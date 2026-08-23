@@ -6,9 +6,11 @@ Commands:
   audition  write the isolated stem (optionally one span) to listen to BEFORE
             spending minutes on transcription
   ab        transcription ear test — original left, transcription right
+  gui       the local selection/audition app (plan §13, screens 1-3)
 """
 
 import argparse
+import contextlib
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -109,6 +111,25 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Output MIDI path (default: <input>.transcribed.mid next to the input)",
     )
+
+    gui_parser = subparsers.add_parser(
+        "gui",
+        help="Open the local app for finding a solo, isolating the instrument "
+        "playing it, and auditioning the isolation before transcribing",
+    )
+    # No audio positional: the GUI has its own track picker, and pre-loading a
+    # file is a convenience, not the entry point.
+    gui_parser.add_argument("audio", nargs="?", default=None, help=AUDIO_HELP)
+    gui_parser.add_argument(
+        "--config",
+        default=str(DEFAULT_CONFIG_PATH),
+        help="Path to a YAML config file (default: config/default.yaml)",
+    )
+    gui_parser.add_argument(
+        "--library", default=None, help="Directory the track picker lists (default: cwd)"
+    )
+    gui_parser.add_argument("--port", type=int, default=None, help="Port to serve on")
+    gui_parser.add_argument("--no-browser", action="store_true", help="Don't open a browser window")
     return parser
 
 
@@ -138,6 +159,36 @@ def _region_for_output(config: Config, duration: float) -> tuple[float, float] |
     start, end = config.transcribe.region
     end = duration if end is None else min(end, duration)
     return (max(0.0, start), end)
+
+
+def cmd_gui(config: Config, args: argparse.Namespace) -> int:
+    """Serve the selection/audition GUI. Blocks until interrupted."""
+    try:
+        from swingscribe.gui.server import serve
+    except ModuleNotFoundError as exc:
+        print(
+            f"swingscribe: the GUI needs the 'gui' dependency group ({exc.name})",
+            file=sys.stderr,
+        )
+        print("  uv sync --group ml --group gui", file=sys.stderr)
+        return 1
+
+    updates: dict = {}
+    if args.library:
+        updates["library_dir"] = args.library
+    elif args.audio:
+        # A file was named: list the folder it lives in, and it will be there.
+        updates["library_dir"] = str(Path(args.audio).expanduser().resolve().parent)
+    if args.port:
+        updates["port"] = args.port
+    if args.no_browser:
+        updates["open_browser"] = False
+    if updates:
+        config = config.model_copy(update={"gui": config.gui.model_copy(update=updates)})
+
+    with contextlib.suppress(KeyboardInterrupt):
+        serve(config)
+    return 0
 
 
 def cmd_audition(config: Config, args: argparse.Namespace) -> int:
@@ -199,12 +250,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command not in ("run", "click", "audition", "ab"):
+    if args.command not in ("run", "click", "audition", "ab", "gui"):
         parser.print_help()
         return 2
 
     config = apply_overrides(Config.from_yaml(args.config), args)
     try:
+        if args.command == "gui":
+            return cmd_gui(config, args)
         if args.command == "audition":
             return cmd_audition(config, args)
         document = pipeline.run(args.audio, config)

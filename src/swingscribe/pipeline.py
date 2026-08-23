@@ -9,6 +9,7 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from swingscribe import progress
 from swingscribe.cache import StageCache, root_key, stage_key
 from swingscribe.config import Config
 from swingscribe.model import Document
@@ -70,8 +71,13 @@ def _run_stages(
         key = stage_key(key, _cache_name(name, stage), config.stage_config(name))
         cached = cache.get(key)
         if cached is not None:
+            # Report cache hits too: a UI must be able to tell "finished in
+            # 20ms because it was cached" from "still thinking".
+            progress.report(name, 1.0, "cached", cached=True)
             doc = Document.model_validate_json(cached)
         else:
+            progress.report(name, 0.0, "started")
             doc = stage(doc, config)
+            progress.report(name, 1.0, "done")
             cache.put(key, doc.model_dump_json().encode("utf-8"))
     return doc

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SwingScribe</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">SwingScribe</div>
+  <div class="track-title" id="track-title">No track loaded</div>
+  <button class="ghost" id="open-picker">Open track…</button>
+</header>
+
+<!-- ── Screen 1: load & navigate ─────────────────────────────────────────── -->
+<div class="picker" id="picker" hidden>
+  <div class="picker-panel">
+    <div class="picker-head">
+      <h2>Open a track</h2>
+      <button class="ghost" id="picker-close" hidden>Close</button>
+    </div>
+    <div class="picker-body">
+      <section>
+        <h3>Recent</h3>
+        <ul class="track-list" id="recent-list"><li class="empty">Nothing yet</li></ul>
+      </section>
+      <section>
+        <h3>Library <span class="muted" id="library-dir"></span></h3>
+        <ul class="track-list" id="library-list"><li class="empty">Scanning…</li></ul>
+      </section>
+    </div>
+    <div class="picker-foot">
+      <input type="text" id="path-input" placeholder="…or paste a full path to an audio file" spellcheck="false">
+      <button id="path-open">Open</button>
+    </div>
+    <p class="picker-error" id="picker-error" hidden></p>
+  </div>
+</div>
+
+<main id="workspace" hidden>
+
+  <!-- ── Screen 2: select the span ───────────────────────────────────────── -->
+  <section class="panel" id="panel-select">
+    <div class="panel-head">
+      <h2><span class="step">1</span> Select the span</h2>
+      <div class="panel-note">Drag on the overview to select. Tap <kbd>A</kbd> / <kbd>B</kbd> while it plays.</div>
+    </div>
+
+    <div class="wave-block">
+      <div class="wave-label">Overview <span class="muted" id="overview-duration"></span></div>
+      <div class="wave overview" id="wave-overview"></div>
+    </div>
+
+    <div class="wave-block">
+      <div class="wave-label">
+        Detail <span class="muted" id="detail-range"></span>
+        <span class="spacer"></span>
+        <button class="chip" data-focus="fit">Fit selection</button>
+        <button class="chip" data-focus="a">Edge A</button>
+        <button class="chip" data-focus="b">Edge B</button>
+        <button class="chip" data-zoom="in" title="Zoom in">+</button>
+        <button class="chip" data-zoom="out" title="Zoom out">−</button>
+      </div>
+      <div class="wave detail" id="wave-detail"></div>
+    </div>
+
+    <div class="transport">
+      <button class="play" id="play" title="Play / pause (Space)">▶</button>
+      <div class="time"><span id="time-now">0:00.00</span><span class="sep">/</span><span id="time-total">0:00</span></div>
+      <button class="toggle" id="loop" title="Loop the selection (L)">Loop</button>
+      <div class="rate-group" id="mix-rate">
+        <button class="chip" data-rate="1">1×</button>
+        <button class="chip" data-rate="0.75">¾×</button>
+        <button class="chip" data-rate="0.5">½×</button>
+      </div>
+      <span class="spacer"></span>
+      <div class="edge" id="edge-a">
+        <button class="tap" data-set="a" title="Set A at the playhead (A)">Set A</button>
+        <span class="edge-time" id="a-time">0:00.00</span>
+        <button class="nudge" data-nudge="a" data-delta="-0.1">−.1</button>
+        <button class="nudge" data-nudge="a" data-delta="0.1">+.1</button>
+      </div>
+      <div class="edge" id="edge-b">
+        <button class="tap" data-set="b" title="Set B at the playhead (B)">Set B</button>
+        <span class="edge-time" id="b-time">0:00.00</span>
+        <button class="nudge" data-nudge="b" data-delta="-0.1">−.1</button>
+        <button class="nudge" data-nudge="b" data-delta="0.1">+.1</button>
+      </div>
+      <div class="span-readout"><span id="span-length">—</span><span class="muted">span</span></div>
+    </div>
+  </section>
+
+  <!-- ── Screen 3: isolate & audition ────────────────────────────────────── -->
+  <section class="panel gate" id="panel-audition">
+    <div class="panel-head">
+      <h2><span class="step">2</span> Isolate &amp; audition <span class="gate-mark">the gate</span></h2>
+      <div class="panel-note">If the soloist isn't clearly dominant here, no tuning downstream will rescue it.</div>
+    </div>
+
+    <div class="model-row">
+      <label>Separation</label>
+      <div class="model-chips" id="model-chips"></div>
+      <button id="separate-btn" hidden>Separate</button>
+      <span class="spacer"></span>
+      <label class="lead-label">Lead stem</label>
+      <select id="lead-stem"></select>
+    </div>
+
+    <div class="job" id="job" hidden>
+      <div class="job-bar"><div class="job-fill" id="job-fill"></div></div>
+      <div class="job-text"><span id="job-message">…</span><span class="muted" id="job-elapsed"></span></div>
+    </div>
+
+    <div class="audition" id="audition" hidden>
+      <div class="wave-block">
+        <div class="wave-label">Isolated stem over the span <span class="muted" id="audition-range"></span></div>
+        <div class="wave stemwave" id="wave-stem"></div>
+        <div class="wave-legend">
+          <span class="key mix"></span> original mix
+          <span class="key lead"></span> <span id="legend-stem">lead stem</span>
+        </div>
+      </div>
+
+      <div class="ab-row">
+        <button class="play" id="a-play" title="Play / pause (Space)">▶</button>
+        <div class="time"><span id="a-time-now">0:00.00</span><span class="sep">/</span><span id="a-time-total">0:00</span></div>
+        <div class="ab-toggle" id="ab-toggle">
+          <button data-ab="stem" class="active">Isolated</button>
+          <button data-ab="mix">Original</button>
+          <button data-ab="both">Both</button>
+        </div>
+        <div class="rate-group" id="stem-rate">
+          <button class="chip" data-rate="1">1×</button>
+          <button class="chip" data-rate="0.75">¾×</button>
+          <button class="chip" data-rate="0.5">½×</button>
+        </div>
+        <span class="spacer"></span>
+        <span class="hint">Sample-locked — switching mid-phrase compares the same instant</span>
+      </div>
+
+      <div class="mixer" id="mixer"></div>
+
+      <div class="handoff">
+        <div class="handoff-cmd"><code id="cli-command">—</code><button class="ghost" id="copy-cmd">Copy</button></div>
+        <button class="ghost" id="download-stem">Download isolated span</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

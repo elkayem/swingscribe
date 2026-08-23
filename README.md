@@ -33,6 +33,24 @@ is cleanly separated *before* spending minutes on analysis. Set
 `separate.model: htdemucs_6s` in the config to split guitar and piano into
 their own stems instead of leaving them mixed into `other`.
 
+## The GUI
+
+```
+uv run swingscribe gui
+```
+
+Opens the selection and audition app on `127.0.0.1:8420` (plan §13, screens 1-3):
+load a track, drag out the span of one solo on a two-tier waveform, pick the stem
+carrying it, and listen to the isolated instrument looped over that span before
+spending anything on transcription. It shows which separation models are already
+cached and runs the missing one as a background job with real progress. The
+audition screen mixes every stem sample-locked, so switching between the isolated
+stem and the original mix mid-phrase compares the same instant.
+
+It hands off to the CLI: the exact `swingscribe ab …` command for the span and
+stem you settled on, plus a download of the isolated span. Needs the `gui`
+dependency group (`uv sync --group ml --group gui`).
+
 The two ear tests (plan §6): `swingscribe click <file>` writes the music with
 clicks at the detected beats, and `swingscribe ab <file>` writes a stereo wav
 — original left, rendered transcription right — plus the transcribed MIDI. Stage outputs are cached, so re-runs are instant. No

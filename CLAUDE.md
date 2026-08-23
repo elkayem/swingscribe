@@ -28,8 +28,13 @@ never change a key.
 - Deps are added at the milestone that needs them, not up front: torch/demucs
   landed at M1, beat_this at M2 (WITHOUT madmom — we skip the DBN, plan §2),
   the piano model at M7b.
-- Heavy ML deps live in the `ml` dependency group. Plain `uv sync` — and
-  therefore CI — never installs it; dev machines run `uv sync --group ml`.
+- Heavy ML deps live in the `ml` dependency group, and the GUI's (fastapi,
+  uvicorn) in `gui`. Plain `uv sync` — and therefore CI — installs neither;
+  dev machines run `uv sync --group ml --group gui`.
+- **The GUI frontend has no JS dependencies and no build step** — no Node, no
+  npm, no bundler (see docs/gui-design.md for why Gradio and wavesurfer.js
+  were both rejected). Keep it that way: `src/swingscribe/gui/static/` is
+  plain ES modules served as-is.
 - **Stage modules must lazy-import heavy libs inside functions** (torch,
   torchaudio, demucs). pipeline/cli/tests must stay importable without the
   ml group, or CI breaks.
@@ -93,6 +98,20 @@ of these has broken a tool at least once:
 - Tier-1 audio is *rendered at test time* from committed generators — never
   stored. Soundfonts are fetched, never committed.
 - `uv run ruff check .` and `uv run ruff format --check .` must be clean.
+
+## GUI (plan §13, screens 1-3)
+
+`swingscribe gui [track]` serves the selection/audition app on 127.0.0.1.
+`src/swingscribe/gui/` is a **thin adapter over pipeline.run and Config** — the
+eventual Hugging Face Space must be able to reuse the core without reusing the
+UI, so pipeline logic never goes here. Two rules that are easy to break:
+
+- Stage progress is a side channel (`progress.py`), not a stage argument. The
+  stage contract stays (Document, Config) -> Document. Install the sink inside
+  the worker thread — ContextVars don't cross threads.
+- `gui.*` config is UI state and must never reach a cache key. `stage_config()`
+  enforces this via `STAGE_SECTIONS`; changing a port must not throw away a
+  separation.
 
 ## Current milestone
 

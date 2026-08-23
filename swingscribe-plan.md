@@ -620,11 +620,30 @@ a compute-budget feature at once.
 Editing transcribed notes by hand, multi-solo batch queues, and any notation editing
 beyond export. Those are a notation editor's job, and MuseScore already exists.
 
+### Status: screens 1-3 are built
+
+`swingscribe gui` implements load / select / isolate-and-audition. See
+`docs/gui-design.md` for the design and the resolved framework question.
+
+- **Framework resolved, and it overrides §2 for the local tool:** FastAPI plus a
+  hand-written frontend with no JS dependencies and no build step. Gradio's region
+  selection was closed as not-planned upstream, so a custom component would have cost
+  the same frontend work *plus* a Node toolchain this machine does not have. Gradio
+  remains the plan for the public ZeroGPU Space at M9, which needs none of these
+  screens — the discipline is that `gui/` stays a thin adapter over `pipeline.run`
+  and `Config`, so the Space reuses the core rather than the UI.
+- **Progress reporting landed** as a side channel (`swingscribe/progress.py`), not as
+  a change to the stage signature: stages stay `(Document, Config) -> Document` and
+  call `report()`, which goes nowhere when nobody is listening.
+- **`stage_config()` now rejects non-stage sections.** `gui.*` is UI state and must
+  never reach a cache key; that invariant used to be incidental and is now enforced.
+
 ### Open questions for the revisit
 
-- Gradio's audio widget is weak on precise region selection; does that force a custom
-  component (or a different framework) for screen 1?
+- Marks rail (named marks with comments) is specced in `docs/gui-design.md` but not
+  built; AutoLoop depends on it.
 - Does the audition step want stem *soloing* only, or also a quick isolated-stem
-  download for listening in a real player?
+  download for listening in a real player? **Answered: both.** The audition screen has
+  a full per-stem mixer and a download of the isolated span.
 - Where does the span live in the exported MusicXML — bar 1 of the export, or offset to
   its position in the original tune?

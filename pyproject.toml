@@ -39,6 +39,16 @@ ml = [
     "torchcrepe>=0.0.23",
     "pretty-midi>=0.2.10",
 ]
+# Local GUI (plan §13, M8). Its own group for the same reason as `ml`: plain
+# `uv sync` — and therefore CI — must stay light. Dev machines opt in with
+#   uv sync --group ml --group gui
+# Both are pure Python with tiny trees (starlette/h11/click), so nothing here
+# needs a compiler or trips Application Control. The frontend is vendored
+# wavesurfer.js — no Node, no npm, no build step (see docs/gui-design.md).
+gui = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
 
 [tool.uv]
 # No macOS until something deploys there (M8 at the earliest).

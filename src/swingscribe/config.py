@@ -88,6 +88,30 @@ class ExportConfig(BaseModel):
     formats: list[str] = ["musicxml", "midi", "json"]
 
 
+class GuiConfig(BaseModel):
+    """The local selection/audition GUI (plan §13). NOT a pipeline stage —
+    Config.stage_config() is only ever called with stage names, so nothing here
+    reaches a cache key. Changing these values must never invalidate a
+    six-to-thirteen-minute separation."""
+
+    host: str = "127.0.0.1"  # localhost only; this serves local files by path
+    port: int = 8420
+    open_browser: bool = True
+    # Where the track picker looks. null = the directory swingscribe was run from.
+    library_dir: str | None = None
+    # Separation models offered on the audition screen, in menu order.
+    models: list[str] = ["htdemucs_ft", "htdemucs_6s"]
+
+
+# Sections that are pipeline stages, and therefore feed cache keys. Membership
+# is explicit rather than "any BaseModel attribute" so that adding a non-stage
+# section — gui, say — cannot accidentally become part of a key and invalidate
+# separations that cost thirteen minutes each to rebuild.
+STAGE_SECTIONS = frozenset(
+    {"ingest", "separate", "beats", "transcribe", "swing", "quantize", "notate", "export"}
+)
+
+
 class Config(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SWINGSCRIBE_", env_nested_delimiter="__")
 
@@ -101,6 +125,7 @@ class Config(BaseSettings):
     quantize: QuantizeConfig = QuantizeConfig()
     notate: NotateConfig = NotateConfig()
     export: ExportConfig = ExportConfig()
+    gui: GuiConfig = GuiConfig()
 
     @classmethod
     def from_yaml(cls, path: str | Path = DEFAULT_CONFIG_PATH) -> "Config":
@@ -109,6 +134,8 @@ class Config(BaseSettings):
 
     def stage_config(self, stage_name: str) -> dict[str, Any]:
         """The config section for one stage, as the plain dict fed to its cache key."""
+        if stage_name not in STAGE_SECTIONS:
+            raise KeyError(f"unknown stage: {stage_name!r}")
         section = getattr(self, stage_name, None)
         if not isinstance(section, BaseModel):
             raise KeyError(f"unknown stage: {stage_name!r}")

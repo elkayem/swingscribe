@@ -46,3 +46,12 @@ notate:
 
 export:
   formats: [musicxml, midi, json]
+
+# The local selection/audition GUI (§13). Not a pipeline stage: nothing here
+# feeds a cache key, so changing it never invalidates a separation.
+gui:
+  host: 127.0.0.1           # localhost only — it serves local files by path
+  port: 8420
+  open_browser: true
+  library_dir: null         # where the track picker looks; null = current directory
+  models: [htdemucs_ft, htdemucs_6s]   # separation models offered, in menu order
