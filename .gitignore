@@ -1,0 +1,32 @@
+# ── Audio & fixtures — must never enter git history (plan §12) ──────────
+# Only the manifest (names + checksums) is tracked; audio lives outside the
+# repo tree in $SWINGSCRIBE_FIXTURES.
+tests/fixtures/*
+!tests/fixtures/manifest.yaml
+*.mp3
+*.wav
+*.flac
+*.m4a
+
+# Soundfonts — hundreds of MB, fetched by scripts/setup_fixtures.py
+*.sf2
+
+# Model weights & caches
+*.ckpt
+*.pt
+*.pth
+*.onnx
+.swingscribe-cache/
+.cache/
+models/
+
+# ── Python ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
