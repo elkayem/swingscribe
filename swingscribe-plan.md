@@ -559,6 +559,10 @@ Historical Recordings (UCSB) both host digitized public-domain recordings.
 *Sketch only. Revisit and expand once M5 lands and the pipeline's real ergonomics are
 known; the point here is to record the intended workflow before it's forgotten.*
 
+**See `docs/gui-design.md`** for the detailed spec, including a feature-by-feature
+read of Anytune Pro+ (the reference app) and the framework risk around region
+selection.
+
 ### The workflow this is really for
 
 The CLI assumes you want to transcribe a whole track. In practice you want **one solo** —
