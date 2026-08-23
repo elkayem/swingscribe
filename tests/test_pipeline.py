@@ -22,7 +22,17 @@ def write_audio(tmp_path) -> str:
 
 def test_run_with_no_stages_raises(tmp_path):
     with pytest.raises(NotImplementedError):
-        pipeline.run(write_audio(tmp_path), make_config(tmp_path))
+        pipeline.run(write_audio(tmp_path), make_config(tmp_path), stages=[])
+
+
+def test_registered_stages_are_m1():
+    assert [name for name, _ in pipeline.STAGES] == ["ingest", "separate"]
+
+
+def test_registered_stage_names_have_config_sections():
+    config = Config()
+    for name, _ in pipeline.STAGES:
+        assert isinstance(config.stage_config(name), dict)
 
 
 def test_second_run_hits_cache(tmp_path):

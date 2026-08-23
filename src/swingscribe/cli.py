@@ -36,10 +36,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     config = Config.from_yaml(args.config)
     try:
-        pipeline.run(args.audio, config)
+        document = pipeline.run(args.audio, config)
     except NotImplementedError as exc:
         print(f"swingscribe: {exc}", file=sys.stderr)
         return 1
+    for name, path in document.stems.items():
+        print(f"{name}: {path}")
     return 0
 
 

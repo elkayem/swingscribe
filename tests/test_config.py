@@ -15,7 +15,7 @@ def test_default_yaml_loads():
 
 def test_stage_config_is_a_plain_dict():
     config = Config.from_yaml()
-    assert config.stage_config("separate") == {"model": "htdemucs_ft"}
+    assert config.stage_config("separate") == {"model": "htdemucs_ft", "device": "auto"}
 
 
 def test_stage_config_rejects_unknown_stage():

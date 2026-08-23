@@ -22,6 +22,31 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
 ]
+# Heavy ML stack (M1+). Not a default group, so plain `uv sync` — and
+# therefore CI — never installs it. Dev machines opt in once:
+#   uv sync --group ml
+ml = [
+    "torch>=2.4",
+    "torchaudio>=2.4",
+    "demucs>=4.0",
+    "soundfile>=0.12",
+]
+
+[tool.uv]
+# No macOS until something deploys there (M8 at the earliest).
+environments = ["sys_platform == 'win32'", "sys_platform == 'linux'"]
+
+[[tool.uv.index]]
+# The original dev machine has no NVIDIA GPU, so torch comes from the CPU
+# index (~200MB instead of ~2.7GB CUDA wheels). On a CUDA machine, switch
+# the URL to https://download.pytorch.org/whl/cu124 (plan §8).
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+torchaudio = { index = "pytorch" }
 
 [build-system]
 requires = ["hatchling"]

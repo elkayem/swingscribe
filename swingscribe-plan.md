@@ -388,7 +388,9 @@ Gotchas:
   where TLS is intercepted (AV/corporate proxy), uv's bundled certificate store rejects
   downloads with `invalid peer certificate: UnknownIssuer` — this was needed on the
   original dev machine and will bite on others. The setting makes uv use the Windows
-  certificate store.
+  certificate store. The same interception breaks Python-side model downloads
+  (huggingface_hub): export the Windows cert stores to a PEM bundle and point
+  `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` at it.
 - **ffmpeg must be on PATH** or mp3 decoding fails cryptically. `winget install ffmpeg`.
 - Model weights are multi-GB and cache to `%USERPROFILE%\.cache`. Point `HF_HOME` and
   `TORCH_HOME` at a drive with room.

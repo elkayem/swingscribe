@@ -26,11 +26,19 @@ never change a key.
 ## Dependencies
 
 - Deps are added at the milestone that needs them, not up front: torch/demucs
-  land at M1, beat_this at M2 (WITHOUT madmom — we skip the DBN, plan §2),
+  landed at M1, beat_this at M2 (WITHOUT madmom — we skip the DBN, plan §2),
   the piano model at M7b.
+- Heavy ML deps live in the `ml` dependency group. Plain `uv sync` — and
+  therefore CI — never installs it; dev machines run `uv sync --group ml`.
+- **Stage modules must lazy-import heavy libs inside functions** (torch,
+  torchaudio, demucs). pipeline/cli/tests must stay importable without the
+  ml group, or CI breaks.
+- The original dev machine has NO NVIDIA GPU: torch comes from the CPU wheel
+  index (see pyproject). On a CUDA machine, switch the index URL to cu124
+  (plan §8) — never take CUDA availability for granted; separate.run logs
+  its resolved device.
 - MuScriptor weights are CC BY-NC: when it arrives (M10) it goes behind its own
   extras group and module boundary so the NC license never touches core (§11).
-- torch must come from the CUDA index, not PyPI default (plan §8).
 
 ## Rules
 
@@ -48,7 +56,9 @@ never change a key.
 ## Testing (plan §6, §12)
 
 - `uv run pytest` — runs lint-fast tier-1 (synthetic/unit) tests; this is all
-  CI runs (ubuntu + windows).
+  CI runs (ubuntu + windows). Tests needing the ml group use importorskip;
+  tests that download model weights are additionally gated behind
+  SWINGSCRIBE_HEAVY_TESTS=1 so a routine dev pytest stays fast too.
 - Tests that need real audio use the `requires_audio` marker from
   tests/conftest.py and skip unless SWINGSCRIBE_FIXTURES points at a local
   audio directory outside the repo. Checksums are verified against
@@ -59,6 +69,6 @@ never change a key.
 
 ## Current milestone
 
-M0 — skeleton: repo, config, document model, cache layer, CI (plan §7).
-Stages in src/swingscribe/stages/ are empty stubs. Do not implement stage
+M1 — Ingest + Separate: `swingscribe run <file>` produces 4 stems (plan §7).
+Remaining stages (beats onward) are empty stubs. Do not implement stage
 logic until the corresponding milestone.

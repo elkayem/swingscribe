@@ -10,6 +10,7 @@ ingest:
 
 separate:
   model: htdemucs_ft        # swappable for a BS-Roformer checkpoint later (§5)
+  device: auto              # auto | cuda | cpu; auto picks cuda when available
 
 beats:
   dbn: false                # never true — we skip madmom entirely (§2)

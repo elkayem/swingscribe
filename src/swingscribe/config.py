@@ -25,6 +25,7 @@ class IngestConfig(BaseModel):
 
 class SeparateConfig(BaseModel):
     model: str = "htdemucs_ft"
+    device: str = "auto"  # auto | cuda | cpu
 
 
 class BeatsConfig(BaseModel):

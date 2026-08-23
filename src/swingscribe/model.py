@@ -10,6 +10,13 @@ migration impact whenever you touch it.
 from pydantic import BaseModel
 
 
+class AudioRef(BaseModel):
+    path: str  # normalized wav produced by ingest (config rate, stereo)
+    sample_rate: int
+    channels: int
+    duration: float  # seconds
+
+
 class NoteEvent(BaseModel):
     onset: float  # seconds, as performed
     duration: float  # seconds, as performed
@@ -43,6 +50,7 @@ class QuantizedNote(BaseModel):
 class Document(BaseModel):
     audio_path: str
     sample_rate: int
+    audio: AudioRef | None = None  # set by ingest
     stems: dict[str, str] = {}  # stem name → wav path
     beat_grid: BeatGrid | None = None
     notes: dict[str, list[NoteEvent]] = {}
