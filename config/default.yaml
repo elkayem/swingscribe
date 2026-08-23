@@ -22,6 +22,16 @@ beats:
 
 transcribe:
   ensemble: horn-led        # horn-led | trio | solo-piano (§5 stage 3)
+  fmin_hz: 55.0             # A1, bari sax bottom — constrains CREPE against octave errors
+  fmax_hz: 1600.0           # ~G6, above alto altissimo
+  crepe_model: full         # full | tiny (tiny ~10x faster on CPU, less accurate)
+  device: auto              # auto | cuda | cpu
+  voicing_threshold: 0.5    # CREPE periodicity gate; above docs' 0.21 — stem bleed is pitched
+  silence_floor_db: -40.0   # frame RMS gate vs the stem's loud reference; kills quiet bleed
+  min_note_ms: 60.0         # drop specks shorter than a fast bebop 16th
+  pitch_persist_ms: 60.0    # new pitch must hold this long to split a note (scoops don't)
+  silence_gap_ms: 40.0      # bridge unvoiced dropouts shorter than this
+  median_filter_ms: 50.0    # f0 median-filter kernel — flattens vibrato
 
 swing:
   window_beats: 16          # sliding window for BUR estimation (§5 stage 4)

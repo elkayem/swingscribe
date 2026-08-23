@@ -43,6 +43,23 @@ class BeatsConfig(BaseModel):
 
 class TranscribeConfig(BaseModel):
     ensemble: Literal["horn-led", "trio", "solo-piano"] = "horn-led"
+    fmin_hz: float = 55.0  # A1 — bari sax bottom; constrains CREPE against octave errors
+    fmax_hz: float = 1600.0  # ~G6 — above alto altissimo
+    crepe_model: str = "full"  # full | tiny (tiny is ~10x faster on CPU, less accurate)
+    device: str = "auto"  # auto | cuda | cpu
+    # CREPE periodicity gate. torchcrepe's docs suggest ~0.21 for clean solo
+    # audio; we sit at 0.5 because the "other" stem's piano/bass bleed is
+    # itself pitched and keeps periodicity moderately high during rests —
+    # biasing up trades slightly clipped note tails for fewer phantom notes.
+    voicing_threshold: float = 0.5
+    # Second gate: frame RMS must be within this many dB of the stem's loud
+    # reference (95th-percentile frame RMS). Periodicity alone cannot reject
+    # QUIET pitched bleed between phrases; energy can.
+    silence_floor_db: float = -40.0
+    min_note_ms: float = 60.0  # drop specks shorter than a fast bebop 16th
+    pitch_persist_ms: float = 60.0  # a new pitch must hold this long to split a note
+    silence_gap_ms: float = 40.0  # unvoiced dropouts shorter than this bridge a phrase
+    median_filter_ms: float = 50.0  # f0 smoothing kernel — flattens vibrato wobble
 
 
 class SwingConfig(BaseModel):

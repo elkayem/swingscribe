@@ -55,7 +55,7 @@ def test_cache_version_bump_invalidates(tmp_path):
 
 
 def test_registered_stages_are_current():
-    assert [name for name, _ in pipeline.STAGES] == ["ingest", "separate", "beats"]
+    assert [name for name, _ in pipeline.STAGES] == ["ingest", "separate", "beats", "transcribe"]
 
 
 def test_registered_stage_names_have_config_sections():

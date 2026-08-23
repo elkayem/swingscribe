@@ -10,15 +10,16 @@ discarded.
 
 ## Status
 
-**M2 — separation + beat tracking.** `swingscribe run <file>` takes an audio
-file — wav/flac natively, plus anything ffmpeg can decode (mp3, m4a/aac,
-ogg, opus, wma, aiff, ...) — and produces four separated stems
-(drums/bass/other/vocals) via
-Demucs, then tracks beats and downbeats with beat_this on the drum stem,
-emitting a per-beat tempo curve. `swingscribe click <file>` writes an
-ear-test wav — the music with clicks at the detected beats (downbeats
-higher-pitched). If the tracker lands an octave off (half/double tempo),
-pass `--tempo-hint <bpm>` with the known tempo to correct the grid. Stage outputs are cached, so re-runs are instant. No
+**M3 — separation, beat tracking, monophonic transcription.**
+`swingscribe run <file>` takes an audio file — wav/flac natively, plus
+anything ffmpeg can decode (mp3, m4a/aac, ogg, opus, wma, aiff, ...) — and
+produces four separated stems via Demucs, tracks beats/downbeats with
+beat_this on the drum stem (per-beat tempo curve, `--tempo-hint <bpm>` to
+fix octave errors), and transcribes the lead line from the "other" stem
+with CREPE. Two ear-test commands (plan §6): `swingscribe click <file>`
+writes the music with clicks at the detected beats, and `swingscribe ab
+<file>` writes a stereo wav — original left, rendered transcription right —
+plus the transcribed MIDI. No swing analysis or notation yet. Stage outputs are cached, so re-runs are instant. No
 transcription or notation yet. See `swingscribe-plan.md` for the milestones.
 
 Separation needs the ML dependency group (`uv sync --group ml`) and downloads

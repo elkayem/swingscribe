@@ -32,6 +32,12 @@ ml = [
     "soundfile>=0.12",
     # No madmom, deliberately: we run beat_this with dbn=False (plan §2).
     "beat-this",
+    # M3: CREPE f0 tracking (torch-based) and MIDI I/O. NOT librosa/pYIN:
+    # librosa hard-requires numba, whose compiled DLLs Windows Application
+    # Control blocks on the dev machine. Onset detection is hand-rolled
+    # numpy spectral flux in stages/transcribe.py for the same reason.
+    "torchcrepe>=0.0.23",
+    "pretty-midi>=0.2.10",
 ]
 
 [tool.uv]

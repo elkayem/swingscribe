@@ -37,6 +37,12 @@ never change a key.
   index (see pyproject). On a CUDA machine, switch the index URL to cu124
   (plan §8) — never take CUDA availability for granted; separate.run logs
   its resolved device.
+- **numba is unusable on the dev machine** — Windows Application Control
+  blocks its compiled DLLs. That rules out librosa (hard numba dependency),
+  so f0 is torchcrepe (CREPE) not pYIN, onsets are hand-rolled numpy
+  spectral flux, and torchcrepe is imported through a resampy shim
+  (transcribe._import_torchcrepe) with the numba-free weighted_argmax
+  decoder. Never add librosa, resampy, or numba-dependent packages.
 - MuScriptor weights are CC BY-NC: when it arrives (M10) it goes behind its own
   extras group and module boundary so the NC license never touches core (§11).
 
@@ -69,8 +75,9 @@ never change a key.
 
 ## Current milestone
 
-M2 — BeatTrack + ear test (plan §7): beats stage runs beat_this on the drum
-stem (full-mix fallback), emits a per-beat tempo curve, and flags octave
-outliers; `swingscribe click <file>` renders the §6 ear-test wav (downbeats
-get a distinct click). Remaining stages (transcribe onward) are empty stubs.
-Do not implement stage logic until the corresponding milestone.
+M3 — monophonic transcription (plan §7): transcribe stage runs CREPE on the
+"other" stem with periodicity+energy gating, persistence-based segmentation
+(vibrato/scoops never split notes), and octave folding; `swingscribe ab
+<file>` writes the §6 stereo ear test (original left, rendered transcription
+right) plus the transcribed MIDI. Remaining stages (swing onward) are empty
+stubs. Do not implement stage logic until the corresponding milestone.
