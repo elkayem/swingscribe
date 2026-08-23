@@ -169,6 +169,28 @@ def segment_notes(
     return notes
 
 
+def crop_region(mono, rate: int, region: tuple[float, float | None] | None):
+    """Slice a mono signal to [start, end] seconds; a None end means "to the
+    end". Returns (signal, offset) where offset is the start time to add back
+    so note onsets stay in whole-track time."""
+    if region is None:
+        return mono, 0.0
+    duration = len(mono) / rate
+    start, end = region
+    end = duration if end is None else end
+    if end <= start:
+        raise ValueError(f"region end must be after start, got {region}")
+    start = max(0.0, min(start, duration))
+    end = max(start, min(end, duration))
+    return mono[int(start * rate) : int(end * rate)], start
+
+
+def offset_notes(notes: list[NoteEvent], offset: float) -> list[NoteEvent]:
+    if not offset:
+        return notes
+    return [n.model_copy(update={"onset": n.onset + offset}) for n in notes]
+
+
 def pick_peaks(strength: list[float], min_separation: int, window: int, delta: float) -> list[int]:
     """Local maxima of an onset-strength curve that stand `delta` above the
     local mean, at least `min_separation` frames apart."""
@@ -278,12 +300,16 @@ def run(document: Document, config: Config) -> Document:
         raise NotImplementedError(
             f"ensemble {tc.ensemble!r} is not implemented yet — the piano path arrives at M7b"
         )
-    stem_path = document.stems.get("other")
+    stem_path = document.stems.get(tc.stem)
     if stem_path is None:
-        raise ValueError("transcribe (horn-led) needs the 'other' stem — run separation first")
+        available = ", ".join(sorted(document.stems)) or "none (run separation first)"
+        raise ValueError(f"transcribe needs the {tc.stem!r} stem; available: {available}")
 
     data, rate = soundfile.read(stem_path, dtype="float32", always_2d=True)
     mono = data.mean(axis=1)
+    mono, region_offset = crop_region(mono, rate, tc.region)
+    if tc.region:
+        print(f"transcribe: region {tc.region[0]:.1f}-{tc.region[1]:.1f}s of {tc.stem} stem")
     mono16 = (
         torchaudio.functional.resample(torch.from_numpy(mono), rate, CREPE_SAMPLE_RATE)
         .numpy()
@@ -292,7 +318,10 @@ def run(document: Document, config: Config) -> Document:
     hop_s = CREPE_HOP / CREPE_SAMPLE_RATE
 
     device = resolve_device(tc.device, torch.cuda.is_available())
-    print(f"transcribe: crepe model={tc.crepe_model} device={device} ensemble={tc.ensemble}")
+    print(
+        f"transcribe: crepe model={tc.crepe_model} device={device} "
+        f"ensemble={tc.ensemble} stem={tc.stem}"
+    )
     f0, periodicity = torchcrepe.predict(
         torch.from_numpy(mono16)[None],
         CREPE_SAMPLE_RATE,
@@ -331,9 +360,10 @@ def run(document: Document, config: Config) -> Document:
         min_note_s=tc.min_note_ms / 1000.0,
         persist_frames=max(1, round(tc.pitch_persist_ms / 1000.0 / hop_s)),
         max_gap_frames=max(1, round(tc.silence_gap_ms / 1000.0 / hop_s)),
-        source="other:crepe",
+        source=f"{tc.stem}:crepe",
     )
     notes = fold_octave_outliers(notes)
+    notes = offset_notes(notes, region_offset)  # back to whole-track time
 
     voiced_fraction = sum(1 for p in pitches if p is not None) / max(1, len(pitches))
     if notes:
@@ -347,4 +377,4 @@ def run(document: Document, config: Config) -> Document:
     else:
         print("transcribe: no notes found")
 
-    return document.model_copy(update={"notes": {**document.notes, "other": notes}})
+    return document.model_copy(update={"notes": {**document.notes, tc.stem: notes}})

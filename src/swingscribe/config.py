@@ -43,6 +43,16 @@ class BeatsConfig(BaseModel):
 
 class TranscribeConfig(BaseModel):
     ensemble: Literal["horn-led", "trio", "solo-piano"] = "horn-led"
+    # Which separated stem carries the solo. htdemucs_ft gives
+    # drums/bass/other/vocals; htdemucs_6s adds guitar/piano.
+    stem: str = "other"
+    # Analyse only [start, end] seconds of the track; a null end means "to the
+    # end of the track". Lives HERE and not on ingest deliberately: separation
+    # and beat tracking stay whole-file (Demucs degrades on short crops, and
+    # beat tracking wants context), so switching to a different solo in the
+    # same tune re-runs only this stage. Note onsets are still reported in
+    # whole-track time.
+    region: tuple[float, float | None] | None = None
     fmin_hz: float = 55.0  # A1 — bari sax bottom; constrains CREPE against octave errors
     fmax_hz: float = 1600.0  # ~G6 — above alto altissimo
     crepe_model: str = "full"  # full | tiny (tiny is ~10x faster on CPU, less accurate)

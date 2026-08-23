@@ -22,6 +22,8 @@ beats:
 
 transcribe:
   ensemble: horn-led        # horn-led | trio | solo-piano (§5 stage 3)
+  stem: other               # which stem carries the solo; 6s model adds guitar/piano
+  region: null              # [start, end] seconds, or null for the whole track
   fmin_hz: 55.0             # A1, bari sax bottom — constrains CREPE against octave errors
   fmax_hz: 1600.0           # ~G6, above alto altissimo
   crepe_model: full         # full | tiny (tiny ~10x faster on CPU, less accurate)

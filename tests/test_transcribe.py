@@ -128,6 +128,74 @@ def test_fold_octave_outliers_leaves_genuine_leaps():
     assert [n.pitch for n in fold_octave_outliers(notes)] == [60, 67, 60]
 
 
+def test_crop_region_none_is_whole_signal():
+    from swingscribe.stages.transcribe import crop_region
+
+    mono = list(range(1000))
+    cropped, offset = crop_region(mono, 100, None)
+    assert cropped is mono
+    assert offset == 0.0
+
+
+def test_crop_region_slices_and_reports_offset():
+    import numpy as np
+
+    from swingscribe.stages.transcribe import crop_region
+
+    mono = np.arange(1000, dtype="float32")  # 10s at 100Hz
+    cropped, offset = crop_region(mono, 100, (2.0, 5.0))
+    assert len(cropped) == 300
+    assert offset == 2.0
+    assert cropped[0] == 200
+
+
+def test_crop_region_open_ended():
+    import numpy as np
+
+    from swingscribe.stages.transcribe import crop_region
+
+    mono = np.arange(1000, dtype="float32")
+    cropped, offset = crop_region(mono, 100, (7.0, None))  # to the end
+    assert len(cropped) == 300
+    assert offset == 7.0
+
+
+def test_crop_region_clamps_past_end():
+    import numpy as np
+
+    from swingscribe.stages.transcribe import crop_region
+
+    mono = np.arange(1000, dtype="float32")
+    cropped, _ = crop_region(mono, 100, (8.0, 99.0))
+    assert len(cropped) == 200
+
+
+def test_crop_region_rejects_inverted():
+    import numpy as np
+    import pytest as _pytest
+
+    from swingscribe.stages.transcribe import crop_region
+
+    with _pytest.raises(ValueError):
+        crop_region(np.arange(1000, dtype="float32"), 100, (5.0, 2.0))
+
+
+def test_offset_notes_restores_whole_track_time():
+    from swingscribe.stages.transcribe import offset_notes
+
+    notes = [note(60, onset=1.0), note(62, onset=2.0)]
+    shifted = offset_notes(notes, 90.0)
+    assert [n.onset for n in shifted] == [91.0, 92.0]
+    assert [n.pitch for n in shifted] == [60, 62]  # nothing else changes
+
+
+def test_offset_notes_zero_is_identity():
+    from swingscribe.stages.transcribe import offset_notes
+
+    notes = [note(60, onset=1.0)]
+    assert offset_notes(notes, 0.0) is notes
+
+
 def test_pick_peaks_finds_separated_maxima():
     from swingscribe.stages.transcribe import pick_peaks
 

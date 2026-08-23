@@ -26,6 +26,28 @@ def default_midi_path(audio_path: str | Path) -> Path:
     return p.with_name(p.stem + ".transcribed.mid")
 
 
+def default_audition_path(audio_path: str | Path, stem: str) -> Path:
+    p = Path(audio_path)
+    return p.with_name(f"{p.stem}.{stem}.wav")
+
+
+def write_stem_slice(
+    stem_path: str | Path, out_path: str | Path, region: tuple[float, float] | None = None
+) -> Path:
+    """Write a (optionally region-limited) copy of a separated stem, for the
+    audition step — listen to the isolated instrument BEFORE transcribing
+    (plan §13 / docs/gui-design.md screen 3)."""
+    import soundfile
+
+    data, rate = soundfile.read(str(stem_path), dtype="float32", always_2d=True)
+    if region is not None:
+        start, end = region
+        data = data[int(start * rate) : int(end * rate)]
+    out = Path(out_path)
+    soundfile.write(str(out), data, rate)
+    return out
+
+
 def notes_to_midi(notes: list[NoteEvent], out_path: str | Path | None = None):
     import pretty_midi
 
@@ -47,13 +69,28 @@ def notes_to_midi(notes: list[NoteEvent], out_path: str | Path | None = None):
     return pm
 
 
-def render_ab_mix(original_path: str | Path, notes: list[NoteEvent], out_path: str | Path) -> Path:
-    """Stereo ear-test wav: original (mono) left, synthesized transcription right."""
+def render_ab_mix(
+    original_path: str | Path,
+    notes: list[NoteEvent],
+    out_path: str | Path,
+    region: tuple[float, float] | None = None,
+) -> Path:
+    """Stereo ear-test wav: original (mono) left, synthesized transcription right.
+
+    With a region, both channels cover just that span — note onsets arrive in
+    whole-track time and are shifted back to the slice.
+    """
     import numpy as np
     import soundfile
 
     data, rate = soundfile.read(str(original_path), dtype="float32", always_2d=True)
     left = data.mean(axis=1) * ORIGINAL_GAIN
+    if region is not None:
+        start, end = region
+        left = left[int(start * rate) : int(end * rate)]
+        notes = [
+            n.model_copy(update={"onset": n.onset - start}) for n in notes if start <= n.onset < end
+        ]
 
     right = notes_to_midi(notes).synthesize(fs=rate).astype("float32")
     peak = float(abs(right).max()) if len(right) else 0.0

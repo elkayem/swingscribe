@@ -67,16 +67,23 @@ Notation, swing marking, transposition, MusicXML/MIDI out.
 
 These are pipeline changes, not UI work, and the GUI is unusable without them:
 
-1. **`region: [start, end] | null` in the ingest config.** A span must be a
-   first-class job parameter so it participates in the cache key. Then transcribing a
-   second solo from the same tune reuses separation and re-runs only what changed.
-2. **`transcribe.stem` config** replacing the hardcoded `"other"`.
+1. ~~**`region` in the ingest config.**~~ **DONE, but on `transcribe`, not `ingest`.**
+   An earlier draft of this doc put `region` on ingest; that was wrong. With chained
+   cache keys, a region on ingest changes every downstream key, so picking a new solo
+   would re-run *separation* — the opposite of what we want. `transcribe.region:
+   [start, end] | null` (null end = "to the end") keeps ingest/separate/beats
+   whole-file and cached, so switching solos re-runs only transcription. Note onsets
+   stay in whole-track time.
+2. **`transcribe.stem` config** replacing the hardcoded `"other"`. **DONE.**
 3. **Separation stays whole-file** even when transcription is span-limited — Demucs
    degrades on short crops, and whole-file stems cache once and serve every span.
+   **DONE** (falls out of requirement 1).
 4. **Per-stage progress callbacks.** Multi-minute CPU stages cannot present as a
-   frozen tab.
+   frozen tab. *Still to do.*
 5. **A stem-audition entry point** that returns (or writes) the isolated stem for a
    span without running transcription at all — the thing screen 3 plays.
+   **DONE:** `swingscribe audition <file> --stem guitar --start 90 --end 210`, which
+   runs ingest + separate only.
 
 ## Framework question
 

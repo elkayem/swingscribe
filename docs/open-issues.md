@@ -27,7 +27,7 @@ pitch*. Band-limit the onset detector around the tracked f0 and its harmonics, o
 gate candidate splits on a local minimum in that band. Isolation (6-stem) reduces
 but does not eliminate this.
 
-## 2. `transcribe.stem` is hardcoded to `"other"`
+## 2. ~~`transcribe.stem` is hardcoded~~ — FIXED
 
 With `htdemucs_6s` giving `drums/bass/other/vocals/guitar/piano`, the transcriber
 should be pointable at any stem — a guitar solo lives in `guitar`, a piano solo in
