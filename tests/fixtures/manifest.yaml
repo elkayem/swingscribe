@@ -1,0 +1,24 @@
+# Fixture manifest — names + checksums only. NO AUDIO IN GIT, EVER (plan §12).
+#
+# Audio lives outside the repo in $SWINGSCRIBE_FIXTURES; tests resolve entries
+# through the fixture_audio fixture in tests/conftest.py, which verifies each
+# file's sha256 before use so a wrong take fails loudly.
+#
+# Schema per entry:
+#   id:                  unique slug tests use to reference the fixture
+#   filename:            file name inside $SWINGSCRIBE_FIXTURES
+#   sha256:              checksum of the exact file (verifies the right take)
+#   tier:                2 = WJazzD regression set, 3 = personal library
+#                        (tier 1 is synthetic — rendered at test time, never stored)
+#   ensemble:            horn-led | trio | solo-piano
+#   expected_tempo_bpm:  rough tempo for sanity checks
+#
+# Example entry:
+#   - id: parker_koko_1945
+#     filename: "koko.mp3"
+#     sha256: "a3f1..."
+#     tier: 3
+#     ensemble: horn-led
+#     expected_tempo_bpm: 300
+
+fixtures: []
