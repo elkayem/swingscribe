@@ -1,0 +1,43 @@
+[project]
+name = "swingscribe"
+version = "0.1.0"
+description = "Jazz audio in → instrument-separated, swing-aware notation out"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11,<3.12"
+# Deps are added at the milestone that needs them (torch/demucs at M1,
+# beat_this at M2, piano model at M7b). M0 needs only the data-contract
+# and config stack.
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.2",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+swingscribe = "swingscribe.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/swingscribe"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

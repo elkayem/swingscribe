@@ -1,0 +1,31 @@
+# SwingScribe default configuration — one object threaded through the pipeline.
+# Each top-level section below maps to one pipeline stage; stage configs feed
+# the cache key, so changing a value here invalidates that stage and everything
+# downstream of it (plan §3).
+
+cache_dir: .swingscribe-cache
+
+ingest:
+  sample_rate: 44100
+
+separate:
+  model: htdemucs_ft        # swappable for a BS-Roformer checkpoint later (§5)
+
+beats:
+  dbn: false                # never true — we skip madmom entirely (§2)
+  use_drum_stem: true       # ride cymbal is the cleanest beat reference (§5)
+
+transcribe:
+  ensemble: horn-led        # horn-led | trio | solo-piano (§5 stage 3)
+
+swing:
+  window_beats: 16          # sliding window for BUR estimation (§5 stage 4)
+
+quantize:
+  resolution: 16            # straight-grid resolution, 16th notes (§5 stage 5)
+
+notate:
+  transposition: C          # C | Eb | Bb — transposing instruments (§5 stage 6)
+
+export:
+  formats: [musicxml, midi, json]
