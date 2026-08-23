@@ -46,6 +46,27 @@ never change a key.
 - MuScriptor weights are CC BY-NC: when it arrives (M10) it goes behind its own
   extras group and module boundary so the NC license never touches core (§11).
 
+## This machine (environment traps that cost real time)
+
+Windows, no NVIDIA GPU, repo under OneDrive, and TLS is intercepted. Every one
+of these has broken a tool at least once:
+
+- **TLS interception** breaks anything with a bundled cert store:
+  - uv → set `UV_SYSTEM_CERTS=true`
+  - winget → add `--source winget` (its msstore source fails cert pinning)
+  - Python downloads (huggingface_hub, torch.hub) → set `SSL_CERT_FILE`,
+    `REQUESTS_CA_BUNDLE`, and `CURL_CA_BUNDLE` to
+    `%USERPROFILE%\.windows-ca-bundle.pem` (exported from the Windows cert
+    stores; regenerate from `Cert:\*\Root` if certs rotate)
+- **OneDrive** breaks uv's hardlinks (`os error 396`) → set `UV_LINK_MODE=copy`.
+  It also intermittently locks `.venv\Lib\site-packages\swingscribe-0.1.0.dist-info`
+  mid-install; delete it and re-sync when that happens.
+- **ffmpeg** is installed but not on PATH; it lives under
+  `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg_*\ffmpeg-*\bin`.
+- **Application Control blocks numba's DLLs** — see the dependency note above.
+- Demucs separation is ~6-13 min per track on CPU. Cache accordingly, and
+  prefer `swingscribe audition` (~1s on cached stems) while iterating.
+
 ## Rules
 
 - Never add a dependency without asking.
