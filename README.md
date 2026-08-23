@@ -10,8 +10,10 @@ discarded.
 
 ## Status
 
-**M2 — separation + beat tracking.** `swingscribe run <file>` takes an
-mp3/wav/flac and produces four separated stems (drums/bass/other/vocals) via
+**M2 — separation + beat tracking.** `swingscribe run <file>` takes an audio
+file — wav/flac natively, plus anything ffmpeg can decode (mp3, m4a/aac,
+ogg, opus, wma, aiff, ...) — and produces four separated stems
+(drums/bass/other/vocals) via
 Demucs, then tracks beats and downbeats with beat_this on the drum stem,
 emitting a per-beat tempo curve. `swingscribe click <file>` writes an
 ear-test wav — the music with clicks at the detected beats (downbeats

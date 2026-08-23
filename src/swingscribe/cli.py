@@ -7,6 +7,7 @@ from pathlib import Path
 
 from swingscribe import __version__, click, pipeline
 from swingscribe.config import DEFAULT_CONFIG_PATH, Config
+from swingscribe.stages.ingest import AudioDecodeError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     run_parser = subparsers.add_parser("run", help="Run the transcription pipeline")
-    run_parser.add_argument("audio", help="Path to an audio file (mp3/wav/flac)")
+    run_parser.add_argument("audio", help="Path to an audio file (anything ffmpeg can decode)")
     run_parser.add_argument(
         "--config",
         default=str(DEFAULT_CONFIG_PATH),
@@ -30,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ear test (plan §6): mix a click at the detected beats over the "
         "music and write a wav to listen to",
     )
-    click_parser.add_argument("audio", help="Path to an audio file (mp3/wav/flac)")
+    click_parser.add_argument("audio", help="Path to an audio file (anything ffmpeg can decode)")
     click_parser.add_argument(
         "--config",
         default=str(DEFAULT_CONFIG_PATH),
@@ -56,7 +57,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     config = Config.from_yaml(args.config)
     try:
         document = pipeline.run(args.audio, config)
-    except NotImplementedError as exc:
+    except (AudioDecodeError, FileNotFoundError, NotImplementedError) as exc:
         print(f"swingscribe: {exc}", file=sys.stderr)
         return 1
 

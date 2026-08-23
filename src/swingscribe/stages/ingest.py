@@ -4,9 +4,11 @@ Produces an AudioRef pointing at a normalized wav (config sample rate, stereo)
 under the cache dir, so every downstream stage reads one known format and mp3
 decoding happens exactly once.
 
-I/O goes through soundfile (wav/flac) with an ffmpeg-CLI fallback for
-everything else (mp3/m4a): torchaudio 2.11+ removed its built-in decoders,
-so torchaudio.load/save are NOT usable — only its pure-DSP functional API is.
+Decoding tries soundfile first and falls back to the ffmpeg CLI when
+soundfile can't read the file — no extension whitelist, so anything ffmpeg
+can decode (mp3, m4a/aac, ogg, opus, wma, aiff, ...) gets through.
+torchaudio 2.11+ removed its built-in decoders, so torchaudio.load/save are
+NOT usable — only its pure-DSP functional API is.
 
 Heavy imports (torch, soundfile) stay inside functions: this module must stay
 importable without the ml dependency group, which CI never installs.
@@ -20,6 +22,11 @@ from pathlib import Path
 
 from swingscribe.config import Config
 from swingscribe.model import AudioRef, Document
+
+
+class AudioDecodeError(RuntimeError):
+    """The input audio could not be decoded; the message names the file and
+    the decoder error, so callers can show it without a stack trace."""
 
 
 def run(document: Document, config: Config) -> Document:
@@ -51,10 +58,14 @@ def run(document: Document, config: Config) -> Document:
 
 
 def _load(path: Path):
-    """Decode audio to a float32 [channels, time] tensor plus its sample rate."""
-    if path.suffix.lower() in (".wav", ".flac"):
+    """Decode audio to a float32 [channels, time] tensor plus its sample rate.
+
+    Routing is by capability, not extension: try soundfile, and on failure
+    hand the file to ffmpeg."""
+    try:
         return _load_via_soundfile(path)
-    return _load_via_ffmpeg(path)
+    except Exception as soundfile_error:
+        return _load_via_ffmpeg(path, soundfile_error)
 
 
 def _load_via_soundfile(path: Path):
@@ -65,19 +76,24 @@ def _load_via_soundfile(path: Path):
     return torch.from_numpy(data.T.copy()), rate  # [time, ch] → [ch, time]
 
 
-def _load_via_ffmpeg(path: Path):
+def _load_via_ffmpeg(path: Path, soundfile_error: Exception):
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
-        raise RuntimeError(
-            f"cannot decode {path}: this format needs ffmpeg, which is not on "
-            "PATH (plan §8: winget install ffmpeg)"
-        )
+        raise AudioDecodeError(
+            f"cannot decode {path}: soundfile failed ({soundfile_error}) and "
+            "ffmpeg is not on PATH (plan §8: winget install ffmpeg)"
+        ) from soundfile_error
     with tempfile.TemporaryDirectory() as tmp:
         decoded = Path(tmp) / "decoded.wav"
-        subprocess.run(
+        result = subprocess.run(
             [ffmpeg, "-y", "-loglevel", "error", "-i", str(path), str(decoded)],
-            check=True,
+            capture_output=True,
+            text=True,
         )
+        if result.returncode != 0:
+            stderr = result.stderr.strip() or "unknown ffmpeg error"
+            reason = stderr.splitlines()[0]  # first line carries the root cause
+            raise AudioDecodeError(f"cannot decode {path}: ffmpeg: {reason}")
         return _load_via_soundfile(decoded)
 
 

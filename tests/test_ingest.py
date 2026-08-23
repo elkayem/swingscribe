@@ -58,3 +58,47 @@ def test_ingest_missing_file_raises(tmp_path):
     document = Document(audio_path=str(tmp_path / "nope.wav"), sample_rate=0)
     with pytest.raises(FileNotFoundError):
         ingest.run(document, config)
+
+
+def _require_ffmpeg() -> str:
+    import shutil
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        pytest.skip("ffmpeg not on PATH")
+    return ffmpeg
+
+
+def test_ingest_m4a_via_ffmpeg_fallback(tmp_path):
+    import subprocess
+
+    ffmpeg = _require_ffmpeg()
+    src_wav = tmp_path / "tone.wav"
+    write_sine_wav(src_wav, rate=44100, channels=2)
+    src_m4a = tmp_path / "tone.m4a"
+    subprocess.run(
+        [ffmpeg, "-y", "-loglevel", "error", "-i", str(src_wav), str(src_m4a)], check=True
+    )
+
+    config = Config(cache_dir=tmp_path / "cache")
+    out = ingest.run(Document(audio_path=str(src_m4a), sample_rate=0), config)
+
+    assert out.audio is not None
+    assert out.audio.sample_rate == 44100
+    assert out.audio.channels == 2
+    # aac adds encoder padding; duration should still be within ~100ms
+    assert abs(out.audio.duration - 1.0) < 0.1
+    assert Path(out.audio.path).is_file()
+
+
+def test_ingest_undecodable_file_fails_clearly(tmp_path):
+    _require_ffmpeg()
+    garbage = tmp_path / "not-audio.m4a"
+    garbage.write_bytes(b"this is definitely not audio")
+
+    config = Config(cache_dir=tmp_path / "cache")
+    with pytest.raises(ingest.AudioDecodeError) as excinfo:
+        ingest.run(Document(audio_path=str(garbage), sample_rate=0), config)
+    message = str(excinfo.value)
+    assert "not-audio.m4a" in message  # names the file
+    assert "ffmpeg" in message  # names the decoder that rejected it
