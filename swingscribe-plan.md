@@ -353,7 +353,7 @@ whole pipeline before running any of it.
 | **M6** | WJazzD eval harness + pinned baselines | `python -m eval.run_eval` prints a scorecard |
 | **M7** | Bass line path | Walking bass transcribed at ≥0.8 onset F1 |
 | **M7b** | Piano path + `--ensemble` routing | Solo piano ≥0.90 onset F1; trio piano usable |
-| **M8** | Gradio UI (local) | Drag audio in, get MusicXML out, in a browser |
+| **M8** | Gradio UI (local) — see §13 | Select a solo, audition the isolated stem, transcribe just that span |
 | **M9** | Hugging Face Space | Public URL, ZeroGPU, someone else uses it |
 | M10 | *(optional)* MuScriptor multi-instrument path | Behind an extras flag |
 
@@ -551,3 +551,76 @@ the status of anything you plan to redistribute.
 
 **Source:** the Library of Congress National Jukebox and the Discography of American
 Historical Recordings (UCSB) both host digitized public-domain recordings.
+
+---
+
+## 13. GUI (M8+) — skeleton
+
+*Sketch only. Revisit and expand once M5 lands and the pipeline's real ergonomics are
+known; the point here is to record the intended workflow before it's forgotten.*
+
+### The workflow this is really for
+
+The CLI assumes you want to transcribe a whole track. In practice you want **one solo** —
+often 60–120 seconds out of a five-minute tune — played by **one instrument**, and you
+want to know the isolation worked *before* committing to a full analysis run. On CPU
+that difference is minutes versus tens of minutes, so this is an ergonomics feature and
+a compute-budget feature at once.
+
+```
+   load audio → [waveform + player]
+                      ↓
+   drag-select the solo span  ────────────→  span is part of the job, not the whole file
+                      ↓
+   separate (6-stem) → pick the lead stem
+                      ↓
+   ★ AUDITION the isolated stem — listen before analysing ★
+                      ↓ (bad isolation → change stem/model, loop back)
+   transcribe the span → notes → notation
+                      ↓
+   A/B ear test in the browser → export MusicXML / MIDI
+```
+
+### Screens
+
+1. **Load & select.** Waveform display with a draggable region and a transport. Region
+   in/out times are the unit of work everywhere downstream. Nudge controls matter — solo
+   entries rarely fall on tidy seconds.
+2. **Isolate & audition.** Choose the separation model and the lead stem
+   (`other`/`guitar`/`piano`/`vocals`). Play the isolated stem, ideally against the
+   original. **This is the gate:** if the soloist isn't cleanly dominant here, nothing
+   downstream can rescue it, and the user should change the stem or model rather than
+   burn a transcription run.
+3. **Transcribe & review.** Piano-roll of detected notes over the waveform, the A/B
+   render, and the per-frame diagnostic overlay (f0, periodicity, gate decisions) so a
+   suspicious note can be traced to a cause.
+4. **Notate & export.** Rendered notation, swing marking, transposition choice,
+   MusicXML/MIDI download.
+
+### What this demands of the core (design for it now, build later)
+
+- **A time span must be a first-class job parameter**, not a UI-only crop. Add
+  `region: [start, end] | null` to the ingest config so it participates in the cache key
+  — then re-transcribing a different solo from the same track reuses nothing it
+  shouldn't and everything it should.
+- **Stem choice must be config, not hardcoded.** `transcribe.stem` (already needed by
+  the CLI once 6-stem separation is in use) is exactly what the audition screen selects.
+- **Separation should stay whole-file even when transcription is span-limited** —
+  Demucs quality degrades on short crops, and the whole-file stems cache anyway, so
+  separate once and slice afterwards.
+- **Progress reporting.** Multi-minute CPU stages need per-stage progress to the UI, not
+  a frozen browser tab.
+
+### Deliberately out of scope for the first GUI cut
+
+Editing transcribed notes by hand, multi-solo batch queues, and any notation editing
+beyond export. Those are a notation editor's job, and MuseScore already exists.
+
+### Open questions for the revisit
+
+- Gradio's audio widget is weak on precise region selection; does that force a custom
+  component (or a different framework) for screen 1?
+- Does the audition step want stem *soloing* only, or also a quick isolated-stem
+  download for listening in a real player?
+- Where does the span live in the exported MusicXML — bar 1 of the export, or offset to
+  its position in the original tune?
