@@ -25,6 +25,35 @@ def test_run_with_no_stages_raises(tmp_path):
         pipeline.run(write_audio(tmp_path), make_config(tmp_path), stages=[])
 
 
+def test_cache_version_bump_invalidates(tmp_path):
+    import sys
+    import types
+
+    module = types.ModuleType("fake_stage_module")
+    sys.modules["fake_stage_module"] = module
+    try:
+        calls = []
+
+        def separate(doc, config):
+            calls.append("separate")
+            return doc
+
+        separate.__module__ = "fake_stage_module"
+        stages = [("separate", separate)]
+        audio = write_audio(tmp_path)
+        config = make_config(tmp_path)
+
+        pipeline.run(audio, config, stages=stages)
+        pipeline.run(audio, config, stages=stages)
+        assert calls == ["separate"]  # same version → cache hit
+
+        module.CACHE_VERSION = 2  # stage behavior changed without config change
+        pipeline.run(audio, config, stages=stages)
+        assert calls == ["separate", "separate"]  # version bump → recompute
+    finally:
+        del sys.modules["fake_stage_module"]
+
+
 def test_registered_stages_are_current():
     assert [name for name, _ in pipeline.STAGES] == ["ingest", "separate", "beats"]
 

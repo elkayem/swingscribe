@@ -25,6 +25,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_CONFIG_PATH),
         help="Path to a YAML config file (default: config/default.yaml)",
     )
+    run_parser.add_argument(
+        "--tempo-hint",
+        type=float,
+        default=None,
+        help="Known tempo in BPM; corrects half/double-octave tracking errors",
+    )
 
     click_parser = subparsers.add_parser(
         "click",
@@ -36,6 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--config",
         default=str(DEFAULT_CONFIG_PATH),
         help="Path to a YAML config file (default: config/default.yaml)",
+    )
+    click_parser.add_argument(
+        "--tempo-hint",
+        type=float,
+        default=None,
+        help="Known tempo in BPM; corrects half/double-octave tracking errors",
     )
     click_parser.add_argument(
         "-o",
@@ -55,6 +67,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     config = Config.from_yaml(args.config)
+    if args.tempo_hint:
+        config = config.model_copy(
+            update={"beats": config.beats.model_copy(update={"tempo_hint": args.tempo_hint})}
+        )
     try:
         document = pipeline.run(args.audio, config)
     except (AudioDecodeError, FileNotFoundError, NotImplementedError) as exc:

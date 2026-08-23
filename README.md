@@ -17,7 +17,8 @@ ogg, opus, wma, aiff, ...) — and produces four separated stems
 Demucs, then tracks beats and downbeats with beat_this on the drum stem,
 emitting a per-beat tempo curve. `swingscribe click <file>` writes an
 ear-test wav — the music with clicks at the detected beats (downbeats
-higher-pitched). Stage outputs are cached, so re-runs are instant. No
+higher-pitched). If the tracker lands an octave off (half/double tempo),
+pass `--tempo-hint <bpm>` with the known tempo to correct the grid. Stage outputs are cached, so re-runs are instant. No
 transcription or notation yet. See `swingscribe-plan.md` for the milestones.
 
 Separation needs the ML dependency group (`uv sync --group ml`) and downloads

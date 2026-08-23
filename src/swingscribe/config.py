@@ -33,7 +33,12 @@ class BeatsConfig(BaseModel):
     use_drum_stem: bool = True
     checkpoint: str = "final0"
     device: str = "auto"  # auto | cuda | cpu
-    min_drum_rms: float = 0.001  # below this the drum stem counts as silent → full-mix fallback
+    # Drum stem must carry at least this fraction of the mix's RMS energy,
+    # else fall back to the full mix. Relative, not absolute: a brushes
+    # ballad leaves a technically-nonsilent but useless drum stem.
+    min_drum_mix_ratio: float = 0.05
+    # Known tempo in BPM; corrects half/double-octave tracking errors.
+    tempo_hint: float | None = None
 
 
 class TranscribeConfig(BaseModel):

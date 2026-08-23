@@ -17,7 +17,8 @@ beats:
   use_drum_stem: true       # ride cymbal is the cleanest beat reference (§5)
   checkpoint: final0        # beat_this checkpoint name
   device: auto              # auto | cuda | cpu
-  min_drum_rms: 0.001       # below this RMS the drum stem counts as silent → full-mix fallback
+  min_drum_mix_ratio: 0.05  # drum stem needs ≥5% of mix RMS, else full-mix fallback
+  tempo_hint: null          # known BPM; fixes half/double octave errors (--tempo-hint)
 
 transcribe:
   ensemble: horn-led        # horn-led | trio | solo-piano (§5 stage 3)

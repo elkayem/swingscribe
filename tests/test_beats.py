@@ -59,38 +59,130 @@ def test_infer_beats_per_bar_defaults_to_four():
     assert infer_beats_per_bar([0.0, 0.5], []) == 4
 
 
+def rms_table(values):
+    return lambda path: values[path]
+
+
 def test_select_source_prefers_drum_stem(tmp_path):
     drums = tmp_path / "drums.wav"
     drums.write_bytes(b"x")
-    path, reason = select_source(
-        {"drums": str(drums)}, "mix.wav", True, 0.001, rms_of=lambda p: 0.1
-    )
+    rms = rms_table({str(drums): 0.02, "mix.wav": 0.1})  # 20% of mix
+    path, reason = select_source({"drums": str(drums)}, "mix.wav", True, 0.05, rms_of=rms)
     assert path == str(drums)
     assert reason == "drum stem"
 
 
-def test_select_source_falls_back_when_silent(tmp_path):
+def test_select_source_falls_back_on_relative_silence(tmp_path):
+    # the They Say It's Spring case: drum stem nonsilent in absolute terms
+    # but carrying ~4% of the mix's energy (brushes ballad)
     drums = tmp_path / "drums.wav"
     drums.write_bytes(b"x")
-    path, reason = select_source(
-        {"drums": str(drums)}, "mix.wav", True, 0.001, rms_of=lambda p: 1e-6
-    )
+    rms = rms_table({str(drums): 0.0032, "mix.wav": 0.083})
+    path, reason = select_source({"drums": str(drums)}, "mix.wav", True, 0.05, rms_of=rms)
     assert path == "mix.wav"
-    assert "near-silent" in reason
+    assert "near-silent relative to mix" in reason
 
 
 def test_select_source_falls_back_when_missing():
-    path, reason = select_source({}, "mix.wav", True, 0.001, rms_of=lambda p: 0.1)
+    path, reason = select_source({}, "mix.wav", True, 0.05, rms_of=lambda p: 0.1)
     assert path == "mix.wav"
     assert "no drum stem" in reason
 
 
 def test_select_source_respects_config_off():
     path, reason = select_source(
-        {"drums": "drums.wav"}, "mix.wav", False, 0.001, rms_of=lambda p: 0.1
+        {"drums": "drums.wav"}, "mix.wav", False, 0.05, rms_of=lambda p: 0.1
     )
     assert path == "mix.wav"
     assert "use_drum_stem=false" in reason
+
+
+def test_grid_is_plausible_normal():
+    from swingscribe.stages.beats import grid_is_plausible
+
+    beats = [i * 0.5 for i in range(240)]  # 120s at 120 bpm
+    assert grid_is_plausible(beats, duration=120.0)
+
+
+def test_grid_is_plausible_rejects_phantom_grid():
+    from swingscribe.stages.beats import grid_is_plausible
+
+    # the Spring failure: 41 beats at ~22 bpm over a 328s track
+    beats = [i * 2.64 for i in range(41)]
+    assert not grid_is_plausible(beats, duration=328.0)
+
+
+def test_grid_quality_prefers_steady_plausible_grid():
+    from swingscribe.stages.beats import grid_is_suspect, grid_quality
+
+    steady = [i * 0.54 for i in range(400)]  # ~111 bpm, clean — the Born To Blue drum grid
+    # messy half-tempo grid with jitter — the Born To Blue full-mix grid
+    import random
+
+    rng = random.Random(1)
+    messy = []
+    t = 0.0
+    for _ in range(360):
+        t += rng.choice([0.5, 1.0, 1.0, 1.0, 2.0])
+        messy.append(t)
+
+    duration = 328.0
+    assert grid_quality(steady, duration) > grid_quality(messy, duration)
+    assert not grid_is_suspect(grid_quality(steady, duration))
+    assert grid_is_suspect(grid_quality(messy, duration))
+
+
+def test_grid_quality_plausibility_dominates():
+    from swingscribe.stages.beats import grid_quality
+
+    phantom = [i * 2.64 for i in range(41)]  # 22 bpm phantoms (Spring drum stem)
+    coherent = [i * 0.84 for i in range(390)]  # 71 bpm half-time (Spring full mix)
+    assert grid_quality(coherent, 328.0) > grid_quality(phantom, 328.0)
+
+
+def test_grid_is_plausible_rejects_sparse_coverage():
+    from swingscribe.stages.beats import grid_is_plausible
+
+    beats = [i * 0.5 for i in range(20)]  # plausible tempo, but only 10s of a 328s track
+    assert not grid_is_plausible(beats, duration=328.0)
+
+
+def test_correct_octave_subdivides_half_tempo():
+    from swingscribe.stages.beats import correct_octave
+
+    beats = [i * (60.0 / 71.4) for i in range(50)]  # tracked at 71.4, truth ~140
+    downbeats = beats[0::4]
+    new_beats, new_downbeats, action = correct_octave(beats, downbeats, 140.0)
+    assert action is not None and "subdivided" in action
+    assert len(new_beats) == 2 * len(beats) - 1
+    bpm = local_bpm_curve(new_beats)
+    import statistics
+
+    assert abs(statistics.median(bpm) - 142.8) < 1.0
+    assert new_downbeats == downbeats  # bar starts unchanged
+
+
+def test_correct_octave_halves_double_tempo():
+    from swingscribe.stages.beats import correct_octave
+
+    beats = [i * 0.25 for i in range(80)]  # tracked at 240, truth ~120
+    downbeats = beats[0::8]  # true bar starts land on even indices
+    new_beats, new_downbeats, action = correct_octave(beats, downbeats, 120.0)
+    assert action is not None and "halved" in action
+    assert new_beats == beats[0::2]  # kept the parity holding the downbeats
+    assert new_downbeats == downbeats
+    import statistics
+
+    assert abs(statistics.median(local_bpm_curve(new_beats)) - 120.0) < 1.0
+
+
+def test_correct_octave_leaves_good_grid_alone():
+    from swingscribe.stages.beats import correct_octave
+
+    beats = [i * 0.5 for i in range(50)]  # 120 bpm, hint 120
+    new_beats, new_downbeats, action = correct_octave(beats, beats[0::4], 120.0)
+    assert action is None
+    assert new_beats == beats
 
 
 @requires_heavy

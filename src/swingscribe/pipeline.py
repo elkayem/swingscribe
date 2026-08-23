@@ -5,6 +5,7 @@ caching each stage's output under its chained key. STAGES stays empty in M0;
 stages register here milestone by milestone.
 """
 
+import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -40,12 +41,32 @@ def run(
         )
 
     audio_bytes = Path(audio_path).read_bytes()
+    return _run_stages(audio_bytes, audio_path, config, stages)
+
+
+def _cache_name(name: str, stage: Stage) -> str:
+    """Stage name as it feeds the cache key, folding in the stage module's
+    CACHE_VERSION. A stage whose behavior changes without a config change
+    must bump CACHE_VERSION, or cached grids from the old code keep being
+    served. Version 1 (the default) keeps the bare name, so existing cache
+    entries for unversioned stages stay valid."""
+    module = sys.modules.get(getattr(stage, "__module__", ""), None)
+    version = getattr(module, "CACHE_VERSION", 1)
+    return name if str(version) == "1" else f"{name}@v{version}"
+
+
+def _run_stages(
+    audio_bytes: bytes,
+    audio_path: str | Path,
+    config: Config,
+    stages: Sequence[tuple[str, Stage]],
+) -> Document:
     cache = StageCache(config.cache_dir)
     doc = Document(audio_path=str(audio_path), sample_rate=config.ingest.sample_rate)
 
     key = root_key(audio_bytes)
     for name, stage in stages:
-        key = stage_key(key, name, config.stage_config(name))
+        key = stage_key(key, _cache_name(name, stage), config.stage_config(name))
         cached = cache.get(key)
         if cached is not None:
             doc = Document.model_validate_json(cached)
