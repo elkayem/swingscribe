@@ -30,3 +30,6 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .coverage
+
+# Local listening-pass material — never tracked
+mp3s/
