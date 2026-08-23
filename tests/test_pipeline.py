@@ -25,8 +25,8 @@ def test_run_with_no_stages_raises(tmp_path):
         pipeline.run(write_audio(tmp_path), make_config(tmp_path), stages=[])
 
 
-def test_registered_stages_are_m1():
-    assert [name for name, _ in pipeline.STAGES] == ["ingest", "separate"]
+def test_registered_stages_are_current():
+    assert [name for name, _ in pipeline.STAGES] == ["ingest", "separate", "beats"]
 
 
 def test_registered_stage_names_have_config_sections():

@@ -11,15 +11,16 @@ from pathlib import Path
 from swingscribe.cache import StageCache, root_key, stage_key
 from swingscribe.config import Config
 from swingscribe.model import Document
-from swingscribe.stages import ingest, separate
+from swingscribe.stages import beats, ingest, separate
 
 Stage = Callable[[Document, Config], Document]
 
 # Ordered (name, stage) pairs. Names must match Config sections — they feed
-# the cache keys. Grows milestone by milestone (beats at M2, ...).
+# the cache keys. Grows milestone by milestone (transcribe at M3, ...).
 STAGES: list[tuple[str, Stage]] = [
     ("ingest", ingest.run),
     ("separate", separate.run),
+    ("beats", beats.run),
 ]
 
 

@@ -2,17 +2,13 @@
 test downloads model weights and runs the real separator, so it is opt-in via
 SWINGSCRIBE_HEAVY_TESTS=1."""
 
-import os
 from pathlib import Path
 
 import pytest
 
-from swingscribe.stages.separate import resolve_device, stems_dir
-
-requires_heavy = pytest.mark.skipif(
-    not os.environ.get("SWINGSCRIBE_HEAVY_TESTS"),
-    reason="Set SWINGSCRIBE_HEAVY_TESTS=1 to run tests that download model weights",
-)
+from conftest import requires_heavy
+from swingscribe.device import resolve_device
+from swingscribe.stages.separate import stems_dir
 
 
 def test_resolve_device_auto():

@@ -29,8 +29,11 @@ class SeparateConfig(BaseModel):
 
 
 class BeatsConfig(BaseModel):
-    dbn: bool = False
+    dbn: bool = False  # never True — we skip madmom entirely (plan §2)
     use_drum_stem: bool = True
+    checkpoint: str = "final0"
+    device: str = "auto"  # auto | cuda | cpu
+    min_drum_rms: float = 0.001  # below this the drum stem counts as silent → full-mix fallback
 
 
 class TranscribeConfig(BaseModel):

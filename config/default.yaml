@@ -15,6 +15,9 @@ separate:
 beats:
   dbn: false                # never true — we skip madmom entirely (§2)
   use_drum_stem: true       # ride cymbal is the cleanest beat reference (§5)
+  checkpoint: final0        # beat_this checkpoint name
+  device: auto              # auto | cuda | cpu
+  min_drum_rms: 0.001       # below this RMS the drum stem counts as silent → full-mix fallback
 
 transcribe:
   ensemble: horn-led        # horn-led | trio | solo-piano (§5 stage 3)

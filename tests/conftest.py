@@ -21,6 +21,12 @@ requires_audio = pytest.mark.skipif(
     reason="Set SWINGSCRIBE_FIXTURES to a local audio directory (see swingscribe-plan.md §12)",
 )
 
+# Tests that download model weights and run real inference (minutes on CPU).
+requires_heavy = pytest.mark.skipif(
+    not os.environ.get("SWINGSCRIBE_HEAVY_TESTS"),
+    reason="Set SWINGSCRIBE_HEAVY_TESTS=1 to run tests that download model weights",
+)
+
 MANIFEST_PATH = Path(__file__).parent / "fixtures" / "manifest.yaml"
 
 

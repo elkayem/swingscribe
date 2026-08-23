@@ -69,6 +69,8 @@ never change a key.
 
 ## Current milestone
 
-M1 — Ingest + Separate: `swingscribe run <file>` produces 4 stems (plan §7).
-Remaining stages (beats onward) are empty stubs. Do not implement stage
-logic until the corresponding milestone.
+M2 — BeatTrack + ear test (plan §7): beats stage runs beat_this on the drum
+stem (full-mix fallback), emits a per-beat tempo curve, and flags octave
+outliers; `swingscribe click <file>` renders the §6 ear-test wav (downbeats
+get a distinct click). Remaining stages (transcribe onward) are empty stubs.
+Do not implement stage logic until the corresponding milestone.

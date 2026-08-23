@@ -13,18 +13,8 @@ import hashlib
 from pathlib import Path
 
 from swingscribe.config import Config
+from swingscribe.device import resolve_device
 from swingscribe.model import Document
-
-
-def resolve_device(configured: str, cuda_available: bool) -> str:
-    """'auto' picks cuda when available; anything else is passed through.
-
-    Silent CPU fallback turns a 20-second job into 15 minutes (plan §8), so
-    run() logs the resolved device rather than hiding it.
-    """
-    if configured != "auto":
-        return configured
-    return "cuda" if cuda_available else "cpu"
 
 
 def stems_dir(cache_dir: str | Path, audio_digest: str, model: str) -> Path:

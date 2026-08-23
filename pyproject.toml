@@ -30,6 +30,8 @@ ml = [
     "torchaudio>=2.4",
     "demucs>=4.0",
     "soundfile>=0.12",
+    # No madmom, deliberately: we run beat_this with dbn=False (plan §2).
+    "beat-this",
 ]
 
 [tool.uv]
@@ -47,6 +49,7 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch" }
 torchaudio = { index = "pytorch" }
+beat-this = { git = "https://github.com/CPJKU/beat_this" }
 
 [build-system]
 requires = ["hatchling"]

@@ -29,6 +29,7 @@ class BeatGrid(BaseModel):
     beats: list[float]  # seconds
     downbeats: list[float]  # subset of beats
     beats_per_bar: int
+    local_bpm: list[float] = []  # tempo curve, one local BPM per beat (plan §5 stage 2)
 
 
 class SwingSpan(BaseModel):
