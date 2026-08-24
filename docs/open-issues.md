@@ -64,7 +64,7 @@ Side effect: the 6-stem drum track gave Gerry's Blues a much cleaner beat grid
 (tempo stdev 20.4 → 8.3, octave outliers 10 → 3) but moved the median 136.4 →
 142.9 bpm. Needs a re-listen to decide which grid is right.
 
-## 4. ~~No ground truth or diagnostics~~ — LARGELY DONE, one real gap
+## 4. ~~No ground truth or diagnostics~~ — DONE; it surfaced issue #8
 
 Landed: `tests/synthetic/generate.py` (exact ground truth, rendered at test
 time), `src/swingscribe/metrics.py` (mir_eval wrappers scoring the three
@@ -72,13 +72,50 @@ failure modes separately), 8 pinned baselines, `tools/pin_baselines.py`, and
 `transcribe.analyze()` returning per-frame `FrameDiagnostics` for the GUI
 overlay.
 
-**The gap that remains: the synthetic material is too easy.** Every case
-scores ≥0.98, so the suite is a regression guard, not a quality measure — it
-will catch a change that breaks something, but it cannot tell us whether the
-transcriber is *good*. Additive synthesis with clean harmonics is far easier
-to track than a real horn. Plan §6 specifies FluidSynth soundfont rendering
-for exactly this reason; that is the next step, along with plan §12's
-`scripts/setup_fixtures.py` to fetch a permissively-licensed soundfont.
+~~**The gap that remains: the synthetic material is too easy.**~~ Closed by
+soundfont rendering: `tests/synthetic/soundfont.py` renders the *same* ground
+truth through GeneralUser GS via the FluidSynth CLI (fetched, never committed,
+by `scripts/setup_fixtures.py` — plan §12), so a score difference is
+attributable to timbre alone. Baselines are pinned separately under
+`synthetic_soundfont`; the additive numbers were not touched.
+
+The suite now has dynamic range. Frame pitch accuracy, additive → sampled
+tenor sax:
+
+| Case | Additive | Soundfont |
+|---|---|---|
+| clean_line | 0.990 | 0.919 |
+| held_note | 1.000 | 0.993 |
+| fast_line | 0.989 | 0.705 |
+| vibrato | 0.979 | 0.936 |
+| held_note_over_comping (-3dB) | 1.000 | 0.660 |
+
+**The finding worth carrying forward: the open-issue #1 fix is
+level-dependent.** A held note under sampled piano comping, note count against
+1 in the truth:
+
+| comping level | -3dB | -6dB | -9dB | -12dB | -18dB |
+|---|---|---|---|---|---|
+| additive | 1 | 1 | — | 1 | — |
+| soundfont | 4 | 3 | 2 | 1 | 1 |
+
+Additive comping never shatters the note at any level, so the additive case
+could not have shown this. With real instruments, onset corroboration holds
+down to about -12dB and fails above it — CREPE loses the sax to the piano
+rather than the segmenter mis-splitting (frame pitch accuracy falls with the
+note count). The -3dB soundfont case is pinned at onset F1 0.000 as a record
+of where we are, not as a floor; `held_note_over_quiet_comping` at -12dB is
+the floor that is actually defended.
+
+Whether -3dB comping is a *fair* target is a judgement call nobody has made
+yet. It is louder than most real comping, but Demucs bleed puts real
+accompaniment closer than -12dB. The honest reading is that the transcriber
+needs either better stem isolation or f0 tracking that survives a competing
+broadband source.
+
+`fast_line` at 0.705 is the other new signal: 130ms notes segment correctly
+(note F1 still 1.000) but a third of the frames are pitched wrong, which
+additive synthesis hid completely.
 
 Also still open from the original entry: nothing scores real audio. That is
 Layer 2 (WJazzD, M6).
@@ -114,3 +151,16 @@ backwards for fast bebop with a clear ride pattern.
 When the quality comparison overrides the initial source choice, the stored Document
 doesn't record the winner, so reporting has to re-derive it (and gets it wrong).
 Add `BeatGrid.source` at the next natural beats change.
+
+## 8. CREPE loses the soloist to loud comping (surfaced by #4)
+
+Split out of #4 so it survives that entry being closed. With realistic timbres, a
+held sax note under piano comping at -3dB is tracked as 4 notes with frame pitch
+accuracy 0.66; the same case is perfect at -12dB and perfect at every level under
+additive synthesis. The onset-corroboration fix from #1 is intact — the failure is
+upstream of it, in f0 tracking, and the note count is a symptom.
+
+Regression-guarded both ways in `tests/test_synthetic.py`: `held_note_over_comping`
+pins the failure, `held_note_over_quiet_comping` defends the level where it works.
+Directions: better stem isolation (6-stem, see #3), a periodicity/energy gate that
+notices it has switched sources mid-note, or CREPE's ensemble/`full` model.
