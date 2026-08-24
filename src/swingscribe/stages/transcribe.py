@@ -193,6 +193,86 @@ def offset_notes(notes: list[NoteEvent], offset: float) -> list[NoteEvent]:
     return [n.model_copy(update={"onset": n.onset + offset}) for n in notes]
 
 
+def harmonic_energy(
+    mono,
+    rate: int,
+    pitch_midi: list[float | None],
+    hop: int,
+    n_harmonics: int = 4,
+    frame_size: int = 1024,
+) -> list[float]:
+    """Per-frame energy in narrow bands around the *tracked pitch's* harmonics.
+
+    This is the evidence that distinguishes a re-articulation from a neighbour
+    instrument's transient: tonguing a held note puts fresh energy into that
+    note's own harmonics, while a piano comp chord underneath it does not
+    (open-issue #1). Frames with no tracked pitch score 0.0 — there is no
+    "own pitch" to measure.
+    """
+    import numpy as np
+
+    window = np.hanning(frame_size)
+    half = frame_size // 2
+    nyquist = rate / 2
+    out: list[float] = []
+    for i, midi in enumerate(pitch_midi):
+        if midi is None:
+            out.append(0.0)
+            continue
+        centre = i * hop
+        lo = centre - half
+        chunk = mono[max(0, lo) : lo + frame_size]
+        if len(chunk) < frame_size:
+            pad_left = max(0, -lo)
+            chunk = np.pad(chunk, (pad_left, frame_size - len(chunk) - pad_left))
+        spectrum = np.abs(np.fft.rfft(chunk * window))
+        f0 = 440.0 * 2 ** ((midi - 69) / 12)
+        total = 0.0
+        for k in range(1, n_harmonics + 1):
+            freq = f0 * k
+            if freq >= nyquist:
+                break
+            bin_centre = int(round(freq * frame_size / rate))
+            total += float(spectrum[max(0, bin_centre - 1) : bin_centre + 2].sum())
+        out.append(total)
+    return out
+
+
+def corroborate_onsets(
+    candidates: set[int],
+    energy: list[float],
+    pitch_midi: list[float | None],
+    rise_db: float,
+    window: int,
+) -> set[int]:
+    """Drop onsets that show no fresh attack in the tracked pitch's harmonics.
+
+    An onset landing where no pitch is tracked is kept untouched — it falls
+    outside a voiced run and the segmenter ignores it anyway. Inside a run, a
+    split is allowed only when harmonic energy rises by `rise_db` across the
+    candidate frame, which is what re-articulating the note actually does and
+    what a neighbouring instrument's transient does not.
+    """
+    import statistics as _stats
+
+    if rise_db <= 0:
+        return set(candidates)
+    ratio = 10.0 ** (rise_db / 20.0)
+    kept: set[int] = set()
+    for i in candidates:
+        if not (0 <= i < len(pitch_midi)) or pitch_midi[i] is None:
+            kept.add(i)
+            continue
+        before = [e for e in energy[max(0, i - window) : i] if e > 0]
+        after = energy[i : i + window]
+        if not before or not after:
+            kept.add(i)
+            continue
+        if max(after) >= _stats.median(before) * ratio:
+            kept.add(i)
+    return kept
+
+
 def pick_peaks(strength: list[float], min_separation: int, window: int, delta: float) -> list[int]:
     """Local maxima of an onset-strength curve that stand `delta` above the
     local mean, at least `min_separation` frames apart."""
@@ -385,7 +465,23 @@ def analyze(
     kernel = max(1, round(tc.median_filter_ms / 1000.0 / hop_s) | 1)
     pitches = median_smooth(pitches, kernel)
 
-    onset_frames = _spectral_flux_onsets(mono, rate, hop_s)
+    # Broadband flux finds every transient in the stem, including the ones
+    # belonging to other instruments. Keep only those corroborated by a fresh
+    # attack in the tracked pitch's own harmonics (open-issue #1).
+    raw_onsets = _spectral_flux_onsets(mono, rate, hop_s)
+    h_energy = harmonic_energy(mono16, CREPE_SAMPLE_RATE, pitches, CREPE_HOP)
+    onset_frames = corroborate_onsets(
+        raw_onsets,
+        h_energy,
+        pitches,
+        rise_db=tc.onset_rise_db,
+        window=max(1, round(tc.onset_window_ms / 1000.0 / hop_s)),
+    )
+    if log and raw_onsets:
+        print(
+            f"transcribe: {len(onset_frames)}/{len(raw_onsets)} onsets corroborated "
+            f"by harmonic attack (rest were other instruments)"
+        )
 
     notes = segment_notes(
         pitches,

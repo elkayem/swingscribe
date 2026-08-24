@@ -30,6 +30,8 @@ transcribe:
   device: auto              # auto | cuda | cpu
   voicing_threshold: 0.5    # CREPE periodicity gate; above docs' 0.21 — stem bleed is pitched
   silence_floor_db: -40.0   # frame RMS gate vs the stem's loud reference; kills quiet bleed
+  onset_rise_db: 3.0        # onset splits a held note only if ITS harmonics re-attack
+  onset_window_ms: 60.0     # lookback/lookahead for that rise
   min_note_ms: 60.0         # drop specks shorter than a fast bebop 16th
   pitch_persist_ms: 60.0    # new pitch must hold this long to split a note (scoops don't)
   silence_gap_ms: 40.0      # bridge unvoiced dropouts shorter than this

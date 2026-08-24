@@ -1,5 +1,7 @@
 """Transcribe stage. Segmentation/gating/octave helpers are pure and run in
-CI; the pYIN melody-recovery test needs librosa and skips without it."""
+CI; the CREPE melody-recovery tests need the ml group and skip without it."""
+
+import statistics
 
 import pytest
 
@@ -194,6 +196,105 @@ def test_offset_notes_zero_is_identity():
 
     notes = [note(60, onset=1.0)]
     assert offset_notes(notes, 0.0) is notes
+
+
+def test_corroborate_keeps_onset_with_harmonic_attack():
+    from swingscribe.stages.transcribe import corroborate_onsets
+
+    # flat, then a clear rise at frame 10 in the note's own harmonics
+    energy = [1.0] * 10 + [4.0] * 10
+    pitch = [60.0] * 20
+    assert corroborate_onsets({10}, energy, pitch, rise_db=3.0, window=5) == {10}
+
+
+def test_corroborate_drops_onset_without_harmonic_attack():
+    # The open-issue #1 case: a transient exists (broadband flux found it) but
+    # the held note's own harmonics carry straight through it unchanged.
+    from swingscribe.stages.transcribe import corroborate_onsets
+
+    energy = [1.0] * 20
+    pitch = [60.0] * 20
+    assert corroborate_onsets({10}, energy, pitch, rise_db=3.0, window=5) == set()
+
+
+def test_corroborate_keeps_onsets_outside_voiced_runs():
+    from swingscribe.stages.transcribe import corroborate_onsets
+
+    energy = [0.0] * 20
+    pitch: list[float | None] = [None] * 20
+    assert corroborate_onsets({10}, energy, pitch, rise_db=3.0, window=5) == {10}
+
+
+def test_corroborate_disabled_by_zero_threshold():
+    from swingscribe.stages.transcribe import corroborate_onsets
+
+    energy = [1.0] * 20
+    pitch = [60.0] * 20
+    assert corroborate_onsets({5, 10}, energy, pitch, rise_db=0.0, window=5) == {5, 10}
+
+
+def test_harmonic_energy_follows_the_tracked_pitch():
+    numpy = pytest.importorskip("numpy")
+    from swingscribe.stages.transcribe import harmonic_energy
+
+    rate, hop = 16000, 160
+    t = numpy.arange(rate) / rate
+    tone = numpy.sin(2 * numpy.pi * 440.0 * t).astype("float32")  # A4 = MIDI 69
+
+    # measured at the pitch that is actually sounding → strong
+    on_pitch = harmonic_energy(tone, rate, [69.0] * 50, hop)
+    # measured a tritone away → weak, because those bins are empty
+    off_pitch = harmonic_energy(tone, rate, [63.0] * 50, hop)
+    assert statistics.median(on_pitch[10:40]) > 10 * statistics.median(off_pitch[10:40])
+
+
+def test_harmonic_energy_is_zero_where_unpitched():
+    numpy = pytest.importorskip("numpy")
+    from swingscribe.stages.transcribe import harmonic_energy
+
+    tone = numpy.sin(2 * numpy.pi * 440.0 * numpy.arange(16000) / 16000).astype("float32")
+    energy = harmonic_energy(tone, 16000, [None] * 50, 160)
+    assert energy == [0.0] * 50
+
+
+def test_held_note_survives_a_foreign_transient(tmp_path):
+    """End-to-end open-issue #1: a held tone plus an unrelated percussive hit
+    must stay ONE note. Previously the hit split it."""
+    pytest.importorskip("torch", reason="ml dependency group not installed")
+    import numpy as np
+    import soundfile
+
+    from swingscribe.config import Config
+    from swingscribe.stages import transcribe
+
+    rate = 16000
+    duration = 2.0
+    t = np.arange(int(rate * duration)) / rate
+    # a steady tenor-ish tone with a couple of harmonics
+    tone = (
+        0.5 * np.sin(2 * np.pi * 220.0 * t)
+        + 0.2 * np.sin(2 * np.pi * 440.0 * t)
+        + 0.1 * np.sin(2 * np.pi * 660.0 * t)
+    )
+    tone *= np.minimum(1.0, t * 40)  # brief fade-in, then held
+    # a foreign transient at 1.0s: broadband noise burst, nothing at 220Hz
+    rng = np.random.default_rng(0)
+    hit = np.zeros_like(tone)
+    start = int(1.0 * rate)
+    burst = rng.standard_normal(int(0.05 * rate))
+    burst *= np.exp(-np.arange(len(burst)) / (0.01 * rate))
+    hp = np.diff(burst, prepend=0.0)  # crude high-pass: no 220Hz content
+    hit[start : start + len(hp)] = hp * 0.6
+    signal = (tone + hit).astype("float32")
+
+    stem = tmp_path / "other.wav"
+    soundfile.write(str(stem), signal, rate)
+
+    config = Config(cache_dir=tmp_path / "cache")
+    notes, _diag = transcribe.analyze(str(stem), config.transcribe)
+    held = [n for n in notes if n.duration > 0.3]
+    assert len(held) == 1, f"held note was split into {[(n.onset, n.pitch) for n in notes]}"
+    assert held[0].pitch == 57  # A3
 
 
 def test_pick_peaks_finds_separated_maxima():

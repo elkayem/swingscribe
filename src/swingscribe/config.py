@@ -66,6 +66,13 @@ class TranscribeConfig(BaseModel):
     # reference (95th-percentile frame RMS). Periodicity alone cannot reject
     # QUIET pitched bleed between phrases; energy can.
     silence_floor_db: float = -40.0
+    # A detected onset only splits a held note when the note's OWN harmonics
+    # show a fresh attack of at least this many dB. Broadband onset detection
+    # fires on every transient in the stem, so without this a comping piano
+    # shatters a sustained horn note into repeated fragments (open-issue #1).
+    # Set to 0 to disable corroboration and split on every onset.
+    onset_rise_db: float = 3.0
+    onset_window_ms: float = 60.0  # lookback/lookahead for that rise
     min_note_ms: float = 60.0  # drop specks shorter than a fast bebop 16th
     pitch_persist_ms: float = 60.0  # a new pitch must hold this long to split a note
     silence_gap_ms: float = 40.0  # unvoiced dropouts shorter than this bridge a phrase
