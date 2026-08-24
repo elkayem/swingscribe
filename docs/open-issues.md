@@ -65,7 +65,21 @@ Three failure modes are currently indistinguishable in the output and should be
 scored separately: f0 accuracy where a single pitch exists; voicing/gating accuracy;
 and segmentation accuracy.
 
-## 5. Footprints downbeat inference is wrong in 6/4
+## 5. Footprints downbeat inference is wrong in 6/4 — ROUTED AROUND, not fixed
+
+**Update:** measurement shows the problem is general, not 6/4-specific. The
+beats-between-consecutive-downbeats histogram is `{2: 131, 4: 99, 1: 30, 3: 5}`
+on Gerry's Blues and similar on Corner Pocket — if bars were real this would be
+a single spike. `infer_beats_per_bar` takes the median of that, which is why
+both 4/4 tunes reported 2 beats per bar. The *pulse* layer is fine (>95% of
+beats within 5% of their local neighbours); only the downbeat layer is noise.
+
+`stages/meter.py` no longer trusts it: bar lines are derived by counting beats
+from a user-settable anchor, and the detected downbeats survive only as a weak
+hint for the initial anchor guess. The underlying beat_this behaviour is
+unchanged, so this entry stays open — but nothing downstream depends on it now.
+
+Original report:
 
 1005 beats against 435 downbeats = a downbeat every ~2.3 beats on a 6/4 tune. The
 beat layer looks right (136 bpm quarter); the downbeat layer is not. Every track in

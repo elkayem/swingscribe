@@ -55,7 +55,21 @@ def test_cache_version_bump_invalidates(tmp_path):
 
 
 def test_registered_stages_are_current():
-    assert [name for name, _ in pipeline.STAGES] == ["ingest", "separate", "beats", "transcribe"]
+    assert [name for name, _ in pipeline.STAGES] == [
+        "ingest",
+        "separate",
+        "beats",
+        "transcribe",
+        "meter",
+    ]
+
+
+def test_meter_runs_below_transcribe():
+    """Order is a caching decision, not a taste one. Meter belongs with beats
+    conceptually, but chained keys mean anything above transcribe invalidates
+    it — so moving a downbeat would re-run CREPE (docs/meter-plan.md)."""
+    names = [name for name, _ in pipeline.STAGES]
+    assert names.index("meter") > names.index("transcribe")
 
 
 def test_registered_stage_names_have_config_sections():
@@ -134,3 +148,40 @@ def test_downstream_config_change_reuses_upstream(tmp_path):
 
     # Tweaking only the quantizer must not re-run separation (plan §3).
     assert calls == ["separate", "quantize", "quantize"]
+
+
+def test_cached_document_peeks_without_executing(tmp_path):
+    """The GUI's "is the beat grid free?" question: answered from the cache
+    alone, never by running a stage."""
+    calls = []
+
+    def stage(doc, config):
+        calls.append("ran")
+        return doc.model_copy(update={"sample_rate": 999})
+
+    stages = [("ingest", stage)]
+    audio = write_audio(tmp_path)
+    config = make_config(tmp_path)
+
+    # Nothing cached: a peek returns None and runs nothing.
+    assert pipeline.cached_document(audio, config, stages) is None
+    assert calls == []
+
+    document = pipeline.run(audio, config, stages=stages)
+    assert calls == ["ran"]
+
+    # Cached: the peek returns the same document, still without executing.
+    peeked = pipeline.cached_document(audio, config, stages)
+    assert peeked is not None
+    assert peeked.sample_rate == document.sample_rate
+    assert calls == ["ran"]
+
+    # A config change re-keys the chain, so the peek honestly says "not ready".
+    moved = config.model_copy(
+        update={"ingest": config.ingest.model_copy(update={"sample_rate": 22050})}
+    )
+    assert pipeline.cached_document(audio, moved, stages) is None
+
+
+def test_cached_document_with_no_stages_is_none(tmp_path):
+    assert pipeline.cached_document(write_audio(tmp_path), make_config(tmp_path), []) is None

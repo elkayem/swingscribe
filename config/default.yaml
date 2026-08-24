@@ -35,6 +35,23 @@ transcribe:
   silence_gap_ms: 40.0      # bridge unvoiced dropouts shorter than this
   median_filter_ms: 50.0    # f0 median-filter kernel — flattens vibrato
 
+meter:
+  # Bar lines are derived by counting beats from an anchor, NOT from the beat
+  # tracker's detected downbeats (that layer is noise — open-issue #5).
+  # Runs after transcribe deliberately: moving a downbeat then re-runs only
+  # swing/quantize, never CREPE and never separation (docs/meter-plan.md).
+  time_signature: null      # "4/4" | "3/4" | "6/8" | "6/4" | ...; null = 4/4
+  pulses_per_bar: null      # tracked beats per bar; null = from time signature
+  anchor: null              # seconds; a beat that is beat 1. null = auto-detect
+  bars_per_chorus: null     # heavier line every N bars (12-bar blues, 32-bar form)
+  form_start: null          # seconds; where bar 1 is — skips an intro. null = first bar
+  extend_to_edges: true     # continue a steady pulse into a head/tail with no beats
+  max_extend_seconds: 12.0  # ...but no further than this, so a free intro stays bare
+  repair_beats: true        # fill in beats the tracker dropped
+  max_implied_run: 8        # wider gaps break the span instead of being filled
+  stability_tolerance: 0.15 # interval must be within this of the local median
+  min_span_beats: 8         # shorter stable runs get no bar lines (rubato)
+
 swing:
   window_beats: 16          # sliding window for BUR estimation (§5 stage 4)
 

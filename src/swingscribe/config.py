@@ -72,6 +72,48 @@ class TranscribeConfig(BaseModel):
     median_filter_ms: float = 50.0  # f0 smoothing kernel — flattens vibrato wobble
 
 
+class MeterConfig(BaseModel):
+    """Bar-grid derivation, and the user's overrides of it (docs/meter-plan.md).
+
+    These are the knobs the GUI's downbeat click and time-signature menu write
+    to. They belong in config precisely so they reach the cache key and
+    therefore the transcription — there is no side channel.
+    """
+
+    # "4/4", "3/4", "6/8", "6/4", ... or null to use the default (4/4).
+    time_signature: str | None = None
+    # Tracked beats per bar. Null derives it from the time signature, which is
+    # not always the numerator: 6/8 counted in 2 has two dotted-quarter pulses.
+    pulses_per_bar: int | None = None
+    # Seconds. A beat that is beat 1; the grid snaps to the nearest one. Stored
+    # as time rather than a beat index so it survives a re-tracked grid
+    # (different separation model, tempo hint) instead of silently sliding.
+    anchor: float | None = None
+    # Heavier line every N bars — jazz solos are whole choruses. Null/0 = off.
+    bars_per_chorus: int | None = None
+    # Seconds. Where the tune's form starts, which is not always where the audio
+    # does: an intro is not part of the song structure. Bar 1 and the chorus
+    # count both start here; bars before it are drawn but not numbered.
+    form_start: float | None = None
+    # Neural beat trackers routinely emit nothing for the first few seconds —
+    # Corner Pocket is at full level from 0.0s but has no beat until 5.86s. Where
+    # the pulse at the edge is steady, continue it out to the ends of the track
+    # rather than leaving the head and tail barless.
+    extend_to_edges: bool = True
+    max_extend_seconds: float = 12.0
+    # Insert beats the tracker dropped. Measured need: Corner Pocket's first 23
+    # seconds are tracked at half rate, which would otherwise make every bar
+    # there twice too long.
+    repair_beats: bool = True
+    # A gap wider than this many pulses is a hole in the tracking, not a run of
+    # missed beats; it breaks the metrical span instead of being filled.
+    max_implied_run: int = 8
+    # A beat is metrical when its interval is within this fraction of the local
+    # median; runs shorter than min_span_beats get no bar lines at all.
+    stability_tolerance: float = 0.15
+    min_span_beats: int = 8
+
+
 class SwingConfig(BaseModel):
     window_beats: int = 16
 
@@ -108,7 +150,17 @@ class GuiConfig(BaseModel):
 # section — gui, say — cannot accidentally become part of a key and invalidate
 # separations that cost thirteen minutes each to rebuild.
 STAGE_SECTIONS = frozenset(
-    {"ingest", "separate", "beats", "transcribe", "swing", "quantize", "notate", "export"}
+    {
+        "ingest",
+        "separate",
+        "beats",
+        "transcribe",
+        "meter",
+        "swing",
+        "quantize",
+        "notate",
+        "export",
+    }
 )
 
 
@@ -121,6 +173,7 @@ class Config(BaseSettings):
     separate: SeparateConfig = SeparateConfig()
     beats: BeatsConfig = BeatsConfig()
     transcribe: TranscribeConfig = TranscribeConfig()
+    meter: MeterConfig = MeterConfig()
     swing: SwingConfig = SwingConfig()
     quantize: QuantizeConfig = QuantizeConfig()
     notate: NotateConfig = NotateConfig()

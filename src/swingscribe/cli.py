@@ -42,6 +42,23 @@ def _add_common(parser: argparse.ArgumentParser, *, region: bool = False) -> Non
             default=None,
             help="Which separated stem carries the solo (other/guitar/piano/bass/vocals)",
         )
+        parser.add_argument(
+            "--time-signature",
+            default=None,
+            help='Time signature for the whole tune, e.g. "4/4", "3/4", "6/8"',
+        )
+        parser.add_argument(
+            "--downbeat",
+            type=float,
+            default=None,
+            help="Seconds; a beat that is beat 1. Re-phases the bar grid.",
+        )
+        parser.add_argument(
+            "--bars-per-chorus",
+            type=int,
+            default=None,
+            help="Form length in bars (12-bar blues, 32-bar AABA)",
+        )
 
 
 def _add_tempo_hint(parser: argparse.ArgumentParser) -> None:
@@ -149,6 +166,19 @@ def apply_overrides(config: Config, args: argparse.Namespace) -> Config:
         config = config.model_copy(
             update={"transcribe": config.transcribe.model_copy(update=updates)}
         )
+
+    # Meter overrides are config, not a side channel: they belong to the cache
+    # key so a different downbeat genuinely re-derives the bar grid, while
+    # leaving separation and transcription cached (docs/meter-plan.md).
+    meter_updates = {}
+    if getattr(args, "time_signature", None):
+        meter_updates["time_signature"] = args.time_signature
+    if getattr(args, "downbeat", None) is not None:
+        meter_updates["anchor"] = args.downbeat
+    if getattr(args, "bars_per_chorus", None):
+        meter_updates["bars_per_chorus"] = args.bars_per_chorus
+    if meter_updates:
+        config = config.model_copy(update={"meter": config.meter.model_copy(update=meter_updates)})
     return config
 
 

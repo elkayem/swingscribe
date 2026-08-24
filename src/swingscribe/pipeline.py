@@ -13,7 +13,7 @@ from swingscribe import progress
 from swingscribe.cache import StageCache, root_key, stage_key
 from swingscribe.config import Config
 from swingscribe.model import Document
-from swingscribe.stages import beats, ingest, separate, transcribe
+from swingscribe.stages import beats, ingest, meter, separate, transcribe
 
 Stage = Callable[[Document, Config], Document]
 
@@ -24,6 +24,11 @@ STAGES: list[tuple[str, Stage]] = [
     ("separate", separate.run),
     ("beats", beats.run),
     ("transcribe", transcribe.run),
+    # Meter sits BELOW transcribe on purpose, though it belongs with beats
+    # conceptually. Chained keys invalidate everything downstream of a changed
+    # stage, so this placement makes moving a downbeat re-run only
+    # swing/quantize (milliseconds) instead of CREPE (docs/meter-plan.md).
+    ("meter", meter.run),
 ]
 
 
@@ -44,6 +49,30 @@ def run(
 
     audio_bytes = Path(audio_path).read_bytes()
     return _run_stages(audio_bytes, audio_path, config, stages)
+
+
+def cached_document(
+    audio_path: str | Path,
+    config: Config,
+    stages: Sequence[tuple[str, Stage]],
+) -> Document | None:
+    """The Document `run` would produce for these stages, but only if the final
+    stage is already cached — never executes anything.
+
+    Exists for the GUI: "show me the beat grid if it's free, otherwise tell me
+    it isn't" must not be answerable only by a call that might block for
+    minutes. Only the last key needs checking — chained keys transitively
+    encode the audio and every upstream stage's config (plan §3), so a hit on
+    the final stage proves the whole chain was computed with this exact config.
+    """
+    if not stages:
+        return None
+    cache = StageCache(config.cache_dir)
+    key = root_key(Path(audio_path).read_bytes())
+    for name, stage in stages:
+        key = stage_key(key, _cache_name(name, stage), config.stage_config(name))
+    payload = cache.get(key)
+    return None if payload is None else Document.model_validate_json(payload)
 
 
 def _cache_name(name: str, stage: Stage) -> str:
