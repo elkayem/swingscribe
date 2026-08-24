@@ -14,6 +14,9 @@
   --lead: #56cfc0;            /* the isolated stem */
   --wave: #4c5468;
   --wave-lit: #97a1bb;
+  --beat: #5f6c8c;            /* beat ticks — quiet, part of the ruler */
+  --downbeat: #9fb4ff;        /* bar lines — the grid's claim about the metre */
+  --chorus: #ffd479;          /* chorus starts — a solo is N whole choruses */
   --danger: #e2666b;
   --radius: 7px;
   --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
@@ -83,6 +86,11 @@ button.play {
   background: var(--accent); border-color: var(--accent); color: #17130a;
 }
 button.play:hover:not(:disabled) { background: #ffbb5c; border-color: #ffbb5c; }
+button.restart { font: 12px var(--mono); padding: 8px 10px; }
+
+/* The overview's window box doubles as a scrubber for the detail view. */
+.wave .window-box { cursor: grab; pointer-events: auto; }
+.wave .window-box:active { cursor: grabbing; }
 
 /* ── track picker ───────────────────────────────────────────────────────── */
 .picker {
@@ -202,12 +210,26 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 18px; }
   position: absolute; top: 0; bottom: 0;
   border: 1px solid rgba(150, 160, 190, 0.55);
   background: rgba(150, 160, 190, 0.07);
-  pointer-events: none; z-index: 2;
+  z-index: 2;
 }
 .wave-legend { display: flex; align-items: center; gap: 7px; margin-top: 6px; font-size: 12px; color: var(--muted); }
 .wave-legend .key { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
 .wave-legend .key.mix { background: var(--wave); }
 .wave-legend .key.lead { background: var(--lead); margin-left: 12px; }
+
+/* The bpm/meter caption keeps normal casing inside the uppercase label row —
+   it's data, not a label. */
+/* Over a beat marker, where a click re-phases the bar grid rather than seeking. */
+.wave.over-beat { cursor: pointer; }
+
+.chip-select {
+  font: 12px var(--mono); padding: 2px 6px; border-radius: 5px;
+  color: var(--text); background: var(--panel-2); border: 1px solid var(--line);
+  text-transform: none; letter-spacing: normal;
+}
+.chip-select:disabled { opacity: 0.4; }
+
+.wave-label .beats-info { text-transform: none; letter-spacing: normal; font: 11px var(--mono); color: var(--downbeat); }
 
 /* ── transport ──────────────────────────────────────────────────────────── */
 .transport, .ab-row {

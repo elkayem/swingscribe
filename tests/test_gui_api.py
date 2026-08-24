@@ -5,6 +5,7 @@ behaviour is what's under test, not torchaudio's.
 """
 
 import json
+import pathlib
 
 import pytest
 
@@ -248,6 +249,121 @@ def test_unknown_track_with_no_sidecar_is_a_404(world):
     assert world["client"].get("/api/tracks/deadbeefdeadbeef/peaks").status_code == 404
 
 
+def test_beats_endpoint_reports_not_ready_without_computing(world):
+    """No cached grid exists in this fixture; the endpoint must say so rather
+    than block the request on minutes of beat tracking."""
+    track = open_track(world)
+    payload = world["client"].get(f"/api/tracks/{track['id']}/beats").json()
+    assert payload == {"ready": False}
+
+
+def test_beats_endpoint_derives_bars_from_a_cached_grid(world, monkeypatch):
+    """Bar lines come from counting beats, not from the tracker's downbeat
+    layer — which is why a deliberately misleading downbeat list still yields a
+    clean grid."""
+    from swingscribe import pipeline
+    from swingscribe.model import BeatGrid
+
+    track = open_track(world)
+    beats = [round(i * 0.5, 3) for i in range(64)]
+    grid = BeatGrid(beats=beats, downbeats=[0.5, 1.5, 2.0], beats_per_bar=2)
+    document = Document(audio_path="x", sample_rate=8000, beat_grid=grid)
+    seen = {}
+
+    def fake_cached(path, config, stages):
+        seen["model"] = config.separate.model
+        seen["stages"] = [name for name, _stage in stages]
+        return document
+
+    monkeypatch.setattr(pipeline, "cached_document", fake_cached)
+    payload = (
+        world["client"]
+        .get(
+            f"/api/tracks/{track['id']}/beats",
+            params={"model": "htdemucs_6s", "time_signature": "4/4", "anchor": 0.0},
+        )
+        .json()
+    )
+
+    assert payload["ready"] is True
+    assert payload["time_signature"] == "4/4"
+    assert payload["pulses_per_bar"] == 4
+    assert payload["bpm"] == pytest.approx(120.0)
+    # A bar every four beats, numbered from one.
+    assert [t for t, _n in payload["bars"]][:3] == pytest.approx([0.0, 2.0, 4.0])
+    assert [n for _t, n in payload["bars"]][:3] == [1, 2, 3]
+    assert seen["model"] == "htdemucs_6s"
+    assert seen["stages"] == ["ingest", "separate", "beats"]
+
+
+def test_beats_endpoint_rephases_on_a_new_anchor(world, monkeypatch):
+    """The downbeat click must be a redraw, not a re-analysis: same request,
+    one parameter different, every bar line moved."""
+    from swingscribe import pipeline
+    from swingscribe.model import BeatGrid
+
+    track = open_track(world)
+    grid = BeatGrid(beats=[round(i * 0.5, 3) for i in range(64)], downbeats=[], beats_per_bar=4)
+    monkeypatch.setattr(
+        pipeline,
+        "cached_document",
+        lambda path, config, stages: Document(audio_path="x", sample_rate=8000, beat_grid=grid),
+    )
+    url = f"/api/tracks/{track['id']}/beats"
+    first = world["client"].get(url, params={"anchor": 0.0}).json()
+    moved = world["client"].get(url, params={"anchor": 0.5}).json()
+    assert [t for t, _ in moved["bars"]][:3] == pytest.approx([0.5, 2.5, 4.5])
+    assert len(first["bars"]) == len(moved["bars"])
+
+
+def test_beats_endpoint_marks_beats_it_had_to_invent(world, monkeypatch):
+    """Implied beats are flagged so the UI can draw them as guesses rather than
+    letting the software's inference pass for detection."""
+    from swingscribe import pipeline
+    from swingscribe.model import BeatGrid
+
+    track = open_track(world)
+    times = [round(i * 0.5, 3) for i in range(64)]
+    del times[30]
+    grid = BeatGrid(beats=times, downbeats=[], beats_per_bar=4)
+    monkeypatch.setattr(
+        pipeline,
+        "cached_document",
+        lambda path, config, stages: Document(audio_path="x", sample_rate=8000, beat_grid=grid),
+    )
+    payload = world["client"].get(f"/api/tracks/{track['id']}/beats").json()
+    assert sum(1 for flag in payload["implied"] if flag) == 1
+    assert len(payload["implied"]) == len(payload["beats"]) == 64
+
+
+def test_beats_endpoint_rejects_a_nonsense_time_signature(world, monkeypatch):
+    from swingscribe import pipeline
+    from swingscribe.model import BeatGrid
+
+    track = open_track(world)
+    monkeypatch.setattr(
+        pipeline,
+        "cached_document",
+        lambda path, config, stages: Document(
+            audio_path="x",
+            sample_rate=8000,
+            beat_grid=BeatGrid(beats=[0.0, 0.5], downbeats=[], beats_per_bar=4),
+        ),
+    )
+    response = world["client"].get(
+        f"/api/tracks/{track['id']}/beats", params={"time_signature": "banana"}
+    )
+    assert response.status_code == 400
+
+
+def test_job_rejects_an_unknown_kind(world):
+    response = world["client"].post(
+        "/api/jobs",
+        json={"path": str(world["source"]), "model": "htdemucs_ft", "kind": "transmogrify"},
+    )
+    assert response.status_code == 400
+
+
 def test_job_rejects_a_model_outside_the_menu(world):
     response = world["client"].post(
         "/api/jobs", json={"path": str(world["source"]), "model": "not_a_model"}
@@ -265,7 +381,21 @@ def test_stems_endpoint_lists_one_model(world):
     assert payload["stems"] == ["bass", "drums", "other", "vocals"]
 
 
-def test_gui_state_file_is_json_and_lives_under_the_cache(world):
+def test_settings_are_written_beside_the_audio(world):
+    """Not under the cache: clearing derived data must never cost the user a
+    span, a stem choice or a downbeat they had to listen to find."""
     track = open_track(world)
-    sidecar = world["config"].cache_dir / "gui" / f"{track['id']}.json"
-    assert json.loads(sidecar.read_text(encoding="utf-8"))["path"] == str(world["source"])
+    response = world["client"].post(
+        f"/api/tracks/{track['id']}/state",
+        json={"state": {"region": [1.0, 2.0], "stem": "other"}},
+    )
+    assert response.status_code == 200
+    written = pathlib.Path(response.json()["settings_path"])
+    assert written == world["source"].with_name(world["source"].name + ".swingscribe.json")
+    assert written.is_file()
+    assert json.loads(written.read_text(encoding="utf-8"))["stem"] == "other"
+
+
+def test_open_reports_where_settings_live(world):
+    track = open_track(world)
+    assert track["settings_path"].endswith(".swingscribe.json")

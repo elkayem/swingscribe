@@ -31,5 +31,10 @@ dist/
 .ruff_cache/
 .coverage
 
+# Per-track GUI settings. They live beside the audio (deliberately — see
+# docs/meter-plan.md), and they describe spans within commercial recordings,
+# so they stay out of git like everything else derived from them (plan §12).
+*.swingscribe.json
+
 # Local listening-pass material — never tracked
 mp3s/

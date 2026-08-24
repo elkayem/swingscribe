@@ -110,6 +110,54 @@ export class StemEngine {
     if (this.playing) this._startSource(key, this.position, this._context().currentTime + 0.02);
   }
 
+  /* Install a locally generated buffer (the click track) as though it were a
+     stem: it then loops, mixes and mutes through exactly the same path, and —
+     because every source is scheduled from one instant — stays sample-locked to
+     the music instead of drifting against it. */
+  setBuffer(key, buffer) {
+    this.buffers.set(key, buffer);
+    this.loopLength = this.loopLength
+      ? Math.min(this.loopLength, buffer.duration)
+      : buffer.duration;
+    if (this.playing) this._startSource(key, this.position, this._context().currentTime + 0.02);
+  }
+
+  /* A click track for `events` — {time, frequency, gain} in buffer seconds —
+     rendered to a buffer exactly one loop long so it repeats seamlessly.
+     Each click is a short sine burst with an exponential decay: enough attack
+     to place the beat precisely, short enough not to smear the thing it is
+     supposed to be measuring. */
+  renderClicks(key, events, seconds) {
+    const ctx = this._context();
+    const rate = ctx.sampleRate;
+    const length = Math.max(1, Math.round(seconds * rate));
+    const buffer = ctx.createBuffer(1, length, rate);
+    const data = buffer.getChannelData(0);
+    const decay = 0.055;
+
+    for (const { time, frequency, gain } of events) {
+      const start = Math.round(time * rate);
+      if (start < 0 || start >= length) continue;
+      const span = Math.min(Math.round(decay * 3 * rate), length - start);
+      for (let i = 0; i < span; i++) {
+        const t = i / rate;
+        data[start + i] += gain * Math.sin(2 * Math.PI * frequency * t) * Math.exp(-t / decay);
+      }
+    }
+    for (let i = 0; i < length; i++) data[i] = Math.max(-1, Math.min(1, data[i]));
+    this.setBuffer(key, buffer);
+  }
+
+  drop(key) {
+    const source = this.sources.get(key);
+    if (source) {
+      try { source.stop(); } catch { /* already stopped */ }
+      source.disconnect();
+      this.sources.delete(key);
+    }
+    this.buffers.delete(key);
+  }
+
   _gainFor(key) {
     if (!this.gains.has(key)) {
       const node = this._context().createGain();

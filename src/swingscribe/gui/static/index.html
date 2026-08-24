@@ -45,7 +45,7 @@
   <section class="panel" id="panel-select">
     <div class="panel-head">
       <h2><span class="step">1</span> Select the span</h2>
-      <div class="panel-note">Drag on the overview to select. Tap <kbd>A</kbd> / <kbd>B</kbd> while it plays.</div>
+      <div class="panel-note">Drag on the overview to select. Tap <kbd>A</kbd> / <kbd>B</kbd> while it plays. <kbd>D</kbd> sets the downbeat at the playhead, <kbd>F</kbd> starts the form (bar 1) there. Or click a beat dot / shift-click for the form. Drag the overview box to slide.</div>
     </div>
 
     <div class="wave-block">
@@ -57,6 +57,19 @@
       <div class="wave-label">
         Detail <span class="muted" id="detail-range"></span>
         <span class="spacer"></span>
+        <span class="muted beats-info" id="beats-info" hidden></span>
+        <button class="chip" id="beats-toggle" title="Show the bar grid transcription will quantize against">Beats</button>
+        <select class="chip-select" id="time-signature" disabled title="Time signature for the whole tune"></select>
+        <select class="chip-select" id="chorus-bars" disabled title="Heavier line every N bars — a solo is a whole number of choruses">
+          <option value="0">no chorus</option>
+          <option value="8">8-bar</option>
+          <option value="12">12-bar</option>
+          <option value="16">16-bar</option>
+          <option value="24">24-bar</option>
+          <option value="32">32-bar</option>
+        </select>
+        <button class="chip" id="snap-toggle" disabled title="Snap A/B to the nearest beat, or bar (S)">Snap: off</button>
+        <button class="chip" id="form-reset" hidden title="Clear the form start; bar 1 returns to the first bar line">bar 1 set ✕</button>
         <button class="chip" data-focus="fit">Fit selection</button>
         <button class="chip" data-focus="a">Edge A</button>
         <button class="chip" data-focus="b">Edge B</button>
@@ -68,6 +81,7 @@
 
     <div class="transport">
       <button class="play" id="play" title="Play / pause (Space)">▶</button>
+      <button class="restart" id="restart" title="Play from A, the start of the selection (Enter)">⇤ A</button>
       <div class="time"><span id="time-now">0:00.00</span><span class="sep">/</span><span id="time-total">0:00</span></div>
       <button class="toggle" id="loop" title="Loop the selection (L)">Loop</button>
       <div class="rate-group" id="mix-rate">
@@ -88,7 +102,11 @@
         <button class="nudge" data-nudge="b" data-delta="-0.1">−.1</button>
         <button class="nudge" data-nudge="b" data-delta="0.1">+.1</button>
       </div>
-      <div class="span-readout"><span id="span-length">—</span><span class="muted">span</span></div>
+      <div class="span-readout">
+        <span id="span-length">—</span>
+        <span class="muted">span</span>
+        <span class="muted" id="span-bars" hidden></span>
+      </div>
     </div>
   </section>
 
@@ -131,6 +149,7 @@
           <button data-ab="mix">Original</button>
           <button data-ab="both">Both</button>
         </div>
+        <button class="chip" id="click-toggle" title="Mix a metronome on the bar grid into the audition (C)">Click</button>
         <div class="rate-group" id="stem-rate">
           <button class="chip" data-rate="1">1×</button>
           <button class="chip" data-rate="0.75">¾×</button>

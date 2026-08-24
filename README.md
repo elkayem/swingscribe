@@ -47,6 +47,25 @@ cached and runs the missing one as a background job with real progress. The
 audition screen mixes every stem sample-locked, so switching between the isolated
 stem and the original mix mid-phrase compares the same instant.
 
+It also draws the bar grid over the waveform — bar lines, bar numbers, chorus
+markers, and snap-to-bar for placing loop points — so you can see whether the
+grid the transcription will quantize against actually matches the tune before
+running anything. Bars are derived by counting beats from a downbeat you can
+move with one click (or `D`), the time signature is a menu, beats the tracker
+missed are drawn as hollow stubs, and passages with no steady pulse get no bars
+at all. Press `F` (or shift-click a bar line) to say where the tune's *form* starts, so
+an intro isn't counted: that bar becomes bar 1, the chorus count starts there,
+and the bars before it are drawn faint and unnumbered. Your choices travel into the pipeline as `--time-signature`,
+`--downbeat` and `--bars-per-chorus`.
+
+Turn on **Click** to hear a metronome on the bar grid while you audition — a bar
+line one beat out is unmistakable by ear and easy to miss on screen.
+
+Your settings for a track (span, stem, model, time signature, downbeat, form
+start) are saved beside the audio as `<track>.swingscribe.json`, not in the
+cache: clearing derived data should never cost you a judgement you had to listen
+for. Reopening the track restores where you were.
+
 It hands off to the CLI: the exact `swingscribe ab …` command for the span and
 stem you settled on, plus a download of the isolated span. Needs the `gui`
 dependency group (`uv sync --group ml --group gui`).

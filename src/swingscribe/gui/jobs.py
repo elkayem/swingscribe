@@ -1,4 +1,4 @@
-"""Background separation jobs with real progress.
+"""Background pipeline jobs (separation, beat tracking) with real progress.
 
 Separation is 6-13 minutes on this machine's CPU, which is far too long to hold
 a request open and far too long to show a spinner for. So it runs on a worker
@@ -24,10 +24,15 @@ from typing import Any
 from swingscribe import progress
 from swingscribe.config import Config
 
-# Stages a separation job walks through, and roughly what share of the wall
-# clock each takes. Ingest is seconds and separation is minutes, so a naive
-# "two stages, 50% each" bar would sit at 50% for the whole job.
-JOB_STAGES: tuple[tuple[str, float], ...] = (("ingest", 0.04), ("separate", 0.96))
+# Stages each job kind walks through, and roughly what share of the wall clock
+# each takes. Ingest is seconds and separation is minutes, so a naive
+# "N stages, 1/N each" bar would sit at 50% for most of a job. A beats job
+# includes separation because beat tracking wants the drum stem — usually a
+# cache hit that flashes past, but honest when it isn't.
+JOB_STAGES: dict[str, tuple[tuple[str, float], ...]] = {
+    "separate": (("ingest", 0.04), ("separate", 0.96)),
+    "beats": (("ingest", 0.03), ("separate", 0.85), ("beats", 0.12)),
+}
 
 
 @dataclass
@@ -35,6 +40,7 @@ class Job:
     id: str
     path: str
     model: str
+    kind: str = "separate"  # separate | beats
     state: str = "queued"  # queued | running | done | error
     stage: str = ""
     fraction: float = 0.0
@@ -50,6 +56,7 @@ class Job:
             "id": self.id,
             "path": self.path,
             "model": self.model,
+            "kind": self.kind,
             "state": self.state,
             "stage": self.stage,
             "fraction": round(self.fraction, 4),
@@ -61,25 +68,25 @@ class Job:
 
 
 class JobRunner:
-    """Runs separations off the request thread and reports progress."""
+    """Runs pipeline work off the request thread and reports progress."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._jobs: dict[str, Job] = {}
-        self._by_target: dict[tuple[str, str], str] = {}
+        self._by_target: dict[tuple[str, str, str], str] = {}  # (path, model, kind)
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="swingscribe-job")
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def active_for(self, path: str, model: str) -> Job | None:
-        """An unfinished job already separating this track with this model.
+    def active_for(self, path: str, model: str, kind: str = "separate") -> Job | None:
+        """An unfinished job already doing this work on this track+model.
 
         Guards against a double-click costing thirteen minutes twice.
         """
         with self._lock:
-            job_id = self._by_target.get((str(path), model))
+            job_id = self._by_target.get((str(path), model, kind))
             job = self._jobs.get(job_id) if job_id else None
         return job if job and job.state in ("queued", "running") else None
 
@@ -87,14 +94,16 @@ class JobRunner:
         with self._lock:
             return [job.snapshot() for job in self._jobs.values()]
 
-    def submit(self, path: str | Path, config: Config, model: str) -> Job:
-        existing = self.active_for(str(path), model)
+    def submit(self, path: str | Path, config: Config, model: str, kind: str = "separate") -> Job:
+        if kind not in JOB_STAGES:
+            raise ValueError(f"unknown job kind {kind!r}")
+        existing = self.active_for(str(path), model, kind)
         if existing is not None:
             return existing
-        job = Job(id=uuid.uuid4().hex[:12], path=str(path), model=model)
+        job = Job(id=uuid.uuid4().hex[:12], path=str(path), model=model, kind=kind)
         with self._lock:
             self._jobs[job.id] = job
-            self._by_target[(job.path, model)] = job.id
+            self._by_target[(job.path, model, kind)] = job.id
         future: Future = self._pool.submit(self._run, job, config, model)
         future.add_done_callback(lambda _f: None)
         return job
@@ -104,25 +113,24 @@ class JobRunner:
     def _run(self, job: Job, config: Config, model: str) -> None:
         from swingscribe import pipeline
         from swingscribe.gui import library
-        from swingscribe.stages import ingest, separate
+        from swingscribe.stages import beats, ingest, separate
 
         job.state = "running"
         run_config = config.model_copy(
             update={"separate": config.separate.model_copy(update={"model": model})}
         )
+        stage_list = [("ingest", ingest.run), ("separate", separate.run)]
+        if job.kind == "beats":
+            stage_list.append(("beats", beats.run))
         # The sink is installed *inside* the worker thread: progress lives in a
         # ContextVar, which does not cross a thread boundary on its own.
         try:
             with progress.sink(lambda event: self._on_progress(job, event)):
-                document = pipeline.run(
-                    job.path,
-                    run_config,
-                    stages=[("ingest", ingest.run), ("separate", separate.run)],
-                )
+                document = pipeline.run(job.path, run_config, stages=stage_list)
             job.stems = sorted(library.available_stems(document, run_config, model))
             job.state = "done"
             job.fraction = 1.0
-            job.message = "stems ready"
+            job.message = "beat grid ready" if job.kind == "beats" else "stems ready"
         except Exception as exc:  # surfaced to the UI, never swallowed
             job.state = "error"
             job.error = f"{type(exc).__name__}: {exc}"
@@ -134,7 +142,7 @@ class JobRunner:
         """Map a stage-local fraction onto the whole job's bar."""
         offset = 0.0
         weight = 1.0
-        for name, share in JOB_STAGES:
+        for name, share in JOB_STAGES[job.kind]:
             if name == event.stage:
                 weight = share
                 break

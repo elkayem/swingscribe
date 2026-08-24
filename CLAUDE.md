@@ -109,6 +109,17 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
 - Stage progress is a side channel (`progress.py`), not a stage argument. The
   stage contract stays (Document, Config) -> Document. Install the sink inside
   the worker thread — ContextVars don't cross threads.
+- **`meter` runs AFTER `transcribe`, not next to `beats`.** It belongs with
+  beats conceptually, but chained keys mean anything above transcribe
+  invalidates it — so moving a downbeat would re-run CREPE. Don't "tidy" the
+  stage order (docs/meter-plan.md).
+- **Per-track GUI settings live beside the audio** (`<track>.swingscribe.json`),
+  never in the cache dir. The cache is derived data that must stay safely
+  deletable; a span and a downbeat are human judgements. Only the disposable
+  recents index stays under the cache.
+- Bar lines are derived by counting beats from an anchor. The beat tracker's
+  detected downbeat layer is noise (open-issue #5) and must not be drawn or
+  trusted; only its pulse layer is reliable.
 - `gui.*` config is UI state and must never reach a cache key. `stage_config()`
   enforces this via `STAGE_SECTIONS`; changing a port must not throw away a
   separation.

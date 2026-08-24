@@ -147,6 +147,18 @@ has **no JS dependencies and no build step** — no Node, no npm, no bundler.
 - **Separation runs as a background job** with real progress from demucs' callback
   (`model_idx_in_bag` + `segment_offset/audio_length`), polled once a second.
   Screens 1-2 stay usable throughout, since they need only ingest.
+- **The beat grid is drawn over the waveform** — downbeats as dots with a faint
+  bar line (and bar numbers when zoomed), other beats as ticks — so "did it hear
+  the bars right?" is answerable before transcription runs; a wrong meter (see
+  open-issues #5) is visible at a glance instead of surfacing as mangled
+  notation later. The grid is whole-file and chained from the selected model's
+  drum stem, so it loads free on any track+model the pipeline has already
+  processed; otherwise the Beats chip runs a kind="beats" job (the GET endpoint
+  never computes — `pipeline.cached_document` peeks at the cache chain without
+  executing anything). Snap mode places A/B on the nearest beat during drags and
+  taps; nudges deliberately never snap, since ±0.1s is how you correct the
+  grid's own small errors. Density-guarded: at zooms where beats would be
+  sub-pixel, they don't draw.
 - **Per-track UI state** (span, stem, model) is a sidecar under the cache dir. It is
   UI state only: `Config.stage_config()` now rejects any section that is not a
   pipeline stage, so `gui.*` can never reach a cache key and discard a separation.

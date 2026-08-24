@@ -32,6 +32,14 @@ const state = {
   jobTimer: null,
   reloadTimer: null,
   auditionToken: 0,
+  beats: null,              // whole-file derived grid from /beats
+  showBeats: true,          // draw the grid when we have one
+  snapMode: 'off',          // off | beat | bar — what A/B placement snaps to
+  timeSignature: null,      // null = server default (4/4)
+  anchor: null,             // seconds; null = auto-detected downbeat
+  barsPerChorus: 0,
+  formStart: null,          // seconds; where the tune's form begins (bar 1)
+  click: false,             // mix a metronome onto the audition
 };
 
 const mix = { engine: null };
@@ -44,7 +52,9 @@ async function api(path, options) {
   if (!response.ok) {
     let detail = `${response.status}`;
     try { detail = (await response.json()).detail ?? detail; } catch { /* not json */ }
-    throw new Error(detail);
+    const error = new Error(detail);
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
@@ -84,6 +94,10 @@ const overview = new WaveView($('wave-overview'), {
   onSeek: (t) => seekTo(t),
   onSelect: (a, b, done) => updateSelection(a, b, done),
   onEdgeFocus: (edge) => setFocusEdge(edge),
+  snap: (t) => snapTime(t),
+  onBeatClick: (t) => setDownbeat(t),
+  onFormClick: (t) => setFormStart(t),
+  onWindowDrag: (start, width) => detail.setWindow(start, start + width),
 });
 
 const detail = new WaveView($('wave-detail'), {
@@ -92,6 +106,9 @@ const detail = new WaveView($('wave-detail'), {
   onSelect: (a, b, done) => updateSelection(a, b, done),
   onWindow: () => onDetailWindowChanged(),
   onEdgeFocus: (edge) => setFocusEdge(edge),
+  snap: (t) => snapTime(t),
+  onBeatClick: (t) => setDownbeat(t),
+  onFormClick: (t) => setFormStart(t),
 });
 
 const stemWave = new WaveView($('wave-stem'), {
@@ -190,6 +207,14 @@ async function loadTrack(track) {
     ?? track.models[0]?.model;
   state.leadStem = remembered.stem ?? null;
   state.mixer.clear();
+  state.beats = null;
+  state.showBeats = remembered.beats_shown ?? true;
+  state.snapMode = remembered.snap_mode ?? 'off';
+  state.timeSignature = remembered.time_signature ?? null;
+  state.anchor = remembered.anchor ?? null;
+  state.barsPerChorus = remembered.bars_per_chorus ?? 0;
+  state.formStart = remembered.form_start ?? null;
+  state.click = remembered.click ?? false;
 
   overview.setPeaks(await api(`/api/tracks/${track.id}/peaks`));
   overview.setWindow(0, track.duration, { silent: true });
@@ -199,6 +224,7 @@ async function loadTrack(track) {
   setFocusEdge('a');
   seekTo(state.selection.a);
   await refreshAudition();
+  await maybeLoadBeats();  // free when the CLI already tracked this track
   persist();  // so this track shows its span in Recent even if nothing is edited
 }
 
@@ -211,6 +237,7 @@ function applySelection(fitDetail = false) {
   $('span-length').textContent = clock(b - a);
   mix.engine?.setLoop(state.loop ? { a, b } : null);
   updateHandoff();
+  updateBars();
   if (fitDetail) focusDetail('fit');
 }
 
@@ -237,8 +264,9 @@ function setFocusEdge(which) {
   $('edge-b').classList.toggle('focused', which === 'b');
 }
 
-function setEdge(which, time) {
+function setEdge(which, time, { snap = true } = {}) {
   if (!state.selection) return;
+  if (snap) time = snapTime(time);
   const other = which === 'a' ? state.selection.b : state.selection.a;
   const a = which === 'a' ? time : other;
   const b = which === 'a' ? other : time;
@@ -247,10 +275,13 @@ function setEdge(which, time) {
   focusDetail(which);
 }
 
+/* Nudges never snap: after snapping an edge to the grid, ±0.1s/±0.01s is
+   exactly how you correct the grid's small errors — snapping the nudge would
+   make it a no-op. */
 function nudge(which, delta) {
   if (!state.selection) return;
   const current = which === 'a' ? state.selection.a : state.selection.b;
-  setEdge(which, Math.max(0, Math.min(state.track.duration, current + delta)));
+  setEdge(which, Math.max(0, Math.min(state.track.duration, current + delta)), { snap: false });
 }
 
 // ── detail window ───────────────────────────────────────────────────────────
@@ -339,6 +370,186 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
+// ── the beat grid ───────────────────────────────────────────────────────────
+// The grid the transcription will quantize against, drawn over the waveform so
+// "did it hear the bars right?" is answerable before anything downstream runs.
+// Whole-file and chained from the selected model's drum stem, so it loads free
+// on any track the CLI has already processed and never re-runs per span.
+
+function nearestIn(arr, t) {
+  if (!arr || !arr.length) return null;
+  let lo = 0;
+  let hi = arr.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid] < t) lo = mid + 1;
+    else hi = mid;
+  }
+  const before = arr[Math.max(0, lo - 1)];
+  return t - before <= arr[lo] - t ? before : arr[lo];
+}
+
+const nearestBeat = (t) => nearestIn(state.beats?.beats, t);
+const nearestBar = (t) => nearestIn((state.beats?.bars ?? []).map(([time]) => time), t);
+
+/* Identity unless snapping is on and a grid is loaded, so gesture code can
+   apply it unconditionally. Bar snapping is usually what's wanted — solos
+   start on downbeats — with beat snapping as the finer fallback. */
+function snapTime(t) {
+  if (!state.beats?.beats?.length) return t;
+  if (state.snapMode === 'bar') return nearestBar(t) ?? t;
+  if (state.snapMode === 'beat') return nearestBeat(t) ?? t;
+  return t;
+}
+
+/* Re-phase the whole bar grid onto this beat. One parameter, so it is a redraw
+   rather than a re-analysis (docs/meter-plan.md). */
+/* Where the tune's form starts. An intro is not part of the song structure, so
+   bar 1 and the chorus count both begin here rather than at the first bar line. */
+async function setFormStart(time) {
+  if (!state.beats) return;
+  // Snap to a bar line first: the server does this anyway when numbering, and
+  // agreeing up front keeps the chip's readout honest.
+  state.formStart = nearestBar(time) ?? time;
+  await maybeLoadBeats();
+  persist();
+  toast(`Bar 1 at ${clock(state.formStart)} — chorus counts from here`);
+}
+
+async function setDownbeat(time) {
+  if (!state.beats) return;
+  state.anchor = time;
+  await maybeLoadBeats();
+  persist();
+  toast(`Downbeat at ${clock(time)}`);
+}
+
+/* The free path: fetch the grid if it's cached, silently accept that it isn't.
+   Computing is only ever started by an explicit click on the Beats chip. */
+async function maybeLoadBeats() {
+  if (!state.track || !state.model) return;
+  const params = new URLSearchParams({ model: state.model });
+  if (state.timeSignature) params.set('time_signature', state.timeSignature);
+  if (state.anchor !== null) params.set('anchor', state.anchor.toFixed(3));
+  if (state.barsPerChorus) params.set('bars_per_chorus', String(state.barsPerChorus));
+  if (state.formStart !== null) params.set('form_start', state.formStart.toFixed(3));
+  try {
+    const grid = await api(`/api/tracks/${state.track.id}/beats?${params}`);
+    state.beats = grid.ready ? grid : null;
+  } catch {
+    state.beats = null;
+  }
+  applyBeats();
+}
+
+function applyBeats() {
+  const grid = state.beats && state.showBeats ? state.beats : null;
+  detail.setBeats(grid);
+  stemWave.setBeats(grid);
+
+  const info = $('beats-info');
+  info.hidden = !state.beats;
+  if (state.beats) {
+    // Name the free time and say where it is: a bare "free time" badge reads as
+    // a claim about the whole tune rather than about twenty seconds of outro.
+    const free = state.beats.free || [];
+    const seconds = free.reduce((total, [a, b]) => total + (b - a), 0);
+    const where = free.length === 1 ? ` at ${clock(free[0][0], false)}` : '';
+    const note = seconds >= 1 ? ` · ${Math.round(seconds)}s unmetered${where}` : '';
+    info.textContent = `≈${Math.round(state.beats.bpm)} bpm · ${state.beats.time_signature}${note}`;
+    info.title = free.length
+      ? `No steady pulse: ${free.map(([a, b]) => `${clock(a, false)}–${clock(b, false)}`).join(', ')}`
+      : 'A steady pulse throughout';
+  }
+  const reset = $('form-reset');
+  reset.hidden = state.formStart === null;
+  if (state.formStart !== null) {
+    reset.textContent = `bar 1 @ ${clock(state.formStart, false)} ✕`;
+    reset.title = 'Clear the form start; bar 1 returns to the first bar line';
+  }
+  // The handoff command carries the meter, so it has to be rebuilt whenever the
+  // grid arrives or changes — it is first built during load, before the grid
+  // has been fetched.
+  updateHandoff();
+  $('beats-toggle').classList.toggle('active', Boolean(grid));
+  refreshClicks();
+
+  const menu = $('time-signature');
+  if (state.beats && !menu.options.length) {
+    for (const name of state.beats.known_signatures) {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      menu.appendChild(option);
+    }
+  }
+  if (state.beats) menu.value = state.beats.time_signature;
+  menu.disabled = !state.beats;
+  $('chorus-bars').disabled = !state.beats;
+  $('chorus-bars').value = String(state.barsPerChorus || 0);
+
+  const snap = $('snap-toggle');
+  snap.disabled = !state.beats;
+  snap.textContent = `Snap: ${state.beats ? state.snapMode : 'off'}`;
+  snap.classList.toggle('active', Boolean(state.beats) && state.snapMode !== 'off');
+  updateBars();
+}
+
+/* "16 bars" under the span readout. Counting bar lines rather than seconds is
+   the check that matters: a solo that comes out as 15 bars usually means a
+   boundary parked mid-bar, or a downbeat one beat out. */
+function updateBars() {
+  const node = $('span-bars');
+  if (!state.beats || !state.selection) { node.hidden = true; return; }
+  const { a, b } = state.selection;
+  const bars = state.beats.bars.filter(([t]) => t >= a && t < b).length;
+  node.hidden = bars < 1;
+  const chorus = state.barsPerChorus;
+  node.textContent =
+    chorus > 1 && bars % chorus === 0
+      ? `${bars} bars · ${bars / chorus} chorus${bars / chorus === 1 ? '' : 'es'}`
+      : `${bars} bars`;
+}
+
+async function toggleBeats() {
+  if (state.beats) {
+    state.showBeats = !state.showBeats;
+    applyBeats();
+    persist();
+    return;
+  }
+  // No cached grid: compute one. Separation is usually already cached from the
+  // audition, so this is mostly the beat tracker's cost, once per track+model.
+  state.showBeats = true;
+  const chip = $('beats-toggle');
+  chip.disabled = true;
+  chip.textContent = 'Beats…';
+  try {
+    const job = await post('/api/jobs', {
+      path: state.track.path, model: state.model, kind: 'beats',
+    });
+    await pollBeatsJob(job.id, chip);
+  } catch (error) {
+    toast(error.message, true);
+  }
+  chip.disabled = false;
+  chip.textContent = 'Beats';
+  persist();
+}
+
+async function pollBeatsJob(jobId, chip) {
+  const job = await watchJob(jobId, (update) => {
+    chip.textContent = `Beats ${(update.fraction * 100).toFixed(0)}%`;
+  });
+  if (job && job.state === 'error') {
+    toast(job.error, true);
+    return;
+  }
+  // Also runs when contact was lost: the grid may be on disk regardless.
+  await maybeLoadBeats();
+  if (!job && !state.beats) toast('The beat grid did not finish — try again', true);
+}
+
 // ── screen 3: isolate & audition ────────────────────────────────────────────
 
 function renderModels() {
@@ -364,9 +575,13 @@ function renderModels() {
 
 async function selectModel(model) {
   state.model = model;
+  // The grid chains from this model's drum stem, so it's per-model too.
+  state.beats = null;
+  applyBeats();
   renderModels();
   persist();
   await refreshAudition();
+  await maybeLoadBeats();
 }
 
 async function refreshStemList() {
@@ -435,7 +650,9 @@ async function loadAudition() {
   // instant; everything else loads only if it was already part of the mix you
   // had built up. Changing span or speed must not silently tear that down.
   const wanted = new Set(['mix', state.leadStem]);
-  for (const [key, settings] of state.mixer) if (!settings.muted) wanted.add(key);
+  for (const [key, settings] of state.mixer) {
+    if (!settings.muted && key !== CLICK_KEY) wanted.add(key);
+  }
 
   try {
     await Promise.all([...wanted].map((key) => stemEngine.load(key, stemUrl(key))));
@@ -446,6 +663,7 @@ async function loadAudition() {
   if (token !== state.auditionToken) return;   // a newer span superseded this one
 
   applyMixer();
+  refreshClicks();
   renderMixer();
   await drawStemOverlay(token);
   if (wasPlaying) stemEngine.play(0);
@@ -468,8 +686,42 @@ async function drawStemOverlay(token) {
   }
 }
 
+const CLICK_KEY = 'click';
+
+/* Rebuild the metronome for the current span and grid.
+
+   This is the ear test for everything the meter work produces: a bar line one
+   beat out is unmistakable against the music and easy to miss on screen. Bar
+   lines get a high accent, chorus starts a higher one, ordinary beats a quiet
+   tick. Rendered locally rather than fetched, so it re-renders the instant you
+   move the downbeat. */
+function refreshClicks() {
+  if (!state.click || !state.beats || !state.selection || !stemEngine.duration) {
+    stemEngine.drop(CLICK_KEY);
+    return;
+  }
+  const { a, b } = state.selection;
+  // Span-local seconds: at half speed the buffer is twice as long, so a beat
+  // one second into the music sits two seconds into the buffer.
+  const toBuffer = (t) => (t - a) / state.stemRate;
+  const bars = new Map(state.beats.bars.map(([time, number]) => [time, number]));
+  const chorus = new Set(state.beats.chorus_bars || []);
+  const events = [];
+  for (const time of state.beats.beats) {
+    if (time < a || time >= b) continue;
+    if (chorus.has(time)) events.push({ time: toBuffer(time), frequency: 1600, gain: 0.5 });
+    else if (bars.has(time)) events.push({ time: toBuffer(time), frequency: 1200, gain: 0.42 });
+    else events.push({ time: toBuffer(time), frequency: 800, gain: 0.16 });
+  }
+  stemEngine.renderClicks(CLICK_KEY, events, stemEngine.duration);
+  const settings = state.mixer.get(CLICK_KEY) ?? { level: 0.8, muted: false };
+  state.mixer.set(CLICK_KEY, settings);
+  stemEngine.setLevel(CLICK_KEY, settings.level);
+  stemEngine.setMuted(CLICK_KEY, settings.muted);
+}
+
 function mixerKeys() {
-  return ['mix', ...state.stems];
+  return state.click ? ['mix', ...state.stems, CLICK_KEY] : ['mix', ...state.stems];
 }
 
 function renderMixer() {
@@ -483,7 +735,7 @@ function renderMixer() {
     row.className = `stem-row${isLead ? ' is-lead' : ''}${settings.muted ? ' muted-row' : ''}`;
     row.innerHTML = `
       <button class="s${settings.muted ? '' : ' on'}" title="Mute / unmute">${settings.muted ? '○' : '◉'}</button>
-      <span class="stem-name">${key === 'mix' ? 'original mix' : key}${isLead ? '<span class="lead-tag">lead</span>' : ''}</span>
+      <span class="stem-name">${key === 'mix' ? 'original mix' : key === CLICK_KEY ? 'click' : key}${isLead ? '<span class="lead-tag">lead</span>' : ''}</span>
       <input type="range" min="0" max="1" step="0.02" value="${settings.level}">
       <span class="loading"${settings.muted || stemEngine.has(key) ? ' hidden' : ''}>loading…</span>`;
 
@@ -498,6 +750,9 @@ function renderMixer() {
 }
 
 function isAudible(key) {
+  // The click is a reference, not one of the things being compared — the A/B
+  // switch must leave it running or it stops being a reference.
+  if (key === CLICK_KEY) return true;
   if (state.abMode === 'both') return key === 'mix' || key === state.leadStem;
   if (state.abMode === 'mix') return key === 'mix';
   return key === state.leadStem;
@@ -506,7 +761,7 @@ function isAudible(key) {
 async function toggleStem(key) {
   const settings = state.mixer.get(key);
   settings.muted = !settings.muted;
-  if (!settings.muted && !stemEngine.has(key)) {
+  if (!settings.muted && !stemEngine.has(key) && key !== CLICK_KEY) {
     renderMixer();
     try {
       await stemEngine.load(key, stemUrl(key));
@@ -573,33 +828,71 @@ async function startSeparation() {
   }
 }
 
-function pollJob(jobId) {
-  clearInterval(state.jobTimer);
-  state.jobTimer = setInterval(async () => {
-    let job;
-    try {
-      job = await api(`/api/jobs/${jobId}`);
-    } catch { return; }
-    $('job-fill').style.width = `${(job.fraction * 100).toFixed(1)}%`;
-    $('job-message').textContent = job.message || job.state;
-    $('job-elapsed').textContent = `${clock(job.elapsed, false)} elapsed`;
-    if (job.state === 'done' || job.state === 'error') {
-      clearInterval(state.jobTimer);
-      $('separate-btn').disabled = false;
-      if (job.state === 'error') {
-        toast(job.error, true);
+const LOST_JOB_TRIES = 5;
+
+/* Watch a background job to completion. Resolves with the finished job, or
+   null when contact is lost.
+
+   Losing contact has to be handled, not ignored: the job lives in the server
+   process, so restarting the server orphans it. Swallowing the error and
+   retrying forever leaves a progress chip frozen at some percentage with
+   nothing behind it — which is exactly what a stuck "Beats 72%" was.
+
+   A 404 means the job is gone for good, so give up at once; anything else gets
+   a few retries in case the server is merely busy. Either way the caller
+   re-checks disk afterwards, because the work may well have finished. */
+function watchJob(jobId, onProgress) {
+  return new Promise((resolve) => {
+    let failures = 0;
+    const timer = setInterval(async () => {
+      let job;
+      try {
+        job = await api(`/api/jobs/${jobId}`);
+        failures = 0;
+      } catch (error) {
+        const gone = error.status === 404;
+        failures += 1;
+        if (gone || failures >= LOST_JOB_TRIES) {
+          clearInterval(timer);
+          toast(
+            gone
+              ? 'Lost that job — the server restarted. Checking what finished…'
+              : 'Lost contact with the server. Checking what finished…',
+            true,
+          );
+          resolve(null);
+        }
         return;
       }
-      $('job').hidden = true;
-      toast(`${job.model}: ${job.stems.length} stems ready`);
-      state.track = await api('/api/tracks/open', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: state.track.path }),
-      }).catch(() => state.track);
-      await refreshAudition();
-    }
-  }, 1000);
+      onProgress(job);
+      if (job.state === 'done' || job.state === 'error') {
+        clearInterval(timer);
+        resolve(job);
+      }
+    }, 1000);
+  });
+}
+
+async function pollJob(jobId) {
+  const job = await watchJob(jobId, (update) => {
+    $('job-fill').style.width = `${(update.fraction * 100).toFixed(1)}%`;
+    $('job-message').textContent = update.message || update.state;
+    $('job-elapsed').textContent = `${clock(update.elapsed, false)} elapsed`;
+  });
+  $('separate-btn').disabled = false;
+  $('job').hidden = true;
+  if (job && job.state === 'error') {
+    toast(job.error, true);
+    return;
+  }
+  if (job) toast(`${job.model}: ${job.stems.length} stems ready`);
+  // Re-read from disk either way: a job we lost contact with may have finished.
+  state.track = await api('/api/tracks/open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: state.track.path }),
+  }).catch(() => state.track);
+  await refreshAudition();
 }
 
 // ── handoff & persistence ───────────────────────────────────────────────────
@@ -611,9 +904,15 @@ function updateHandoff() {
     return;
   }
   const { a, b } = state.selection;
-  const command =
+  let command =
     `uv run swingscribe ab "${state.track.path}" --stem ${state.leadStem} ` +
     `--start ${a.toFixed(2)} --end ${b.toFixed(2)}`;
+  // The meter you settled on has to travel with the span, or transcription
+  // quantizes against a different grid than the one you just verified.
+  if (state.beats) {
+    command += ` --time-signature ${state.beats.time_signature}`;
+    if (state.beats.anchor !== null) command += ` --downbeat ${state.beats.anchor.toFixed(2)}`;
+  }
   $('cli-command').textContent = command;
 }
 
@@ -627,6 +926,13 @@ function persist() {
         region: [state.selection.a, state.selection.b],
         stem: state.leadStem,
         model: state.model,
+        beats_shown: state.showBeats,
+        snap_mode: state.snapMode,
+        time_signature: state.timeSignature,
+        anchor: state.anchor,
+        bars_per_chorus: state.barsPerChorus,
+        form_start: state.formStart,
+        click: state.click,
       },
     }).catch(() => { /* remembering where you were is not worth an error */ });
   }, 500);
@@ -714,6 +1020,43 @@ $('lead-stem').addEventListener('change', async (event) => {
 
 $('separate-btn').addEventListener('click', startSeparation);
 
+$('beats-toggle').addEventListener('click', toggleBeats);
+
+$('click-toggle').addEventListener('click', () => {
+  state.click = !state.click;
+  $('click-toggle').classList.toggle('active', state.click);
+  refreshClicks();
+  renderMixer();
+  persist();
+});
+$('snap-toggle').addEventListener('click', () => {
+  if (!state.beats) return;
+  const order = ['off', 'bar', 'beat'];
+  state.snapMode = order[(order.indexOf(state.snapMode) + 1) % order.length];
+  applyBeats();
+  persist();
+});
+
+$('restart').addEventListener('click', () => restartFromA());
+
+$('form-reset').addEventListener('click', async () => {
+  state.formStart = null;
+  await maybeLoadBeats();
+  persist();
+});
+
+$('time-signature').addEventListener('change', async (event) => {
+  state.timeSignature = event.target.value;
+  await maybeLoadBeats();
+  persist();
+});
+
+$('chorus-bars').addEventListener('change', async (event) => {
+  state.barsPerChorus = Number(event.target.value);
+  await maybeLoadBeats();
+  persist();
+});
+
 $('copy-cmd').addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText($('cli-command').textContent);
@@ -750,6 +1093,32 @@ document.addEventListener('keydown', (event) => {
     case 'l':
       $('loop').click();
       break;
+    case 's':
+      $('snap-toggle').click();
+      break;
+    case 'c':
+      $('click-toggle').click();
+      break;
+    case 'f':
+      // Same idea as D, for the form: whichever bar you are nearest becomes
+      // bar 1. Clicking an exact dot is precise but fiddly; this is neither.
+      if (state.beats) {
+        const bar = nearestBar(currentTime());
+        if (bar !== null) setFormStart(bar);
+      }
+      break;
+    case 'd':
+      // The better gesture while the music is playing: whichever beat you are
+      // nearest becomes beat 1.
+      if (state.beats) {
+        const beat = nearestBeat(currentTime());
+        if (beat !== null) setDownbeat(beat);
+      }
+      break;
+    case 'enter':
+      event.preventDefault();
+      restartFromA();
+      break;
     case '[':
       nudge(state.focusEdge, shift ? -0.01 : -0.1);
       break;
@@ -768,6 +1137,21 @@ document.addEventListener('keydown', (event) => {
       break;
   }
 });
+
+/* Back to A and play. The transport plays from the playhead, which is what you
+   want while hunting for a boundary — but once the span is set, "again from the
+   top" is the gesture you reach for over and over. */
+function restartFromA() {
+  if (!state.selection) return;
+  if (state.active === 'stem' && stemEngine.duration) {
+    stemEngine.seek(0);
+    if (!stemEngine.playing) stemEngine.play(0);
+  } else {
+    seekTo(state.selection.a);
+    mix.engine?.play();
+  }
+  refreshPlayButtons();
+}
 
 function currentTime() {
   return state.active === 'stem' && stemEngine.duration

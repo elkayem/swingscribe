@@ -10,6 +10,7 @@ dependency group (CLAUDE.md), which CI never installs.
 
 import hashlib
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -117,58 +118,125 @@ def model_status(document: Document, config: Config) -> list[dict[str, Any]]:
     return status
 
 
-# ── Remembered per-track UI state ───────────────────────────────────────────
-# A sidecar under the cache dir, keyed by track id. Small and disposable: if it
-# is deleted the GUI simply forgets where you were, and nothing expensive is
-# lost. It holds UI state only — never anything a cache key depends on.
+# ── Remembered per-track settings ───────────────────────────────────────────
+# These live NEXT TO THE AUDIO as "<track>.swingscribe.json", not under the
+# cache dir, and the distinction is deliberate: the cache holds derived data
+# that must stay safely deletable, while a span, a stem choice and a downbeat
+# are human judgements that took listening to arrive at. Clearing five
+# gigabytes of stems should never cost you those. It also matches where every
+# other output already goes — `ab`, `audition` and `click` all write beside
+# the input.
+#
+# The recents *index* does stay in the cache: it is genuinely disposable, and
+# losing it only means the list rebuilds as you open tracks again.
+
+SETTINGS_SUFFIX = ".swingscribe.json"
 
 
-def _state_path(config: Config, track_id: str) -> Path:
+def settings_path(audio_path: str | Path) -> Path:
+    """Where this track's settings live: beside the audio, plainly named."""
+    source = Path(audio_path)
+    return source.with_name(source.name + SETTINGS_SUFFIX)
+
+
+def _legacy_path(config: Config, track_id: str) -> Path:
+    """Where settings lived before they moved out of the cache."""
     return Path(config.cache_dir) / "gui" / f"{track_id}.json"
 
 
-def load_state(config: Config, track_id: str) -> dict[str, Any]:
-    path = _state_path(config, track_id)
+def _read_json(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, ValueError):
+    except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
 
 
-def save_state(config: Config, track_id: str, state: dict[str, Any]) -> None:
-    path = _state_path(config, track_id)
+def load_settings(audio_path: str | Path, config: Config, track_id: str) -> dict[str, Any]:
+    """This track's settings, migrating a pre-move sidecar if one exists."""
+    settings = _read_json(settings_path(audio_path))
+    if settings:
+        return settings
+    legacy = _read_json(_legacy_path(config, track_id))
+    if legacy:
+        # Bring it forward silently; the old copy is left alone so an older
+        # build of the app keeps working against the same track.
+        legacy.pop("path", None)
+        legacy.pop("opened_at", None)
+        save_settings(audio_path, legacy, config)
+        return legacy
+    return {}
+
+
+def save_settings(audio_path: str | Path, settings: dict[str, Any], config: Config) -> Path:
+    """Merge and write, falling back to the cache dir if the audio's folder is
+    not writable (a read-only library, a mounted share). Returns where it went,
+    so the UI can say."""
+    path = settings_path(audio_path)
+    merged = _read_json(path) | settings
+    merged["file"] = Path(audio_path).name  # so the file is identifiable on sight
+    payload = json.dumps(merged, indent=2, sort_keys=True)
+    try:
+        path.write_text(payload, encoding="utf-8")
+        return path
+    except OSError:
+        fallback = _legacy_path(config, file_digest(audio_path))
+        fallback.parent.mkdir(parents=True, exist_ok=True)
+        fallback.write_text(payload, encoding="utf-8")
+        return fallback
+
+
+# ── Recents index (disposable) ──────────────────────────────────────────────
+
+
+def _recents_path(config: Config) -> Path:
+    return Path(config.cache_dir) / "gui" / "recents.json"
+
+
+def remember_open(
+    config: Config, track_id: str, audio_path: str | Path, when: float | None = None
+) -> None:
+    index = _read_json(_recents_path(config))
+    index[track_id] = {
+        "path": str(audio_path),
+        "opened_at": time.time() if when is None else when,
+    }
+    path = _recents_path(config)
     path.parent.mkdir(parents=True, exist_ok=True)
-    merged = load_state(config, track_id) | state
-    path.write_text(json.dumps(merged, indent=2, sort_keys=True), encoding="utf-8")
+    path.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def remembered_path(config: Config, track_id: str) -> str | None:
+    """The audio a track id refers to, for recovering after a server restart."""
+    entry = _read_json(_recents_path(config)).get(track_id)
+    return entry.get("path") if isinstance(entry, dict) else None
 
 
 def recent_tracks(config: Config) -> list[dict[str, Any]]:
-    """Tracks the GUI has seen before, most recently opened first.
+    """Tracks seen before, most recently opened first.
 
-    Reconstructed from the state sidecars rather than a separate index, so
-    there is only one thing to keep consistent. Entries whose audio has moved
-    or been deleted are dropped silently — the file is the source of truth.
+    Entries whose audio has moved or been deleted are dropped silently — the
+    file on disk is the source of truth, never the index.
     """
-    gui_dir = Path(config.cache_dir) / "gui"
-    if not gui_dir.is_dir():
-        return []
     entries = []
-    for path in gui_dir.glob("*.json"):
-        state = load_state(config, path.stem)
-        source = state.get("path")
+    for track_id, record in _read_json(_recents_path(config)).items():
+        source = record.get("path") if isinstance(record, dict) else None
         if not source or not Path(source).is_file():
             continue
+        settings = load_settings(source, config, track_id)
         entries.append(
             {
-                "id": path.stem,
+                "id": track_id,
                 "path": source,
                 "name": Path(source).name,
-                "opened_at": state.get("opened_at", 0),
-                "stem": state.get("stem"),
-                "model": state.get("model"),
-                "region": state.get("region"),
+                "opened_at": record.get("opened_at", 0),
+                "stem": settings.get("stem"),
+                "model": settings.get("model"),
+                "region": settings.get("region"),
             }
         )
-    entries.sort(key=lambda e: e["opened_at"], reverse=True)
+    # Name breaks ties: the clock's resolution is coarse enough on Windows that
+    # two tracks opened in quick succession can share a timestamp, and an
+    # arbitrary order there makes the list look like it shuffles itself.
+    entries.sort(key=lambda e: (-e["opened_at"], e["name"]))
     return entries

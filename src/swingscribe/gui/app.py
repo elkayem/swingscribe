@@ -10,7 +10,6 @@ module is an adapter over pipeline.run and Config, not a second brain. Anything
 resembling pipeline logic belongs in a stage, not here.
 """
 
-import time
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +52,7 @@ class OpenRequest(BaseModel):
 class JobRequest(BaseModel):
     path: str
     model: str
+    kind: str = "separate"  # separate | beats — see gui_jobs.JOB_STAGES
 
 
 class StateRequest(BaseModel):
@@ -78,7 +78,7 @@ def create_app(config: Config) -> FastAPI:
         entry = app.state.tracks.get(track_id)
         if entry is not None:
             return entry
-        remembered = library.load_state(config, track_id).get("path")
+        remembered = library.remembered_path(config, track_id)
         if remembered and Path(remembered).is_file():
             return open_track(remembered)
         raise HTTPException(404, f"unknown track {track_id!r}; open it again")
@@ -96,7 +96,7 @@ def create_app(config: Config) -> FastAPI:
         track_id = library.file_digest(source)
         entry = {"path": str(source.resolve()), "document": document}
         app.state.tracks[track_id] = entry
-        library.save_state(config, track_id, {"path": entry["path"], "opened_at": time.time()})
+        library.remember_open(config, track_id, entry["path"])
         return entry
 
     # ── pages and assets ────────────────────────────────────────────────────
@@ -138,7 +138,8 @@ def create_app(config: Config) -> FastAPI:
             "duration": document.audio.duration,
             "sample_rate": document.audio.sample_rate,
             "models": library.model_status(document, config),
-            "state": library.load_state(config, track_id),
+            "state": library.load_settings(entry["path"], config, track_id),
+            "settings_path": str(library.settings_path(entry["path"])),
         }
 
     @app.get("/api/tracks/{track_id}/peaks")
@@ -227,14 +228,128 @@ def create_app(config: Config) -> FastAPI:
             headers["Content-Disposition"] = f'attachment; filename="{name}.{stem}.{span}.wav"'
         return Response(content=payload, media_type="audio/wav", headers=headers)
 
-    # ── separation jobs ─────────────────────────────────────────────────────
+    @app.get("/api/tracks/{track_id}/beats")
+    def get_beats(
+        track_id: str,
+        model: str | None = None,
+        time_signature: str | None = None,
+        pulses_per_bar: int | None = None,
+        anchor: float | None = None,
+        bars_per_chorus: int | None = None,
+        form_start: float | None = None,
+    ) -> dict[str, Any]:
+        """The bar grid for this track+model, or ready:false.
+
+        Never computes the beat grid: beat tracking (and the separation it
+        chains from) can cost minutes, and "draw the bars if they're free" must
+        not be a call that might block. When this says not ready, the client
+        starts a kind="beats" job and asks again.
+
+        The *meter* on top of it is re-derived here on every call, because that
+        is microseconds of pure arithmetic (stages/meter.py). So the query
+        parameters let the GUI preview any downbeat or time signature instantly,
+        with no job, no cache write, and no config edit — while the identical
+        functions run inside the pipeline for the transcription itself.
+        """
+        from swingscribe import pipeline
+        from swingscribe.stages import beats, ingest, meter, separate
+
+        entry = resolve(track_id)
+        run_config = config.model_copy(
+            update={
+                "separate": config.separate.model_copy(
+                    update={"model": model or config.separate.model}
+                )
+            }
+        )
+        document = pipeline.cached_document(
+            entry["path"],
+            run_config,
+            stages=[("ingest", ingest.run), ("separate", separate.run), ("beats", beats.run)],
+        )
+        grid = document.beat_grid if document else None
+        if grid is None or not grid.beats:
+            return {"ready": False}
+
+        overrides = {
+            key: value
+            for key, value in {
+                "time_signature": time_signature,
+                "pulses_per_bar": pulses_per_bar,
+                "anchor": anchor,
+                "bars_per_chorus": bars_per_chorus,
+                "form_start": form_start,
+            }.items()
+            if value is not None
+        }
+        meter_config = config.meter.model_copy(update=overrides)
+        try:
+            signature, pulses = meter.resolve_meter(meter_config)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+        duration = entry["document"].audio.duration
+        repaired = meter.repair_beats(grid.beats, meter_config)
+        repaired = meter.extend_beats(repaired, meter_config, 0.0, duration)
+        sections = meter.derive_sections(repaired, grid.downbeats, meter_config)
+        lines = meter.bar_lines(repaired, sections, meter_config.form_start)
+
+        intervals = sorted(
+            b.time - a.time for a, b in zip(repaired, repaired[1:], strict=False) if b.time > a.time
+        )
+        median_bpm = 60.0 / intervals[len(intervals) // 2] if intervals else 0.0
+        chorus = meter_config.bars_per_chorus or 0
+        # Time the bar grid does not cover, so the UI can say how much free time
+        # there is and where — "free time" as a bare label reads as a claim about
+        # the whole tune.
+        free = []
+        cursor = 0.0
+        for section in sections:
+            if section.start - cursor > 0.5:
+                free.append([round(cursor, 2), round(section.start, 2)])
+            cursor = max(cursor, section.end)
+        if duration - cursor > 0.5:
+            free.append([round(cursor, 2), round(duration, 2)])
+
+        return {
+            "ready": True,
+            "beats": [round(b.time, 3) for b in repaired],
+            "implied": [b.implied for b in repaired],
+            "bars": [[round(t, 3), number] for t, number in lines],
+            "free": free,
+            "chorus_bars": (
+                [round(t, 3) for t, number in lines if number >= 1 and (number - 1) % chorus == 0]
+                if chorus > 1
+                else []
+            ),
+            "sections": [
+                {
+                    "start": round(section.start, 3),
+                    "end": round(section.end, 3),
+                    "first_bar": section.first_bar,
+                    "confidence": section.confidence,
+                }
+                for section in sections
+            ],
+            "time_signature": f"{signature[0]}/{signature[1]}",
+            "pulses_per_bar": pulses,
+            "anchor": round(sections[0].anchor, 3) if sections else None,
+            "form_start": meter_config.form_start,
+            "bpm": round(median_bpm, 1),
+            "known_signatures": list(meter.TIME_SIGNATURES),
+        }
+
+    # ── pipeline jobs ───────────────────────────────────────────────────────
 
     @app.post("/api/jobs")
     def post_job(request: JobRequest) -> dict[str, Any]:
         if request.model not in config.gui.models:
             raise HTTPException(400, f"unknown model {request.model!r}")
+        if request.kind not in gui_jobs.JOB_STAGES:
+            raise HTTPException(400, f"unknown job kind {request.kind!r}")
         open_track(request.path)  # decode errors surface now, not in the worker
-        return app.state.runner.submit(request.path, config, request.model).snapshot()
+        job = app.state.runner.submit(request.path, config, request.model, request.kind)
+        return job.snapshot()
 
     @app.get("/api/jobs")
     def get_jobs() -> dict[str, Any]:
@@ -247,11 +362,15 @@ def create_app(config: Config) -> FastAPI:
             raise HTTPException(404, f"unknown job {job_id!r}")
         return job.snapshot()
 
-    # ── remembered state ────────────────────────────────────────────────────
+    # ── remembered settings ────────────────────────────────────────────────────
 
     @app.post("/api/tracks/{track_id}/state")
     def post_state(track_id: str, request: StateRequest) -> dict[str, Any]:
-        library.save_state(config, track_id, request.state)
-        return library.load_state(config, track_id)
+        entry = resolve(track_id)
+        written = library.save_settings(entry["path"], request.state, config)
+        return {
+            "settings": library.load_settings(entry["path"], config, track_id),
+            "settings_path": str(written),
+        }
 
     return app

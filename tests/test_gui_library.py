@@ -1,6 +1,7 @@
 """Track identity, discovery and remembered state. No ml dependencies."""
 
 import json
+import pathlib
 
 import pytest
 
@@ -61,41 +62,146 @@ def test_list_tracks_survives_a_missing_directory(config):
     assert library.list_tracks(config) == []
 
 
-def test_state_round_trips_and_merges(config):
-    library.save_state(config, "abc123", {"region": [10.0, 20.0], "stem": "other"})
-    library.save_state(config, "abc123", {"stem": "guitar"})
-    state = library.load_state(config, "abc123")
-    # A partial save updates one key without dropping the rest.
-    assert state == {"region": [10.0, 20.0], "stem": "guitar"}
+def test_settings_live_beside_the_audio_not_in_the_cache(config, tmp_path):
+    """The cache holds derived data that must stay safely deletable; a span and
+    a downbeat are judgements that took listening to reach. Clearing gigabytes
+    of stems must not cost you those."""
+    audio = make_audio(tmp_path / "music" / "tune.m4a")
+    library.save_settings(audio, {"region": [10.0, 20.0], "stem": "other"}, config)
+
+    beside = tmp_path / "music" / "tune.m4a.swingscribe.json"
+    assert beside.is_file()
+    assert not (config.cache_dir / "gui" / "tune.json").exists()
+
+    # And it survives the cache being thrown away entirely.
+    import shutil
+
+    shutil.rmtree(config.cache_dir, ignore_errors=True)
+    assert library.load_settings(audio, config, "any-id")["stem"] == "other"
 
 
-def test_load_state_tolerates_a_corrupt_sidecar(config, tmp_path):
-    path = tmp_path / "cache" / "gui" / "bad.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("{not json", encoding="utf-8")
-    # UI state is disposable: a damaged sidecar means "forget where I was",
+def test_settings_merge_rather_than_replace(config, tmp_path):
+    audio = make_audio(tmp_path / "music" / "tune.m4a")
+    library.save_settings(audio, {"region": [10.0, 20.0], "stem": "other"}, config)
+    library.save_settings(audio, {"stem": "guitar"}, config)
+    settings = library.load_settings(audio, config, "id")
+    assert settings["region"] == [10.0, 20.0]
+    assert settings["stem"] == "guitar"
+
+
+def test_settings_name_their_own_track(config, tmp_path):
+    """The file sits in the user's music folder, so it should be identifiable
+    without opening it against a directory listing."""
+    audio = make_audio(tmp_path / "music" / "tune.m4a")
+    library.save_settings(audio, {"stem": "other"}, config)
+    assert library.load_settings(audio, config, "id")["file"] == "tune.m4a"
+
+
+def test_old_cache_sidecars_are_migrated_forward(config, tmp_path):
+    """Settings written before the move must not be silently lost."""
+    audio = make_audio(tmp_path / "music" / "tune.m4a")
+    track_id = library.file_digest(audio)
+    legacy = config.cache_dir / "gui" / f"{track_id}.json"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(
+        json.dumps({"region": [5.0, 9.0], "stem": "piano", "path": str(audio)}),
+        encoding="utf-8",
+    )
+
+    settings = library.load_settings(audio, config, track_id)
+    assert settings["region"] == [5.0, 9.0]
+    assert settings["stem"] == "piano"
+    assert library.settings_path(audio).is_file()  # brought forward on read
+    assert "path" not in settings  # bookkeeping stays in the recents index
+
+
+def test_settings_fall_back_to_the_cache_when_the_folder_is_read_only(
+    config, tmp_path, monkeypatch
+):
+    """A read-only music library or a mounted share must not lose the work."""
+    audio = make_audio(tmp_path / "music" / "tune.m4a")
+
+    real_write = pathlib.Path.write_text
+
+    def refuse(self, *args, **kwargs):
+        if self.name.endswith(library.SETTINGS_SUFFIX):
+            raise OSError("read-only")
+        return real_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "write_text", refuse)
+    written = library.save_settings(audio, {"stem": "bass"}, config)
+    assert config.cache_dir in written.parents
+
+
+def test_load_settings_tolerates_a_corrupt_file(config, tmp_path):
+    audio = make_audio(tmp_path / "music" / "tune.m4a")
+    library.settings_path(audio).write_text("{not json", encoding="utf-8")
+    # Settings are a convenience: a damaged file means "forget where I was",
     # never a failure to open the track.
-    assert library.load_state(config, "bad") == {}
+    assert library.load_settings(audio, config, "id") == {}
+
+
+def test_every_setting_the_gui_persists_survives_a_restart(config, tmp_path):
+    """Closing the app and reopening must bring back where you were. Written
+    over the real payload so a newly persisted setting that nothing restores
+    shows up here."""
+    audio = make_audio(tmp_path / "music" / "tune.m4a")
+    settings = {
+        "region": [85.07, 208.03],
+        "stem": "guitar",
+        "model": "htdemucs_6s",
+        "beats_shown": True,
+        "snap_mode": "bar",
+        "time_signature": "3/4",
+        "anchor": 6.68,
+        "bars_per_chorus": 16,
+        "form_start": 1.76,
+    }
+    library.save_settings(audio, settings, config)
+    library.remember_open(config, "trackid", audio)
+
+    restored = library.load_settings(audio, config, "trackid")
+    assert {key: restored[key] for key in settings} == settings
+
+    recent = library.recent_tracks(config)
+    assert [entry["name"] for entry in recent] == ["tune.m4a"]
+    assert recent[0]["region"] == [85.07, 208.03]
+    assert recent[0]["stem"] == "guitar"
 
 
 def test_recent_tracks_drops_entries_whose_audio_has_gone(config, tmp_path):
     present = make_audio(tmp_path / "music" / "here.wav")
-    library.save_state(config, "aaa", {"path": str(present), "opened_at": 1.0})
-    library.save_state(config, "bbb", {"path": str(tmp_path / "gone.wav"), "opened_at": 2.0})
-
-    recent = library.recent_tracks(config)
-    assert [entry["name"] for entry in recent] == ["here.wav"]
+    library.remember_open(config, "aaa", present)
+    library.remember_open(config, "bbb", tmp_path / "gone.wav")
+    assert [e["name"] for e in library.recent_tracks(config)] == ["here.wav"]
 
 
 def test_recent_tracks_is_newest_first(config, tmp_path):
     older = make_audio(tmp_path / "music" / "older.wav", b"a")
     newer = make_audio(tmp_path / "music" / "newer.wav", b"b")
-    library.save_state(config, "aaa", {"path": str(older), "opened_at": 1.0})
-    library.save_state(config, "bbb", {"path": str(newer), "opened_at": 9.0})
-    assert [entry["name"] for entry in library.recent_tracks(config)] == [
-        "newer.wav",
-        "older.wav",
-    ]
+    # Explicit timestamps: two real calls can land in the same clock tick.
+    library.remember_open(config, "aaa", older, when=1.0)
+    library.remember_open(config, "bbb", newer, when=9.0)
+    assert [e["name"] for e in library.recent_tracks(config)] == ["newer.wav", "older.wav"]
+
+
+def test_recent_tracks_order_is_stable_when_timestamps_tie(config, tmp_path):
+    first = make_audio(tmp_path / "music" / "alpha.wav", b"a")
+    second = make_audio(tmp_path / "music" / "beta.wav", b"b")
+    library.remember_open(config, "aaa", first, when=5.0)
+    library.remember_open(config, "bbb", second, when=5.0)
+    assert [e["name"] for e in library.recent_tracks(config)] == ["alpha.wav", "beta.wav"]
+
+
+def test_losing_the_recents_index_does_not_lose_settings(config, tmp_path):
+    """The index is disposable by design; the settings are not."""
+    audio = make_audio(tmp_path / "music" / "tune.m4a")
+    library.save_settings(audio, {"stem": "guitar"}, config)
+    library.remember_open(config, "aaa", audio)
+    (config.cache_dir / "gui" / "recents.json").unlink()
+
+    assert library.recent_tracks(config) == []
+    assert library.load_settings(audio, config, "aaa")["stem"] == "guitar"
 
 
 def test_available_stems_reads_the_separate_stage_layout(config, tmp_path):

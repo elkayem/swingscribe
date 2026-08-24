@@ -23,6 +23,10 @@ export class WaveView {
    *   onWindow(start, end)  – emitted when the view zooms or pans itself
    *   onEdgeFocus('a'|'b')  – a boundary was grabbed, so the nudge keys should
    *                           now apply to it
+   *   snap(t) => t          – applied to pointer-placed edge times (beat snap)
+   *   onBeatClick(t)        – a beat marker was clicked: make it the downbeat
+   *   onFormClick(t)        – shift-click on a marker: the form starts here
+   *   onWindowDrag(start,w) – the overview's window box was slid
    */
   constructor(el, opts = {}) {
     this.el = el;
@@ -38,6 +42,10 @@ export class WaveView {
     this.peaks = null;
     this.overlay = null;
     this.windowBox = null;
+    this.beatsData = null;
+    this._beatsPainted = false;
+    this.barSet = null;
+    this.chorusSet = null;
 
     this._buildOverlays();
     this._bindPointer();
@@ -81,6 +89,16 @@ export class WaveView {
   }
 
   setPeaks(data) { this.peaks = data; this.draw(); }
+
+  /* The derived bar grid from /api/tracks/{id}/beats, or null:
+     {beats, implied, bars: [[time, number]], chorus_bars, sections}.
+     All times are track-global seconds. */
+  setBeats(grid) {
+    this.beatsData = grid;
+    this.barSet = grid ? new Map(grid.bars.map(([t, n]) => [t, n])) : null;
+    this.chorusSet = grid ? new Set(grid.chorus_bars || []) : null;
+    this.draw();
+  }
 
   setOverlay(data) { this.overlay = data; this.draw(); }
 
@@ -141,6 +159,8 @@ export class WaveView {
     ctx.fillStyle = 'rgba(255,255,255,0.05)';
     ctx.fillRect(0, Math.round(height / 2), width, 1);
 
+    if (this.beatsData) this._drawBeats(width, height, style);
+
     this._layoutOverlays();
   }
 
@@ -183,6 +203,123 @@ export class WaveView {
     }
     ctx.fill();
     ctx.globalAlpha = 1;
+  }
+
+  /* The bar grid transcription will quantize against, drawn so the eye can
+     check it against the audio's own transients.
+
+     Full-height lines appear ONLY at bar starts — the beat tracker's detected
+     downbeats are noise (open-issue #5) and drawing a line at each of them was
+     unreadable. Ordinary beats get a baseline tick; beats the repair pass had
+     to invent are hollow, so the software's guesses are never mistaken for
+     detections. Chorus starts get a brighter line, since a jazz solo is a whole
+     number of choruses. Density-guarded throughout: at zooms where marks would
+     be sub-pixel confetti they simply don't draw. */
+  _drawBeats(width, height, style) {
+    const grid = this.beatsData;
+    const beats = grid.beats || [];
+    if (beats.length < 2) return;
+    const ctx = this.ctx;
+    const beatColor = style.getPropertyValue('--beat').trim() || '#5f6c8c';
+    const downColor = style.getPropertyValue('--downbeat').trim() || '#9fb4ff';
+    const chorusColor = style.getPropertyValue('--chorus').trim() || '#ffd479';
+    const pxPerSec = width / this.span;
+    const beatPx = pxPerSec * ((beats[beats.length - 1] - beats[0]) / (beats.length - 1));
+    const barPx = beatPx * (grid.pulses_per_bar || 4);
+    const visible = (t) => t >= this.win.start && t <= this.win.end;
+    // Remembered so clicking can only ever hit a marker that was drawn.
+    this._beatsPainted = beatPx >= 5;
+
+    // Time no section covers has no steady pulse: shade it and draw no bars.
+    for (const gap of this._rubatoGaps(grid)) {
+      const x0 = this.timeToX(Math.max(gap[0], this.win.start));
+      const x1 = this.timeToX(Math.min(gap[1], this.win.end));
+      if (x1 <= x0) continue;
+      ctx.fillStyle = 'rgba(120, 128, 150, 0.13)';
+      ctx.fillRect(x0, 0, x1 - x0, height);
+    }
+
+    if (beatPx >= 5) {
+      for (let i = 0; i < beats.length; i++) {
+        const t = beats[i];
+        if (!visible(t) || this.barSet.has(t)) continue;
+        const x = this.timeToX(t) - 0.5;
+        if (grid.implied && grid.implied[i]) {
+          ctx.globalAlpha = 0.55;
+          ctx.fillStyle = beatColor;
+          ctx.fillRect(x, height - 6, 1, 2);   // stub: a beat we inferred
+          ctx.globalAlpha = 1;
+        } else {
+          ctx.fillStyle = beatColor;
+          ctx.fillRect(x, height - 8, 1, 6);
+        }
+      }
+    }
+
+    if (barPx >= 4) {
+      const labelled = barPx >= 44;
+      ctx.font = '9px ui-monospace, Menlo, Consolas, monospace';
+      ctx.textAlign = 'left';
+      for (const [t, number] of this.barSet) {
+        if (!visible(t)) continue;
+        const x = this.timeToX(t);
+        const chorus = this.chorusSet.has(t);
+        // Bars before bar 1 are an intro or a vamp: part of the recording, not
+        // part of the form. Drawn faintly and left unnumbered, so the run of
+        // numbers begins exactly where the tune does.
+        const preForm = number < 1;
+        ctx.globalAlpha = preForm ? 0.07 : chorus ? 0.5 : 0.16;
+        ctx.fillStyle = chorus ? chorusColor : downColor;
+        ctx.fillRect(x - 0.5, 0, chorus ? 1.5 : 1, height);
+        ctx.globalAlpha = preForm ? 0.4 : 1;
+        ctx.beginPath();
+        ctx.arc(x, height - 7, chorus ? 4 : 3, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        if (labelled && !preForm) {
+          ctx.fillStyle = chorus ? chorusColor : downColor;
+          ctx.fillText(String(number), x + 6, height - 4);
+        }
+      }
+    }
+  }
+
+  /* Stretches between metrical sections — free time, drawn without bars. */
+  _rubatoGaps(grid) {
+    const sections = grid.sections || [];
+    if (!sections.length) return [];
+    const gaps = [];
+    if (sections[0].start > this.bounds.start) gaps.push([this.bounds.start, sections[0].start]);
+    for (let i = 1; i < sections.length; i++) {
+      gaps.push([sections[i - 1].end, sections[i].start]);
+    }
+    const last = sections[sections.length - 1];
+    if (last.end < this.bounds.end) gaps.push([last.end, this.bounds.end]);
+    return gaps;
+  }
+
+  /* Track time of the beat nearest x, when it is close enough to have been
+     aimed at — used for click-to-set-the-downbeat. The radius is generous
+     because the strip is only the bottom few pixels: a click that lands there
+     was almost certainly aimed at a marker, and ordinary seeking clicks happen
+     everywhere above it. */
+  beatNear(clientX, clientY, maxPx = 12) {
+    const grid = this.beatsData;
+    if (!grid || !grid.beats.length) return null;
+    // Only where the dots are actually on screen. Zoomed out they are hidden
+    // as sub-pixel confetti, and letting a click land on an invisible marker
+    // silently re-phases the whole tune onto a beat the user never saw.
+    if (!this._beatsPainted) return null;
+    const rect = this.el.getBoundingClientRect();
+    if (clientY - rect.top < rect.height - 18) return null;   // marker strip only
+    const x = clientX - rect.left;
+    let best = null;
+    let bestPx = maxPx;
+    for (const t of grid.beats) {
+      const distance = Math.abs(this.timeToX(t) - x);
+      if (distance <= bestPx) { bestPx = distance; best = t; }
+    }
+    return best;
   }
 
   // ── DOM overlays ──────────────────────────────────────────────────────────
@@ -265,9 +402,28 @@ export class WaveView {
 
   _bindPointer() {
     this.el.addEventListener('pointerdown', (event) => this._onPointerDown(event));
+    if (this.opts.onBeatClick) {
+      this.el.addEventListener('pointermove', (event) => {
+        if (event.buttons) return;   // mid-drag; leave the cursor alone
+        const over = this.beatNear(event.clientX, event.clientY) !== null;
+        this.el.classList.toggle('over-beat', over);
+      });
+      this.el.addEventListener('pointerleave', () => this.el.classList.remove('over-beat'));
+    }
     if (this.opts.onWindow) {
       this.el.addEventListener('wheel', (event) => this._onWheel(event), { passive: false });
     }
+  }
+
+  /* The overview's window box is a scrubber for the detail view: grabbing it
+     and sliding is the natural "move the music left and right" gesture, and it
+     is the one place where where-you-are and where-you-could-go are both
+     visible at once. */
+  _hitWindowBox(x) {
+    if (!this.windowBox || !this.opts.onWindowDrag) return false;
+    const x0 = this.timeToX(this.windowBox.start);
+    const x1 = this.timeToX(this.windowBox.end);
+    return x >= x0 - 3 && x <= x1 + 3;
   }
 
   _hitHandle(x) {
@@ -286,7 +442,9 @@ export class WaveView {
     const startX = event.clientX - rect.left;
     const startTime = this.xToTime(startX);
     const pan = event.shiftKey && this.opts.onWindow;
-    const grabbed = pan ? null : this._hitHandle(startX);
+    const slide = !pan && this._hitWindowBox(startX);
+    const grabbed = pan || slide ? null : this._hitHandle(startX);
+    const windowAtStart = this.windowBox ? { ...this.windowBox } : null;
 
     if ((grabbed === 'a' || grabbed === 'b') && this.opts.onEdgeFocus) {
       this.opts.onEdgeFocus(grabbed);
@@ -302,6 +460,9 @@ export class WaveView {
     if (grabbed === 'b' && this.nodes.handleB) this.nodes.handleB.classList.add('dragging');
 
     const clamp = (t) => Math.max(this.bounds.start, Math.min(t, this.bounds.end));
+    // Snap applies only to the endpoint(s) the pointer is actually placing —
+    // never to the far edge, which may have been nudged off-grid on purpose.
+    const snap = this.opts.snap ?? ((t) => t);
 
     const onMove = (moveEvent) => {
       const x = moveEvent.clientX - rect.left;
@@ -314,19 +475,27 @@ export class WaveView {
         this.setWindow(winStart - delta, winStart - delta + this.span);
         return;
       }
+      if (slide) {
+        const delta = now - startTime;
+        const width = windowAtStart.end - windowAtStart.start;
+        this.opts.onWindowDrag(windowAtStart.start + delta, width);
+        return;
+      }
       if (!this.opts.selectable) return;
 
-      if (grabbed === 'a') this._emitSelect(clamp(now), original.b, false);
-      else if (grabbed === 'b') this._emitSelect(original.a, clamp(now), false);
+      if (grabbed === 'a') this._emitSelect(snap(clamp(now)), original.b, false);
+      else if (grabbed === 'b') this._emitSelect(original.a, snap(clamp(now)), false);
       else if (grabbed === 'move') {
         const delta = now - startTime;
         const length = original.b - original.a;
-        let a = clamp(original.a + delta);
+        // Moving snaps the leading edge and preserves the length exactly —
+        // snapping both ends independently would quietly resize the span.
+        let a = snap(clamp(original.a + delta));
         if (a + length > this.bounds.end) a = this.bounds.end - length;
         this._emitSelect(a, a + length, false);
       } else {
         creating = true;
-        this._emitSelect(clamp(startTime), clamp(now), false);
+        this._emitSelect(snap(clamp(startTime)), snap(clamp(now)), false);
       }
     };
 
@@ -338,10 +507,20 @@ export class WaveView {
       this.nodes.handleA?.classList.remove('dragging');
       this.nodes.handleB?.classList.remove('dragging');
       if (!moved) {
-        // A click, not a drag: seek. Inside an existing selection this is how
-        // you audition from a point without losing the span you just set.
-        if (this.opts.onSeek) this.opts.onSeek(clamp(startTime));
-      } else if (!pan && this.selection && this.opts.onSelect) {
+        // A click on a beat marker re-phases the bar grid; anywhere else it
+        // seeks. Restricting it to the marker strip keeps the ordinary click
+        // — audition from here — unchanged.
+        const marker = this.opts.onBeatClick
+          ? this.beatNear(event.clientX, event.clientY)
+          : null;
+        if (marker !== null && event.shiftKey && this.opts.onFormClick) {
+          this.opts.onFormClick(marker);
+        } else if (marker !== null) {
+          this.opts.onBeatClick(marker);
+        } else if (this.opts.onSeek) {
+          this.opts.onSeek(clamp(startTime));
+        }
+      } else if (!pan && !slide && this.selection && this.opts.onSelect) {
         this.opts.onSelect(this.selection.a, this.selection.b, true);
         if (creating && this.opts.onSeek) this.opts.onSeek(Math.min(this.selection.a, this.selection.b));
       }
@@ -361,6 +540,13 @@ export class WaveView {
 
   _onWheel(event) {
     event.preventDefault();
+    // Sideways intent — a trackpad swipe or shift+wheel — slides the view;
+    // plain vertical wheel zooms.
+    if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+      const amount = (event.shiftKey ? event.deltaY : event.deltaX) * 0.0015 * this.span;
+      this.setWindow(this.win.start + amount, this.win.end + amount);
+      return;
+    }
     const rect = this.el.getBoundingClientRect();
     const anchor = this.xToTime(event.clientX - rect.left);
     const factor = Math.exp(event.deltaY * 0.0015);
