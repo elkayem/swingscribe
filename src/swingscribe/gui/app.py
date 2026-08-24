@@ -21,9 +21,14 @@ from pydantic import BaseModel
 from swingscribe.config import Config
 from swingscribe.gui import audio as gui_audio
 from swingscribe.gui import jobs as gui_jobs
-from swingscribe.gui import library, peaks
+from swingscribe.gui import library, peaks, review
+from swingscribe.model import NoteEvent
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Decimal places span bounds are rounded to before they reach a cache key.
+# Milliseconds are finer than any boundary a person places by ear.
+SPAN_PRECISION = 3
 
 
 class RevalidatingStatic(StaticFiles):
@@ -52,7 +57,11 @@ class OpenRequest(BaseModel):
 class JobRequest(BaseModel):
     path: str
     model: str
-    kind: str = "separate"  # separate | beats — see gui_jobs.JOB_STAGES
+    kind: str = "separate"  # separate | beats | transcribe — see gui_jobs.JOB_STAGES
+    # Transcribe jobs need the span and the lead stem; ignored for the others.
+    stem: str | None = None
+    start: float | None = None
+    end: float | None = None
 
 
 class StateRequest(BaseModel):
@@ -98,6 +107,32 @@ def create_app(config: Config) -> FastAPI:
         app.state.tracks[track_id] = entry
         library.remember_open(config, track_id, entry["path"])
         return entry
+
+    def review_config(stem: str, start: float | None, end: float | None) -> Config:
+        """Base config with the review span and lead stem folded into transcribe.
+
+        Region is stored as (start, end|None); a null start means from zero.
+        This is the single place the GUI turns a span selection into the exact
+        transcribe config whose hash keys the cached review.
+
+        Span bounds are rounded to the millisecond HERE rather than trusted from
+        the caller. The key is a hash of this config, so 60.0637 and "60.064"
+        are different spans as far as the cache is concerned — and the job POST
+        and the review GET would otherwise disagree in the last decimal place
+        and never find each other's work. Canonicalising server-side means no
+        client has to get its rounding right.
+        """
+        span = SPAN_PRECISION
+        region = (
+            None
+            if start is None and end is None
+            else (round(start or 0.0, span), None if end is None else round(end, span))
+        )
+        return config.model_copy(
+            update={
+                "transcribe": config.transcribe.model_copy(update={"stem": stem, "region": region})
+            }
+        )
 
     # ── pages and assets ────────────────────────────────────────────────────
 
@@ -346,6 +381,62 @@ def create_app(config: Config) -> FastAPI:
             "known_signatures": list(meter.TIME_SIGNATURES),
         }
 
+    @app.get("/api/tracks/{track_id}/review")
+    def get_review(
+        track_id: str,
+        model: str,
+        stem: str,
+        start: float | None = None,
+        end: float | None = None,
+    ) -> dict[str, Any]:
+        """The cached transcription review for this span, or ready:false.
+
+        Never transcribes: the CREPE pass costs ~30s, so "show the notes if
+        they're ready" must not block. When not ready the client starts a
+        kind=transcribe job and asks again. The frame diagnostics ride along —
+        this endpoint is the only thing that serves them.
+        """
+        entry = resolve(track_id)
+        run_config = review_config(stem, start, end)
+        payload = review.cached_review(entry["document"], run_config, model)
+        if payload is None:
+            return {"ready": False}
+        return {"ready": True, **payload}
+
+    @app.get("/api/tracks/{track_id}/transcription")
+    def get_transcription(
+        track_id: str,
+        model: str,
+        stem: str,
+        start: float = 0.0,
+        end: float | None = None,
+        rate: float = 1.0,
+    ) -> Response:
+        """The synthesized transcription for the span, as a wav.
+
+        The review screen loads this as one more source in the sample-locked
+        engine, so original-vs-transcription switches mid-phrase stay aligned —
+        the same guarantee the audition mixer gives. Reads the cached notes;
+        404 if the span has not been transcribed yet.
+        """
+        entry = resolve(track_id)
+        document = entry["document"]
+        run_config = review_config(stem, start, end)
+        payload = review.cached_review(document, run_config, model)
+        if payload is None:
+            raise HTTPException(404, "not transcribed yet")
+        notes = [NoteEvent(source=stem, **n) for n in payload["notes"]]
+        resolved_end = document.audio.duration if end is None else end
+        try:
+            audio = gui_audio.render_transcription(
+                notes, start, resolved_end, document.audio.sample_rate, rate
+            )
+        except Exception as exc:
+            raise HTTPException(500, f"could not render transcription: {exc}") from exc
+        return Response(
+            content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store"}
+        )
+
     # ── pipeline jobs ───────────────────────────────────────────────────────
 
     @app.post("/api/jobs")
@@ -354,8 +445,19 @@ def create_app(config: Config) -> FastAPI:
             raise HTTPException(400, f"unknown model {request.model!r}")
         if request.kind not in gui_jobs.JOB_STAGES:
             raise HTTPException(400, f"unknown job kind {request.kind!r}")
-        open_track(request.path)  # decode errors surface now, not in the worker
-        job = app.state.runner.submit(request.path, config, request.model, request.kind)
+        entry = open_track(request.path)  # decode errors surface now, not in the worker
+        if request.kind == "transcribe":
+            if not request.stem:
+                raise HTTPException(400, "a transcribe job needs a stem")
+            run_config = review_config(request.stem, request.start, request.end)
+            # variant keys the job (and its cache) to this exact span+stem+config,
+            # so two spans never dedupe onto each other.
+            variant = review.review_key(entry["document"], run_config, request.model)
+            job = app.state.runner.submit(
+                request.path, run_config, request.model, "transcribe", variant
+            )
+        else:
+            job = app.state.runner.submit(request.path, config, request.model, request.kind)
         return job.snapshot()
 
     @app.get("/api/jobs")

@@ -6,6 +6,7 @@ behaviour is what's under test, not torchaudio's.
 
 import json
 import pathlib
+import time
 
 import pytest
 
@@ -389,6 +390,129 @@ def test_beats_endpoint_rejects_a_nonsense_time_signature(world, monkeypatch):
     assert response.status_code == 400
 
 
+def _seed_review(world, monkeypatch, *, stem="other", start=1.0, end=3.0):
+    """Populate the review cache for a span without running CREPE."""
+    from dataclasses import dataclass
+
+    from swingscribe.gui import library, review
+
+    @dataclass
+    class Diag:
+        hop_s: float = 0.01
+        start: float = 0.0
+        f0_midi: list = None
+        periodicity: list = None
+        energy_ok: list = None
+        pitch: list = None
+        onsets: list = None
+
+        @property
+        def voiced_fraction(self):
+            return 1.0
+
+    from swingscribe.model import NoteEvent
+
+    notes = [NoteEvent(onset=start + 0.1, duration=0.2, pitch=64, confidence=0.8, source=stem)]
+    diag = Diag(
+        start=start,
+        f0_midi=[64.0, 64.0],
+        periodicity=[0.9, 0.9],
+        energy_ok=[True, True],
+        pitch=[64.0, 64.0],
+        onsets=[start + 0.1],
+    )
+    monkeypatch.setattr("swingscribe.stages.transcribe.analyze", lambda sp, tc: (notes, diag))
+
+    track = open_track(world)
+    config = world["config"].model_copy(
+        update={
+            "transcribe": world["config"].transcribe.model_copy(
+                update={"stem": stem, "region": (start, end)}
+            )
+        }
+    )
+    document = library.ingested_document(world["source"], config)
+    review.analyze_and_cache(document, config, "htdemucs_ft")
+    return track
+
+
+def test_transcribe_job_requires_a_stem(world):
+    response = world["client"].post(
+        "/api/jobs",
+        json={"path": str(world["source"]), "model": "htdemucs_ft", "kind": "transcribe"},
+    )
+    assert response.status_code == 400
+
+
+def test_review_reports_not_ready_without_transcribing(world):
+    track = open_track(world)
+    payload = (
+        world["client"]
+        .get(
+            f"/api/tracks/{track['id']}/review",
+            params={"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0},
+        )
+        .json()
+    )
+    assert payload == {"ready": False}
+
+
+def test_review_serves_notes_and_frame_diagnostics(world, monkeypatch):
+    track = _seed_review(world, monkeypatch)
+    payload = (
+        world["client"]
+        .get(
+            f"/api/tracks/{track['id']}/review",
+            params={"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0},
+        )
+        .json()
+    )
+    assert payload["ready"] is True
+    assert payload["notes"][0]["pitch"] == 64
+    diag = payload["diagnostics"]
+    assert diag["frames"] == 2
+    assert diag["energy_ok"] == [True, True]
+    assert "onsets" in diag
+
+
+def test_review_span_is_part_of_the_key(world, monkeypatch):
+    """A review of 1-3s must not answer a request for 5-7s."""
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0)
+    other = (
+        world["client"]
+        .get(
+            f"/api/tracks/{track['id']}/review",
+            params={"model": "htdemucs_ft", "stem": "other", "start": 5.0, "end": 7.0},
+        )
+        .json()
+    )
+    assert other == {"ready": False}
+
+
+def test_transcription_wav_matches_the_span(world, monkeypatch):
+    import io
+    import wave
+
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0)
+    response = world["client"].get(
+        f"/api/tracks/{track['id']}/transcription",
+        params={"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/wav"
+    with wave.open(io.BytesIO(response.content)) as clip:
+        assert clip.getnframes() / clip.getframerate() == pytest.approx(2.0, abs=0.05)
+
+
+def test_transcription_of_an_untranscribed_span_is_404(world):
+    track = open_track(world)
+    response = world["client"].get(
+        f"/api/tracks/{track['id']}/transcription",
+        params={"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0},
+    )
+    assert response.status_code == 404
+
+
 def test_job_rejects_an_unknown_kind(world):
     response = world["client"].post(
         "/api/jobs",
@@ -432,3 +556,63 @@ def test_settings_are_written_beside_the_audio(world):
 def test_open_reports_where_settings_live(world):
     track = open_track(world)
     assert track["settings_path"].endswith(".swingscribe.json")
+
+
+def test_transcribe_job_and_review_agree_on_the_span(world, monkeypatch):
+    """The end-to-end version of the precision bug: submit a job with unrounded
+    float bounds, then fetch the review the way the client does."""
+    from dataclasses import dataclass
+
+    from swingscribe.model import NoteEvent
+
+    @dataclass
+    class Diag:
+        hop_s: float = 0.01
+        start: float = 1.0637
+        f0_midi: list = None
+        periodicity: list = None
+        energy_ok: list = None
+        pitch: list = None
+        onsets: list = None
+
+        @property
+        def voiced_fraction(self):
+            return 1.0
+
+    notes = [NoteEvent(onset=1.2, duration=0.2, pitch=64, confidence=0.8, source="other")]
+    diag = Diag(f0_midi=[64.0], periodicity=[0.9], energy_ok=[True], pitch=[64.0], onsets=[1.2])
+    monkeypatch.setattr("swingscribe.stages.transcribe.analyze", lambda sp, tc: (notes, diag))
+
+    track = open_track(world)
+    # Job posted with full float precision, as the browser does.
+    response = world["client"].post(
+        "/api/jobs",
+        json={
+            "path": str(world["source"]),
+            "model": "htdemucs_ft",
+            "kind": "transcribe",
+            "stem": "other",
+            "start": 1.0637000000001,
+            "end": 3.0912999999998,
+        },
+    )
+    assert response.status_code == 200
+    job_id = response.json()["id"]
+    for _ in range(200):
+        state = world["client"].get(f"/api/jobs/{job_id}").json()
+        if state["state"] in ("done", "error"):
+            break
+        time.sleep(0.02)
+    assert state["state"] == "done", state.get("error")
+
+    # Review fetched the way the client builds params: rounded to 3 dp.
+    payload = (
+        world["client"]
+        .get(
+            f"/api/tracks/{track['id']}/review",
+            params={"model": "htdemucs_ft", "stem": "other", "start": "1.064", "end": "3.091"},
+        )
+        .json()
+    )
+    assert payload["ready"] is True
+    assert payload["notes"][0]["pitch"] == 64

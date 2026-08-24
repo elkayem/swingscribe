@@ -56,9 +56,55 @@ should change stem or model, or accept the passage is not separable. Getting thi
 judgement to happen in 20 seconds of listening rather than 10 minutes of compute is
 the single biggest workflow win available to us.
 
-### 4. Transcribe & review
+### 4. Transcribe & review — BUILT
 Piano roll over the waveform, the A/B ear-test render, and a diagnostic overlay
 (f0, periodicity, gate decisions) so a suspicious note traces to a cause.
+
+**A piano roll alone is a picture; wired to the frame trace it is a
+diagnostic.** Clicking a note surfaces the frames that produced it — how many,
+their mean periodicity against the voicing threshold, how many failed the energy
+gate, the raw f0 spread across the note, and whether a detected onset sits at
+its start. Two lanes beneath the roll carry the same evidence continuously: raw
+CREPE f0 (dim) against the gated-and-smoothed pitch (bright), so the gaps
+between them *are* the frames gating removed; and periodicity against its
+threshold with energy-gate failures shaded.
+
+Notes are drawn over the bar grid from screen 2, because a wrong downbeat is
+invisible in a note list and obvious the moment notes sit against bar lines.
+Note opacity tracks confidence, so an uncertain note looks uncertain.
+
+**Fragmentation is reported at span level**, not just per note: the summary
+counts consecutive same-pitch notes butted together ("6 split same-pitch
+pairs"), which is the first thing that says whether the transcription is
+breaking held notes. Clicking one says *which mechanism* split it — a detected
+onset (open issue #1: the onset detector fires on the whole stem, so comping or
+drum bleed breaks a note the soloist is holding) or a gate dropout in the gap
+(periodicity or energy). Reporting "fragmented" without saying which would leave
+the actual question unanswered. Measured on a 30s piano-stem span of Gerry's
+Blues: 87 notes, 6 fragment pairs, and every one of them was a periodicity
+dropout rather than an onset split.
+
+Implementation notes:
+
+- **`transcribe.analyze()`, not `pipeline.run`.** analyze() returns the
+  FrameDiagnostics the pipeline discards. The result is cached under
+  `gui/reviews/`, keyed by the stem digest + model + the whole transcribe
+  config — *not* written into the pipeline's chained-key stage cache. The GUI
+  must never construct a pipeline cache key: getting it subtly wrong poisons the
+  cache with results the config does not describe. The cost is that a later
+  `swingscribe ab` re-runs CREPE (~30s); that is the safe trade.
+- **Span bounds are rounded server-side** (`SPAN_PRECISION`) before they reach a
+  key. The job POST sends raw floats and the review GET sends `toFixed(3)`, so
+  without one shared rounding point those are different spans and the GET never
+  finds the job's work — which is exactly the bug that showed up first.
+- **The A/B render is just another source** in the sample-locked engine, so
+  original-vs-transcription switches mid-phrase carry the same guarantee as the
+  audition mixer. Verified byte-identical in length at 1x and 0.5x. Synthesis is
+  the core's `abmix.notes_to_midi`; slowing it shifts note times rather than
+  resampling, so the pitch is exact.
+- Transcription is a `kind="transcribe"` job on the existing background-job
+  machinery, keyed by a `variant` so two spans never dedupe onto each other.
+  ~30s for a span, since separation is cached.
 
 ### 5. Notate & export
 Notation, swing marking, transposition, MusicXML/MIDI out.

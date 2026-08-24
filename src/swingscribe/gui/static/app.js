@@ -8,6 +8,7 @@
 
 import { WaveView } from './waveform.js';
 import { MixEngine, StemEngine } from './engine.js';
+import { PianoRoll } from './review.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -38,12 +39,17 @@ const state = {
   timeSignature: null,      // null = server default (4/4)
   anchor: null,             // seconds; null = auto-detected downbeat
   barsPerChorus: 0,
+  review: null,             // cached review payload {notes, diagnostics}
+  reviewMode: 'mix',        // mix | transcription | both
+  reviewRate: 1,
+  reviewToken: 0,
   formStart: null,          // seconds; where the tune's form begins (bar 1)
   click: false,             // mix a metronome onto the audition
 };
 
 const mix = { engine: null };
 const stemEngine = new StemEngine();
+const reviewEngine = new StemEngine();  // mix + synthesized transcription, its own A/B
 
 // ── tiny helpers ────────────────────────────────────────────────────────────
 
@@ -117,6 +123,10 @@ const stemWave = new WaveView($('wave-stem'), {
     stemEngine.seek((t - state.selection.a) / state.stemRate);
     state.active = 'stem';
   },
+});
+
+const pianoRoll = new PianoRoll($('pianoroll'), $('lane-f0'), $('lane-gate'), {
+  onSelect: (note, index) => renderInspector(note, index),
 });
 
 // ── screen 1: the track picker ──────────────────────────────────────────────
@@ -377,13 +387,16 @@ function onDetailWindowChanged() {
 function seekTo(t) {
   state.active = 'mix';
   stemEngine.pause();
+  reviewEngine.pause();
   mix.engine?.seek(t);
   overview.setPlayhead(t);
   detail.setPlayhead(t);
 }
 
 function togglePlay() {
-  if (state.active === 'stem' && stemEngine.duration) {
+  if (state.active === 'review' && reviewEngine.duration) {
+    reviewEngine.toggle();
+  } else if (state.active === 'stem' && stemEngine.duration) {
     stemEngine.toggle();
   } else {
     state.active = 'mix';
@@ -396,6 +409,7 @@ function togglePlay() {
 function refreshPlayButtons() {
   $('play').textContent = mix.engine?.playing ? '❚❚' : '▶';
   $('a-play').textContent = stemEngine.playing ? '❚❚' : '▶';
+  $('r-play').textContent = reviewEngine.playing ? '❚❚' : '▶';
 }
 
 function tick() {
@@ -403,7 +417,12 @@ function tick() {
     // Keyed on which engine is *active*, not on which is playing: a paused
     // stem engine must hold its playhead where you stopped it rather than snap
     // back to wherever the mix transport happens to be.
-    if (state.active === 'stem' && stemEngine.duration) {
+    if (state.active === 'review' && reviewEngine.duration) {
+      const t = reviewEngine.trackTime;
+      pianoRoll.setPlayhead(t);
+      $('r-time-now').textContent = clock(reviewEngine.position * state.reviewRate);
+      $('time-now').textContent = clock(t);
+    } else if (state.active === 'stem' && stemEngine.duration) {
       const t = stemEngine.trackTime;
       stemWave.setPlayhead(t);
       overview.setPlayhead(t);
@@ -528,6 +547,7 @@ function applyBeats() {
   updateHandoff();
   $('beats-toggle').classList.toggle('active', Boolean(grid));
   refreshClicks();
+  if (state.review) pianoRoll.setData({ a: state.selection.a, b: state.selection.b }, state.review, grid);
 
   const menu = $('time-signature');
   if (state.beats && !menu.options.length) {
@@ -667,8 +687,9 @@ async function refreshAudition() {
   const ready = state.stems.length > 0;
   $('audition').hidden = !ready;
   renderModels();
-  if (!ready) { stemEngine.reset(0, 1); return; }
+  if (!ready) { stemEngine.reset(0, 1); $('panel-review').hidden = true; return; }
   await loadAudition();
+  refreshReviewPanel();
 }
 
 function scheduleAuditionReload() {
@@ -722,6 +743,7 @@ async function loadAudition() {
   renderMixer();
   await drawStemOverlay(token);
   if (wasPlaying) stemEngine.play(0);
+  invalidateReview();
 }
 
 async function drawStemOverlay(token) {
@@ -950,6 +972,240 @@ async function pollJob(jobId) {
   await refreshAudition();
 }
 
+// ── screen 4: transcribe & review ────────────────────────────────────────────
+// A note list is a picture; a note list wired to the frame trace is a
+// diagnostic. Transcription runs as a background job (the CREPE pass only,
+// since separation is cached), then the piano roll draws the notes over the
+// same bar grid the selection screen uses, with the per-frame evidence beneath.
+
+function reviewParams(extra) {
+  const { a, b } = state.selection;
+  return new URLSearchParams(Object.assign({
+    model: state.model,
+    stem: state.leadStem,
+    start: a.toFixed(3),
+    end: b.toFixed(3),
+  }, extra || {}));
+}
+
+/* The review belongs to one span+stem. When either changes the old notes are
+   stale, so drop back to the Transcribe button rather than showing notes that
+   describe a different passage. */
+function invalidateReview() {
+  state.review = null;
+  reviewEngine.stop();
+  reviewEngine.reset(0, 1);
+  if (state.active === 'review') state.active = 'mix';
+  $('review').hidden = true;
+  $('review-summary').hidden = true;
+  $('transcribe-btn').disabled = false;
+  $('transcribe-btn').textContent = 'Transcribe span';
+  refreshReviewPanel();
+}
+
+async function refreshReviewPanel() {
+  const shown = Boolean(state.selection && state.leadStem && state.stems.length);
+  $('panel-review').hidden = !shown;
+  if (!shown) return;
+  const { a, b } = state.selection;
+  $('review-range').textContent = `${state.leadStem} · ${clock(a, false)}–${clock(b, false)}`;
+  if (!state.review) {
+    try {
+      const payload = await api(`/api/tracks/${state.track.id}/review?${reviewParams()}`);
+      if (payload.ready) await showReview(payload);
+    } catch (e) { /* not transcribed yet — the button stands */ }
+  }
+}
+
+async function startTranscribe() {
+  if (!state.selection || !state.leadStem) return;
+  const btn = $('transcribe-btn');
+  btn.disabled = true;
+  $('review-job').hidden = false;
+  try {
+    const { a, b } = state.selection;
+    const job = await post('/api/jobs', {
+      path: state.track.path, model: state.model, kind: 'transcribe',
+      stem: state.leadStem, start: a, end: b,
+    });
+    const finished = await watchJob(job.id, (update) => {
+      $('review-job-fill').style.width = `${(update.fraction * 100).toFixed(1)}%`;
+      $('review-job-message').textContent = update.message || update.state;
+      $('review-job-elapsed').textContent = `${clock(update.elapsed, false)} elapsed`;
+    });
+    $('review-job').hidden = true;
+    btn.disabled = false;
+    if (finished && finished.state === 'error') { toast(finished.error, true); return; }
+    const payload = await api(`/api/tracks/${state.track.id}/review?${reviewParams()}`);
+    if (payload.ready) await showReview(payload);
+    else if (!finished) toast('Transcription did not finish — try again', true);
+  } catch (error) {
+    $('review-job').hidden = true;
+    btn.disabled = false;
+    toast(error.message, true);
+  }
+}
+
+async function showReview(payload) {
+  state.review = payload;
+  state.reviewToken += 1;
+  $('review').hidden = false;
+  $('transcribe-btn').textContent = 'Re-transcribe';
+  const notes = payload.notes.length;
+  const voiced = Math.round(payload.diagnostics.voiced_fraction * 100);
+  const fragments = countFragments(payload.notes);
+  $('review-summary').hidden = false;
+  $('review-summary').textContent =
+    `${notes} notes · ${voiced}% voiced` +
+    (fragments ? ` · ${fragments} split same-pitch pair${fragments === 1 ? '' : 's'}` : '');
+  $('review-summary').title = fragments
+    ? 'Consecutive notes at the same pitch, butted together — usually one held note broken up (open issue #1). Click one to see what split it.'
+    : 'No same-pitch fragmentation detected in this span';
+  $('review-hint').textContent = `${notes} notes`;
+  $('r-time-total').textContent = clock(state.selection.b - state.selection.a, false);
+  pianoRoll.opts.voicingThreshold = 0.5;
+  pianoRoll.setData({ a: state.selection.a, b: state.selection.b }, payload, state.showBeats ? state.beats : null);
+  renderInspector(null, -1);
+  await loadReviewAudio();
+}
+
+async function loadReviewAudio() {
+  const token = state.reviewToken;
+  const { a } = state.selection;
+  reviewEngine.reset(a, state.reviewRate);
+  const mixUrl = `/api/tracks/${state.track.id}/stem?${reviewParams({ stem: 'mix', rate: String(state.reviewRate) })}`;
+  const transUrl = `/api/tracks/${state.track.id}/transcription?${reviewParams({ rate: String(state.reviewRate) })}`;
+  try {
+    await Promise.all([
+      reviewEngine.load('mix', mixUrl),
+      reviewEngine.load('transcription', transUrl),
+    ]);
+  } catch (error) {
+    if (token === state.reviewToken) toast(`Ear test: ${error.message}`, true);
+    return;
+  }
+  if (token !== state.reviewToken) return;
+  applyReviewMode();
+}
+
+function applyReviewMode() {
+  const audible = {
+    mix: state.reviewMode !== 'transcription',
+    transcription: state.reviewMode !== 'mix',
+  };
+  for (const key of ['mix', 'transcription']) {
+    if (reviewEngine.has(key)) reviewEngine.setMuted(key, !audible[key]);
+  }
+  for (const button of $('review-ab').querySelectorAll('button')) {
+    button.classList.toggle('active', button.dataset.rab === state.reviewMode);
+  }
+}
+
+/* The inspector is the point of the screen: why is this note what it is? */
+function renderInspector(note, index) {
+  const empty = $('inspector-empty');
+  const body = $('inspector-body');
+  if (!note) { empty.hidden = false; body.hidden = true; return; }
+  empty.hidden = true;
+  body.hidden = false;
+
+  const frames = pianoRoll.framesFor(note);
+  const diag = state.review.diagnostics;
+  const periods = frames.map((i) => diag.periodicity[i]).filter((v) => v !== undefined);
+  const meanPeriod = periods.length ? periods.reduce((s2, v) => s2 + v, 0) / periods.length : 0;
+  const gatedOut = frames.filter((i) => diag.energy_ok[i] === false).length;
+  const raw = frames.map((i) => diag.f0_midi[i]).filter((v) => v !== null);
+  const f0Spread = raw.length ? Math.max(...raw) - Math.min(...raw) : 0;
+  const onsetAtStart = diag.onsets.some((t) => Math.abs(t - note.onset) < 0.03);
+
+  body.innerHTML =
+    `<div class="inspector-head">` +
+    `<span class="pitch">${midiName(note.pitch)} <span class="muted">(${note.pitch})</span></span>` +
+    `<span class="timing">${clock(note.onset)} · ${(note.duration * 1000).toFixed(0)}ms · conf ${note.confidence.toFixed(2)}</span>` +
+    `</div><div class="inspector-why"></div><div class="inspector-note"></div>`;
+  const why = body.querySelector('.inspector-why');
+  const chip = (text, kind) => {
+    const el = document.createElement('span');
+    el.className = `why-chip ${kind || ''}`;
+    el.textContent = text;
+    why.appendChild(el);
+  };
+  chip(`${frames.length} frames`);
+  chip(`periodicity ${meanPeriod.toFixed(2)}`, meanPeriod >= 0.5 ? 'ok' : 'flag');
+  if (gatedOut) chip(`${gatedOut} energy-gated`, 'flag');
+  chip(`f0 spread ${f0Spread.toFixed(2)} st`, f0Spread > 1 ? 'flag' : 'ok');
+  if (onsetAtStart) chip('onset at start', 'flag');
+
+  const remarks = [];
+  const previous = index > 0 ? state.review.notes[index - 1] : null;
+  const fragment = isFragmentOf(previous, note);
+  if (fragment) chip('split from previous', 'flag');
+
+  if (meanPeriod < 0.5) remarks.push('Low periodicity — the transcriber was unsure this frame was pitched.');
+  if (gatedOut) remarks.push('Some frames failed the energy gate; the note may be clipped.');
+
+  if (fragment) {
+    // Same pitch, butted against the previous note: one held note got broken.
+    // Which mechanism did it matters — an onset means the detector fired on
+    // something else in the stem (open issue #1); no onset means a gate
+    // momentarily dropped the pitch out. Reporting "fragmented" without saying
+    // which would leave the actual question unanswered.
+    if (onsetAtStart) {
+      remarks.push(
+        'Same pitch as the previous note and split at a detected onset — the onset detector fires on the whole stem, so comping or drum bleed can break a note the soloist is holding (open issue #1).',
+      );
+    } else {
+      const gapFrames = framesBetween(previous, note);
+      const unvoiced = gapFrames.filter((i) => diag.pitch[i] === null).length;
+      const energyDrop = gapFrames.filter((i) => diag.energy_ok[i] === false).length;
+      remarks.push(
+        unvoiced
+          ? `Same pitch as the previous note, split without an onset — ${unvoiced} frame${unvoiced === 1 ? '' : 's'} in between lost pitch${energyDrop ? ' (energy gate)' : ' (periodicity gate)'}, so a held note was cut in two.`
+          : 'Same pitch as the previous note, split without an onset or a gate dropout — the pitch tracker likely wavered past the persistence threshold.',
+      );
+    }
+  }
+
+  if (f0Spread > 1) remarks.push('Wide f0 spread — a scoop, a bend, or an unstable pitch.');
+  body.querySelector('.inspector-note').textContent = remarks.join(' ');
+}
+
+/* Frame indices strictly between two notes — the gap that a split happened in. */
+function framesBetween(previous, note) {
+  if (!previous || !state.review) return [];
+  const { hop_s, start, frames } = state.review.diagnostics;
+  const from = Math.max(0, Math.round((previous.onset + previous.duration - start) / hop_s));
+  const to = Math.min(frames - 1, Math.round((note.onset - start) / hop_s));
+  const out = [];
+  for (let i = from; i <= to; i++) out.push(i);
+  return out;
+}
+
+function midiName(pitch) {
+  const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  return `${names[pitch % 12]}${Math.floor(pitch / 12) - 1}`;
+}
+
+const FRAGMENT_GAP_S = 0.12;
+
+/* Two consecutive notes at the same pitch, butted together, are almost always
+   one held note that got broken — the signature of open issue #1. Worth
+   counting for the whole span, because the count is the first thing that tells
+   you whether the transcription is fragmenting. */
+function isFragmentOf(previous, note) {
+  return (
+    previous &&
+    previous.pitch === note.pitch &&
+    Math.abs(previous.onset + previous.duration - note.onset) < FRAGMENT_GAP_S
+  );
+}
+
+function countFragments(notes) {
+  let pairs = 0;
+  for (let i = 1; i < notes.length; i++) if (isFragmentOf(notes[i - 1], notes[i])) pairs += 1;
+  return pairs;
+}
+
 // ── handoff & persistence ───────────────────────────────────────────────────
 
 function updateHandoff() {
@@ -1082,6 +1338,35 @@ $('lead-stem').addEventListener('change', async (event) => {
 });
 
 $('separate-btn').addEventListener('click', startSeparation);
+
+$('transcribe-btn').addEventListener('click', startTranscribe);
+
+$('r-play').addEventListener('click', () => {
+  state.active = 'review';
+  mix.engine?.pause();
+  stemEngine.pause();
+  reviewEngine.toggle();
+  refreshPlayButtons();
+});
+
+for (const button of $('review-ab').querySelectorAll('button')) {
+  button.addEventListener('click', () => {
+    state.reviewMode = button.dataset.rab;
+    applyReviewMode();
+  });
+}
+
+for (const button of $('review-rate').querySelectorAll('button')) {
+  button.addEventListener('click', async () => {
+    state.reviewRate = Number(button.dataset.rrate);
+    for (const other of $('review-rate').querySelectorAll('button')) {
+      other.classList.toggle('active', other === button);
+    }
+    // Stretched server-side, so mix and transcription stay sample-locked.
+    if (state.review) await loadReviewAudio();
+  });
+}
+$('review-rate').querySelector('[data-rrate="1"]').classList.add('active');
 
 $('beats-toggle').addEventListener('click', toggleBeats);
 

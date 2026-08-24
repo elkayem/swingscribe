@@ -76,6 +76,60 @@ def slice_wav(
     return buffer.getvalue()
 
 
+def render_transcription(
+    notes: list,
+    start: float,
+    end: float,
+    sample_rate: int,
+    rate: float = 1.0,
+) -> bytes:
+    """Synthesize the transcribed notes for one span as a mono wav.
+
+    This is the transcription side of the browser A/B: the review screen loads
+    it as just another source in the sample-locked engine, so switching
+    original-vs-transcription mid-phrase carries the same alignment guarantee
+    as the stem mixer. Onsets arrive in whole-track time and are shifted into
+    span-local time; the same phase-vocoder stretch as the stems is applied so
+    a slowed transcription stays locked to a slowed stem.
+
+    Synthesis is the core's additive-sine synth (abmix / pretty_midi) — crude
+    but pitch- and timing-faithful, which is all an ear test needs.
+    """
+    import numpy as np
+
+    from swingscribe import abmix
+
+    rate = max(MIN_RATE, min(float(rate), MAX_RATE))
+    span = max(0.0, end - start)
+    length = int(round(span * sample_rate))
+
+    shifted = [
+        n.model_copy(update={"onset": n.onset - start}) for n in notes if start <= n.onset < end
+    ]
+    if shifted:
+        audio = abmix.notes_to_midi(shifted).synthesize(fs=sample_rate).astype("float32")
+    else:
+        audio = np.zeros(0, dtype="float32")
+
+    # Match the span length exactly, so this buffer is the same length as the
+    # stem buffers the engine loops it against.
+    audio = np.pad(audio, (0, length - len(audio))) if len(audio) < length else audio[:length]
+
+    peak = float(np.abs(audio).max()) if audio.size else 0.0
+    if peak > 0:
+        audio = audio * (0.7 / peak)
+
+    data = audio.reshape(-1, 1)
+    if rate != 1.0 and data.size:
+        data = _time_stretch(data, rate)
+
+    buffer = io.BytesIO()
+    import soundfile
+
+    soundfile.write(buffer, np.clip(data, -1.0, 1.0), sample_rate, subtype="PCM_16", format="WAV")
+    return buffer.getvalue()
+
+
 def _time_stretch(data, rate: float):
     """Phase-vocoder time stretch. `rate` 0.5 makes the audio twice as long.
 

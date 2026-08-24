@@ -174,6 +174,66 @@
     </div>
   </section>
 
+  <!-- ── Screen 4: transcribe & review ───────────────────────────────────── -->
+  <section class="panel" id="panel-review" hidden>
+    <div class="panel-head">
+      <h2><span class="step">3</span> Transcribe &amp; review</h2>
+      <div class="panel-note">Click a note to see the frames that produced it — the f0 there, and whether periodicity, energy, or an onset shaped it.</div>
+    </div>
+
+    <div class="review-bar">
+      <button id="transcribe-btn">Transcribe span</button>
+      <span class="muted" id="review-range"></span>
+      <span class="spacer"></span>
+      <span class="muted" id="review-summary" hidden></span>
+    </div>
+
+    <div class="job" id="review-job" hidden>
+      <div class="job-bar"><div class="job-fill" id="review-job-fill"></div></div>
+      <div class="job-text"><span id="review-job-message">…</span><span class="muted" id="review-job-elapsed"></span></div>
+    </div>
+
+    <div class="review" id="review" hidden>
+      <div class="pianoroll-wrap">
+        <div class="wave-label">Piano roll over the bar grid <span class="muted" id="review-hint"></span></div>
+        <div class="pianoroll" id="pianoroll"></div>
+        <div class="lanes">
+          <div class="lane" id="lane-f0" title="Raw CREPE pitch (dim) vs the smoothed pitch after gating (bright). A gap is a frame gated out."></div>
+          <div class="lane" id="lane-gate" title="Periodicity (line) against the voicing threshold; energy-gate failures shaded."></div>
+        </div>
+        <div class="lane-legend">
+          <span><span class="swatch raw"></span> raw f0</span>
+          <span><span class="swatch kept"></span> kept pitch</span>
+          <span><span class="swatch onset"></span> onset</span>
+          <span><span class="swatch periodicity"></span> periodicity</span>
+          <span><span class="swatch gated"></span> energy-gated</span>
+        </div>
+      </div>
+
+      <div class="inspector" id="inspector">
+        <div class="inspector-empty" id="inspector-empty">Click a note to inspect it.</div>
+        <div class="inspector-body" id="inspector-body" hidden></div>
+      </div>
+
+      <div class="ab-row">
+        <button class="play" id="r-play" title="Play / pause (Space)">▶</button>
+        <div class="time"><span id="r-time-now">0:00.00</span><span class="sep">/</span><span id="r-time-total">0:00</span></div>
+        <div class="ab-toggle" id="review-ab">
+          <button data-rab="mix" class="active">Original</button>
+          <button data-rab="transcription">Transcription</button>
+          <button data-rab="both">Both</button>
+        </div>
+        <div class="rate-group" id="review-rate">
+          <button class="chip" data-rrate="1">1×</button>
+          <button class="chip" data-rrate="0.75">¾×</button>
+          <button class="chip" data-rrate="0.5">½×</button>
+        </div>
+        <span class="spacer"></span>
+        <span class="hint">A wrong downbeat is obvious against the bar lines; open issue #1 shows as repeated same-pitch fragments.</span>
+      </div>
+    </div>
+  </section>
+
 </main>
 
 <div class="toast" id="toast" hidden></div>

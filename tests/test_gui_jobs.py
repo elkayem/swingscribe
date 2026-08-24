@@ -61,3 +61,32 @@ def test_progress_never_walks_backwards():
 def test_every_kind_weights_sum_to_one():
     for kind, stages in jobs.JOB_STAGES.items():
         assert sum(share for _name, share in stages) == pytest.approx(1.0), kind
+
+
+def test_transcribe_progress_ignores_foreign_stages():
+    """A transcribe job runs a cached ingest as a precondition. That ingest
+    emits progress, but it is not part of this bar — letting it through pushed
+    the fraction past 100%."""
+    runner = jobs.JobRunner()
+    job = jobs.Job(id="j", path="x", model="m", kind="transcribe")
+
+    runner._on_progress(job, ProgressEvent(stage="ingest", fraction=1.0, cached=True))
+    assert job.fraction == 0.0  # foreign stage left the bar alone
+
+    runner._on_progress(job, ProgressEvent(stage="transcribe", fraction=0.75))
+    assert job.fraction == pytest.approx(0.75)
+
+
+def test_transcribe_jobs_of_different_spans_do_not_dedupe():
+    runner = jobs.JobRunner()
+    release = threading.Event()
+    runner._run = lambda job, config, model: release.wait(5)
+    try:
+        config = Config(cache_dir="unused")
+        a = runner.submit("x.wav", config, "htdemucs_ft", "transcribe", variant="span-a")
+        again = runner.submit("x.wav", config, "htdemucs_ft", "transcribe", variant="span-a")
+        b = runner.submit("x.wav", config, "htdemucs_ft", "transcribe", variant="span-b")
+        assert a.id == again.id  # same span dedupes
+        assert b.id != a.id  # different span does not
+    finally:
+        release.set()

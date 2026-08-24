@@ -323,3 +323,55 @@ select {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 .toast.error { border-color: var(--danger); color: var(--danger); }
+
+/* ── Screen 4: transcribe & review ─────────────────────────────────────────── */
+.review-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+#transcribe-btn { background: var(--accent); border-color: var(--accent); color: #17130a; }
+#transcribe-btn:hover:not(:disabled) { background: #ffbb5c; border-color: #ffbb5c; }
+#review-summary { font: 12px var(--mono); }
+
+.pianoroll-wrap { margin-bottom: 12px; }
+.pianoroll {
+  position: relative; width: 100%;
+  background: #0d0f16; border: 1px solid var(--line);
+  border-radius: var(--radius) var(--radius) 0 0; overflow: hidden;
+  cursor: pointer;
+}
+.pianoroll canvas { display: block; width: 100%; }
+.lanes { display: flex; flex-direction: column; }
+.lane {
+  position: relative; width: 100%;
+  background: #0d0f16; border: 1px solid var(--line); border-top: none;
+}
+.lane:last-child { border-radius: 0 0 var(--radius) var(--radius); }
+.lane canvas { display: block; width: 100%; }
+.lane-legend {
+  display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px;
+  font-size: 11.5px; color: var(--muted);
+}
+.lane-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.swatch { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.swatch.raw { background: var(--wave-lit); }
+.swatch.kept { background: var(--lead); }
+.swatch.onset { background: var(--danger); }
+.swatch.periodicity { background: var(--downbeat); }
+.swatch.gated { background: rgba(226, 102, 107, 0.4); }
+
+.inspector {
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px;
+  min-height: 58px;
+}
+.inspector-empty { color: var(--muted); font-size: 13px; }
+.inspector-body { display: flex; flex-direction: column; gap: 8px; }
+.inspector-head { display: flex; align-items: baseline; gap: 12px; }
+.inspector-head .pitch { font: 16px var(--mono); color: var(--lead); }
+.inspector-head .timing { font: 12px var(--mono); color: var(--muted); }
+.inspector-why { display: flex; flex-wrap: wrap; gap: 8px; }
+.why-chip {
+  font: 11.5px var(--mono); padding: 3px 8px; border-radius: 5px;
+  background: var(--bg); border: 1px solid var(--line); color: var(--text);
+}
+.why-chip.flag { border-color: var(--danger); color: var(--danger); }
+.why-chip.ok { border-color: var(--lead); color: var(--lead); }
+.inspector-note { font-size: 12.5px; color: var(--muted); }
