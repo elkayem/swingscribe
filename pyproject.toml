@@ -38,6 +38,9 @@ ml = [
     # numpy spectral flux in stages/transcribe.py for the same reason.
     "torchcrepe>=0.0.23",
     "pretty-midi>=0.2.10",
+    # Transcription metrics. CLAUDE.md: mir_eval is the source of truth for
+    # scoring — never hand-roll it. Pure numpy/scipy, no numba.
+    "mir_eval>=0.7",
 ]
 # Local GUI (plan §13, M8). Its own group for the same reason as `ml`: plain
 # `uv sync` — and therefore CI — must stay light. Dev machines opt in with
