@@ -139,12 +139,15 @@ def test_crop_region_none_is_whole_signal():
     assert offset == 0.0
 
 
-def test_crop_region_slices_and_reports_offset():
-    import numpy as np
+"""crop_region only slices and measures, so a plain list exercises it exactly
+as an ndarray does — and unlike an ndarray it runs in CI, which installs
+neither numpy nor the rest of the ml group."""
 
+
+def test_crop_region_slices_and_reports_offset():
     from swingscribe.stages.transcribe import crop_region
 
-    mono = np.arange(1000, dtype="float32")  # 10s at 100Hz
+    mono = list(range(1000))  # 10s at 100Hz
     cropped, offset = crop_region(mono, 100, (2.0, 5.0))
     assert len(cropped) == 300
     assert offset == 2.0
@@ -152,34 +155,29 @@ def test_crop_region_slices_and_reports_offset():
 
 
 def test_crop_region_open_ended():
-    import numpy as np
-
     from swingscribe.stages.transcribe import crop_region
 
-    mono = np.arange(1000, dtype="float32")
+    mono = list(range(1000))
     cropped, offset = crop_region(mono, 100, (7.0, None))  # to the end
     assert len(cropped) == 300
     assert offset == 7.0
 
 
 def test_crop_region_clamps_past_end():
-    import numpy as np
-
     from swingscribe.stages.transcribe import crop_region
 
-    mono = np.arange(1000, dtype="float32")
+    mono = list(range(1000))
     cropped, _ = crop_region(mono, 100, (8.0, 99.0))
     assert len(cropped) == 200
 
 
 def test_crop_region_rejects_inverted():
-    import numpy as np
     import pytest as _pytest
 
     from swingscribe.stages.transcribe import crop_region
 
     with _pytest.raises(ValueError):
-        crop_region(np.arange(1000, dtype="float32"), 100, (5.0, 2.0))
+        crop_region(list(range(1000)), 100, (5.0, 2.0))
 
 
 def test_offset_notes_restores_whole_track_time():
