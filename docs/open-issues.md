@@ -256,6 +256,54 @@ deserve to be notated as separate notes. `pitch_persist_ms` currently applies
 one flat 60ms threshold regardless of interval size, which cannot distinguish
 a bend from a melodic step.
 
+### Measured and rejected: interval-aware note splitting
+
+The obvious follow-up to the correction above was to make `_pitch_change_points`
+interval-aware — require a small excursion to persist much longer than a large
+one before it earns its own note, on the theory that small excursions are bends
+and large ones are melody. **It does not work, and the reason is worth keeping
+so nobody tries it again.**
+
+Every local feature the segmenter can see, scored over the 253 invented and 966
+matched notes of the two tenor solos:
+
+| rule | invented caught | matched wrongly caught |
+|---|---|---|
+| interval <= 2 semitones | 52% | **61%** |
+| returns to the previous pitch | 16% | 10% |
+| no corroborated onset | 60% / 37% | 35% / 50% |
+| <= 2 semitones AND returns | 9% | 7% |
+| <= 2 semitones AND no onset | 33% | 24% |
+
+The first row is the whole story: a matched note is *more* likely to be a small
+interval than an invented one. Bebop is overwhelmingly stepwise, so "small
+interval" describes the melody at least as well as it describes the ornaments.
+The onset feature has real signal on Confirmation (60% vs 35%) and inverts on
+All The Things (37% vs 50%) — the second number pair above — because a
+slurred saxophone line produces real notes with no fresh attack.
+
+Searching all combinations of interval, duration, return and onset for the best
+achievable trade, every winner turns out to be **duration alone**; adding an
+interval constraint makes each one worse:
+
+| rule | invented cut | matched lost |
+|---|---|---|
+| duration < 0.25 beats, no onset | 22% | 3% |
+| duration < 0.25 beats | 33% | 6% |
+| interval <= 2, duration < 0.25 beats, no onset | 11% | 2% |
+
+And the best of those is the beat-relative duration floor already known to be
+marginal: applied per tune it moves Confirmation 0.762 -> 0.769 and All The
+Things 0.892 -> **0.875**. Net zero.
+
+**Conclusion: the remaining precision gap on horn solos is not reachable from
+local per-note features.** Whether a passing tone or a scoop deserves to be
+notated depends on the phrase, the harmony and the transcriber's convention —
+context the segmenter does not have and cannot be given by a threshold. It is
+a modelling problem, not a heuristic one. It is also partly a matter of taste:
+some fraction of those "invented" notes are sounds the player really made, and
+a different transcriber would have written some of them down.
+
 ### Two things the synthetic case got wrong about this
 
 Worth recording, because the -3dB soundfont case was chosen as the cheap proxy
