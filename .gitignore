@@ -8,8 +8,16 @@ tests/fixtures/*
 *.flac
 *.m4a
 
-# Soundfonts — hundreds of MB, fetched by scripts/setup_fixtures.py
+# Soundfonts — tens to hundreds of MB, fetched by scripts/setup_fixtures.py
+# into $LOCALAPPDATA/swingscribe/fixtures (outside the tree), never committed.
+# The glob is belt-and-braces for a copy that lands in the working directory.
 *.sf2
+*.sf3
+*.dls
+# MIDI: tier-1 renders write a scratch .mid on the way to fluidsynth, and
+# anything derived from a commercial recording is as untrackable as the audio.
+*.mid
+*.midi
 
 # Model weights & caches
 *.ckpt

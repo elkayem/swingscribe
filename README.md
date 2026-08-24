@@ -94,6 +94,20 @@ recordings skip unless `SWINGSCRIBE_FIXTURES` points at a local audio
 directory, and files are checksum-verified against
 `tests/fixtures/manifest.yaml`.
 
+The tier-1 synthetic suite renders its own audio, so it needs no fixtures —
+but its *realistic* half renders through a soundfont, which is fetched rather
+than committed:
+
+```
+uv run python scripts/setup_fixtures.py
+$env:SWINGSCRIBE_HEAVY_TESTS = "1"
+uv run pytest tests/test_synthetic.py
+```
+
+That downloads GeneralUser GS and the FluidSynth CLI to a directory outside
+the repo and prints where. Without them the soundfont cases skip; the
+additive ones still run.
+
 ## License
 
 MIT — see `LICENSE`.
