@@ -22,6 +22,12 @@ The three known hazards are handled explicitly:
   rounded pitch PERSISTS (pitch_persist_ms) — scoops, falls, and bends
   pass through as transitions inside one note instead of becoming notes.
 
+A fourth hazard was added after M3 was scored against real transcriptions:
+**following the wrong instrument**. f0 is decoded with a Viterbi path through
+CREPE's per-frame pitch bins (pitch_step_cost), so leaving the line the
+soloist is on has to be paid for. See `viterbi_bins` for why that matters and
+what it does not fix.
+
 Heavy imports (torch, torchcrepe, numpy, soundfile) stay inside functions:
 this module must stay importable without the ml dependency group.
 
@@ -41,6 +47,9 @@ from swingscribe.model import Document, NoteEvent
 
 CREPE_SAMPLE_RATE = 16000
 CREPE_HOP = 160  # 10ms frames
+PITCH_BINS = 360  # CREPE's output resolution
+CENTS_PER_BIN = 20.0
+CENTS_ORIGIN = 1997.3794084376191  # cents of bin 0, from torchcrepe.convert
 
 # Bump when this stage's behavior changes without a config change (see
 # pipeline._cache_name).
@@ -49,6 +58,11 @@ CACHE_VERSION = 1
 
 def hz_to_midi(hz: float) -> float:
     return 69.0 + 12.0 * math.log2(hz / 440.0)
+
+
+def _hz_to_bin(hz: float) -> float:
+    """Frequency to CREPE pitch-bin index (fractional)."""
+    return (1200.0 * math.log2(hz / 10.0) - CENTS_ORIGIN) / CENTS_PER_BIN
 
 
 def median_smooth(pitches: list[float | None], kernel: int) -> list[float | None]:
@@ -304,6 +318,120 @@ def fold_octave_outliers(notes: list[NoteEvent], context: int = 2) -> list[NoteE
     return out
 
 
+# ── Viterbi f0 decoding (open-issue #8) ──────────────────────────────────
+#
+# CREPE emits an independent probability for each of 360 pitch bins per 10ms
+# frame. Decoding each frame by itself — torchcrepe's `weighted_argmax`, what
+# we shipped through M3 — means nothing connects frame t to frame t-1, so the
+# instant a comping piano out-shouts the soloist the reported pitch jumps to
+# the piano and back. That is the mechanism behind open-issue #8, and the
+# benchmark's 240 invented notes at unrelated pitches is its signature.
+#
+# torchcrepe ships a Viterbi decoder but routes it through
+# librosa.sequence.viterbi, and librosa hard-requires numba, whose DLLs
+# Application Control blocks here. So this is our own, in numpy.
+#
+# Two deliberate differences from torchcrepe's:
+#
+# 1. **A soft transition cost, not a hard band.** theirs forbids moving more
+#    than 11 bins (2.2 semitones) per frame outright, so an octave leap has to
+#    slide through every bin between, taking ~60ms — a quarter of a note at
+#    bebop tempo. Ours charges `step_cost` per bin of distance and lets the
+#    evidence decide. A leap is affordable when the evidence is strong; an
+#    excursion that jumps away AND returns pays the cost twice, which is
+#    exactly the asymmetry that separates a real interval from following the
+#    piano for a moment.
+#
+# 2. **log(p), not log(softmax(p)).** `torchcrepe.infer` already returns
+#    per-bin sigmoid probabilities (its variable is misleadingly named
+#    `logits`), so theirs softmaxes an activation that is already a
+#    probability. CREPE is trained with per-bin binary cross-entropy against a
+#    blurred one-hot target, so the bins are independent probabilities and
+#    log(p) is the observation likelihood the model was actually fit to.
+
+BIN_FLOOR = -1e9  # stands in for -inf on out-of-range bins (keeps arithmetic finite)
+
+
+def viterbi_bins(log_probs, step_cost: float):
+    """Best pitch-bin path through a (frames, bins) log-probability matrix.
+
+    Maximises  sum_t log_probs[t, b_t] - step_cost * |b_t - b_{t-1}|.
+
+    The naive recurrence is O(bins^2) per frame. Because the transition
+    penalty is linear in |i - j|, the inner maximisation is a max-plus
+    distance transform and separates into a forward and a backward running
+    maximum, each O(bins) and each vectorised:
+
+        max_i (prev[i] - c|i-j|)
+          = max( max_{i<=j}(prev[i] + c*i) - c*j ,
+                 max_{i>=j}(prev[i] - c*i) + c*j )
+
+    which is what turns a 360x360 matrix per frame into two accumulates.
+    """
+    import numpy as np
+
+    log_probs = np.asarray(log_probs, dtype=np.float64)
+    n_frames, n_bins = log_probs.shape
+    if n_frames == 0:
+        return []
+    if step_cost <= 0:  # no continuity constraint — plain per-frame argmax
+        return [int(b) for b in log_probs.argmax(axis=1)]
+
+    idx = np.arange(n_bins, dtype=np.float64)
+    ramp = step_cost * idx
+    back = np.empty((n_frames, n_bins), dtype=np.int16)
+    back[0] = idx
+    score = log_probs[0].copy()
+
+    for t in range(1, n_frames):
+        # forward sweep: best predecessor at or below each bin
+        g = score + ramp
+        run_f = np.maximum.accumulate(g)
+        arg_f = np.maximum.accumulate(np.where(g >= run_f, idx, -1.0))
+        best_f = run_f - ramp
+
+        # backward sweep: best predecessor at or above each bin
+        h = (score - ramp)[::-1]
+        run_b = np.maximum.accumulate(h)
+        arg_b = (n_bins - 1) - np.maximum.accumulate(np.where(h >= run_b, idx, -1.0))
+        best_b = run_b[::-1] + ramp
+        arg_b = arg_b[::-1]
+
+        take_f = best_f >= best_b
+        back[t] = np.where(take_f, arg_f, arg_b).astype(np.int16)
+        score = np.where(take_f, best_f, best_b) + log_probs[t]
+
+    path = [0] * n_frames
+    b = int(score.argmax())
+    for t in range(n_frames - 1, -1, -1):
+        path[t] = b
+        b = int(back[t][b])
+    return path
+
+
+def refine_bins(probs, bins, window: int = 4):
+    """Sub-bin pitch, in cents, by weighting probabilities around each bin.
+
+    Viterbi picks a bin, and bins are 20 cents wide — coarse enough to matter
+    for a median filter running over the result. This is torchcrepe's
+    `weighted_argmax` refinement applied *around the path* instead of around
+    the per-frame argmax: continuity chooses the region, the local weighted
+    mean places the pitch inside it.
+    """
+    import numpy as np
+
+    probs = np.asarray(probs, dtype=np.float64)
+    n_frames, n_bins = probs.shape
+    centres = CENTS_PER_BIN * np.arange(n_bins) + CENTS_ORIGIN
+    out = np.empty(n_frames, dtype=np.float64)
+    for t, b in enumerate(bins):
+        lo, hi = max(0, b - window), min(n_bins, b + window + 1)
+        weights = probs[t, lo:hi]
+        total = weights.sum()
+        out[t] = centres[lo:hi] @ weights / total if total > 0 else centres[b]
+    return out
+
+
 def _import_torchcrepe():
     """Import torchcrepe with a stub for its unused resampy dependency —
     resampy needs numba, which Application Control blocks on some machines.
@@ -321,6 +449,71 @@ def _import_torchcrepe():
     import torchcrepe
 
     return torchcrepe
+
+
+def _crepe_track(mono16, tc: TranscribeConfig, device: str, batch_size: int = 256):
+    """CREPE f0 + periodicity for one mono 16kHz signal.
+
+    Returns (f0_hz, periodicity) as plain lists. With `pitch_step_cost` at 0
+    this delegates to `torchcrepe.predict` and is bit-identical to what M3
+    shipped; above 0 it runs the whole excerpt through `viterbi_bins`.
+
+    The Viterbi path deliberately does NOT go through torchcrepe's `decoder`
+    hook: `predict` calls the decoder once per batch of frames, which would
+    restart the path — and hand back a free jump — every 2.56s. Continuity is
+    the entire point, so we drive `preprocess`/`infer` ourselves and decode
+    the excerpt as one sequence.
+    """
+    import numpy as np
+    import torch
+
+    torchcrepe = _import_torchcrepe()
+    audio = torch.from_numpy(mono16)[None]
+
+    if tc.pitch_step_cost <= 0:
+        f0, periodicity = torchcrepe.predict(
+            audio,
+            CREPE_SAMPLE_RATE,
+            hop_length=CREPE_HOP,
+            fmin=tc.fmin_hz,
+            fmax=tc.fmax_hz,
+            model=tc.crepe_model,
+            decoder=torchcrepe.decode.weighted_argmax,
+            return_periodicity=True,
+            batch_size=batch_size,
+            device=device,
+        )
+        return f0[0].tolist(), periodicity[0].tolist()
+
+    chunks = []
+    with torch.no_grad():
+        for frames in torchcrepe.preprocess(
+            audio,
+            CREPE_SAMPLE_RATE,
+            hop_length=CREPE_HOP,
+            batch_size=batch_size,
+            device=device,
+        ):
+            # (frames, 360) per-bin probabilities — sigmoid is already applied
+            # inside the model, despite `infer`'s docstring calling them logits.
+            chunks.append(torchcrepe.infer(frames, model=tc.crepe_model).cpu().numpy())
+    probs = np.concatenate(chunks, axis=0).astype(np.float64)
+
+    lo = int(np.floor(_hz_to_bin(tc.fmin_hz)))
+    hi = int(np.ceil(_hz_to_bin(tc.fmax_hz)))
+    log_probs = np.log(np.maximum(probs, 1e-12))
+    log_probs[:, : max(0, lo)] = BIN_FLOOR
+    log_probs[:, min(probs.shape[1], hi + 1) :] = BIN_FLOOR
+
+    bins = viterbi_bins(log_probs, tc.pitch_step_cost)
+    cents = refine_bins(probs, bins)
+    f0 = 10.0 * 2.0 ** (cents / 1200.0)
+    # Periodicity is the network's probability at the bin we CHOSE, matching
+    # torchcrepe. Note the consequence: where continuity holds the path on the
+    # soloist against a louder competitor, this reads low and the voicing gate
+    # drops the frame — a spurious note becomes a rest rather than a right note.
+    periodicity = probs[np.arange(len(bins)), bins]
+    return f0.tolist(), periodicity.tolist()
 
 
 def _frame_energy_gate(mono16, floor_db: float) -> list[bool]:
@@ -413,8 +606,6 @@ def analyze(
     import torch
     import torchaudio
 
-    torchcrepe = _import_torchcrepe()
-
     data, rate = soundfile.read(stem_path, dtype="float32", always_2d=True)
     mono = data.mean(axis=1)
     mono, region_offset = crop_region(mono, rate, tc.region)
@@ -429,26 +620,18 @@ def analyze(
     hop_s = CREPE_HOP / CREPE_SAMPLE_RATE
 
     device = resolve_device(tc.device, torch.cuda.is_available())
+    decoding = (
+        f"viterbi (step cost {tc.pitch_step_cost})"
+        if tc.pitch_step_cost > 0
+        else "weighted argmax (per-frame)"
+    )
     if log:
         print(
             f"transcribe: crepe model={tc.crepe_model} device={device} "
-            f"ensemble={tc.ensemble} stem={tc.stem}"
+            f"ensemble={tc.ensemble} stem={tc.stem} decode={decoding}"
         )
     progress.report("transcribe", 0.05, f"running CREPE ({tc.crepe_model}) on {device}")
-    f0, periodicity = torchcrepe.predict(
-        torch.from_numpy(mono16)[None],
-        CREPE_SAMPLE_RATE,
-        hop_length=CREPE_HOP,
-        fmin=tc.fmin_hz,
-        fmax=tc.fmax_hz,
-        model=tc.crepe_model,
-        decoder=torchcrepe.decode.weighted_argmax,  # viterbi needs numba-blocked librosa
-        return_periodicity=True,
-        batch_size=256,
-        device=device,
-    )
-    f0 = f0[0].tolist()
-    periodicity = periodicity[0].tolist()
+    f0, periodicity = _crepe_track(mono16, tc, device)
 
     # Gate on periodicity AND frame energy — silence between phrases must
     # not transcribe (see module docstring for the thresholds' rationale).

@@ -50,4 +50,4 @@ benchmark/
 
 # Cached benchmark transcriptions (scripts/score_benchmark.py). Note lists
 # derived from commercial recordings — only aggregate metrics ship (plan §12).
-.benchmark-notes.json
+.benchmark-notes*.json

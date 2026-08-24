@@ -192,6 +192,50 @@ Recall is fine (0.86); precision is what this costs us (0.64).
 Note that #3's dedicated stems did *not* fix the equivalent on Giant Steps, so
 "better isolation" is not automatically the answer — see #3.
 
+### Partly addressed: Viterbi f0 decoding (`transcribe.pitch_step_cost`)
+
+The mechanism was that CREPE was decoded **per frame**, by weighted argmax,
+with nothing connecting frame t to frame t-1 — so the instant another
+instrument out-shouted the soloist the reported pitch jumped to it and back.
+`viterbi_bins` charges for movement between frames, which makes an excursion
+that leaves the soloist and returns pay twice while a real interval pays once.
+Default `pitch_step_cost` 0.2. Measured on the benchmark:
+
+| | cost 0.0 | 0.1 | 0.2 | 0.4 |
+|---|---|---|---|---|
+| Confirmation | 0.747 | 0.753 | 0.762 | 0.764 |
+| All The Things | 0.893 | 0.893 | 0.892 | 0.892 |
+| Giant Steps | 0.688 | 0.687 | 0.702 | 0.709 |
+
+0.4 scores higher still but starts dropping real notes (Giant Steps' missed
+notes go 28 -> 44, and the additive `clean_line` case loses a note outright),
+so 0.2 is where the trade stops being free. Invented notes on Confirmation
+fall 242 -> 215 and on Giant Steps 69 -> 47.
+
+**This does not close the issue.** Confirmation still invents 215 notes; the
+gain is real but partial, and the largest error source is still other
+instruments in the stem.
+
+### Two things the synthetic case got wrong about this
+
+Worth recording, because the -3dB soundfont case was chosen as the cheap proxy
+for this issue and it misled in both directions.
+
+1. **It showed no improvement at all, for the wrong reason.** Viterbi fixes its
+   pitch track — frames on the true sax bin go 54% -> 71%, and the
+   octave-below excursions go 16.8% -> 0% — but the score does not move,
+   because at the frames CREPE gets wrong its confidence in the sax is 0.07,
+   far under the 0.5 `voicing_threshold`. Those frames are gated out as
+   unvoiced whichever bin the decoder picks. **That case is a voicing failure,
+   not a decoding failure**, and it cannot measure a decoder. Drop the gate to
+   0.05 and continuity takes it from frame accuracy 0.727 to 0.913 and onset
+   F1 0.286 to 0.500.
+2. **So it suggested lowering the voicing gate, which is wrong on real audio.**
+   Swept over the benchmark, every reduction below 0.5 costs accuracy (mean
+   pitch F1 0.788 at 0.5, 0.776 at 0.1): a lower gate admits bleed, and on
+   real music there is much more of it than one synthetic piano. The gate
+   stays at 0.5.
+
 ## 9. The drum-stem gate is global, but drum presence is local
 
 Confirmation draws no bars for its first ~20s. Not a drawing bug and not a

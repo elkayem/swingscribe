@@ -122,9 +122,9 @@
       "onset_f1": 1.0,
       "onset_precision": 1.0,
       "onset_recall": 1.0,
-      "overall_accuracy": 0.9826,
-      "raw_chroma_accuracy": 0.9787,
-      "raw_pitch_accuracy": 0.9787,
+      "overall_accuracy": 0.987,
+      "raw_chroma_accuracy": 0.9858,
+      "raw_pitch_accuracy": 0.9858,
       "voicing_false_alarm": 0.0112,
       "voicing_recall": 0.9858
     }
@@ -140,11 +140,11 @@
       "onset_f1": 1.0,
       "onset_precision": 1.0,
       "onset_recall": 1.0,
-      "overall_accuracy": 0.8226,
-      "raw_chroma_accuracy": 0.9289,
-      "raw_pitch_accuracy": 0.9194,
+      "overall_accuracy": 0.8194,
+      "raw_chroma_accuracy": 0.9242,
+      "raw_pitch_accuracy": 0.9147,
       "voicing_false_alarm": 0.3838,
-      "voicing_recall": 0.9763
+      "voicing_recall": 0.9716
     },
     "fast_line": {
       "n_estimate": 8.0,
@@ -156,11 +156,11 @@
       "onset_f1": 1.0,
       "onset_precision": 1.0,
       "onset_recall": 1.0,
-      "overall_accuracy": 0.6893,
-      "raw_chroma_accuracy": 0.6932,
-      "raw_pitch_accuracy": 0.6932,
+      "overall_accuracy": 0.678,
+      "raw_chroma_accuracy": 0.6705,
+      "raw_pitch_accuracy": 0.6705,
       "voicing_false_alarm": 0.3146,
-      "voicing_recall": 0.9659
+      "voicing_recall": 0.9432
     },
     "held_note": {
       "n_estimate": 1.0,
@@ -172,11 +172,11 @@
       "onset_f1": 1.0,
       "onset_precision": 1.0,
       "onset_recall": 1.0,
-      "overall_accuracy": 0.9333,
-      "raw_chroma_accuracy": 0.9933,
-      "raw_pitch_accuracy": 0.9933,
+      "overall_accuracy": 0.9289,
+      "raw_chroma_accuracy": 0.9867,
+      "raw_pitch_accuracy": 0.9867,
       "voicing_false_alarm": 0.1867,
-      "voicing_recall": 0.9933
+      "voicing_recall": 0.9867
     },
     "held_note_over_comping": {
       "n_estimate": 4.0,
@@ -189,10 +189,10 @@
       "onset_precision": 0.0,
       "onset_recall": 0.0,
       "overall_accuracy": 0.7289,
-      "raw_chroma_accuracy": 0.68,
+      "raw_chroma_accuracy": 0.6733,
       "raw_pitch_accuracy": 0.66,
       "voicing_false_alarm": 0.1333,
-      "voicing_recall": 0.68
+      "voicing_recall": 0.6733
     },
     "held_note_over_quiet_comping": {
       "n_estimate": 1.0,
@@ -236,11 +236,11 @@
       "onset_f1": 1.0,
       "onset_precision": 1.0,
       "onset_recall": 1.0,
-      "overall_accuracy": 0.8435,
-      "raw_chroma_accuracy": 0.9504,
-      "raw_pitch_accuracy": 0.9362,
+      "overall_accuracy": 0.8391,
+      "raw_chroma_accuracy": 0.9433,
+      "raw_pitch_accuracy": 0.9291,
       "voicing_false_alarm": 0.3034,
-      "voicing_recall": 0.9787
+      "voicing_recall": 0.9716
     }
   }
 }

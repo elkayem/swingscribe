@@ -77,6 +77,14 @@ class TranscribeConfig(BaseModel):
     pitch_persist_ms: float = 60.0  # a new pitch must hold this long to split a note
     silence_gap_ms: float = 40.0  # unvoiced dropouts shorter than this bridge a phrase
     median_filter_ms: float = 50.0  # f0 smoothing kernel — flattens vibrato wobble
+    # Viterbi continuity for f0 decoding: the log-probability charged per
+    # CREPE pitch bin (20 cents) of movement between adjacent 10ms frames.
+    # 0 restores the per-frame weighted-argmax decoding M3 shipped with, which
+    # has no memory at all and so follows whichever source is loudest in each
+    # frame (open-issue #8). Above 0, an excursion that leaves the soloist and
+    # comes back pays the cost twice while a real melodic interval pays once.
+    # Scale: 5 bins = 1 semitone, 60 bins = an octave.
+    pitch_step_cost: float = 0.2
 
 
 class MeterConfig(BaseModel):

@@ -378,3 +378,125 @@ def test_frame_diagnostics_times_are_whole_track():
     )
     assert diag.times == [90.0, 90.01, 90.02]  # offset by the region start
     assert abs(diag.voiced_fraction - 2 / 3) < 1e-9
+
+
+"""Viterbi f0 decoding (open-issue #8). The DP itself is numpy, so these skip
+in CI alongside the other ml-group tests; the arrays are tiny and none of them
+touch CREPE, so they run in milliseconds locally."""
+
+
+def _brute_force_viterbi(log_probs, step_cost):
+    """Textbook O(bins^2) Viterbi. The shipped one uses a distance-transform
+    shortcut that is easy to get subtly wrong, so it is checked against this."""
+    import numpy as np
+
+    n_frames, n_bins = log_probs.shape
+    idx = np.arange(n_bins)
+    transition = -step_cost * np.abs(idx[:, None] - idx[None, :])
+    score = log_probs[0].copy()
+    back = np.zeros((n_frames, n_bins), dtype=int)
+    for t in range(1, n_frames):
+        totals = score[:, None] + transition
+        back[t] = totals.argmax(axis=0)
+        score = totals.max(axis=0) + log_probs[t]
+    bin_index = int(score.argmax())
+    path = [0] * n_frames
+    for t in range(n_frames - 1, -1, -1):
+        path[t] = bin_index
+        bin_index = int(back[t][bin_index])
+    return path, float(score.max())
+
+
+def _path_score(log_probs, path, step_cost):
+    total = sum(log_probs[t, b] for t, b in enumerate(path))
+    return total - step_cost * sum(abs(path[t] - path[t - 1]) for t in range(1, len(path)))
+
+
+def test_viterbi_matches_brute_force():
+    numpy = pytest.importorskip("numpy")
+    from swingscribe.stages.transcribe import viterbi_bins
+
+    rng = numpy.random.default_rng(7)
+    for _ in range(40):
+        n_frames = int(rng.integers(1, 20))
+        n_bins = int(rng.integers(2, 30))
+        log_probs = rng.normal(size=(n_frames, n_bins)) * rng.choice([0.3, 1.0, 4.0])
+        step_cost = float(rng.choice([0.01, 0.1, 0.5, 2.0]))
+        fast = viterbi_bins(log_probs, step_cost)
+        _, optimal = _brute_force_viterbi(log_probs, step_cost)
+        assert abs(_path_score(log_probs, fast, step_cost) - optimal) < 1e-9
+
+
+def test_viterbi_zero_cost_is_per_frame_argmax():
+    numpy = pytest.importorskip("numpy")
+    from swingscribe.stages.transcribe import viterbi_bins
+
+    log_probs = numpy.random.default_rng(3).normal(size=(50, 30))
+    assert viterbi_bins(log_probs, 0.0) == list(log_probs.argmax(axis=1))
+
+
+def test_viterbi_ignores_a_brief_louder_competitor():
+    """Open-issue #8 in miniature: another instrument out-shouts the soloist
+    for 40ms. Without continuity the decoder follows it; with continuity the
+    round trip costs more than the four frames are worth."""
+    numpy = pytest.importorskip("numpy")
+    from swingscribe.stages.transcribe import viterbi_bins
+
+    log_probs = numpy.full((40, 60), -6.0)
+    log_probs[:, 10] = -0.5  # the soloist: steady, never the loudest
+    log_probs[18:22, 45] = 0.0  # the competitor: louder, briefly
+
+    assert set(viterbi_bins(log_probs, 0.0)) == {10, 45}
+    assert set(viterbi_bins(log_probs, 0.05)) == {10}
+
+
+def test_viterbi_still_follows_a_real_interval():
+    """The other half of the trade: continuity must not flatten the melody.
+    A leap that STAYS is paid for once and is worth it."""
+    numpy = pytest.importorskip("numpy")
+    from swingscribe.stages.transcribe import viterbi_bins
+
+    log_probs = numpy.full((40, 60), -6.0)
+    log_probs[:20, 10] = -0.5
+    log_probs[20:, 45] = -0.5  # an octave-ish leap, sustained
+
+    path = viterbi_bins(log_probs, 0.05)
+    assert path[0] == 10
+    assert path[-1] == 45
+
+
+def test_viterbi_never_chooses_a_masked_bin():
+    numpy = pytest.importorskip("numpy")
+    from swingscribe.stages.transcribe import BIN_FLOOR, viterbi_bins
+
+    log_probs = numpy.zeros((6, 20))
+    log_probs[:, 3] = 5.0
+    log_probs[:, 15] = BIN_FLOOR  # outside [fmin, fmax]
+    assert 15 not in viterbi_bins(log_probs, 0.1)
+
+
+def test_viterbi_handles_an_empty_matrix():
+    numpy = pytest.importorskip("numpy")
+    from swingscribe.stages.transcribe import viterbi_bins
+
+    assert viterbi_bins(numpy.zeros((0, 360)), 0.1) == []
+
+
+def test_refine_bins_interpolates_between_bin_centres():
+    numpy = pytest.importorskip("numpy")
+    from swingscribe.stages.transcribe import CENTS_PER_BIN, refine_bins
+
+    probs = numpy.zeros((1, 20))
+    probs[0, 10] = 1.0
+    probs[0, 11] = 1.0  # mass split evenly across two adjacent bins
+    cents = refine_bins(probs, [10])
+    centre_10 = refine_bins(numpy.eye(20)[None, 10], [10])[0]
+    assert abs(cents[0] - (centre_10 + CENTS_PER_BIN / 2)) < 1e-6
+
+
+def test_hz_to_bin_agrees_with_midi_conversion():
+    from swingscribe.stages.transcribe import _hz_to_bin
+
+    # 20 cents per bin means a semitone is exactly 5 bins, an octave 60.
+    assert abs((_hz_to_bin(440.0) - _hz_to_bin(220.0)) - 60.0) < 1e-9
+    assert abs((_hz_to_bin(440.0) - _hz_to_bin(415.3047)) - 5.0) < 1e-3

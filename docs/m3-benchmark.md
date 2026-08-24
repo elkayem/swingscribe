@@ -113,21 +113,59 @@ the same note. Quantization is M5's job and there is no tempo map yet — the
 per-window fit had to absorb up to 1.94 s of drift, which is 6 beats at
 Confirmation's tempo. Do not read these as a verdict on M3.
 
+## Follow-up: Viterbi f0 decoding
+
+The first fix these numbers motivated, measured the same way. CREPE was being
+decoded per frame with nothing connecting frame t to frame t-1, so a louder
+instrument captured the pitch for as long as it was louder. `transcribe.
+pitch_step_cost` charges for movement between frames; 0.2 is the default.
+
+| | before | after | invented notes |
+|---|---|---|---|
+| Confirmation | 0.747 | **0.762** | 242 -> 215 |
+| All The Things | 0.893 | 0.892 | 38 -> 39 |
+| Giant Steps | 0.688 | **0.702** | 69 -> 47 |
+
+Two caveats on reading that table:
+
+- The "before" column is **not** the results table above. It is the new code
+  path with the transition cost set to zero, which already scores higher than
+  what M3 shipped (0.736 / 0.883 / 0.686) because torchcrepe's
+  `weighted_argmax` sigmoids an activation that is already a probability and
+  then dithers the result. Of the total gain, roughly 0.008 mean F1 is that
+  fix and 0.009 is continuity. They are separated here so neither gets credit
+  for the other.
+- All The Things was already at 0.89 and does not move. The gain is
+  concentrated exactly where the error was.
+
+Raising the cost to 0.4 scores higher again (0.764 / 0.892 / 0.709) but starts
+refusing real intervals — Giant Steps' missed notes go 28 -> 44 — so 0.2 is
+where the trade stops being free.
+
+What this does *not* do is close open-issue #8. Confirmation still invents 215
+notes, and they are still mostly other instruments.
+
 ## What this suggests next
 
 1. **For the horns, isolation is the bottleneck.** The largest single lever is
    keeping other instruments out of the stem the tracker sees (issue #8).
    Tuning CREPE's gates will not touch 240 spurious notes. But the Giant Steps
    result above is a warning that "isolate harder" is not a general answer —
-   it did nothing there.
+   it did nothing there. *Partly acted on:* Viterbi decoding removed 27 of
+   Confirmation's and 22 of Giant Steps' invented notes without touching
+   isolation at all — see the follow-up section. The rest still stand.
 2. **For a piano or guitar soloist, the ceiling is monophony itself.** This is
    the two-or-three-note path already wanted for solos that are not single
    lines, and it is what M7b exists for.
-3. **A minimum-duration floor should be beat-relative, not absolute.** An 80 ms
-   floor removes 25% / 43% of invented notes for 5% / 3% of matched ones on the
-   tenors — a clear win. On Giant Steps the same floor removes 10% for 11%, a
-   loss, because at 249 bpm real notes *are* that short. 80 ms is 0.25 beats at
-   187 bpm but 0.33 beats at 249. `min_note_ms` is the wrong unit.
+3. **A minimum-duration floor should be beat-relative — but it is worth very
+   little.** An 80 ms floor removes 25% / 43% of invented notes for 5% / 3% of
+   matched ones on the tenors. On Giant Steps it removes 10% for 11%, a loss,
+   because at 249 bpm real notes *are* that short: 80 ms is 0.25 beats at
+   187 bpm but 0.33 beats at 249, so `min_note_ms` is the wrong unit. Working
+   the counts through, though, an absolute floor moves pitch F1 by +0.006 /
+   +0.007 / −0.045, and making it beat-relative only rescues the third case to
+   about neutral. This is a footnote, not a lever — an earlier draft of this
+   file oversold it as "a clear win".
 4. **The three failure modes are now separable and cheap to re-measure**, which
    is what this harness is for. Re-run it after any transcribe change.
 

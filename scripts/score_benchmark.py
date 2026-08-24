@@ -69,7 +69,7 @@ TUNES = {
 }
 
 
-def transcribe_all(cache_path: Path) -> dict:
+def transcribe_all(cache_path: Path, step_cost: float = 0.0) -> dict:
     """Run the transcriber over each tune's saved span, caching the notes.
 
     Cached because CREPE on CPU is minutes per tune and the scoring above it
@@ -98,8 +98,13 @@ def transcribe_all(cache_path: Path) -> dict:
                 f"{title}: no {stem!r} stem for {model}. Separate it first:\n"
                 f"    uv run swingscribe run {src!r}"
             )
-        tc = base.transcribe.model_copy(update={"stem": stem, "region": (lo, hi)})
-        print(f"\n=== {title}: {stem} of {model}, {lo:.1f}-{hi:.1f}s ===", flush=True)
+        tc = base.transcribe.model_copy(
+            update={"stem": stem, "region": (lo, hi), "pitch_step_cost": step_cost}
+        )
+        print(
+            f"\n=== {title}: {stem} of {model}, {lo:.1f}-{hi:.1f}s, step cost {step_cost} ===",
+            flush=True,
+        )
         started = time.time()
         notes, diagnostics = transcribe.analyze(str(stem_path), tc, log=True)
         print(f"  {len(notes)} notes in {time.time() - started:.0f}s", flush=True)
@@ -253,13 +258,26 @@ def main() -> None:
     parser.add_argument(
         "--reuse", action="store_true", help="score the cached notes instead of re-running CREPE"
     )
-    parser.add_argument("--notes", type=Path, default=Path(".benchmark-notes.json"))
+    parser.add_argument("--notes", type=Path, default=None)
+    parser.add_argument(
+        "--step-cost",
+        type=float,
+        default=0.0,
+        help="Viterbi f0 continuity cost per CREPE pitch bin (transcribe.pitch_step_cost)",
+    )
     args = parser.parse_args()
 
-    if args.reuse and args.notes.is_file():
-        runs = json.loads(args.notes.read_text(encoding="utf-8"))
+    # One cache per decoding setting: they are not interchangeable results.
+    default_notes = (
+        ".benchmark-notes.json"
+        if not args.step_cost
+        else f".benchmark-notes-c{args.step_cost}.json"
+    )
+    notes_path = args.notes or Path(default_notes)
+    if args.reuse and notes_path.is_file():
+        runs = json.loads(notes_path.read_text(encoding="utf-8"))
     else:
-        runs = transcribe_all(args.notes)
+        runs = transcribe_all(notes_path, args.step_cost)
 
     for key in TUNES:
         s = score_tune(key, runs[key])
