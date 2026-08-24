@@ -182,12 +182,12 @@ pins the failure, `held_note_over_quiet_comping` defends the level where it work
 Directions: better stem isolation (6-stem, see #3), a periodicity/energy gate that
 notices it has switched sources mid-note, or CREPE's ensemble/`full` model.
 
-**Confirmed on real music, and it is now the largest error source in the
-pipeline.** Scoring against the hand transcriptions (`docs/m3-benchmark.md`),
-Confirmation produced 253 notes that are not in the score — and only 13 of
-them repeat a neighbour's pitch, so they are not #1's fragmentation coming
-back. The other 240 sit at unrelated pitches: they are other instruments.
-Recall is fine (0.86); precision is what this costs us (0.64).
+**Confirmed on real music — but see the correction below for how much of the
+error it actually accounts for.** Scoring against the hand transcriptions
+(`docs/m3-benchmark.md`), Confirmation produced 253 notes that are not in the
+score, and only 13 of them repeat a neighbour's pitch, so they are not #1's
+fragmentation coming back. Recall is fine (0.86); precision is what this costs
+us (0.64).
 
 Note that #3's dedicated stems did *not* fix the equivalent on Giant Steps, so
 "better isolation" is not automatically the answer — see #3.
@@ -215,6 +215,46 @@ fall 242 -> 215 and on Giant Steps 69 -> 47.
 **This does not close the issue.** Confirmation still invents 215 notes; the
 gain is real but partial, and the largest error source is still other
 instruments in the stem.
+
+### CORRECTION: on the horns, most of the rest is not other instruments
+
+An earlier version of this entry read "only 13 of 253 repeat a neighbour's
+pitch, so the other 240 sit at unrelated pitches: they are other instruments."
+The first half is measured; the second half was an inference, and it is wrong.
+"Not the same pitch as its neighbour" is not "unrelated to its neighbour".
+
+Measured properly — each invented note against the nearest real notes on
+either side of it in time, after Viterbi decoding:
+
+| | Confirmation | All The Things | Giant Steps |
+|---|---|---|---|
+| invented notes | 215 | 39 | 47 |
+| within 2 semitones of a real neighbour | **74%** | **94%** | 24% |
+| sitting *between* its neighbours in pitch | 49% | 77% | 15% |
+| more than 4 semitones from both | 16% | 0% | **70%** |
+| outside the soloist's own register | 7% | 5% | **55%** |
+| within 0.5s of a real note | 85% | 85% | 96% |
+| median duration vs matched | 0.110 / 0.150s | 0.110 / 0.160s | 0.120 / 0.130s |
+
+The two horn solos and the piano solo have different remaining failure modes,
+and only one of them is this issue:
+
+- **On the tenors, the remaining invented notes are the soloist's own
+  articulation.** They are one or two semitones from a real note (commonest
+  intervals -1, -2, +1, +2), half of them sit between their neighbours, none
+  are out of register, and they are short. Those are scoops, bends, grace
+  notes and passing tones — sound the player really made and the transcriber
+  chose not to notate. Not other instruments, and not something isolation can
+  reach.
+- **On Giant Steps it really is a second source**: 70% more than 4 semitones
+  from both neighbours, 55% below the soloist's register, commonest intervals
+  -10, -17, -9, -12, -20. The pianist's left hand, as #3 concluded.
+
+So this issue is real but it is now mostly a *piano-soloist* issue, and the
+horn precision gap belongs to a new problem: deciding which pitch inflections
+deserve to be notated as separate notes. `pitch_persist_ms` currently applies
+one flat 60ms threshold regardless of interval size, which cannot distinguish
+a bend from a melodic step.
 
 ### Two things the synthetic case got wrong about this
 

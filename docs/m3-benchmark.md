@@ -74,10 +74,13 @@ the harmonic-attack corroboration was built to kill — number **13 of 253, 5
 of 46, and 3 of 69**. Fragmentation is essentially gone outside the synthetic
 suite too.
 
-**So the invented notes are other instruments.** 240 of Confirmation's 253
-are at some unrelated pitch. That is open-issue #8 (CREPE follows the loudest
-broadband source, not the soloist) showing up on real audio, and it is now
-the single largest error source in the whole pipeline.
+**So the invented notes are at some other pitch** — 240 of Confirmation's 253.
+This section originally continued "they are other instruments", attributing
+them to open-issue #8. That inference was wrong and is corrected in the
+follow-up below: measured against their neighbours rather than just counted as
+different, 74% of them are within two semitones of a real note. On the horns
+they are the soloist's own scoops and passing tones. Only Giant Steps' are a
+second instrument.
 
 **Giant Steps' errors all point downward — and separation cannot fix them.**
 Its commonest substitutions are −12 (×18), −14, −19, −17, never upward. Its
@@ -142,8 +145,31 @@ Raising the cost to 0.4 scores higher again (0.764 / 0.892 / 0.709) but starts
 refusing real intervals — Giant Steps' missed notes go 28 -> 44 — so 0.2 is
 where the trade stops being free.
 
-What this does *not* do is close open-issue #8. Confirmation still invents 215
-notes, and they are still mostly other instruments.
+### Where the remaining invented notes actually are
+
+Viterbi does not close open-issue #8 — Confirmation still invents 215 notes —
+but measuring *what they are* changed which problem is next. Each invented note
+against the nearest real note on either side of it in time:
+
+| | Confirmation | All The Things | Giant Steps |
+|---|---|---|---|
+| invented notes | 215 | 39 | 47 |
+| within 2 semitones of a real neighbour | **74%** | **94%** | 24% |
+| sitting *between* its neighbours in pitch | 49% | 77% | 15% |
+| more than 4 semitones from both | 16% | 0% | **70%** |
+| outside the soloist's register | 7% | 5% | **55%** |
+| within 0.5s of a real note | 85% | 85% | 96% |
+| median duration vs matched | 0.110 / 0.150s | 0.110 / 0.160s | 0.120 / 0.130s |
+
+They are not in the rests, and on the horns they are not other instruments.
+They are inside the phrases, in the soloist's register, one or two semitones
+from a real note, and short: scoops, bends, grace notes, passing tones — sound
+the player made that the transcriber chose not to write down. Giant Steps is
+the opposite on every row, and stays a second-source problem.
+
+That splits the remaining precision gap into two unrelated problems, and puts
+the horn one somewhere new: `pitch_persist_ms` applies one flat 60ms threshold
+however large the interval is, so it cannot tell a bend from a melodic step.
 
 ## What this suggests next
 
