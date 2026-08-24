@@ -164,3 +164,47 @@ Regression-guarded both ways in `tests/test_synthetic.py`: `held_note_over_compi
 pins the failure, `held_note_over_quiet_comping` defends the level where it works.
 Directions: better stem isolation (6-stem, see #3), a periodicity/energy gate that
 notices it has switched sources mid-note, or CREPE's ensemble/`full` model.
+
+## 9. The drum-stem gate is global, but drum presence is local
+
+Confirmation draws no bars for its first ~20s. Not a drawing bug and not a
+meter bug — the beat *tracker* found almost nothing there, and the meter stage
+correctly declined to invent bars over it.
+
+Measured (htdemucs_6s, RMS per 4s window against a whole-mix RMS of 0.130):
+
+| window | mix | drums | bass | piano |
+|---|---|---|---|---|
+| 0–4s | 0.112 | **0.00005** | 0.00008 | 0.002 |
+| 4–8s | 0.115 | 0.005 | 0.035 | 0.012 |
+| 8–12s | 0.126 | 0.012 | 0.053 | 0.017 |
+| 28–32s | 0.138 | 0.024 | 0.076 | 0.022 |
+
+The intro has no drums at all — the drum stem is ~68dB below the mix for the
+first four seconds, and the kit only arrives gradually. Beats stage runs on
+the drum stem by design (plan §5: the ride is the cleanest reference), so it
+had nothing to track. The result:
+
+- no beats at all before 11.28s
+- three sparse beats 11.28–13.82, then a 6.06s hole
+- from 19.88s a steady grid, but at 0.62s spacing — **half** the true rate
+- whole-track median 187.5 bpm, and the transcription implies 187.3 bpm, so
+  the tracker is exactly right once the drums are playing
+
+`min_drum_mix_ratio` (open-issue #3's relative gate) correctly keeps the drum
+stem here, because *across the whole track* drums are well above the 5%
+threshold. The gate cannot see that one passage has none. A drumless intro —
+a piano intro, a rubato head, a horn pickup — is common in jazz, so this will
+recur.
+
+**Fix directions**, none obviously right yet:
+- Make the drum-stem decision per-passage rather than per-track, falling back
+  to the mix where the stem is locally dead.
+- Or track both sources always and splice, preferring whichever is locally
+  steadier (an extension of the existing grid-quality comparison).
+- The half-rate opening is the Corner Pocket pattern from docs/meter-plan.md;
+  repair seeded from the global mode should reach it, but cannot here because
+  the surviving early beats are too few to form a span (`min_span_beats`).
+
+Low urgency for the benchmark work: Confirmation's `form_start` is 51.4s, well
+clear of the damage. It matters when a solo *starts* near a drumless passage.
