@@ -122,6 +122,19 @@ button.restart { font: 12px var(--mono); padding: 8px 10px; }
 .track-list li.empty:hover { background: none; }
 .track-list .name { flex: 1; }
 .track-list .meta { color: var(--muted); font: 12px var(--mono); }
+.track-list li.dir .name::before { content: "📁 "; }
+.track-list li.dir .meta { color: var(--muted); }
+
+.browse-bar { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.browse-bar #browse-up { flex: 0 0 auto; }
+.browse-bar #browse-drive { flex: 0 0 auto; }
+.browse-path-input {
+  flex: 1; min-width: 0; font: 12px var(--mono); color: var(--text);
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 5px 8px;
+}
+.browse-path-input:focus { outline: none; border-color: var(--accent); }
+
 .picker-foot { display: flex; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); }
 .picker-foot input {
   flex: 1; font: 13px var(--mono); color: var(--text);

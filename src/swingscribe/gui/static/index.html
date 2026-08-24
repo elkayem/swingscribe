@@ -27,7 +27,13 @@
         <ul class="track-list" id="recent-list"><li class="empty">Nothing yet</li></ul>
       </section>
       <section>
-        <h3>Library <span class="muted" id="library-dir"></span></h3>
+        <h3>Browse</h3>
+        <div class="browse-bar">
+          <button class="ghost" id="browse-up" title="Up one level">↑ Up</button>
+          <select class="chip-select" id="browse-drive" title="Jump to a drive"></select>
+          <input type="text" id="browse-path" class="browse-path-input" spellcheck="false"
+                 title="Current folder — edit and press Enter to jump to a path">
+        </div>
         <ul class="track-list" id="library-list"><li class="empty">Scanning…</li></ul>
       </section>
     </div>

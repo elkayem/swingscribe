@@ -125,6 +125,13 @@ def create_app(config: Config) -> FastAPI:
     def get_tracks() -> dict[str, Any]:
         return {"library": library.list_tracks(config), "recent": library.recent_tracks(config)}
 
+    @app.get("/api/browse")
+    def get_browse(path: str | None = None) -> dict[str, Any]:
+        try:
+            return library.browse(path, config)
+        except (NotADirectoryError, FileNotFoundError, PermissionError) as exc:
+            raise HTTPException(400, f"cannot open {path or '(library folder)'}: {exc}") from exc
+
     @app.post("/api/tracks/open")
     def post_open(request: OpenRequest) -> dict[str, Any]:
         entry = open_track(request.path)

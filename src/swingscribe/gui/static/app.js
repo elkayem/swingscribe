@@ -121,40 +121,95 @@ const stemWave = new WaveView($('wave-stem'), {
 
 // ── screen 1: the track picker ──────────────────────────────────────────────
 
+// The last successful /api/browse response. Kept around so reopening the
+// picker (or a failed navigation) returns to where you were, not the start.
+let browseRoot = null;
+
 async function refreshPicker() {
   $('picker-error').hidden = true;
   try {
-    const [config, tracks] = await Promise.all([api('/api/config'), api('/api/tracks')]);
-    $('library-dir').textContent = config.library_dir;
-    renderTrackList($('recent-list'), tracks.recent, true);
-    renderTrackList($('library-list'), tracks.library, false);
+    const tracks = await api('/api/tracks');
+    renderTrackList($('recent-list'), tracks.recent);
+  } catch (error) {
+    showPickerError(error.message);
+  }
+  await browseTo(browseRoot?.path ?? null);
+}
+
+function renderTrackList(node, items) {
+  node.innerHTML = '';
+  if (!items.length) {
+    node.innerHTML = '<li class="empty">Nothing yet</li>';
+    return;
+  }
+  for (const item of items) {
+    const li = document.createElement('li');
+    // Recents describe the work done on a track: span and stem.
+    const meta = item.region
+      ? `${item.stem ?? 'no stem'} · ${clock(item.region[0], false)}–${clock(item.region[1], false)}`
+      : (item.stem ?? '');
+    li.innerHTML = `<span class="name"></span><span class="meta"></span>`;
+    li.querySelector('.name').textContent = item.name;
+    li.querySelector('.meta').textContent = meta;
+    li.addEventListener('click', () => openTrack(item.path));
+    node.appendChild(li);
+  }
+}
+
+/* The folder browser: navigate to `path` (null = the configured library
+   folder) and render its subfolders and audio files. This is what lets
+   "Open track…" reach anywhere on disk without typing a path — the pasted-
+   path box below stays as a fallback for anywhere you'd rather jump straight
+   to. Errors (a locked folder, a path that no longer exists) show inline
+   without losing the listing you were already looking at. */
+async function browseTo(path) {
+  try {
+    const query = path ? `?path=${encodeURIComponent(path)}` : '';
+    const data = await api(`/api/browse${query}`);
+    browseRoot = data;
+    renderBrowse(data);
+    $('picker-error').hidden = true;
   } catch (error) {
     showPickerError(error.message);
   }
 }
 
-function renderTrackList(node, items, isRecent) {
+function renderBrowse(data) {
+  $('browse-path').value = data.path;
+  $('browse-up').disabled = !data.parent;
+
+  const driveSelect = $('browse-drive');
+  driveSelect.innerHTML = '';
+  for (const drive of data.drives) {
+    const option = document.createElement('option');
+    option.value = drive;
+    option.textContent = drive;
+    driveSelect.appendChild(option);
+  }
+  const currentDrive = data.path.slice(0, 3);
+  if (data.drives.includes(currentDrive)) driveSelect.value = currentDrive;
+
+  const node = $('library-list');
   node.innerHTML = '';
-  if (!items.length) {
-    node.innerHTML = `<li class="empty">${isRecent ? 'Nothing yet' : 'No audio files here'}</li>`;
+  if (!data.dirs.length && !data.files.length) {
+    node.innerHTML = '<li class="empty">No folders or audio files here</li>';
     return;
   }
-  for (const item of items) {
+  for (const dir of data.dirs) {
     const li = document.createElement('li');
-    // Recents describe the work (span and stem); library entries only have a
-    // file, so they describe the file.
-    let meta = '';
-    if (isRecent) {
-      meta = item.region
-        ? `${item.stem ?? 'no stem'} · ${clock(item.region[0], false)}–${clock(item.region[1], false)}`
-        : (item.stem ?? '');
-    } else if (Number.isFinite(item.size)) {
-      meta = `${(item.size / 1e6).toFixed(1)} MB`;
-    }
-    li.innerHTML = `<span class="name"></span><span class="meta"></span>`;
-    li.querySelector('.name').textContent = item.name;
+    li.className = 'dir';
+    li.innerHTML = '<span class="name"></span>';
+    li.querySelector('.name').textContent = dir.name;
+    li.addEventListener('click', () => browseTo(dir.path));
+    node.appendChild(li);
+  }
+  for (const file of data.files) {
+    const li = document.createElement('li');
+    const meta = Number.isFinite(file.size) ? `${(file.size / 1e6).toFixed(1)} MB` : '';
+    li.innerHTML = '<span class="name"></span><span class="meta"></span>';
+    li.querySelector('.name').textContent = file.name;
     li.querySelector('.meta').textContent = meta;
-    li.addEventListener('click', () => openTrack(item.path));
+    li.addEventListener('click', () => openTrack(file.path));
     node.appendChild(li);
   }
 }
@@ -945,6 +1000,14 @@ $('picker-close').addEventListener('click', () => { $('picker').hidden = true; }
 $('path-open').addEventListener('click', () => openTrack($('path-input').value.trim()));
 $('path-input').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') openTrack($('path-input').value.trim());
+});
+
+$('browse-up').addEventListener('click', () => {
+  if (browseRoot?.parent) browseTo(browseRoot.parent);
+});
+$('browse-drive').addEventListener('change', (event) => browseTo(event.target.value));
+$('browse-path').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') browseTo(event.target.value.trim());
 });
 
 $('play').addEventListener('click', () => { state.active = 'mix'; togglePlay(); });

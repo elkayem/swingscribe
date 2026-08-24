@@ -98,6 +98,39 @@ def test_tracks_lists_the_library(world):
     assert payload["recent"] == []
 
 
+def test_browse_defaults_to_library_dir(world):
+    payload = world["client"].get("/api/browse").json()
+    assert [f["name"] for f in payload["files"]] == ["Some Tune.m4a"]
+    assert payload["parent"] is not None  # not a drive root
+
+
+def test_browse_can_navigate_to_a_subfolder(world, tmp_path):
+    sub = pathlib.Path(world["config"].gui.library_dir) / "solos"
+    sub.mkdir()
+    (sub / "take.wav").write_bytes(b"pretend audio")
+
+    payload = world["client"].get("/api/browse", params={"path": str(sub)}).json()
+    assert payload["path"] == str(sub.resolve())
+    assert [f["name"] for f in payload["files"]] == ["take.wav"]
+    assert payload["parent"] == str(sub.parent)
+
+
+def test_browse_rejects_a_nonexistent_path(world, tmp_path):
+    response = world["client"].get("/api/browse", params={"path": str(tmp_path / "nope")})
+    assert response.status_code == 400
+
+
+def test_browse_a_folder_then_open_a_file_found_there(world):
+    """The realistic path: navigate somewhere new, then open what you found —
+    matches the actual bug report (a file in an unlisted folder)."""
+    payload = (
+        world["client"].get("/api/browse", params={"path": str(world["source"].parent)}).json()
+    )
+    found = next(f for f in payload["files"] if f["name"] == "Some Tune.m4a")
+    response = world["client"].post("/api/tracks/open", json={"path": found["path"]})
+    assert response.status_code == 200, response.text
+
+
 def test_open_returns_duration_and_model_readiness(world):
     track = open_track(world)
     assert track["duration"] == pytest.approx(6.0)

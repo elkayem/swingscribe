@@ -62,6 +62,83 @@ def test_list_tracks_survives_a_missing_directory(config):
     assert library.list_tracks(config) == []
 
 
+def test_browse_defaults_to_library_dir(tmp_path, config):
+    music = tmp_path / "music"
+    make_audio(music / "solo.m4a")
+    (music / "subdir").mkdir()
+
+    result = library.browse(None, config)
+    assert result["path"] == str(music.resolve())
+    assert [d["name"] for d in result["dirs"]] == ["subdir"]
+    assert [f["name"] for f in result["files"]] == ["solo.m4a"]
+
+
+def test_browse_navigates_to_an_explicit_path(tmp_path, config):
+    other = tmp_path / "elsewhere"
+    make_audio(other / "take.wav")
+    result = library.browse(str(other), config)
+    assert result["path"] == str(other.resolve())
+    assert [f["name"] for f in result["files"]] == ["take.wav"]
+
+
+def test_browse_reports_parent_for_navigation_up(tmp_path, config):
+    child = tmp_path / "a" / "b"
+    child.mkdir(parents=True)
+    result = library.browse(str(child), config)
+    assert result["parent"] == str(child.parent)
+
+
+def test_browse_drive_root_has_no_parent():
+    drives = library.list_drives()
+    result = library.browse(drives[0], Config())
+    assert result["parent"] is None
+
+
+def test_browse_excludes_our_own_derived_output(tmp_path, config):
+    music = tmp_path / "music"
+    make_audio(music / "Blues.m4a")
+    make_audio(music / "Blues.ab.wav")
+
+    result = library.browse(str(music), config)
+    assert [f["name"] for f in result["files"]] == ["Blues.m4a"]
+
+
+def test_browse_skips_hidden_entries(tmp_path, config):
+    music = tmp_path / "music"
+    make_audio(music / "solo.m4a")
+    (music / ".git").mkdir(parents=True)
+
+    result = library.browse(str(music), config)
+    assert result["dirs"] == []
+
+
+def test_browse_rejects_a_file_path(tmp_path, config):
+    audio = make_audio(tmp_path / "music" / "solo.m4a")
+    with pytest.raises(NotADirectoryError):
+        library.browse(str(audio), config)
+
+
+def test_browse_rejects_a_missing_path(tmp_path, config):
+    with pytest.raises(NotADirectoryError):
+        library.browse(str(tmp_path / "does-not-exist"), config)
+
+
+def test_browse_lists_are_sorted_case_insensitively(tmp_path, config):
+    music = tmp_path / "music"
+    make_audio(music / "banana.wav")
+    make_audio(music / "Apple.wav")
+    make_audio(music / "cherry.wav")
+
+    names = [f["name"] for f in library.browse(str(music), config)["files"]]
+    assert names == ["Apple.wav", "banana.wav", "cherry.wav"]
+
+
+def test_browse_reports_available_drives():
+    drives = library.list_drives()
+    assert all(d.endswith(":\\") for d in drives)
+    assert len(drives) >= 1  # the drive this repo lives on, at minimum
+
+
 def test_settings_live_beside_the_audio_not_in_the_cache(config, tmp_path):
     """The cache holds derived data that must stay safely deletable; a span and
     a downbeat are judgements that took listening to reach. Clearing gigabytes

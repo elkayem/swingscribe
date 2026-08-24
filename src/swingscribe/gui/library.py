@@ -57,6 +57,64 @@ def library_dir(config: Config) -> Path:
     return Path(configured).expanduser().resolve() if configured else Path.cwd().resolve()
 
 
+def list_drives() -> list[str]:
+    """Windows drive letters that exist, for the folder browser's root level.
+
+    Windows-only, matching the rest of this project (CLAUDE.md). A single-drive
+    machine still benefits: it's how the browser gets back to "Computer" after
+    navigating down into a folder with no further parent.
+    """
+    import string
+
+    return [f"{letter}:\\" for letter in string.ascii_uppercase if Path(f"{letter}:\\").exists()]
+
+
+def browse(path: str | Path | None, config: Config) -> dict[str, Any]:
+    """Subdirectories and audio files at `path`, for the folder browser.
+
+    Deliberately NOT confined to library_dir — that restriction is what this
+    feature removes. It is not a new privilege boundary: the picker's "paste a
+    full path" box already opened any file the OS user can read, and the
+    server only ever binds to 127.0.0.1 (GuiConfig). Browsing just makes that
+    existing reach navigable instead of requiring a typed path.
+
+    `path=None` starts at library_dir. A permission error on an individual
+    entry is skipped rather than failing the whole listing — one locked-down
+    subfolder should not block browsing its siblings.
+    """
+    root = Path(path).expanduser().resolve() if path else library_dir(config)
+    if not root.is_dir():
+        raise NotADirectoryError(str(root))
+
+    dirs: list[dict[str, Any]] = []
+    files: list[dict[str, Any]] = []
+    try:
+        entries = list(root.iterdir())
+    except PermissionError:
+        entries = []
+    for p in entries:
+        if p.name.startswith("."):
+            continue
+        try:
+            if p.is_dir():
+                dirs.append({"name": p.name, "path": str(p)})
+            elif p.suffix.lower() in AUDIO_SUFFIXES and not is_derived_output(p):
+                files.append({"name": p.name, "path": str(p), "size": p.stat().st_size})
+        except OSError:
+            continue  # unreadable entry (permissions, broken junction) — skip it, not the listing
+
+    dirs.sort(key=lambda d: d["name"].lower())
+    files.sort(key=lambda f: f["name"].lower())
+    parent = root.parent
+    return {
+        "path": str(root),
+        "parent": None if parent == root else str(parent),  # a drive root is its own parent
+        "dirs": dirs,
+        "files": files,
+        "drives": list_drives(),
+    }
+
+
 def list_tracks(config: Config) -> list[dict[str, Any]]:
     """Audio files in the library directory, newest first.
 
