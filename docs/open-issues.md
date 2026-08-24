@@ -197,14 +197,48 @@ threshold. The gate cannot see that one passage has none. A drumless intro —
 a piano intro, a rubato head, a horn pickup — is common in jazz, so this will
 recur.
 
-**Fix directions**, none obviously right yet:
-- Make the drum-stem decision per-passage rather than per-track, falling back
-  to the mix where the stem is locally dead.
-- Or track both sources always and splice, preferring whichever is locally
-  steadier (an extension of the existing grid-quality comparison).
-- The half-rate opening is the Corner Pocket pattern from docs/meter-plan.md;
-  repair seeded from the global mode should reach it, but cannot here because
-  the surviving early beats are too few to form a span (`min_span_beats`).
+### Measured: which source would have found the intro?
+
+beat_this run on each source for Confirmation, truth 187.3 bpm from the hand
+transcription:
+
+| source | intro coverage 0-30s | first beat | intro gaps | whole stdev | octave outliers |
+|---|---|---|---|---|---|
+| drums (current) | 20/94 = 21% | 11.28s | 1.28, 6.06, 0.62... | **22.0** | 2% |
+| bass | 36/94 = 38% | 9.62s | 0.64, 0.66, 0.64... | 45.9 | **30%** |
+| full mix | **95/94 = 101%** | **0.24s** | **0.32, 0.34, 0.32** | 64.5 | 2% |
+
+Bass beats drums in the intro but finds beats at HALF the true rate — the
+bassist is playing a 2-feel in the head and only walks in 4 for the solos, so
+the bass reports its own rhythm rather than the pulse. That is why its
+whole-track octave-outlier rate is 30%. Bass is not the answer.
+
+The full mix is: 101% intro coverage at exactly the right rate. In a drumless
+intro the pulse is carried by the *ensemble*, and separation destroys that by
+isolating one instrument. But the full mix is three times less steady than the
+drum stem over the body of the track, so it is not the answer everywhere
+either.
+
+### The deeper bug
+
+The M2 grid-quality comparison already tries the other source when a grid is
+suspect. **It never fired here**, because the drum grid is excellent by every
+whole-track measure — 187.5 bpm median, 2% outliers, the steadiest of the
+three. A grid can be superb across 95% of a track and have a 20-second hole
+at the front, and nothing in `grid_is_suspect` notices.
+
+So source selection AND quality assessment are both global, and the failure is
+local. That is the same shape as the drum-gate problem above, one level up.
+
+**Fix direction:** evaluate coverage and steadiness per passage and splice —
+full mix for the intro, drum stem for the body. A coverage test (are there
+long stretches with no beats where the audio is not silent?) would catch this
+class of failure that steadiness alone cannot see.
+
+The half-rate opening is also the Corner Pocket pattern from
+docs/meter-plan.md; repair seeded from the global mode should reach it, but
+cannot here because the surviving early beats are too few to form a span
+(`min_span_beats`).
 
 Low urgency for the benchmark work: Confirmation's `form_start` is 51.4s, well
 clear of the damage. It matters when a solo *starts* near a drumless passage.
