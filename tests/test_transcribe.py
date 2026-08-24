@@ -251,3 +251,31 @@ def test_crepe_recovers_synthetic_melody(tmp_path):
 
     pitches = [n.pitch for n in out.notes["other"]]
     assert pitches == [57, 60, 64, 62]
+
+    # analyze() must return the same notes as the stage, plus the frame trace
+    # the GUI's diagnostic overlay reads (docs/gui-design.md screen 4).
+    notes, diag = transcribe.analyze(str(other), config.transcribe)
+    assert [n.pitch for n in notes] == pitches
+    assert len(diag.periodicity) == len(diag.pitch) == len(diag.f0_midi) == len(diag.energy_ok)
+    assert len(diag.times) == len(diag.periodicity)
+    assert 0.0 < diag.voiced_fraction <= 1.0
+    # raw f0 survives gating so a gated-out frame can still be shown
+    assert sum(1 for p in diag.f0_midi if p is not None) >= sum(
+        1 for p in diag.pitch if p is not None
+    )
+
+
+def test_frame_diagnostics_times_are_whole_track():
+    from swingscribe.stages.transcribe import FrameDiagnostics
+
+    diag = FrameDiagnostics(
+        hop_s=0.01,
+        start=90.0,
+        f0_midi=[60.0, 60.0, None],
+        periodicity=[0.9, 0.9, 0.1],
+        energy_ok=[True, True, False],
+        pitch=[60.0, 60.0, None],
+        onsets=[90.0, 90.5],
+    )
+    assert diag.times == [90.0, 90.01, 90.02]  # offset by the region start
+    assert abs(diag.voiced_fraction - 2 / 3) < 1e-9

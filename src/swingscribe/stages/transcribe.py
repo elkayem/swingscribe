@@ -32,8 +32,10 @@ import math
 import statistics
 import sys
 import types
+from dataclasses import dataclass
 
-from swingscribe.config import Config
+from swingscribe import progress
+from swingscribe.config import Config, TranscribeConfig
 from swingscribe.device import resolve_device
 from swingscribe.model import Document, NoteEvent
 
@@ -286,30 +288,59 @@ def _spectral_flux_onsets(mono, rate: int, hop_s: float, min_sep_s: float = 0.05
     return {round(p * flux_hop_s / hop_s) for p in peaks}
 
 
-def run(document: Document, config: Config) -> Document:
+@dataclass(frozen=True)
+class FrameDiagnostics:
+    """Per-frame trace of how the transcription decision was reached.
+
+    Exists so a suspicious note can be traced to a *cause* — was the pitch
+    wrong, was the frame gated out, did an onset split it — rather than
+    guessed at. Deliberately NOT part of Document: it is an order of magnitude
+    more data than the notes, nothing downstream consumes it, and putting it
+    in the cached document would bloat every stage artifact for the sake of an
+    opt-in overlay.
+
+    All times are whole-track seconds. Lists are frame-aligned and equal
+    length except `onsets`.
+    """
+
+    hop_s: float
+    start: float  # whole-track time of frame 0
+    f0_midi: list[float | None]  # raw CREPE pitch, BEFORE any gating
+    periodicity: list[float]  # CREPE's own confidence
+    energy_ok: list[bool]  # passed the silence-floor gate
+    pitch: list[float | None]  # after both gates and median smoothing
+    onsets: list[float]  # detected onset times (note-split candidates)
+
+    @property
+    def times(self) -> list[float]:
+        return [self.start + i * self.hop_s for i in range(len(self.periodicity))]
+
+    @property
+    def voiced_fraction(self) -> float:
+        return sum(1 for p in self.pitch if p is not None) / max(1, len(self.pitch))
+
+
+def analyze(
+    stem_path: str, tc: TranscribeConfig, *, log: bool = False
+) -> tuple[list[NoteEvent], FrameDiagnostics]:
+    """Transcribe one stem, returning the notes AND the per-frame trace.
+
+    `run()` is a thin wrapper that keeps only the notes. Callers wanting the
+    diagnostic overlay (the GUI's review screen) call this directly — which
+    keeps transcription logic in the stage rather than duplicated in the UI.
+    """
     import soundfile
     import torch
     import torchaudio
 
     torchcrepe = _import_torchcrepe()
 
-    if document.audio is None:
-        raise ValueError("transcribe requires ingest to have run first (document.audio is None)")
-    tc = config.transcribe
-    if tc.ensemble != "horn-led":
-        raise NotImplementedError(
-            f"ensemble {tc.ensemble!r} is not implemented yet — the piano path arrives at M7b"
-        )
-    stem_path = document.stems.get(tc.stem)
-    if stem_path is None:
-        available = ", ".join(sorted(document.stems)) or "none (run separation first)"
-        raise ValueError(f"transcribe needs the {tc.stem!r} stem; available: {available}")
-
     data, rate = soundfile.read(stem_path, dtype="float32", always_2d=True)
     mono = data.mean(axis=1)
     mono, region_offset = crop_region(mono, rate, tc.region)
-    if tc.region:
+    if log and tc.region:
         print(f"transcribe: region {tc.region[0]:.1f}-{tc.region[1]:.1f}s of {tc.stem} stem")
+
     mono16 = (
         torchaudio.functional.resample(torch.from_numpy(mono), rate, CREPE_SAMPLE_RATE)
         .numpy()
@@ -318,10 +349,12 @@ def run(document: Document, config: Config) -> Document:
     hop_s = CREPE_HOP / CREPE_SAMPLE_RATE
 
     device = resolve_device(tc.device, torch.cuda.is_available())
-    print(
-        f"transcribe: crepe model={tc.crepe_model} device={device} "
-        f"ensemble={tc.ensemble} stem={tc.stem}"
-    )
+    if log:
+        print(
+            f"transcribe: crepe model={tc.crepe_model} device={device} "
+            f"ensemble={tc.ensemble} stem={tc.stem}"
+        )
+    progress.report("transcribe", 0.05, f"running CREPE ({tc.crepe_model}) on {device}")
     f0, periodicity = torchcrepe.predict(
         torch.from_numpy(mono16)[None],
         CREPE_SAMPLE_RATE,
@@ -339,12 +372,14 @@ def run(document: Document, config: Config) -> Document:
 
     # Gate on periodicity AND frame energy — silence between phrases must
     # not transcribe (see module docstring for the thresholds' rationale).
+    progress.report("transcribe", 0.75, "gating and segmenting")
     energetic = _frame_energy_gate(mono16, tc.silence_floor_db)
     count = min(len(f0), len(energetic))
+    raw_midi: list[float | None] = [
+        hz_to_midi(float(f0[i])) if f0[i] and f0[i] > 0 else None for i in range(count)
+    ]
     pitches: list[float | None] = [
-        hz_to_midi(float(f0[i]))
-        if periodicity[i] >= tc.voicing_threshold and energetic[i]
-        else None
+        raw_midi[i] if periodicity[i] >= tc.voicing_threshold and energetic[i] else None
         for i in range(count)
     ]
     kernel = max(1, round(tc.median_filter_ms / 1000.0 / hop_s) | 1)
@@ -365,7 +400,35 @@ def run(document: Document, config: Config) -> Document:
     notes = fold_octave_outliers(notes)
     notes = offset_notes(notes, region_offset)  # back to whole-track time
 
-    voiced_fraction = sum(1 for p in pitches if p is not None) / max(1, len(pitches))
+    diagnostics = FrameDiagnostics(
+        hop_s=hop_s,
+        start=region_offset,
+        f0_midi=raw_midi,
+        periodicity=[float(p) for p in periodicity[:count]],
+        energy_ok=list(energetic[:count]),
+        pitch=pitches,
+        onsets=sorted(region_offset + f * hop_s for f in onset_frames),
+    )
+    progress.report("transcribe", 1.0, f"{len(notes)} notes")
+    return notes, diagnostics
+
+
+def run(document: Document, config: Config) -> Document:
+    if document.audio is None:
+        raise ValueError("transcribe requires ingest to have run first (document.audio is None)")
+    tc = config.transcribe
+    if tc.ensemble != "horn-led":
+        raise NotImplementedError(
+            f"ensemble {tc.ensemble!r} is not implemented yet — the piano path arrives at M7b"
+        )
+    stem_path = document.stems.get(tc.stem)
+    if stem_path is None:
+        available = ", ".join(sorted(document.stems)) or "none (run separation first)"
+        raise ValueError(f"transcribe needs the {tc.stem!r} stem; available: {available}")
+
+    notes, diagnostics = analyze(stem_path, tc, log=True)
+
+    voiced_fraction = diagnostics.voiced_fraction
     if notes:
         low = min(n.pitch for n in notes)
         high = max(n.pitch for n in notes)
