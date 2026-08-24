@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from swingscribe.config import Config
+from swingscribe.gui import ground_truth
 from swingscribe.model import Document
 from swingscribe.stages.separate import stems_dir
 
@@ -88,6 +89,7 @@ def browse(path: str | Path | None, config: Config) -> dict[str, Any]:
 
     dirs: list[dict[str, Any]] = []
     files: list[dict[str, Any]] = []
+    scores: list[dict[str, Any]] = []
     try:
         entries = list(root.iterdir())
     except PermissionError:
@@ -100,17 +102,25 @@ def browse(path: str | Path | None, config: Config) -> dict[str, Any]:
                 dirs.append({"name": p.name, "path": str(p)})
             elif p.suffix.lower() in AUDIO_SUFFIXES and not is_derived_output(p):
                 files.append({"name": p.name, "path": str(p), "size": p.stat().st_size})
+            elif ground_truth.is_score(p):
+                # Listed alongside, not instead: picking a hand transcription
+                # for the review screen is the same navigation problem as
+                # picking a track, so it reuses this browser rather than
+                # growing a second one.
+                scores.append({"name": p.name, "path": str(p), "size": p.stat().st_size})
         except OSError:
             continue  # unreadable entry (permissions, broken junction) — skip it, not the listing
 
     dirs.sort(key=lambda d: d["name"].lower())
     files.sort(key=lambda f: f["name"].lower())
+    scores.sort(key=lambda f: f["name"].lower())
     parent = root.parent
     return {
         "path": str(root),
         "parent": None if parent == root else str(parent),  # a drive root is its own parent
         "dirs": dirs,
         "files": files,
+        "scores": scores,
         "drives": list_drives(),
     }
 

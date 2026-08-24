@@ -18,12 +18,12 @@
 <div class="picker" id="picker" hidden>
   <div class="picker-panel">
     <div class="picker-head">
-      <h2>Open a track</h2>
+      <h2 id="picker-title">Open a track</h2>
       <button class="ghost" id="picker-close" hidden>Close</button>
     </div>
     <div class="picker-body">
-      <section>
-        <h3>Recent</h3>
+      <section id="picker-recent">
+        <h3 id="picker-recent-title">Recent</h3>
         <ul class="track-list" id="recent-list"><li class="empty">Nothing yet</li></ul>
       </section>
       <section>
@@ -38,7 +38,7 @@
       </section>
     </div>
     <div class="picker-foot">
-      <input type="text" id="path-input" placeholder="…or paste a full path to an audio file" spellcheck="false">
+      <input type="text" id="path-input" placeholder="…or paste a full path to an audio file" spellcheck="false" data-track="…or paste a full path to an audio file" data-score="…or paste a full path to a .mscz / .mscx">
       <button id="path-open">Open</button>
     </div>
     <p class="picker-error" id="picker-error" hidden></p>
@@ -194,6 +194,15 @@
     </div>
 
     <div class="review" id="review" hidden>
+      <div class="gt-bar" id="gt-bar">
+        <button class="chip" id="gt-pick" title="Draw a MuseScore hand transcription against ours">Ground truth…</button>
+        <span class="muted" id="gt-info">No hand transcription loaded</span>
+        <div class="gt-classes" id="gt-classes" hidden></div>
+        <span class="spacer"></span>
+        <span class="muted gt-caveat" id="gt-caveat" hidden></span>
+        <button class="chip" id="gt-clear" hidden title="Stop drawing the hand transcription">✕</button>
+      </div>
+
       <div class="pianoroll-wrap">
         <div class="wave-label">Piano roll over the bar grid <span class="muted" id="review-hint"></span></div>
         <div class="pianoroll" id="pianoroll"></div>

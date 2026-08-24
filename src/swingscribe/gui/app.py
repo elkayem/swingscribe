@@ -20,8 +20,8 @@ from pydantic import BaseModel
 
 from swingscribe.config import Config
 from swingscribe.gui import audio as gui_audio
+from swingscribe.gui import ground_truth, library, peaks, review
 from swingscribe.gui import jobs as gui_jobs
-from swingscribe.gui import library, peaks, review
 from swingscribe.model import NoteEvent
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -436,6 +436,60 @@ def create_app(config: Config) -> FastAPI:
         return Response(
             content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store"}
         )
+
+    # ── ground truth ────────────────────────────────────────────────────────
+
+    @app.get("/api/tracks/{track_id}/scores")
+    def get_scores(track_id: str) -> dict[str, Any]:
+        """Hand transcriptions sitting beside this track, best name match first.
+
+        Only a suggestion: the folder browser reaches anywhere, and benchmark
+        folders hold several tunes at once. See ground_truth.nearby_scores.
+        """
+        entry = resolve(track_id)
+        return {"scores": ground_truth.nearby_scores(entry["path"])}
+
+    @app.get("/api/tracks/{track_id}/ground-truth")
+    def get_ground_truth(
+        track_id: str,
+        model: str,
+        stem: str,
+        score: str,
+        start: float | None = None,
+        end: float | None = None,
+    ) -> dict[str, Any]:
+        """A notated score aligned against this span's transcription.
+
+        Needs the transcription first — the alignment is *to* our notes, and
+        their onsets are what places the score horizontally (ground_truth's
+        module docstring). 404 rather than transcribing: this endpoint must
+        stay as cheap to poll as /review.
+        """
+        entry = resolve(track_id)
+        document = entry["document"]
+        score_path = Path(score).expanduser()
+        if not score_path.is_file():
+            raise HTTPException(404, f"no such score: {score_path}")
+        if not ground_truth.is_score(score_path):
+            raise HTTPException(400, f"not a MuseScore file: {score_path.name}")
+
+        run_config = review_config(stem, start, end)
+        payload = review.cached_review(document, run_config, model)
+        if payload is None:
+            raise HTTPException(404, "transcribe the span first")
+        lo, hi = run_config.transcribe.region or (0.0, None)
+        try:
+            overlay = ground_truth.cached_overlay(
+                config,
+                review.review_key(document, run_config, model),
+                score_path,
+                payload["notes"],
+                lo or 0.0,
+                document.audio.duration if hi is None else hi,
+            )
+        except Exception as exc:
+            raise HTTPException(422, f"could not read {score_path.name}: {exc}") from exc
+        return overlay
 
     # ── pipeline jobs ───────────────────────────────────────────────────────
 

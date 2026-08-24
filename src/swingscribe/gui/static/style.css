@@ -18,6 +18,13 @@
   --downbeat: #9fb4ff;        /* bar lines — the grid's claim about the metre */
   --chorus: #ffd479;          /* chorus starts — a solo is N whole choruses */
   --danger: #e2666b;
+  /* The four ways a note comes out of the alignment against a hand
+     transcription. Matched borrows --lead, so an agreeing roll looks like the
+     roll you already know and only the disagreements introduce new colour. */
+  --gt-matched: #56cfc0;
+  --gt-wrong: #f0a848;
+  --gt-invented: #e2666b;
+  --gt-missed: #9f8cff;
   --radius: 7px;
   --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
 }
@@ -329,6 +336,25 @@ select {
 #transcribe-btn { background: var(--accent); border-color: var(--accent); color: #17130a; }
 #transcribe-btn:hover:not(:disabled) { background: #ffbb5c; border-color: #ffbb5c; }
 #review-summary { font: 12px var(--mono); }
+
+/* ── ground truth ───────────────────────────────────────────────────────── */
+.gt-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line);
+}
+#gt-info { font: 12px var(--mono); }
+.gt-classes { display: flex; gap: 5px; flex-wrap: wrap; }
+/* Each class chip carries its own colour, so the toggle and the thing it
+   toggles are the same colour — no legend to consult. Off is greyed rather
+   than hidden, because the count still says something when the class is not
+   being drawn. */
+.gt-chip { font: 11.5px var(--mono); opacity: 0.45; border-color: var(--line); }
+.gt-chip.active { opacity: 1; }
+.gt-chip.gt-matched.active { color: var(--gt-matched); border-color: var(--gt-matched); background: rgba(86, 207, 192, 0.12); }
+.gt-chip.gt-wrong.active { color: var(--gt-wrong); border-color: var(--gt-wrong); background: rgba(240, 168, 72, 0.12); }
+.gt-chip.gt-invented.active { color: var(--gt-invented); border-color: var(--gt-invented); background: rgba(226, 102, 107, 0.12); }
+.gt-chip.gt-missed.active { color: var(--gt-missed); border-color: var(--gt-missed); background: rgba(159, 140, 255, 0.14); }
+.gt-caveat { font-size: 11.5px; font-style: italic; cursor: help; }
 
 .pianoroll-wrap { margin-bottom: 12px; }
 .pianoroll {

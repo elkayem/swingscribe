@@ -106,6 +106,66 @@ Implementation notes:
   machinery, keyed by a `variant` so two spans never dedupe onto each other.
   ~30s for a span, since separation is cached.
 
+#### The ground-truth overlay
+
+`scripts/score_benchmark.py` scores us against the hand transcriptions in
+`benchmark/` and prints numbers. Numbers say *how much* is wrong; they cannot
+say *what kind*. A spurious note one semitone from a real one is the soloist's
+own scoop — 74% of Confirmation's inventions are exactly that — while one
+fifteen semitones below is a different instrument, which is Giant Steps' whole
+problem. Same count, opposite fixes, indistinguishable in a table and obvious
+on a roll. So when a `.mscz`/`.mscx` is chosen for the loaded track, the
+notated notes are drawn over ours and every note is coloured by how it
+aligned: **matched**, **wrong note**, **invented**, **missed**. Each class
+toggles, and the chip carries its own count and colour.
+
+Picking the score reuses the "Open track…" folder browser in a second mode
+rather than growing its own — one folder history, one drive list. Scores
+beside the track are offered first, ranked by shared words: the benchmark
+names its scores after the soloist ("Dexter_Gordon_solo_on_Confirmation.mscz")
+and its audio after the album track ("02 Confirmation.m4a"), so a stem-equality
+test would find nothing. Ranking is a suggestion, never a filter — the whole
+folder is listed, with the matched words shown as the reason.
+
+Two things this has to get right, both of which have bitten before:
+
+- **The transposition is measured, never assumed** (`alignment.best_transposition`,
+  narrowed on a prefix — 49 full alignments over ~900 notes is minutes of pure
+  Python). Hand transcriptions of transposing instruments are often written an
+  octave or more from concert; both benchmark tenors come out at +12 and the
+  piano at 0. Scored without detecting it, Confirmation reads 0.121 instead of
+  0.736. The detected offset is shown in the bar, and the score is drawn at
+  concert pitch so both layers share one axis. The axis auto-ranges over the
+  notated notes too — an error of fifteen semitones is the one worth seeing and
+  the one an axis fitted to our own notes would push off the canvas.
+- **A notated score has no timestamps, so none are invented.** Bar 1 is the
+  start of the span and the tempo follows from bars/span, but that constant-
+  tempo assumption drifts — 1.9 s over one solo, six beats at Confirmation's
+  tempo. So horizontal position comes from the *alignment*: every notated note
+  that aligned to one of ours is drawn at that note's real onset, needing no
+  tempo at all, and unaligned notes are interpolated between their neighbouring
+  anchors. It is a tempo map derived from the alignment — exact at every anchor,
+  and unable to accumulate drift because each anchor resets it. Constant tempo
+  survives only as the fallback outside the outermost anchors, and as the
+  implied-bpm readout, which is the cross-check that the span is the one the
+  score was written against.
+
+  The consequence is stated on screen, because it must be: **an aligned pair
+  sits at the same x by construction**, so this view cannot be read as evidence
+  about timing. Onset timing has its own measurement in the benchmark harness.
+  The bar reports how far the placement had to move the score away from
+  constant tempo, which is the honest statement of what a naive placement would
+  have cost.
+
+Verified against two real solos: Giant Steps (piano, 0 transposition, F1 0.691)
+and All The Things (tenor, +12, F1 0.894), whose counts and implied tempos
+reproduce `scripts/score_benchmark.py` on identical notes to the last digit —
+two independent code paths agreeing is the point of checking.
+
+Onset ticks and invented notes are both red; with an overlay loaded the ticks
+retreat to a fifth of their alpha, since the question on screen is no longer
+"what split this note?".
+
 ### 5. Notate & export
 Notation, swing marking, transposition, MusicXML/MIDI out.
 

@@ -13,6 +13,31 @@
 const PITCH_PAD = 2; // semitones of headroom above/below the note range
 const MIN_PITCH_SPAN = 14; // never zoom the pitch axis tighter than this
 
+// How far a click may miss a note and still count. Generous on purpose: at a
+// wide pitch range a note is only a few pixels tall, and a solo whose lowest
+// note is fifteen semitones below its highest gives a very wide range.
+const CLICK_SLACK_S = 0.05;
+const CLICK_SLACK_SEMITONES = 6;
+
+/* The four ways a note can come out of the alignment. `matched` and `wrong`
+   are pairs and get drawn twice — our note filled, the notated one outlined
+   over it — so a wrong note reads as an interval, which is the whole point:
+   one semitone is a scoop the transcriber chose not to write, fifteen is a
+   different instrument. */
+export const CLASSES = ['matched', 'wrong', 'invented', 'missed'];
+const CLASS_VAR = {
+  matched: '--gt-matched',
+  wrong: '--gt-wrong',
+  invented: '--gt-invented',
+  missed: '--gt-missed',
+};
+const CLASS_FALLBACK = {
+  matched: '#56cfc0',
+  wrong: '#f0a848',
+  invented: '#e2666b',
+  missed: '#9f8cff',
+};
+
 export class PianoRoll {
   constructor(rollEl, f0El, gateEl, opts = {}) {
     this.rollEl = rollEl;
@@ -30,6 +55,8 @@ export class PianoRoll {
     this.beats = null;
     this.selected = -1;
     this.playhead = null;
+    this.ground = null;                        // the aligned hand transcription, if any
+    this.visible = new Set(CLASSES);           // which alignment classes to draw
 
     this.rollEl.addEventListener('pointerdown', (e) => this._onClick(e));
     this._observer = new ResizeObserver(() => this.draw());
@@ -49,23 +76,52 @@ export class PianoRoll {
     this.diag = review ? review.diagnostics : null;
     this.beats = beats;
     this.selected = -1;
-    // Pitch axis auto-ranges to the notes, with headroom, floored to a minimum
-    // span so a monophonic line does not render as one fat band.
-    if (this.notes.length) {
-      let lo = Math.min(...this.notes.map((n) => n.pitch));
-      let hi = Math.max(...this.notes.map((n) => n.pitch));
-      const short = MIN_PITCH_SPAN - (hi - lo);
-      if (short > 0) {
-        lo -= Math.floor(short / 2);
-        hi += Math.ceil(short / 2);
-      }
-      this.pitchLo = lo - PITCH_PAD;
-      this.pitchHi = hi + PITCH_PAD;
-    } else {
+    this._range();
+    this.draw();
+  }
+
+  /* The aligned hand transcription (or null to drop it). */
+  setGroundTruth(ground) {
+    this.ground = ground;
+    this._range();
+    this.draw();
+  }
+
+  setVisibleClasses(classes) {
+    this.visible = new Set(classes);
+    this.draw();
+  }
+
+  /* Pitch axis auto-ranges to everything drawn, with headroom, floored to a
+     minimum span so a monophonic line does not render as one fat band. The
+     notated notes are included deliberately: an error of fifteen semitones is
+     exactly the one worth seeing, and it is the one an axis fitted to our own
+     notes would push off the top or bottom of the canvas. */
+  _range() {
+    const pitches = this.notes.map((n) => n.pitch);
+    if (this.ground) for (const n of this.ground.reference_notes) pitches.push(n.pitch);
+    if (!pitches.length) {
       this.pitchLo = 48;
       this.pitchHi = 72;
+      return;
     }
-    this.draw();
+    let lo = Math.min(...pitches);
+    let hi = Math.max(...pitches);
+    const short = MIN_PITCH_SPAN - (hi - lo);
+    if (short > 0) {
+      lo -= Math.floor(short / 2);
+      hi += Math.ceil(short / 2);
+    }
+    this.pitchLo = lo - PITCH_PAD;
+    this.pitchHi = hi + PITCH_PAD;
+  }
+
+  classOf(index) {
+    return this.ground ? this.ground.estimate_class[index] : null;
+  }
+
+  _classColor(name) {
+    return this._css(CLASS_VAR[name], CLASS_FALLBACK[name]);
   }
 
   setPlayhead(t) {
@@ -160,7 +216,12 @@ export class PianoRoll {
     // seen sitting on one.
     if (this.diag) {
       ctx.strokeStyle = this._css('--onset', '#e2666b');
-      ctx.globalAlpha = 0.4;
+      // Onset ticks are red, and so are invented notes. They are never
+      // confusable in shape — full-height hairlines against short horizontal
+      // bars — but a field of them drowns the overlay, and with a hand
+      // transcription loaded the question on screen is no longer "what split
+      // this note?". So they retreat rather than disappear.
+      ctx.globalAlpha = this.ground ? 0.14 : 0.4;
       ctx.beginPath();
       for (const t of this.diag.onsets) {
         if (t < this.span.a || t > this.span.b) continue;
@@ -174,6 +235,8 @@ export class PianoRoll {
 
     const noteH = Math.max(3, h / (this.pitchHi - this.pitchLo));
     this.notes.forEach((n, i) => {
+      const kind = this.classOf(i);
+      if (kind && !this.visible.has(kind)) return;
       const x0 = this.timeToX(n.onset, w);
       const x1 = this.timeToX(n.onset + n.duration, w);
       const y = this.pitchToY(n.pitch, h) - noteH / 2;
@@ -181,15 +244,74 @@ export class PianoRoll {
       // Confidence drives fill: a faint note is one the transcriber was unsure
       // of, which is exactly what you want to eyeball.
       const alpha = 0.35 + 0.6 * Math.min(1, Math.max(0, n.confidence));
-      ctx.fillStyle = selected ? this._css('--accent', '#f0a848') : `rgba(86, 207, 192, ${alpha})`;
+      ctx.globalAlpha = selected ? 1 : alpha;
+      ctx.fillStyle = selected
+        ? this._css('--accent', '#f0a848')
+        : kind
+          ? this._classColor(kind)
+          : this._css('--lead', '#56cfc0');
       ctx.fillRect(x0, y, Math.max(2, x1 - x0), noteH - 1);
+      ctx.globalAlpha = 1;
       if (selected) {
         ctx.strokeStyle = this._css('--accent', '#f0a848');
         ctx.strokeRect(x0 - 1, y - 1, Math.max(2, x1 - x0) + 2, noteH + 1);
       }
     });
 
+    this._drawGroundTruth(ctx, w, h, noteH);
     this._drawPlayhead(ctx, w, h);
+  }
+
+  /* The notated notes, outlined over ours.
+   *
+   * A matched pair is our filled note wearing its notated outline exactly —
+   * which is also the visual admission that the two agree horizontally BY
+   * CONSTRUCTION: an aligned notated note is placed at our note's onset, so
+   * nothing here is evidence about timing (see ground_truth.py). A wrong note
+   * puts the outline at a different height with a stalk joining the two, so
+   * the error reads as an interval; a missed note is an outline with nothing
+   * underneath it.
+   */
+  _drawGroundTruth(ctx, w, h, noteH) {
+    if (!this.ground) return;
+    const outlineH = Math.max(3, noteH - 2);
+    for (const note of this.ground.reference_notes) {
+      if (!this.visible.has(note.cls)) continue;
+      const x0 = this.timeToX(note.x, w);
+      const x1 = this.timeToX(note.x + note.duration, w);
+      if (x1 < 0 || x0 > w) continue;
+      const y = this.pitchToY(note.pitch, h) - outlineH / 2;
+      const width = Math.max(2, x1 - x0);
+      const color = this._classColor(note.cls);
+
+      if (note.cls === 'wrong' && note.partner !== null) {
+        // Stalk from what we produced to what was written, at our onset.
+        const ours = this.notes[note.partner];
+        if (ours) {
+          ctx.strokeStyle = color;
+          ctx.globalAlpha = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(x0 + 1, this.pitchToY(ours.pitch, h));
+          ctx.lineTo(x0 + 1, this.pitchToY(note.pitch, h));
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+      }
+      if (note.cls === 'missed') {
+        // Nothing of ours underneath, so a bare outline would read as faint
+        // rather than absent. A wash inside makes "we never played this" the
+        // loud thing it should be.
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.22;
+        ctx.fillRect(x0, y, width, outlineH);
+        ctx.globalAlpha = 1;
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = note.cls === 'matched' ? 0.55 : 0.9;
+      ctx.strokeRect(x0 + 0.5, y + 0.5, width - 1, outlineH - 1);
+      ctx.globalAlpha = 1;
+    }
   }
 
   _drawF0() {
@@ -303,21 +425,54 @@ export class PianoRoll {
     const rect = this.rollEl.getBoundingClientRect();
     const t = this.xToTime(event.clientX - rect.left);
     const h = this.roll.el.clientHeight;
-    const pitch = this.pitchLo + (1 - (event.clientY - rect.top) / h) * (this.pitchHi - this.pitchLo);
-    // Nearest note whose time span contains the click, breaking ties by pitch.
-    let best = -1;
-    let bestDist = Infinity;
-    this.notes.forEach((n, i) => {
-      if (t < n.onset - 0.05 || t > n.onset + n.duration + 0.05) return;
+    // The exact inverse of pitchToY, half-semitone offset included. Without
+    // that term a click on a note's centre reads half a row high, which only
+    // shifted ties before the ground-truth layer existed — and now decides
+    // between our note and the notated one sitting beside it.
+    const pitch =
+      this.pitchLo - 0.5 + (1 - (event.clientY - rect.top) / h) * (this.pitchHi - this.pitchLo);
+    // Both layers are candidates, judged the same way, and the vertically
+    // nearer one wins. Searching ours first and only then falling back would
+    // make a missed note unclickable whenever any note of ours overlaps it in
+    // time — which in a busy passage is most of them, and a missed note is
+    // exactly the case with nothing of ours to click instead.
+    const ours = this._nearest(this.notes, t, pitch, (n) => n.onset, (_, i) =>
+      this.visible.has(this.classOf(i) ?? 'matched'),
+    );
+    const notated = this.ground
+      ? this._nearest(this.ground.reference_notes, t, pitch, (n) => n.x, (n) =>
+          this.visible.has(n.cls),
+        )
+      : { index: -1, distance: Infinity };
+
+    if (notated.index >= 0 && notated.distance < ours.distance) {
+      this.selected = -1;
+      this.draw();
+      if (this.opts.onSelectReference) this.opts.onSelectReference(notated.index);
+      return;
+    }
+    this.selected = ours.index;
+    this.draw();
+    if (this.opts.onSelect) {
+      this.opts.onSelect(ours.index >= 0 ? this.notes[ours.index] : null, ours.index);
+    }
+  }
+
+  /* Nearest visible note in pitch whose time span contains the click. */
+  _nearest(notes, t, pitch, onsetOf, isVisible) {
+    let index = -1;
+    let distance = Infinity;
+    notes.forEach((n, i) => {
+      const onset = onsetOf(n);
+      if (t < onset - CLICK_SLACK_S || t > onset + n.duration + CLICK_SLACK_S) return;
+      if (!isVisible(n, i)) return;
       const d = Math.abs(n.pitch - pitch);
-      if (d < bestDist) {
-        bestDist = d;
-        best = i;
+      if (d < distance && d <= CLICK_SLACK_SEMITONES) {
+        distance = d;
+        index = i;
       }
     });
-    this.selected = best;
-    this.draw();
-    if (this.opts.onSelect) this.opts.onSelect(best >= 0 ? this.notes[best] : null, best);
+    return { index, distance };
   }
 
   selectIndex(i) {

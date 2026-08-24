@@ -8,7 +8,7 @@
 
 import { WaveView } from './waveform.js';
 import { MixEngine, StemEngine } from './engine.js';
-import { PianoRoll } from './review.js';
+import { CLASSES, PianoRoll } from './review.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -43,6 +43,9 @@ const state = {
   reviewMode: 'mix',        // mix | transcription | both
   reviewRate: 1,
   reviewToken: 0,
+  scorePath: null,          // hand transcription chosen for the overlay
+  ground: null,             // the aligned overlay: classes, counts, placed notes
+  gtClasses: [...CLASSES],  // which alignment classes are drawn
   formStart: null,          // seconds; where the tune's form begins (bar 1)
   click: false,             // mix a metronome onto the audition
 };
@@ -127,6 +130,7 @@ const stemWave = new WaveView($('wave-stem'), {
 
 const pianoRoll = new PianoRoll($('pianoroll'), $('lane-f0'), $('lane-gate'), {
   onSelect: (note, index) => renderInspector(note, index),
+  onSelectReference: (index) => renderReferenceInspector(index),
 });
 
 // ── screen 1: the track picker ──────────────────────────────────────────────
@@ -135,15 +139,58 @@ const pianoRoll = new PianoRoll($('pianoroll'), $('lane-f0'), $('lane-gate'), {
 // picker (or a failed navigation) returns to where you were, not the start.
 let browseRoot = null;
 
+/* The picker does double duty: 'track' opens audio, 'score' picks the hand
+   transcription for the review overlay. Choosing a .mscz is the same
+   navigation problem as choosing a track, so it reuses this browser rather
+   than growing a second one — one folder history, one drive list, one set of
+   keyboard behaviours. */
+let pickerMode = 'track';
+
+function openPicker(mode) {
+  pickerMode = mode;
+  const score = mode === 'score';
+  $('picker-title').textContent = score ? 'Choose a hand transcription' : 'Open a track';
+  $('picker-recent-title').textContent = score ? 'Beside this track' : 'Recent';
+  $('path-input').placeholder = $('path-input').dataset[mode];
+  $('path-input').value = '';
+  $('picker').hidden = false;
+  refreshPicker();
+}
+
 async function refreshPicker() {
   $('picker-error').hidden = true;
   try {
-    const tracks = await api('/api/tracks');
-    renderTrackList($('recent-list'), tracks.recent);
+    if (pickerMode === 'score') {
+      const found = await api(`/api/tracks/${state.track.id}/scores`);
+      renderScoreList($('recent-list'), found.scores);
+    } else {
+      const tracks = await api('/api/tracks');
+      renderTrackList($('recent-list'), tracks.recent);
+    }
   } catch (error) {
     showPickerError(error.message);
   }
   await browseTo(browseRoot?.path ?? null);
+}
+
+/* Scores found beside the track. The name match is only a ranking — the
+   benchmark names its scores after the soloist and its audio after the album
+   track — so every candidate in the folder is listed and the matched ones
+   simply come first, with the words they share shown as the reason. */
+function renderScoreList(node, items) {
+  node.innerHTML = '';
+  if (!items.length) {
+    node.innerHTML = '<li class="empty">No .mscz or .mscx beside this track</li>';
+    return;
+  }
+  for (const item of items) {
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="name"></span><span class="meta"></span>';
+    li.querySelector('.name').textContent = item.name;
+    li.querySelector('.meta').textContent = item.matched ? `matches “${item.shared.join(' ')}”` : '';
+    li.addEventListener('click', () => chooseScore(item.path));
+    node.appendChild(li);
+  }
 }
 
 function renderTrackList(node, items) {
@@ -201,8 +248,12 @@ function renderBrowse(data) {
 
   const node = $('library-list');
   node.innerHTML = '';
-  if (!data.dirs.length && !data.files.length) {
-    node.innerHTML = '<li class="empty">No folders or audio files here</li>';
+  const scoring = pickerMode === 'score';
+  const files = scoring ? (data.scores ?? []) : data.files;
+  if (!data.dirs.length && !files.length) {
+    node.innerHTML = scoring
+      ? '<li class="empty">No folders or MuseScore files here</li>'
+      : '<li class="empty">No folders or audio files here</li>';
     return;
   }
   for (const dir of data.dirs) {
@@ -213,13 +264,13 @@ function renderBrowse(data) {
     li.addEventListener('click', () => browseTo(dir.path));
     node.appendChild(li);
   }
-  for (const file of data.files) {
+  for (const file of files) {
     const li = document.createElement('li');
     const meta = Number.isFinite(file.size) ? `${(file.size / 1e6).toFixed(1)} MB` : '';
     li.innerHTML = '<span class="name"></span><span class="meta"></span>';
     li.querySelector('.name').textContent = file.name;
-    li.querySelector('.meta').textContent = meta;
-    li.addEventListener('click', () => openTrack(file.path));
+    li.querySelector('.meta').textContent = scoring ? '' : meta;
+    li.addEventListener('click', () => (scoring ? chooseScore(file.path) : openTrack(file.path)));
     node.appendChild(li);
   }
 }
@@ -280,6 +331,8 @@ async function loadTrack(track) {
   state.barsPerChorus = remembered.bars_per_chorus ?? 0;
   state.formStart = remembered.form_start ?? null;
   state.click = remembered.click ?? false;
+  state.scorePath = remembered.score ?? null;
+  clearGroundTruth();  // the score is remembered; its alignment to a previous track is not
 
   overview.setPeaks(await api(`/api/tracks/${track.id}/peaks`));
   overview.setWindow(0, track.duration, { silent: true });
@@ -1000,6 +1053,10 @@ function invalidateReview() {
   $('review-summary').hidden = true;
   $('transcribe-btn').disabled = false;
   $('transcribe-btn').textContent = 'Transcribe span';
+  // The overlay is an alignment *to* these notes, so it dies with them — but
+  // the chosen score does not: it is still the right score for the next
+  // transcription of this solo.
+  clearGroundTruth();
   refreshReviewPanel();
 }
 
@@ -1066,6 +1123,7 @@ async function showReview(payload) {
   pianoRoll.opts.voicingThreshold = 0.5;
   pianoRoll.setData({ a: state.selection.a, b: state.selection.b }, payload, state.showBeats ? state.beats : null);
   renderInspector(null, -1);
+  await loadGroundTruth();
   await loadReviewAudio();
 }
 
@@ -1141,6 +1199,26 @@ function renderInspector(note, index) {
   const fragment = isFragmentOf(previous, note);
   if (fragment) chip('split from previous', 'flag');
 
+  // What the hand transcription says about this note, if one is loaded.
+  const verdict = state.ground?.estimate_class[index];
+  if (verdict) {
+    chip(CLASS_LABEL[verdict], verdict === 'matched' ? 'ok' : 'flag');
+    const partner = state.ground.estimate_partner[index];
+    if (verdict === 'wrong' && partner !== null) {
+      const notated = state.ground.reference_notes[partner];
+      const delta = note.pitch - notated.pitch;
+      remarks.push(
+        `Notated ${midiName(notated.pitch)} in bar ${notated.bar} — we are ${Math.abs(delta)} ` +
+          `semitone${Math.abs(delta) === 1 ? '' : 's'} ${delta > 0 ? 'high' : 'low'}. ` +
+          (Math.abs(delta) <= 2
+            ? 'Close enough to be the player’s own inflection rather than a tracking error.'
+            : 'Far enough to be a different note: an octave error, or another instrument.'),
+      );
+    } else if (verdict === 'invented') {
+      remarks.push('Nothing in the hand transcription aligns to this note.');
+    }
+  }
+
   if (meanPeriod < 0.5) remarks.push('Low periodicity — the transcriber was unsure this frame was pitched.');
   if (gatedOut) remarks.push('Some frames failed the energy gate; the note may be clipped.');
 
@@ -1184,6 +1262,170 @@ function framesBetween(previous, note) {
 function midiName(pitch) {
   const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   return `${names[pitch % 12]}${Math.floor(pitch / 12) - 1}`;
+}
+
+// ── the ground-truth overlay ────────────────────────────────────────────────
+// Scoring prints numbers, and numbers say how much is wrong without saying
+// what kind. A spurious note a semitone from a real one is the soloist's own
+// scoop; one fifteen semitones down is another instrument. Same count,
+// opposite fixes — and obvious on a roll.
+
+const CLASS_LABEL = {
+  matched: 'matched',
+  wrong: 'wrong note',
+  invented: 'invented',
+  missed: 'missed',
+};
+
+/* Adopt a score only if the server accepts it. A rejected file must not
+   silently replace the one that was working — and must not be persisted,
+   which would resurrect it on the next open. */
+async function chooseScore(path) {
+  const previous = state.scorePath;
+  state.scorePath = path;
+  $('picker').hidden = true;
+  if ((await loadGroundTruth()) === 'failed') {
+    state.scorePath = previous;
+    // Put the working overlay back rather than leaving the roll bare: the
+    // previous alignment is cached, so this costs nothing.
+    await loadGroundTruth();
+    return;
+  }
+  persist();
+}
+
+function clearGroundTruth({ forget = false } = {}) {
+  state.ground = null;
+  if (forget) state.scorePath = null;
+  pianoRoll.setGroundTruth(null);
+  renderGroundTruthBar();
+  if (forget) persist();
+}
+
+/* -> 'ok' | 'pending' (nothing transcribed yet) | 'failed' (the server said no). */
+async function loadGroundTruth() {
+  if (!state.review || !state.scorePath || !state.track) {
+    renderGroundTruthBar();
+    return 'pending';
+  }
+  $('gt-info').textContent = 'Aligning…';
+  try {
+    const params = reviewParams({ score: state.scorePath });
+    state.ground = await api(`/api/tracks/${state.track.id}/ground-truth?${params}`);
+  } catch (error) {
+    state.ground = null;
+    pianoRoll.setGroundTruth(null);
+    renderGroundTruthBar();
+    toast(`Ground truth: ${error.message}`, true);
+    return 'failed';
+  }
+  pianoRoll.setVisibleClasses(state.gtClasses);
+  pianoRoll.setGroundTruth(state.ground);
+  renderGroundTruthBar();
+  return 'ok';
+}
+
+function renderGroundTruthBar() {
+  const info = $('gt-info');
+  const classes = $('gt-classes');
+  const caveat = $('gt-caveat');
+  $('gt-clear').hidden = !state.scorePath;
+  if (!state.ground) {
+    info.textContent = state.scorePath
+      ? `${state.scorePath.split(/[\\/]/).pop()} — transcribe the span to align it`
+      : 'No hand transcription loaded';
+    classes.hidden = true;
+    caveat.hidden = true;
+    return;
+  }
+
+  const s = state.ground.score;
+  const transposed =
+    s.transposition === 0
+      ? 'written at concert pitch'
+      : `written ${s.transposition > 0 ? '+' : ''}${s.transposition} semitones`;
+  info.textContent =
+    `${s.name} · ${s.bars} bars → ${s.implied_bpm} bpm · ` +
+    `${transposed} · F1 ${state.ground.pitch_f1.toFixed(3)}`;
+  info.title =
+    'Bars over the span give the implied tempo — a wildly wrong value means the span is not ' +
+    'the one this score was written against. The transposition is measured, not assumed.';
+
+  classes.hidden = false;
+  classes.innerHTML = '';
+  for (const name of CLASSES) {
+    const button = document.createElement('button');
+    button.className = `chip gt-chip gt-${name}${state.gtClasses.includes(name) ? ' active' : ''}`;
+    button.textContent = `${CLASS_LABEL[name]} ${state.ground.counts[name]}`;
+    button.addEventListener('click', () => toggleGroundClass(name));
+    classes.appendChild(button);
+  }
+
+  // Horizontal position is derived from the alignment, so an aligned pair
+  // sits at the same x by construction. Saying so on screen is the only thing
+  // stopping the picture being read as a timing result.
+  caveat.hidden = false;
+  caveat.textContent = `placed by alignment, not by time (${s.drift_s}s off constant tempo)`;
+  caveat.title =
+    'Every notated note that aligned to one of ours is drawn at that note’s onset, and the ' +
+    'rest are interpolated between those anchors. So horizontal agreement is by construction — ' +
+    'this view answers pitch, not timing. The figure is how far that placement had to move the ' +
+    'score away from a constant tempo.';
+}
+
+function toggleGroundClass(name) {
+  state.gtClasses = state.gtClasses.includes(name)
+    ? state.gtClasses.filter((c) => c !== name)
+    : [...state.gtClasses, name];
+  pianoRoll.setVisibleClasses(state.gtClasses);
+  renderGroundTruthBar();
+}
+
+/* A notated note has no frames behind it, so its inspector is a different
+   thing from a transcribed note's: what was written, where, and whether we
+   produced anything for it. */
+function renderReferenceInspector(index) {
+  const note = state.ground?.reference_notes[index];
+  if (!note) return;
+  $('inspector-empty').hidden = true;
+  const body = $('inspector-body');
+  body.hidden = false;
+  const written =
+    note.written === note.pitch
+      ? ''
+      : ` <span class="muted">written ${midiName(note.written)}</span>`;
+  body.innerHTML =
+    `<div class="inspector-head">` +
+    `<span class="pitch">${midiName(note.pitch)} <span class="muted">(${note.pitch})</span>${written}</span>` +
+    `<span class="timing">notated · bar ${note.bar} · ~${clock(note.x)}</span>` +
+    `</div><div class="inspector-why"></div><div class="inspector-note"></div>`;
+  const why = body.querySelector('.inspector-why');
+  const chip = (text, kind) => {
+    const el = document.createElement('span');
+    el.className = `why-chip ${kind || ''}`;
+    el.textContent = text;
+    why.appendChild(el);
+  };
+  chip(CLASS_LABEL[note.cls], note.cls === 'matched' ? 'ok' : 'flag');
+
+  const remarks = ['From the hand transcription, not from the audio.'];
+  if (note.cls === 'missed') {
+    remarks.push('We produced nothing that aligned to this note — a note the transcriber heard and we did not.');
+  } else if (note.cls === 'wrong' && note.partner !== null) {
+    const ours = state.review.notes[note.partner];
+    const delta = ours.pitch - note.pitch;
+    remarks.push(
+      `We produced ${midiName(ours.pitch)} here, ${Math.abs(delta)} semitone${
+        Math.abs(delta) === 1 ? '' : 's'
+      } ${delta > 0 ? 'above' : 'below'}. ${
+        Math.abs(delta) <= 2
+          ? 'That close is usually the player’s own scoop or passing tone rather than a tracking failure.'
+          : 'That far is a different note, not an inflection — an octave error or another instrument.'
+      }`,
+    );
+  }
+  remarks.push('Its horizontal position comes from the alignment, so do not read it as a timing.');
+  body.querySelector('.inspector-note').textContent = remarks.join(' ');
 }
 
 const FRAGMENT_GAP_S = 0.12;
@@ -1244,6 +1486,7 @@ function persist() {
         bars_per_chorus: state.barsPerChorus,
         form_start: state.formStart,
         click: state.click,
+        score: state.scorePath,
       },
     }).catch(() => { /* remembering where you were is not worth an error */ });
   }, 500);
@@ -1251,12 +1494,20 @@ function persist() {
 
 // ── events ──────────────────────────────────────────────────────────────────
 
-$('open-picker').addEventListener('click', () => { $('picker').hidden = false; refreshPicker(); });
+$('open-picker').addEventListener('click', () => openPicker('track'));
 $('picker-close').addEventListener('click', () => { $('picker').hidden = true; });
-$('path-open').addEventListener('click', () => openTrack($('path-input').value.trim()));
+
+const openTypedPath = () => {
+  const path = $('path-input').value.trim();
+  if (path) (pickerMode === 'score' ? chooseScore : openTrack)(path);
+};
+$('path-open').addEventListener('click', openTypedPath);
 $('path-input').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') openTrack($('path-input').value.trim());
+  if (event.key === 'Enter') openTypedPath();
 });
+
+$('gt-pick').addEventListener('click', () => openPicker('score'));
+$('gt-clear').addEventListener('click', () => clearGroundTruth({ forget: true }));
 
 $('browse-up').addEventListener('click', () => {
   if (browseRoot?.parent) browseTo(browseRoot.parent);
