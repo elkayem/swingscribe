@@ -3,7 +3,18 @@
 Findings that are diagnosed but not yet fixed, recorded so they survive a session
 change. Delete entries as they land.
 
-## 1. Sustained notes split by other instruments' onsets — CONFIRMED
+## 1. ~~Sustained notes split by other instruments' onsets~~ — FIXED
+
+Fixed by onset corroboration: a split inside a voiced run now requires the
+tracked pitch's OWN harmonics to re-attack by `transcribe.onset_rise_db`
+(default 3.0 dB). Measured on the original case (Moment's Notice 1.5–4.5s):
+the held pitch-70 note went from 6 fragments to 1 note of 1.22s; notes in the
+window 15 → 8. Regression-guarded in the synthetic suite
+(`held_note_over_comping`: onset F1 0.40 with corroboration off, 1.000 on).
+Set `onset_rise_db: 0` to restore the old behaviour.
+
+Original report follows.
+
 
 `stages/transcribe.py` splits a note at any detected onset, so a re-articulated
 same-pitch note becomes two notes. But onsets come from `_spectral_flux_onsets`,
@@ -53,17 +64,24 @@ Side effect: the 6-stem drum track gave Gerry's Blues a much cleaner beat grid
 (tempo stdev 20.4 → 8.3, octave outliers 10 → 3) but moved the median 136.4 →
 142.9 bpm. Needs a re-listen to decide which grid is right.
 
-## 4. No ground truth or diagnostics yet
+## 4. ~~No ground truth or diagnostics~~ — LARGELY DONE, one real gap
 
-Transcription quality is currently judged only by ear on hard material. Plan §6's
-Layer-1 synthetic tier (known MIDI → soundfont → transcribe → score with
-`mir_eval`) is scheduled for M4 but is needed *now* to tell a good change from a bad
-one. Wanted alongside it: a per-frame diagnostic dump (f0, periodicity, energy, gate
-decisions, note boundaries) so a suspicious note traces to a cause.
+Landed: `tests/synthetic/generate.py` (exact ground truth, rendered at test
+time), `src/swingscribe/metrics.py` (mir_eval wrappers scoring the three
+failure modes separately), 8 pinned baselines, `tools/pin_baselines.py`, and
+`transcribe.analyze()` returning per-frame `FrameDiagnostics` for the GUI
+overlay.
 
-Three failure modes are currently indistinguishable in the output and should be
-scored separately: f0 accuracy where a single pitch exists; voicing/gating accuracy;
-and segmentation accuracy.
+**The gap that remains: the synthetic material is too easy.** Every case
+scores ≥0.98, so the suite is a regression guard, not a quality measure — it
+will catch a change that breaks something, but it cannot tell us whether the
+transcriber is *good*. Additive synthesis with clean harmonics is far easier
+to track than a real horn. Plan §6 specifies FluidSynth soundfont rendering
+for exactly this reason; that is the next step, along with plan §12's
+`scripts/setup_fixtures.py` to fetch a permissively-licensed soundfont.
+
+Also still open from the original entry: nothing scores real audio. That is
+Layer 2 (WJazzD, M6).
 
 ## 5. Footprints downbeat inference is wrong in 6/4 — ROUTED AROUND, not fixed
 
