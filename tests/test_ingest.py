@@ -61,12 +61,68 @@ def test_ingest_missing_file_raises(tmp_path):
 
 
 def _require_ffmpeg() -> str:
-    import shutil
+    # Uses find_ffmpeg(), not shutil.which() directly: on this machine winget
+    # installs ffmpeg but never puts it on PATH (CLAUDE.md), so a plain
+    # shutil.which() check here would silently skip these tests in exactly
+    # the environment — a fresh shell — where they matter most.
+    found = ingest.find_ffmpeg()
+    if found is None:
+        pytest.skip("ffmpeg not found (not on PATH, and no winget install located)")
+    return found
 
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is None:
-        pytest.skip("ffmpeg not on PATH")
-    return ffmpeg
+
+def test_find_ffmpeg_prefers_path(monkeypatch):
+    monkeypatch.setattr(ingest.shutil, "which", lambda name: r"C:\on\path\ffmpeg.exe")
+    assert ingest.find_ffmpeg() == r"C:\on\path\ffmpeg.exe"
+
+
+def test_find_ffmpeg_falls_back_to_winget_location(monkeypatch, tmp_path):
+    # The exact bug this regression-tests: shutil.which() finds nothing (a
+    # fresh shell, PATH never touched) but ffmpeg is still on disk where
+    # winget put it.
+    monkeypatch.setattr(ingest.shutil, "which", lambda name: None)
+    fake_home = tmp_path
+    ffmpeg_dir = fake_home / "AppData/Local/Microsoft/WinGet/Packages"
+    ffmpeg_dir /= "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-7.1-full_build/bin"
+    ffmpeg_dir.mkdir(parents=True)
+    exe = ffmpeg_dir / "ffmpeg.exe"
+    exe.write_bytes(b"not a real binary, just needs to exist")
+    monkeypatch.setattr(ingest.Path, "home", classmethod(lambda cls: fake_home))
+
+    found = ingest.find_ffmpeg()
+    assert found is not None
+    assert Path(found) == exe
+
+
+def test_find_ffmpeg_returns_none_when_truly_absent(monkeypatch, tmp_path):
+    monkeypatch.setattr(ingest.shutil, "which", lambda name: None)
+    monkeypatch.setattr(ingest.Path, "home", classmethod(lambda cls: tmp_path))
+    assert ingest.find_ffmpeg() is None
+
+
+def test_ingest_decodes_m4a_even_when_ffmpeg_is_off_path(tmp_path, monkeypatch):
+    """The actual bug report: a plain shell has ffmpeg installed but not on
+    PATH, and every m4a failed with 'ffmpeg is not on PATH' even though
+    ffmpeg was right there in the winget install directory."""
+    import subprocess
+
+    real_ffmpeg = _require_ffmpeg()
+    src_wav = tmp_path / "tone.wav"
+    write_sine_wav(src_wav, rate=44100, channels=2)
+    src_m4a = tmp_path / "tone.m4a"
+    subprocess.run(
+        [real_ffmpeg, "-y", "-loglevel", "error", "-i", str(src_wav), str(src_m4a)], check=True
+    )
+
+    # Simulate the real-world failure: shutil.which() finds nothing, as it
+    # would in a fresh shell, but the real winget install is still on disk —
+    # find_ffmpeg()'s glob fallback should still locate it via the real home.
+    monkeypatch.setattr(ingest.shutil, "which", lambda name: None)
+
+    config = Config(cache_dir=tmp_path / "cache")
+    out = ingest.run(Document(audio_path=str(src_m4a), sample_rate=0), config)
+    assert out.audio is not None
+    assert Path(out.audio.path).is_file()
 
 
 def test_ingest_m4a_via_ffmpeg_fallback(tmp_path):

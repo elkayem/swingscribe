@@ -76,8 +76,28 @@ def _load_via_soundfile(path: Path):
     return torch.from_numpy(data.T.copy()), rate  # [time, ch] → [ch, time]
 
 
+def find_ffmpeg() -> str | None:
+    """Locate ffmpeg even when it's not on PATH.
+
+    On this machine (CLAUDE.md) winget installs ffmpeg but never puts it on
+    PATH, so every launch of swingscribe that didn't happen through a shell
+    where a human manually fixed PATH for that session would otherwise fail
+    to decode any m4a/mp3 — soundfile cannot read AAC at all, so ALL such
+    files need this fallback, not just unusual ones. Falls back to the
+    winget install location before giving up.
+    """
+    on_path = shutil.which("ffmpeg")
+    if on_path:
+        return on_path
+    winget_root = Path.home() / "AppData/Local/Microsoft/WinGet/Packages"
+    for candidate in winget_root.glob("Gyan.FFmpeg_*/ffmpeg-*/bin/ffmpeg.exe"):
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def _load_via_ffmpeg(path: Path, soundfile_error: Exception):
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = find_ffmpeg()
     if ffmpeg is None:
         raise AudioDecodeError(
             f"cannot decode {path}: soundfile failed ({soundfile_error}) and "

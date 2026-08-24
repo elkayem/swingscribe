@@ -68,6 +68,9 @@ of these has broken a tool at least once:
   mid-install; delete it and re-sync when that happens.
 - **ffmpeg** is installed but not on PATH; it lives under
   `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg_*\ffmpeg-*\bin`.
+  `ingest.find_ffmpeg()` locates it there when `shutil.which` finds nothing,
+  so the app itself doesn't need PATH fixed — but a shell running the tools
+  by hand (this file's other commands, ad hoc scripts) still does.
 - **Application Control blocks numba's DLLs** — see the dependency note above.
 - Demucs separation is ~6-13 min per track on CPU. Cache accordingly, and
   prefer `swingscribe audition` (~1s on cached stems) while iterating.
