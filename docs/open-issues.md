@@ -64,6 +64,23 @@ Side effect: the 6-stem drum track gave Gerry's Blues a much cleaner beat grid
 (tempo stdev 20.4 → 8.3, octave outliers 10 → 3) but moved the median 136.4 →
 142.9 bpm. Needs a re-listen to decide which grid is right.
 
+**It does not help a piano soloist.** Scored against Tommy Flanagan's solo on
+Giant Steps (`docs/m3-benchmark.md`), the dedicated `piano` stem is a wash
+against `other` of `htdemucs_ft`:
+
+| | pitch F1 | chroma F1 | invented | notes below the notated floor |
+|---|---|---|---|---|
+| `other` of htdemucs_ft | 0.686 | 0.773 | 69 | 26 (7%) |
+| `piano` of htdemucs_6s | 0.682 | 0.765 | 59 | 25 (7%) |
+
+The hypothesis was that Giant Steps' errors — substitutions of −12, −14, −19,
+−17, never upward — were bleed a dedicated piano stem would remove. They are
+not. They survive isolation intact because they are the pianist's *own left
+hand*: separation cannot split one instrument from itself. That makes a piano
+soloist an M7b problem (a polyphonic model, or top-line bias in the tracker),
+not a separation problem, and it is evidence *against* making 6-stem the
+default for its own sake.
+
 ## 4. ~~No ground truth or diagnostics~~ — DONE; it surfaced issue #8
 
 Landed: `tests/synthetic/generate.py` (exact ground truth, rendered at test
@@ -164,6 +181,16 @@ Regression-guarded both ways in `tests/test_synthetic.py`: `held_note_over_compi
 pins the failure, `held_note_over_quiet_comping` defends the level where it works.
 Directions: better stem isolation (6-stem, see #3), a periodicity/energy gate that
 notices it has switched sources mid-note, or CREPE's ensemble/`full` model.
+
+**Confirmed on real music, and it is now the largest error source in the
+pipeline.** Scoring against the hand transcriptions (`docs/m3-benchmark.md`),
+Confirmation produced 253 notes that are not in the score — and only 13 of
+them repeat a neighbour's pitch, so they are not #1's fragmentation coming
+back. The other 240 sit at unrelated pitches: they are other instruments.
+Recall is fine (0.86); precision is what this costs us (0.64).
+
+Note that #3's dedicated stems did *not* fix the equivalent on Giant Steps, so
+"better isolation" is not automatically the answer — see #3.
 
 ## 9. The drum-stem gate is global, but drum presence is local
 

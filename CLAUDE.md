@@ -81,7 +81,11 @@ of these has broken a tool at least once:
 - Never modify model.py without flagging the migration impact on cached artifacts.
 - Every stage change requires a corresponding test in tests/.
 - Do not run the full pipeline to test one stage — use cached fixtures.
-- mir_eval is the source of truth for metrics. Don't hand-roll scoring.
+- mir_eval is the source of truth for metrics. Don't hand-roll scoring. The
+  one exception is `alignment.py`'s time-free note-sequence comparison, which
+  exists because mir_eval has no such measure and because scoring a notated
+  score in time would need a tempo map from our own beat tracker — see its
+  module docstring. Everything time-based still goes through `metrics.py`.
 - Baselines in tests/regression/baselines.json are sacred. If a change moves
   them, say so explicitly and explain why.
 - **No audio in git, ever** (plan §12) — not committed-then-deleted, not in a
@@ -101,6 +105,11 @@ of these has broken a tool at least once:
 - Tier-1 audio is *rendered at test time* from committed generators — never
   stored. Soundfonts are fetched, never committed.
 - `uv run ruff check .` and `uv run ruff format --check .` must be clean.
+- `scripts/score_benchmark.py` scores the pipeline against the hand
+  transcriptions in `benchmark/` (results: `docs/m3-benchmark.md`). Run it
+  after any transcribe change — it is the only measurement against real
+  music, and it is cheap once the stems are cached (`--reuse` skips CREPE).
+  Its note cache and everything else it touches stay out of git.
 
 ## GUI (plan §13, screens 1-3)
 
