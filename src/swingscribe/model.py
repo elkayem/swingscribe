@@ -30,6 +30,14 @@ class BeatGrid(BaseModel):
     downbeats: list[float]  # subset of beats
     beats_per_bar: int
     local_bpm: list[float] = []  # tempo curve, one local BPM per beat (plan §5 stage 2)
+    # Which audio produced this grid. The stage may override its initial
+    # source choice or splice two together, and without this, reporting has to
+    # re-derive the winner and gets it wrong (open-issue #7).
+    source: str = ""
+    # Spans filled from the OTHER source because the chosen one had no beats
+    # there — a drumless intro, typically (open-issue #9). Empty is the normal
+    # case. Beats inside these spans are worth trusting less.
+    spliced: list[tuple[float, float]] = []
 
 
 class MeterSection(BaseModel):

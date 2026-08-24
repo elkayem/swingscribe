@@ -223,3 +223,132 @@ def test_beats_end_to_end_recovers_tempo(tmp_path):
 
     median = statistics.median(b for b in grid.local_bpm if b > 0)
     assert abs(median - 120.0) / 120.0 < 0.06  # within ~5% (octave errors would be 100% off)
+
+
+"""Local coverage and splicing (open-issue #9). All pure — no numpy, no
+beat_this — so they run in CI, which is where this logic most needs guarding:
+the bug they exist to prevent was invisible to every whole-track measure."""
+
+
+def test_median_interval():
+    from swingscribe.stages.beats import median_interval
+
+    assert abs(median_interval([0.0, 0.5, 1.0, 1.5]) - 0.5) < 1e-9
+    assert median_interval([1.0]) == 0.0
+    assert median_interval([]) == 0.0
+
+
+def test_coverage_gaps_finds_a_late_start():
+    """Confirmation's actual failure: the grid is perfectly steady and simply
+    does not begin until 11.3s, which no steadiness measure can see."""
+    from swingscribe.stages.beats import coverage_gaps
+
+    beats = [11.28 + i * 0.32 for i in range(200)]
+    gaps = coverage_gaps(beats, duration=beats[-1] + 0.32)
+    assert len(gaps) == 1
+    assert gaps[0][0] == 0.0
+    assert abs(gaps[0][1] - 11.28) < 1e-9
+
+
+def test_coverage_gaps_finds_a_hole_in_the_middle():
+    from swingscribe.stages.beats import coverage_gaps
+
+    beats = [i * 0.32 for i in range(20)] + [12.0 + i * 0.32 for i in range(20)]
+    gaps = coverage_gaps(beats, duration=beats[-1] + 0.32)
+    assert len(gaps) == 1
+    assert abs(gaps[0][0] - beats[19]) < 1e-9
+    assert abs(gaps[0][1] - 12.0) < 1e-9
+
+
+def test_coverage_gaps_clean_grid_has_none():
+    from swingscribe.stages.beats import coverage_gaps
+
+    beats = [i * 0.32 for i in range(300)]
+    assert coverage_gaps(beats, duration=beats[-1] + 0.32) == []
+
+
+def test_coverage_gaps_counts_the_tail():
+    from swingscribe.stages.beats import coverage_gaps
+
+    beats = [i * 0.5 for i in range(20)]  # stops at 9.5s
+    gaps = coverage_gaps(beats, duration=30.0)
+    assert len(gaps) == 1
+    assert abs(gaps[0][1] - 30.0) < 1e-9
+
+
+def test_audible_spans_drops_a_silent_lead_in():
+    """A silent intro is not a tracker failure and must not trigger a splice."""
+    from swingscribe.stages.beats import audible_spans
+
+    window_s = 0.5
+    windows = [0.0] * 20 + [0.2] * 100  # silent for the first 10s
+    assert audible_spans([(0.0, 10.0)], windows, window_s) == []
+    assert audible_spans([(20.0, 30.0)], windows, window_s) == [(20.0, 30.0)]
+
+
+def test_audible_spans_keeps_a_playing_gap():
+    from swingscribe.stages.beats import audible_spans
+
+    windows = [0.15] * 40  # quiet intro, but playing
+    assert audible_spans([(0.0, 11.0)], windows, 0.5) == [(0.0, 11.0)]
+
+
+def test_splice_fills_a_gap_at_the_matching_rate():
+    from swingscribe.stages.beats import splice_beats
+
+    base = [11.28 + i * 0.32 for i in range(100)]
+    filler = [0.24 + i * 0.32 for i in range(200)]  # full mix, same rate
+    beats, filled = splice_beats(base, filler, [(0.0, 11.28)], interval=0.32)
+    assert len(filled) == 1
+    assert len(beats) > len(base)
+    assert beats == sorted(beats)
+    assert beats[0] < 1.0  # the intro is now covered
+
+
+def test_splice_rejects_a_half_rate_filler():
+    """The bass covers Confirmation's intro better than the drums do, but
+    plays a 2-feel — its beats are at half the true pulse. Filling from it
+    would be worse than leaving the hole."""
+    from swingscribe.stages.beats import splice_beats
+
+    base = [11.28 + i * 0.32 for i in range(100)]
+    filler = [0.3 + i * 0.64 for i in range(20)]  # half rate
+    beats, filled = splice_beats(base, filler, [(0.0, 11.28)], interval=0.32)
+    assert filled == []
+    assert beats == base
+
+
+def test_splice_never_doubles_the_pulse_at_a_seam():
+    from swingscribe.stages.beats import splice_beats
+
+    base = [10.0 + i * 0.5 for i in range(20)]
+    filler = [i * 0.5 for i in range(40)]  # overlaps the base exactly
+    beats, _ = splice_beats(base, filler, [(0.0, 10.0)], interval=0.5)
+    intervals = [b - a for a, b in zip(beats, beats[1:], strict=False)]
+    assert min(intervals) > 0.25  # no beat lands within half a beat of another
+
+
+def test_splice_leaves_a_grid_with_no_gaps_alone():
+    from swingscribe.stages.beats import splice_beats
+
+    base = [i * 0.5 for i in range(40)]
+    beats, filled = splice_beats(base, [i * 0.5 + 0.1 for i in range(40)], [], interval=0.5)
+    assert beats == base
+    assert filled == []
+
+
+def test_beat_grid_records_its_source():
+    """open-issue #7 — the stored grid must say where it came from."""
+    from swingscribe.model import BeatGrid
+
+    grid = BeatGrid(beats=[0.0, 0.5], downbeats=[0.0], beats_per_bar=4)
+    assert grid.source == ""  # old cached artifacts still load
+    assert grid.spliced == []
+    grid = BeatGrid(
+        beats=[0.0, 0.5],
+        downbeats=[0.0],
+        beats_per_bar=4,
+        source="drum stem + full mix over 1 span(s)",
+        spliced=[(0.0, 11.3)],
+    )
+    assert grid.spliced == [(0.0, 11.3)]

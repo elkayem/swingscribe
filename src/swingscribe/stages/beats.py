@@ -24,7 +24,8 @@ from swingscribe.model import BeatGrid, Document
 
 # Bump when this stage's behavior changes without a config change — it feeds
 # the cache key (see pipeline._cache_name). v2: grid-quality source comparison.
-CACHE_VERSION = 2
+# v3: per-passage coverage and splicing (open-issue #9).
+CACHE_VERSION = 3
 
 # |log2(bpm / median)| at or beyond this counts as an octave-error outlier;
 # 0.5 flags anything past ~1.41x off the median, halfway to a doubling.
@@ -162,6 +163,137 @@ def correct_octave(
     return beats, downbeats, None
 
 
+# ── Local coverage (open-issue #9) ───────────────────────────────────────
+#
+# Source selection and the grid-quality comparison above are both whole-track
+# judgements. Drum presence is not: Confirmation opens with ~20 seconds of
+# piano and bass and no kit at all, so the drum stem — correctly chosen, since
+# across the whole track the drums are far above min_drum_mix_ratio — had
+# nothing to track there. The resulting grid is the steadiest of the three
+# sources by every global measure and still has a 20-second hole at the front,
+# which is exactly what `grid_is_suspect` cannot see.
+#
+# So coverage is measured separately from steadiness, and the repair is a
+# splice rather than a swap: in a drumless intro the pulse is carried by the
+# whole ensemble, and the full mix tracks it well there while being three
+# times less steady over the body of the tune. Neither source is right
+# everywhere.
+
+# A stretch with no beat lasting longer than this many expected beat
+# intervals is a coverage gap.
+MAX_GAP_BEATS = 3.0
+
+# A gap only counts as a tracker failure if the mix is actually playing
+# there — silent lead-in and run-out are not.
+GAP_AUDIBLE_RATIO = 0.1
+GAP_WINDOW_S = 0.5
+
+# An alternate source may fill a gap only if its beat rate there agrees with
+# the base grid's within this fraction. This is what rejects the bass, which
+# covers Confirmation's intro better than the drums but reports a 2-feel —
+# its own rhythm, at half the true pulse rate.
+SPLICE_RATE_TOLERANCE = 0.25
+
+
+def median_interval(beats: list[float]) -> float:
+    """Median seconds between consecutive beats; 0.0 when undefined."""
+    if len(beats) < 2:
+        return 0.0
+    return statistics.median(b1 - b0 for b0, b1 in zip(beats, beats[1:], strict=False))
+
+
+def coverage_gaps(
+    beats: list[float],
+    duration: float,
+    max_gap_beats: float = MAX_GAP_BEATS,
+    interval: float | None = None,
+) -> list[tuple[float, float]]:
+    """Spans where the tracker found no beats for longer than it should have.
+
+    The head (before the first beat) and tail (after the last) count, which is
+    where this failure actually appears — a grid that simply starts late looks
+    perfect to every steadiness measure.
+    """
+    if duration <= 0:
+        return []
+    if len(beats) < 2:
+        return [(0.0, duration)]
+    interval = interval if interval is not None else median_interval(beats)
+    if interval <= 0:
+        return []
+    limit = max_gap_beats * interval
+    edges = [0.0, *beats, duration]
+    return [(a, b) for a, b in zip(edges, edges[1:], strict=False) if b - a > limit]
+
+
+def audible_spans(
+    spans: list[tuple[float, float]],
+    window_rms: list[float],
+    window_s: float,
+    ratio: float = GAP_AUDIBLE_RATIO,
+) -> list[tuple[float, float]]:
+    """Keep only the spans where the mix is playing.
+
+    Relative to the track's own loud reference (95th-percentile window), for
+    the same reason the drum gate is relative: an absolute threshold cannot
+    tell a quiet recording from a silent passage.
+    """
+    if not window_rms or window_s <= 0:
+        return list(spans)
+    ordered = sorted(window_rms)
+    reference = ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))]
+    floor = reference * ratio
+    kept = []
+    for lo, hi in spans:
+        chunk = window_rms[int(lo / window_s) : math.ceil(hi / window_s)]
+        if chunk and max(chunk) >= floor:
+            kept.append((lo, hi))
+    return kept
+
+
+def splice_beats(
+    base: list[float],
+    filler: list[float],
+    gaps: list[tuple[float, float]],
+    interval: float,
+    tolerance: float = SPLICE_RATE_TOLERANCE,
+) -> tuple[list[float], list[tuple[float, float]]]:
+    """Fill each gap in `base` with `filler`'s beats, where the rate agrees.
+
+    Returns (beats, filled_spans). A gap is filled all-or-nothing: partial
+    agreement is not evidence, and half a gap of beats at the wrong rate is
+    worse than none. Candidates landing within half a beat of an existing beat
+    are dropped so a splice never doubles the pulse at a seam.
+    """
+    if interval <= 0 or not gaps or not filler:
+        return list(base), []
+    added: list[float] = []
+    filled: list[tuple[float, float]] = []
+    for lo, hi in gaps:
+        inner = [
+            b for b in filler if lo <= b <= hi and all(abs(b - p) > 0.5 * interval for p in base)
+        ]
+        if len(inner) < 2:
+            continue
+        rate = median_interval(inner)
+        if rate <= 0 or abs(rate / interval - 1.0) > tolerance:
+            continue
+        added.extend(inner)
+        filled.append((min(inner), max(inner)))
+    if not added:
+        return list(base), []
+    return sorted(base + added), filled
+
+
+def _rms_windows(path: str, window_s: float = GAP_WINDOW_S) -> list[float]:
+    import soundfile
+
+    data, rate = soundfile.read(path, dtype="float32", always_2d=True)
+    mono = data.mean(axis=1)
+    size = max(1, int(window_s * rate))
+    return [float((mono[i : i + size] ** 2).mean() ** 0.5) for i in range(0, len(mono), size)]
+
+
 def _rms(path: str) -> float:
     import soundfile
 
@@ -204,19 +336,54 @@ def run(document: Document, config: Config) -> Document:
     )
     beats, downbeats = _track(file2beats, source)
 
-    # If the grid looks bad, track the other source too and keep the better
-    # grid — a second beat_this pass is cheap next to a wrong beat grid.
+    # Two independent reasons to try the other source: the grid is unsteady
+    # (v2), or it has holes where the music is playing (v3, open-issue #9).
+    # A grid can be the steadiest of its alternatives and still miss the first
+    # twenty seconds, so steadiness alone cannot decide this.
     duration = document.audio.duration
+    windows = _rms_windows(document.audio.path)
     quality = grid_quality(beats, duration)
+    gaps = audible_spans(coverage_gaps(beats, duration), windows, GAP_WINDOW_S)
     other = _other_source(source, document)
-    if other is not None and grid_is_suspect(quality):
+    spliced: list[tuple[float, float]] = []
+
+    if other is not None and (grid_is_suspect(quality) or gaps):
         other_label = "full mix" if other == document.audio.path else "drum stem"
-        print(f"beats: suspect grid from {reason} — also trying {other_label}")
+        why = "suspect grid" if grid_is_suspect(quality) else f"{len(gaps)} coverage gap(s)"
+        print(f"beats: {why} from {reason} — also trying {other_label}")
         other_beats, other_downbeats = _track(file2beats, other)
-        if grid_quality(other_beats, duration) > quality:
-            beats, downbeats = other_beats, other_downbeats
+
+        # Swap wholesale ONLY when the whole grid is bad (v2's job). A grid
+        # whose only fault is a hole gets a local repair, because that is the
+        # entire finding of open-issue #9: the drum stem is the right source
+        # for the body of a tune even when it is the wrong one for the intro.
+        # Letting the global comparison decide a near-tie here would trade a
+        # 20-second hole for a three-times-less-steady grid everywhere.
+        if grid_is_suspect(quality) and grid_quality(other_beats, duration) > quality:
+            beats, downbeats, filler = other_beats, other_downbeats, beats
             reason = f"{other_label} (better grid than {reason})"
             print(f"beats: kept {other_label} grid ({len(beats)} beats)")
+        else:
+            filler = other_beats
+
+        interval = median_interval(beats)
+        gaps = audible_spans(
+            coverage_gaps(beats, duration, interval=interval), windows, GAP_WINDOW_S
+        )
+        if gaps:
+            beats, spliced = splice_beats(beats, filler, gaps, interval)
+        if spliced:
+            covered = sum(hi - lo for lo, hi in spliced)
+            reason = f"{reason} + {other_label} over {len(spliced)} span(s)"
+            print(
+                f"beats: spliced {len(spliced)} span(s), {covered:.1f}s, from "
+                f"{other_label} where {reason.split(' + ')[0]} had no beats"
+            )
+        elif gaps:
+            # Worth saying out loud: the hole is real and nothing could fill
+            # it at the right rate, so downstream bar lines will stop there.
+            unfilled = ", ".join(f"{lo:.1f}-{hi:.1f}s" for lo, hi in gaps[:4])
+            print(f"beats: WARNING {len(gaps)} coverage gap(s) left unfilled: {unfilled}")
 
     if config.beats.tempo_hint:
         beats, downbeats, action = correct_octave(beats, downbeats, config.beats.tempo_hint)
@@ -238,10 +405,16 @@ def run(document: Document, config: Config) -> Document:
         more = "" if len(outliers) <= 8 else f" (+{len(outliers) - 8} more)"
         print(f"beats: WARNING {len(outliers)} octave-error outlier(s) at {times}{more}")
 
+    # Downbeats are deliberately NOT spliced. The detected downbeat layer is
+    # noise (open-issue #5) and nothing downstream trusts it — meter.py counts
+    # beats from a user-set anchor instead — so inventing more of it would add
+    # confidence without adding information.
     grid = BeatGrid(
         beats=beats,
         downbeats=downbeats,
         beats_per_bar=infer_beats_per_bar(beats, downbeats),
         local_bpm=bpm,
+        source=reason,
+        spliced=spliced,
     )
     return document.model_copy(update={"beat_grid": grid})

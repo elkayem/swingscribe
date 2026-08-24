@@ -163,11 +163,17 @@ Tempo stdev 110.6 against a 250 bpm median, 420 octave outliers (17% of beats). 
 grid-quality comparison rejected the drum stem in favour of the full mix, which is
 backwards for fast bebop with a clear ride pattern.
 
-## 7. `BeatGrid` doesn't record which source produced it
+## 7. ~~`BeatGrid` doesn't record which source produced it~~ — FIXED
 
 When the quality comparison overrides the initial source choice, the stored Document
 doesn't record the winner, so reporting has to re-derive it (and gets it wrong).
 Add `BeatGrid.source` at the next natural beats change.
+
+Landed with #9 below, which was that change. `BeatGrid.source` holds the
+human-readable outcome ("drum stem + full mix over 5 span(s)") and
+`BeatGrid.spliced` holds the spans taken from the other source, so a caller
+can tell which beats are worth trusting less. Both default to empty, so
+previously cached grids still deserialize.
 
 ## 8. CREPE loses the soloist to loud comping (surfaced by #4)
 
@@ -324,7 +330,7 @@ for this issue and it misled in both directions.
    real music there is much more of it than one synthetic piano. The gate
    stays at 0.5.
 
-## 9. The drum-stem gate is global, but drum presence is local
+## 9. ~~The drum-stem gate is global, but drum presence is local~~ — FIXED
 
 Confirmation draws no bars for its first ~20s. Not a drawing bug and not a
 meter bug — the beat *tracker* found almost nothing there, and the meter stage
@@ -401,3 +407,46 @@ cannot here because the surviving early beats are too few to form a span
 
 Low urgency for the benchmark work: Confirmation's `form_start` is 51.4s, well
 clear of the damage. It matters when a solo *starts* near a drumless passage.
+
+### The fix: measure coverage separately, and splice rather than swap
+
+`coverage_gaps` finds stretches with no beats lasting more than three expected
+beat intervals — **including before the first beat and after the last**, which
+is where this failure lives; a grid that simply starts late looks perfect to
+every steadiness measure. `audible_spans` discards gaps where the mix is not
+playing, so a silent lead-in is not mistaken for a tracker failure.
+`splice_beats` then fills each gap from the other source, all-or-nothing, and
+only where the filler's beat rate there agrees with the base grid's to within
+25%. That rate test is what rejects the bass: it covers the intro better than
+the drums but reports a 2-feel at half the true pulse.
+
+Confirmation, against 187.3 bpm from the hand transcription:
+
+| | before | wholesale swap | splice (shipped) |
+|---|---|---|---|
+| source | drum stem | full mix | drum stem + full mix, 5 spans |
+| first beat | 11.28s | 0.24s | **0.24s** |
+| intro 0-30s coverage | 21% | 101% | **84%** |
+| whole-track stdev | 22.0 | 64.5 | **35.7** |
+| octave outliers | 2% | 2% | 2% |
+
+The middle column is worth keeping. A first attempt let the existing
+whole-track comparison decide, and it *did* fix the coverage — by swapping to
+the full mix, whose grid is three times less steady over the body of the tune.
+That is precisely the trade this entry warned against. **Coverage gaps are a
+local failure and must get a local repair**, so the wholesale swap now
+requires a genuinely suspect grid (v2's job, unchanged) and a merely gappy
+grid keeps its source and borrows only what it is missing. The spliced spans
+land exactly on the damage described above: 0.24-10.98, 11.62-12.26,
+12.88-13.52, 14.14-19.58, plus an outro.
+
+**What is left.** Intro coverage is 84%, not 100%, because the drum stem's own
+half-rate beats between 11.28s and 19.88s are *present* — so they are not a
+gap, and splicing does not touch them. Detecting a locally-wrong beat *rate*
+is a different repair from detecting a missing one, and it is the Corner
+Pocket pattern in docs/meter-plan.md. Not attempted here.
+
+Also unaddressed, and pre-existing: Giant Steps' drum grid is genuinely
+suspect, so it still takes the v2 wholesale swap to the full mix and ends up
+with 16% octave outliers and 51% intro coverage. That is issue #6's territory,
+not this one.
