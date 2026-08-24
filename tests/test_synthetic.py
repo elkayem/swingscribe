@@ -20,7 +20,13 @@ from conftest import requires_heavy
 from swingscribe.config import Config
 from swingscribe.metrics import notes_to_frames, score_frames, score_notes
 from swingscribe.stages import transcribe
-from synthetic import generate
+from synthetic import generate, soundfont
+
+# Soundfont cases need a 32MB bank and the FluidSynth CLI, neither of which is
+# committed (plan §12) and neither of which CI has. They skip rather than fail.
+requires_soundfont = pytest.mark.skipif(
+    not soundfont.available(), reason=soundfont.missing_reason()
+)
 
 BASELINES_PATH = Path(__file__).parent / "regression" / "baselines.json"
 # How far below a pinned baseline a score may drift before the test fails.
@@ -51,6 +57,12 @@ _FAST = generate.phrase([57, 59, 60, 62, 64, 62, 60, 59], note_duration=0.13, ga
 # held note shatters into 4 (onset F1 0.40) at -3dB, and survives at -6dB. A
 # case that passes whether or not the code is correct measures nothing.
 COMPING_DB = -3.0
+# Sampled comping is a much stronger competitor than sine chords at the same
+# nominal level — a real piano chord is broadband and transient where three
+# sines are neither. -12dB is the loudest the soundfont held-note case stays
+# intact at (see the sweep beside held_note_over_quiet_comping), so it is the
+# level at which a floor is worth pinning.
+QUIET_COMPING_DB = -12.0
 
 CASES: dict[str, dict] = {
     "clean_line": {"notes": _LINE, "render": {}},
@@ -88,10 +100,63 @@ CASES: dict[str, dict] = {
 }
 
 
-def run_case(tmp_path, name: str) -> dict[str, float]:
-    case = CASES[name]
-    truth = generate.to_note_events(case["notes"])
-    signal = generate.render(case["notes"], **case["render"])
+# ── Soundfont cases (plan §6, open-issue #4) ────────────────────────────
+#
+# The additive cases above all score ≥0.98, which makes them a regression
+# guard and not a quality measure. These render the SAME ground truth through
+# a sampled tenor sax, so any score difference is attributable to timbre
+# alone — breath noise, a moving harmonic series, real attacks and release
+# tails. Their baselines live in a separate "synthetic_soundfont" section
+# precisely because they are expected to be lower: mixing them into the
+# additive numbers would hide both.
+SOUNDFONT_CASES: dict[str, dict] = {
+    "clean_line": {"notes": _LINE, "render": {}},
+    "held_note": {"notes": _HELD, "render": {}},
+    # The direct mirror of the additive case, at the same -3dB. It scores
+    # ZERO, and that is the measurement, not a bug in the harness: a sampled
+    # piano at -3dB under a sampled sax pulls CREPE off the melody outright,
+    # where sine chords at the same level never did. Its baseline is a record
+    # of where we are, not a floor worth defending — see
+    # `held_note_over_quiet_comping` for the floor.
+    "held_note_over_comping": {
+        "notes": _HELD,
+        "render": {
+            "accompaniment": generate.comping_under(_HELD),
+            "accompaniment_db": COMPING_DB,
+        },
+    },
+    # The same case at a level where onset corroboration still holds. Measured
+    # sweep of the held note under sampled comping (frame pitch accuracy /
+    # notes estimated against 1 in the truth):
+    #     -3dB 0.66/4   -6dB 0.79/3   -9dB 0.95/2   -12dB 0.97/1   -18dB 0.98/1
+    # The additive renderer scores 1.000/1 at every one of those levels, so
+    # this is the first synthetic case with any dynamic range at all.
+    "held_note_over_quiet_comping": {
+        "notes": _HELD,
+        "render": {
+            "accompaniment": generate.comping_under(_HELD),
+            "accompaniment_db": QUIET_COMPING_DB,
+        },
+    },
+    "fast_line": {"notes": _FAST, "render": {}},
+    # Mod wheel drives the GM vibrato LFO, so this is the patch's own wobble
+    # rather than a frequency modulation we imposed — a closer analogue of
+    # what a player does than generate.render's vibrato_cents.
+    "vibrato": {
+        "notes": generate.phrase([57, 60, 64, 62]),
+        "render": {"vibrato": 100},
+    },
+    # A second timbre family. Brass has a much stronger upper harmonic series
+    # than a reed, and octave errors are the failure mode that costs us.
+    "trumpet_line": {
+        "notes": _LINE,
+        "render": {"program": soundfont.TRUMPET},
+    },
+}
+
+
+def _score_case(tmp_path, name: str, notes, signal) -> dict[str, float]:
+    truth = generate.to_note_events(notes)
     estimate, diag = transcribe_signal(tmp_path, signal, name=name)
 
     scores = score_notes(truth, estimate)
@@ -101,14 +166,20 @@ def run_case(tmp_path, name: str) -> dict[str, float]:
     return scores
 
 
-@requires_heavy
-@pytest.mark.parametrize("name", sorted(CASES))
-def test_scores_meet_baseline(tmp_path, name):
-    baselines = load_baselines().get("synthetic", {})
-    if name not in baselines:
-        pytest.skip(f"no pinned baseline for {name!r} — run tools/pin_baselines.py")
-    scores = run_case(tmp_path, name)
-    pinned = baselines[name]
+def run_case(tmp_path, name: str) -> dict[str, float]:
+    case = CASES[name]
+    return _score_case(
+        tmp_path, name, case["notes"], generate.render(case["notes"], **case["render"])
+    )
+
+
+def run_soundfont_case(tmp_path, name: str) -> dict[str, float]:
+    case = SOUNDFONT_CASES[name]
+    signal = soundfont.render(case["notes"], **case["render"])
+    return _score_case(tmp_path, f"sf_{name}", case["notes"], signal)
+
+
+def assert_meets_baseline(name: str, scores: dict[str, float], pinned: dict[str, float]) -> None:
     regressions = []
     for metric, expected in pinned.items():
         if metric.startswith(("n_", "voicing_false_alarm")):
@@ -122,6 +193,42 @@ def test_scores_meet_baseline(tmp_path, name):
 
 
 @requires_heavy
+@pytest.mark.parametrize("name", sorted(CASES))
+def test_scores_meet_baseline(tmp_path, name):
+    baselines = load_baselines().get("synthetic", {})
+    if name not in baselines:
+        pytest.skip(f"no pinned baseline for {name!r} — run tools/pin_baselines.py")
+    assert_meets_baseline(name, run_case(tmp_path, name), baselines[name])
+
+
+@requires_heavy
+@requires_soundfont
+@pytest.mark.parametrize("name", sorted(SOUNDFONT_CASES))
+def test_soundfont_scores_meet_baseline(tmp_path, name):
+    baselines = load_baselines().get("synthetic_soundfont", {})
+    if name not in baselines:
+        pytest.skip(f"no pinned baseline for {name!r} — run tools/pin_baselines.py --soundfont")
+    assert_meets_baseline(name, run_soundfont_case(tmp_path, name), baselines[name])
+
+
+@requires_heavy
+@requires_soundfont
+def test_soundfont_is_harder_than_additive(tmp_path):
+    """Guards the measurement, like test_the_suite_can_actually_see_the_bug:
+    if a sampled sax ever scores as well as stacked sines, the soundfont path
+    has stopped rendering what we think it renders and its baselines mean
+    nothing. Frame pitch accuracy is the comparison — note counts move for
+    segmentation reasons that are their own story."""
+    additive = run_case(tmp_path, "clean_line")
+    sampled = run_soundfont_case(tmp_path, "clean_line")
+    assert sampled["raw_pitch_accuracy"] < additive["raw_pitch_accuracy"], (
+        "the soundfont case is no harder than additive synthesis "
+        f"({sampled['raw_pitch_accuracy']:.3f} vs {additive['raw_pitch_accuracy']:.3f}) — "
+        "check that fluidsynth is actually rendering the sax patch"
+    )
+
+
+@requires_heavy
 def test_comping_does_not_shatter_a_held_note(tmp_path):
     """Open-issue #1, measured rather than eyeballed: chords underneath a
     held note must not multiply the note count."""
@@ -129,6 +236,20 @@ def test_comping_does_not_shatter_a_held_note(tmp_path):
     comped = run_case(tmp_path, "held_note_over_comping")
     assert comped["n_estimate"] <= clean["n_estimate"] + 2, (
         f"comping inflated the note count {clean['n_estimate']} -> {comped['n_estimate']}"
+    )
+
+
+@requires_heavy
+@requires_soundfont
+def test_sampled_comping_does_not_shatter_a_held_note(tmp_path):
+    """The same guard with real instruments, at the level where the open-issue
+    #1 fix actually holds. Deliberately NOT the -3dB case: at -3dB a sampled
+    piano wins the frame outright and the held note becomes 4, which is a
+    tracking failure rather than a segmentation one and is recorded in the
+    baselines instead of asserted here."""
+    comped = run_soundfont_case(tmp_path, "held_note_over_quiet_comping")
+    assert comped["n_estimate"] <= 2, (
+        f"sampled comping shattered the held note into {comped['n_estimate']:.0f}"
     )
 
 
@@ -157,6 +278,9 @@ def test_corroboration_does_not_merge_fast_repeated_notes(tmp_path):
 
 
 def test_generator_is_deterministic():
+    # numpy is not in the default dependency closure — plain `uv sync`, and so
+    # CI, installs neither it nor the ml group that pulls it in.
+    pytest.importorskip("numpy")
     a = generate.render(generate.phrase([60, 62]), noise_db=-30.0)
     b = generate.render(generate.phrase([60, 62]), noise_db=-30.0)
     assert (a == b).all()
@@ -167,3 +291,78 @@ def test_ground_truth_matches_the_notes_asked_for():
     events = generate.to_note_events(notes)
     assert [e.pitch for e in events] == [57, 60, 64]
     assert all(e.confidence == 1.0 for e in events)
+
+
+# ── Soundfont plumbing (no ml group, no soundfont needed) ───────────────
+
+
+def test_soundfont_discovery_prefers_an_explicit_override(tmp_path, monkeypatch):
+    fake = tmp_path / "fake.sf2"
+    fake.write_bytes(b"sfbk")
+    monkeypatch.setenv(soundfont.SOUNDFONT_ENV, str(fake))
+    assert soundfont.find_soundfont() == str(fake)
+
+
+def test_soundfont_discovery_rejects_an_override_that_is_not_there(tmp_path, monkeypatch):
+    """A typo'd path must skip the tests, not silently fall back to a
+    different soundfont — the scores would be from a bank nobody chose."""
+    monkeypatch.setenv(soundfont.SOUNDFONT_ENV, str(tmp_path / "nope.sf2"))
+    assert soundfont.find_soundfont() is None
+    assert not soundfont.available()
+
+
+def test_missing_reason_names_the_fix(monkeypatch, tmp_path):
+    monkeypatch.setenv(soundfont.SOUNDFONT_ENV, str(tmp_path / "nope.sf2"))
+    reason = soundfont.missing_reason()
+    assert "setup_fixtures.py" in reason
+    assert soundfont.SOUNDFONT_ENV in reason
+
+
+def test_written_midi_is_the_ground_truth_verbatim(tmp_path):
+    """The whole premise is that only the timbre changes, so the MIDI handed
+    to fluidsynth must carry the answer key unmodified."""
+    pretty_midi = pytest.importorskip("pretty_midi")
+    notes = generate.phrase([57, 60, 64, 62])
+    path = soundfont.write_midi(notes, tmp_path / "truth.mid", program=soundfont.TENOR_SAX)
+
+    pm = pretty_midi.PrettyMIDI(path)
+    (instrument,) = pm.instruments
+    assert instrument.program == soundfont.TENOR_SAX
+    assert [n.pitch for n in instrument.notes] == [n.pitch for n in notes]
+    for written, truth in zip(instrument.notes, notes, strict=True):
+        assert written.start == pytest.approx(truth.onset, abs=1e-3)
+        assert written.end == pytest.approx(truth.onset + truth.duration, abs=1e-3)
+
+
+def test_vibrato_is_written_as_a_mod_wheel_message(tmp_path):
+    pretty_midi = pytest.importorskip("pretty_midi")
+    path = soundfont.write_midi(generate.phrase([57]), tmp_path / "vib.mid", vibrato=100)
+    (instrument,) = pretty_midi.PrettyMIDI(path).instruments
+    assert [(cc.number, cc.value) for cc in instrument.control_changes] == [
+        (soundfont.VIBRATO_CC, 100)
+    ]
+
+
+@requires_soundfont
+def test_soundfont_render_is_the_expected_shape_and_rate(tmp_path):
+    """Cheap enough to run without the heavy gate: it renders audio but never
+    touches CREPE."""
+    pytest.importorskip("soundfile")
+    notes = generate.phrase([57, 60], note_duration=0.3)
+    signal = soundfont.render(notes, program=soundfont.TENOR_SAX)
+    expected = int(generate.SAMPLE_RATE * (notes[-1].onset + notes[-1].duration + 0.5))
+    assert signal.shape == (expected,)
+    assert signal.dtype == "float32"
+    assert 0.6 < abs(signal).max() <= 0.7001  # peak-normalized, like generate.render
+
+
+@requires_soundfont
+def test_soundfont_render_actually_differs_from_additive(tmp_path):
+    """Same notes, same length, different samples. If these ever matched, the
+    soundfont path would be silently falling through to the sine renderer."""
+    pytest.importorskip("soundfile")
+    notes = generate.phrase([57, 60], note_duration=0.3)
+    sampled = soundfont.render(notes)
+    additive = generate.render(notes)
+    assert sampled.shape == additive.shape
+    assert not (sampled == additive).all()
