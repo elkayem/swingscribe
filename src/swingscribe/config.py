@@ -203,6 +203,18 @@ class QuantizeConfig(BaseModel):
     # notated a swung pair as a triplet on a third of all intervals. 1 or 2
     # restores the pre-M6 behaviour.
     min_onsets_for_tuplet: int = 3
+    # How much worse, in beats of mean snap error, a COARSER grid may be and
+    # still win. Parsimony: reading a sixteenth out of a beat that only shows
+    # an eighth pair is how a swung pair becomes a dotted eighth. 0 keeps the
+    # old least-error rule.
+    #
+    # 0.05 is not tuned on the notation score, which rises monotonically to
+    # "write everything as eighth notes" and would happily overfit three
+    # bebop solos. It is the largest value that keeps quantize inside its OWN
+    # acceptance criterion — plan §5's 20ms round trip, which measures what
+    # coarsening costs the performance rather than what it buys the page.
+    # At 0.05 the worst tune replays at 18.7ms; at 0.08 it is 21.0ms.
+    grid_slack: float = 0.05
 
 
 class NotateConfig(BaseModel):

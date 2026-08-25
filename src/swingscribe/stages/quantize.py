@@ -164,31 +164,38 @@ def snap(position: float, divisions: int) -> tuple[float, float]:
 
 
 def choose_grid(
-    offsets: list[float], candidates: tuple[int, ...], min_onsets_for_tuplet: int = 3
+    offsets: list[float],
+    candidates: tuple[int, ...],
+    min_onsets_for_tuplet: int = 3,
+    slack: float = 0.05,
 ) -> int:
     """Pick the subdivision that the notes in one beat actually fit.
 
     Post-warp, a swung eighth pair (0, 0.5) and a triplet figure (0, 1/3, 2/3)
     are close enough that assuming a binary grid silently rewrites the second
-    as the first. So both are tried and the one with less total snap error
-    wins. Ties go to the earlier candidate, which is the binary grid — the
-    commoner reading, and the one a notation program renders without fuss.
+    as the first. So the candidates are tried and the snap error compared.
 
-    **Least snap error is not enough on its own, and measurement said so.**
-    Warping is imperfect — the phase estimate is shrunk toward the track mean
-    and real playing scatters around it — so a warped offbeat routinely lands
-    near 0.58 rather than 0.5. Binary is then 0.08 away and ternary 0.07, and
-    ternary wins on arithmetic while being wrong on music. Scored against the
-    hand transcriptions, that turned an even eighth pair into a triplet or a
-    dotted-eighth pair on **37% of Confirmation's intervals, 56% of All The
-    Things'** — the single largest disagreement with a human score, and
-    exactly the error the swing warp exists to prevent.
+    **Least snap error is not enough on its own, and measurement said so
+    twice.** Warping is imperfect — the phase estimate is shrunk toward the
+    track mean and real playing scatters around it — so a warped offbeat
+    routinely lands near 0.6 rather than 0.5. Two things follow, and both were
+    happening:
 
-    So a tuplet also has to be *visible*: it needs at least
-    `min_onsets_for_tuplet` notes in the beat. You cannot see a triplet in two
-    notes, and two notes in a beat post-warp are an eighth pair by
-    construction. This is a claim about what the evidence can support, not a
-    preference for binary.
+    - On pure arithmetic ternary beats binary there, so an even eighth pair
+      was notated as a triplet.
+    - Once that was fixed it snapped to 0.75 on the sixteenth grid instead,
+      and the pair was notated as a dotted eighth plus a sixteenth.
+
+    Both are the same mistake: **reading more resolution out of the notes than
+    the notes can demonstrate.** Two onsets in a beat cannot show a triplet
+    and cannot show a sixteenth; they can only show an eighth pair, and the
+    scatter that distinguishes 0.5 from 0.75 is smaller than the scatter a
+    player produces. So:
+
+    - a tuplet needs `min_onsets_for_tuplet` onsets before it may be chosen;
+    - and among what remains, the COARSEST grid within `slack` of the best
+      error wins, rather than the best. Parsimony, and the coarser reading is
+      the one a musician writes.
     """
     if not offsets:
         return candidates[0]
@@ -199,12 +206,29 @@ def choose_grid(
     ]
     if not allowed:
         allowed = [candidates[0]]
-    best, best_error = allowed[0], None
-    for divisions in allowed:
-        error = sum(abs(snap(offset, divisions)[1]) for offset in offsets)
-        if best_error is None or error < best_error - 1e-12:
-            best, best_error = divisions, error
-    return best
+    errors = {
+        divisions: sum(abs(snap(offset, divisions)[1]) for offset in offsets) / len(offsets)
+        for divisions in allowed
+    }
+    best_error = min(errors.values())
+    # A grid that cannot keep two onsets apart is too coarse for this beat,
+    # whatever its snap error says. Two notes on one grid position are one
+    # note in a single-line score — the other is simply lost — so this is a
+    # hard constraint and not a preference. Without it, buying notated rhythm
+    # by coarsening the grid quietly costs notes: 4.8% of All The Things
+    # disappeared before this rule existed.
+    separating = [d for d in allowed if _keeps_apart(offsets, d)] or allowed
+    # Coarsest first: a smaller number of divisions is a coarser grid.
+    for divisions in sorted(separating):
+        if errors[divisions] <= best_error + slack + 1e-12:
+            return divisions
+    return min(separating, key=lambda d: errors[d])
+
+
+def _keeps_apart(offsets: list[float], divisions: int) -> bool:
+    """Do all these onsets still land on different grid positions?"""
+    snapped = {round(snap(offset, divisions)[0], 9) for offset in offsets}
+    return len(snapped) == len(offsets)
 
 
 def _anchor_index(section: MeterSection, beats: list[float]) -> int:
@@ -249,6 +273,7 @@ def quantize_notes(
     straight_bur_ceiling: float = 1.6,
     allow_triplets: bool = True,
     min_onsets_for_tuplet: int = 3,
+    grid_slack: float = 0.05,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -261,8 +286,12 @@ def quantize_notes(
     if len(beats) < 2:
         return [], []
     by_beat, _track = pooled_phase(spans, straight_bur_ceiling)
-    divisions = max(1, resolution // 4)  # grid steps per beat
-    candidates = (divisions, 3) if allow_triplets else (divisions,)
+    finest = max(1, resolution // 4)  # grid steps per beat at full resolution
+    # Coarse to fine. An eighth-note grid is offered first so a beat holding
+    # only an eighth pair is not forced onto a sixteenth grid it cannot
+    # justify; `slack` decides how much better a finer grid has to be.
+    coarse = [d for d in (2, finest) if d <= finest]
+    candidates = tuple(dict.fromkeys(coarse + ([3] if allow_triplets else [])))
 
     # Warp first, then group by beat so the grid choice sees the whole beat.
     warped: list[tuple[int, float, float, int]] = []  # (index, position, duration, pitch)
@@ -285,13 +314,13 @@ def quantize_notes(
     for index, position, _duration, _pitch in warped:
         per_beat.setdefault(index, []).append(position - index)
     grids = {
-        index: choose_grid(offsets, candidates, min_onsets_for_tuplet)
+        index: choose_grid(offsets, candidates, min_onsets_for_tuplet, grid_slack)
         for index, offsets in per_beat.items()
     }
 
     out, positions = [], []
     for index, position, duration, pitch in warped:
-        grid = grids.get(index, divisions)
+        grid = grids.get(index, finest)
         snapped, residual = snap(position, grid)
         length, _ = snap(duration, grid)
         bar, beat = bar_and_beat(snapped, beats, sections)
@@ -378,6 +407,7 @@ def run(document: Document, config: Config) -> Document:
         straight_bur_ceiling=qc.straight_bur_ceiling,
         allow_triplets=qc.allow_triplets,
         min_onsets_for_tuplet=qc.min_onsets_for_tuplet,
+        grid_slack=qc.grid_slack,
     )
 
     by_beat, track = pooled_phase(document.swing, qc.straight_bur_ceiling)

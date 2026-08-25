@@ -389,3 +389,29 @@ def test_the_tuplet_floor_cannot_leave_a_beat_with_no_grid():
     from swingscribe.stages.quantize import choose_grid
 
     assert choose_grid([0.0, 0.5], (3,), min_onsets_for_tuplet=3) == 3
+
+
+def test_a_grid_that_merges_two_onsets_is_too_coarse_whatever_its_error():
+    """Two notes on one grid position are ONE note in a single-line score --
+    the other is simply lost. So separation is a hard constraint, not a
+    preference: before this rule, buying notated rhythm by coarsening the grid
+    quietly deleted 4.8% of All The Things."""
+    from swingscribe.stages.quantize import choose_grid
+
+    # Two onsets a sixteenth apart: an eighth grid puts them in one place.
+    close_pair = [0.0, 0.25]
+    assert choose_grid(close_pair, (2, 4), min_onsets_for_tuplet=3, slack=1.0) == 4
+
+
+def test_parsimony_still_applies_when_the_grid_can_separate_the_notes():
+    from swingscribe.stages.quantize import choose_grid
+
+    # An eighth pair: both grids separate it, so the coarser one wins.
+    assert choose_grid([0.0, 0.52], (2, 4), min_onsets_for_tuplet=3, slack=0.05) == 2
+
+
+def test_zero_slack_restores_least_snap_error():
+    from swingscribe.stages.quantize import choose_grid
+
+    assert choose_grid([0.0, 0.52], (2, 4), min_onsets_for_tuplet=3, slack=0.0) == 2
+    assert choose_grid([0.0, 0.74], (2, 4), min_onsets_for_tuplet=3, slack=0.0) == 4
