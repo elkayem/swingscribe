@@ -322,6 +322,24 @@ over a sliding window of N beats (start with N=16):
 - Transposing instruments: alto sax is in E♭, tenor/trumpet in B♭. Config-driven.
 - **Acceptance:** output opens cleanly in MuseScore with no import warnings.
 
+**Landed. `docs/m6-notate.md` has the results and limits.** Key detection is exact
+against the hand transcriptions' own signatures on both tunes that have a key
+(F and A♭); Giant Steps has three keys and the human wrote none. Confirmation
+exports 129 of 129 measures summing exactly to 4/4.
+
+- **Built WITHOUT music21**, which this section names. Everything the stage needs
+  is arithmetic, and keeping it arithmetic means key detection and note spelling
+  run in CI like every other stage rather than behind an importorskip. This is a
+  deviation from the plan on the record — confirm or overturn it. `model.py`'s
+  `Notation` carries what a music21 `Score` would need, so wrapping is the way back.
+- **A tuplet may live inside one beat and no wider.** Quantize chooses its grid one
+  beat at a time and a third of a beat is not a note value; before `NotatedNote.tuplet`
+  existed, 57 of Confirmation's 129 bars did not add up.
+- **Truncate overlapping notes, do not drop them.** Quantization can round one
+  note's end past the next note's start — invisible on a piano roll, fatal in
+  notation, and a few milliseconds of rounding rather than a second voice.
+- The MuseScore acceptance itself is a human check and is still outstanding.
+
 ---
 
 ## 6. Test strategy
@@ -389,19 +407,19 @@ reveals more than a page of metrics. Make it a CLI subcommand.
 Each milestone ends with something that visibly works. Resist the urge to build the
 whole pipeline before running any of it.
 
-| # | Deliverable | Acceptance |
-|---|---|---|
-| **M0** | Skeleton: repo, config, document model, cache layer, CI, ruff | `pytest` green on an empty suite; cache hit/miss works |
-| **M1** | Ingest + Separate | CLI produces 4 stems from an mp3 |
-| **M2** | BeatTrack + click-track renderer + ear-test command | Click lines up by ear on 10 tracks |
-| **M3** | Monophonic transcription of one horn → MIDI | MIDI opens and sounds like the solo |
-| **M4** | **SwingModel + Layer-1 synthetic suite** | Recovers injected BUR within ±5% |
-| **M5** | Quantize + Notate + Export | MusicXML opens in MuseScore, swing marking present |
-| **M6** | WJazzD eval harness + pinned baselines | `python -m eval.run_eval` prints a scorecard |
-| **M7** | Bass line path | Walking bass transcribed at ≥0.8 onset F1 |
-| **M7b** | Piano path + `--ensemble` routing | Solo piano ≥0.90 onset F1; trio piano usable |
-| **M8** | Gradio UI (local) — see §13 | Select a solo, audition the isolated stem, transcribe just that span |
-| **M9** | Hugging Face Space | Public URL, ZeroGPU, someone else uses it |
+| # | Deliverable | Acceptance | Status |
+|---|---|---|---|
+| **M0** | Skeleton: repo, config, document model, cache layer, CI, ruff | `pytest` green on an empty suite; cache hit/miss works | done |
+| **M1** | Ingest + Separate | CLI produces 4 stems from an mp3 | done |
+| **M2** | BeatTrack + click-track renderer + ear-test command | Click lines up by ear on 10 tracks | done |
+| **M3** | Monophonic transcription of one horn → MIDI | MIDI opens and sounds like the solo | done |
+| **M4** | **SwingModel + Layer-1 synthetic suite** | Recovers injected BUR within ±5% | done |
+| **M5** | Quantize + Notate + Export | MusicXML opens in MuseScore, swing marking present | code done; the MuseScore check is human and outstanding |
+| **M6** | WJazzD eval harness + pinned baselines | `python -m eval.run_eval` prints a scorecard | done: `scripts/run_eval.py`, baselines in `tests/regression/real-audio-baselines.json` |
+| **M7** | Bass line path | Walking bass transcribed at ≥0.8 onset F1 |  |
+| **M7b** | Piano path + `--ensemble` routing | Solo piano ≥0.90 onset F1; trio piano usable |  |
+| **M8** | Gradio UI (local) — see §13 | Select a solo, audition the isolated stem, transcribe just that span |  |
+| **M9** | Hugging Face Space | Public URL, ZeroGPU, someone else uses it |  |
 | M10 | *(optional)* MuScriptor multi-instrument path | Behind an extras flag |
 
 M4 is the milestone that makes this project yours rather than a wrapper around other
