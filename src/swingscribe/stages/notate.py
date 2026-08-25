@@ -322,7 +322,15 @@ def build(
         return Notation(swing=swing, transpose=transpose, title=title)
 
     key_fifths = detect_key([(n.pitch, n.duration_beats) for n in quantized])
+    # Start where the MUSIC starts, not where the soloist does. A player who
+    # comes in on bar 2 leaves bar 1 as a bar of rests, which is what a reader
+    # expects; a score whose first measure is numbered 2 is a score with a bar
+    # missing, and some readers say so.
     first_bar = min(n.bar for n in quantized)
+    if sections:
+        opening = min(section.first_bar for section in sections)
+        if opening <= first_bar:
+            first_bar = opening
     last_bar = max(n.bar for n in quantized)
     bars_index = _Bars(sections, first_bar, last_bar + 4)
     events = without_overlap(quantized, bars_index)

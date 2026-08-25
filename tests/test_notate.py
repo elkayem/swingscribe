@@ -247,3 +247,14 @@ def test_notation_keeps_sounding_pitch_and_carries_transposition_separately():
 
 def test_no_notes_gives_an_empty_score_rather_than_an_exception():
     assert build([], section(), swing=False, transpose=0).bars == []
+
+
+def test_the_score_starts_at_bar_one_even_if_the_soloist_does_not():
+    """A player entering on bar 2 leaves a bar of rests, which is what a
+    reader expects. A score whose first measure is numbered 2 is a score with
+    a measure missing."""
+    notes = [QuantizedNote(bar=3, beat=0.0, duration_beats=4.0, pitch=60, timing_residual=0.0)]
+    notation = build(notes, section(), swing=False, transpose=0)
+    assert notation.bars[0].number == 1
+    assert all(n.is_rest for n in notation.bars[0].notes)
+    assert [b.number for b in notation.bars] == [1, 2, 3]
