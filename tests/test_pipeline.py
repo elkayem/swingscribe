@@ -64,6 +64,7 @@ def test_registered_stages_are_current():
         "swing",
         "quantize",
         "notate",
+        "export",
     ]
 
 

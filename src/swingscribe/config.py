@@ -74,9 +74,15 @@ class TranscribeConfig(BaseModel):
     onset_rise_db: float = 3.0
     # A rise alone is weak evidence on a held note: vibrato swells the
     # harmonics by several dB with no re-articulation. So when the pitch is
-    # the SAME note either side of the onset, the energy must also dip this
-    # far below the sustain first — tonguing interrupts the tone, a swell
-    # does not. 0 disables the extra test (the M3 behaviour).
+    # the SAME note either side of the onset, requiring the energy to dip
+    # below the sustain first should tell a tongued repeat from a swell.
+    #
+    # It does — and it LOSES overall, so it ships off. Measured against
+    # WJazzD it un-fragments the held notes it was built for and suppresses
+    # more genuine repeated notes than it saves: mean note F1 0.791 at 0.0,
+    # 0.775 at 2dB, 0.774 at 3dB, down on every tune. Kept because the
+    # mechanism is sound and a better rise/dip test may yet win; do not turn
+    # it on without re-running scripts/run_eval.py.
     onset_dip_db: float = 0.0
     onset_window_ms: float = 60.0  # lookback/lookahead for that rise
     min_note_ms: float = 60.0  # drop specks shorter than a fast bebop 16th

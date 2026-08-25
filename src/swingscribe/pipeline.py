@@ -15,6 +15,7 @@ from swingscribe.config import Config
 from swingscribe.model import Document
 from swingscribe.stages import (
     beats,
+    export,
     ingest,
     meter,
     notate,
@@ -43,6 +44,7 @@ STAGES: list[tuple[str, Stage]] = [
     ("swing", swing.run),
     ("quantize", quantize.run),
     ("notate", notate.run),
+    ("export", export.run),
 ]
 
 
