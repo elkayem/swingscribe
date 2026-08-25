@@ -352,3 +352,68 @@ def test_beat_grid_records_its_source():
         spliced=[(0.0, 11.3)],
     )
     assert grid.spliced == [(0.0, 11.3)]
+
+
+def test_repair_local_rate_subdivides_a_half_rate_passage():
+    """Confirmation's residue: the grid resumes at exactly half the tune's
+    pulse. Those beats are PRESENT, so no coverage test can see them."""
+    from swingscribe.stages.beats import median_interval, repair_local_rate
+
+    good = [i * 0.32 for i in range(100)]
+    half = [good[-1] + (i + 1) * 0.64 for i in range(15)]
+    repaired, spans = repair_local_rate(good + half)
+    assert len(spans) == 1
+    assert abs(median_interval(repaired) - 0.32) < 0.01
+    assert repaired == sorted(repaired)
+    intervals = [b - a for a, b in zip(repaired, repaired[1:], strict=False)]
+    assert max(intervals) < 0.45  # nothing at the old half rate survives
+
+
+def test_repair_local_rate_ignores_an_isolated_long_interval():
+    """One doubled interval is a dropped beat, a fermata or a rubato moment.
+    Only a persistent wrong rate is evidence of a mis-tracked passage."""
+    from swingscribe.stages.beats import repair_local_rate
+
+    beats = [i * 0.5 for i in range(40)]
+    beats = beats[:20] + [b + 0.5 for b in beats[20:]]  # one 1.0s hole
+    repaired, spans = repair_local_rate(beats)
+    assert spans == []
+    assert repaired == beats
+
+
+def test_repair_local_rate_leaves_a_steady_grid_alone():
+    from swingscribe.stages.beats import repair_local_rate
+
+    beats = [i * 0.32 for i in range(200)]
+    repaired, spans = repair_local_rate(beats)
+    assert spans == []
+    assert repaired == beats
+
+
+def test_repair_local_rate_handles_a_quarter_rate_passage():
+    from swingscribe.stages.beats import repair_local_rate
+
+    good = [i * 0.5 for i in range(60)]
+    quarter = [good[-1] + (i + 1) * 2.0 for i in range(10)]
+    repaired, spans = repair_local_rate(good + quarter)
+    assert len(spans) == 1
+    intervals = [b - a for a, b in zip(repaired, repaired[1:], strict=False)]
+    assert max(intervals) < 0.7
+
+
+def test_repair_local_rate_does_not_touch_a_faster_passage():
+    """One-directional on purpose: removing beats means choosing WHICH to
+    remove, which correct_octave only does with a user-supplied tempo."""
+    from swingscribe.stages.beats import repair_local_rate
+
+    beats = [i * 0.5 for i in range(60)] + [29.5 + (i + 1) * 0.25 for i in range(20)]
+    repaired, spans = repair_local_rate(beats)
+    assert spans == []
+    assert repaired == beats
+
+
+def test_repair_local_rate_degenerate():
+    from swingscribe.stages.beats import repair_local_rate
+
+    assert repair_local_rate([]) == ([], [])
+    assert repair_local_rate([1.0, 2.0]) == ([1.0, 2.0], [])

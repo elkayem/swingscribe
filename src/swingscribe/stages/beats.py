@@ -25,7 +25,8 @@ from swingscribe.model import BeatGrid, Document
 # Bump when this stage's behavior changes without a config change — it feeds
 # the cache key (see pipeline._cache_name). v2: grid-quality source comparison.
 # v3: per-passage coverage and splicing (open-issue #9).
-CACHE_VERSION = 3
+# v4: per-passage rate repair (open-issue #9, second half).
+CACHE_VERSION = 4
 
 # |log2(bpm / median)| at or beyond this counts as an octave-error outlier;
 # 0.5 flags anything past ~1.41x off the median, halfway to a doubling.
@@ -285,6 +286,80 @@ def splice_beats(
     return sorted(base + added), filled
 
 
+# ── Local rate repair (open-issue #9, second half) ───────────────────────
+#
+# Splicing fixes a passage with NO beats. It cannot fix a passage with the
+# wrong beats: Confirmation's drum grid resumes at 19.88s at 0.62s spacing,
+# exactly half the tune's 0.32s pulse, and those beats are present, so no
+# coverage test sees them.
+#
+# `correct_octave` already does this repair, but globally and only when the
+# user supplies a tempo_hint. The grid's own median interval is a better
+# reference than a hint in every case where most of the track is tracked
+# correctly, and it needs no input — so this is that correction, applied per
+# passage and seeded from the grid itself.
+#
+# The safety property is the run length. A single doubled interval is a
+# dropped beat, a fermata or a rubato moment; only a PERSISTENT wrong rate is
+# evidence of a passage the tracker took at the wrong subdivision.
+
+LOCAL_RATE_TOLERANCE = 0.15  # how close to an exact multiple an interval must sit
+MIN_RATE_RUN = 3  # consecutive intervals at that multiple before we believe it
+MAX_RATE_FACTOR = 4
+
+
+def repair_local_rate(
+    beats: list[float],
+    tolerance: float = LOCAL_RATE_TOLERANCE,
+    min_run: int = MIN_RATE_RUN,
+    max_factor: int = MAX_RATE_FACTOR,
+) -> tuple[list[float], list[tuple[float, float]]]:
+    """Subdivide passages tracked at a whole fraction of the grid's own rate.
+
+    Returns (beats, repaired_spans). The reference is the whole-grid median
+    interval, so this only works while most of the track is right — which is
+    the case it exists for. Deliberately one-directional: a passage tracked
+    too FAST would need beats removed, and choosing which to remove is a
+    different and much less safe decision (see `correct_octave`, which only
+    does it with a user-supplied tempo).
+    """
+    if len(beats) < 4:
+        return list(beats), []
+    intervals = [b1 - b0 for b0, b1 in zip(beats, beats[1:], strict=False)]
+    reference = statistics.median(intervals)
+    if reference <= 0:
+        return list(beats), []
+
+    factors = []
+    for gap in intervals:
+        k = round(gap / reference)
+        exact = 2 <= k <= max_factor and abs(gap / (k * reference) - 1.0) <= tolerance
+        factors.append(k if exact else 1)
+
+    out = [beats[0]]
+    spans: list[tuple[float, float]] = []
+    i = 0
+    while i < len(intervals):
+        k = factors[i]
+        if k == 1:
+            out.append(beats[i + 1])
+            i += 1
+            continue
+        j = i
+        while j < len(intervals) and factors[j] == k:
+            j += 1
+        if j - i >= min_run:
+            for m in range(i, j):
+                step = intervals[m] / k
+                out.extend(beats[m] + n * step for n in range(1, k))
+                out.append(beats[m + 1])
+            spans.append((beats[i], beats[j]))
+        else:
+            out.extend(beats[m + 1] for m in range(i, j))
+        i = j
+    return out, spans
+
+
 def _rms_windows(path: str, window_s: float = GAP_WINDOW_S) -> list[float]:
     import soundfile
 
@@ -385,6 +460,19 @@ def run(document: Document, config: Config) -> Document:
             unfilled = ", ".join(f"{lo:.1f}-{hi:.1f}s" for lo, hi in gaps[:4])
             print(f"beats: WARNING {len(gaps)} coverage gap(s) left unfilled: {unfilled}")
 
+    # After splicing, because a spliced-in passage can itself be at the wrong
+    # rate, and because the reference interval is only trustworthy once the
+    # grid covers the track.
+    beats, repaired = repair_local_rate(beats)
+    if repaired:
+        covered = sum(hi - lo for lo, hi in repaired)
+        where = ", ".join(f"{lo:.1f}-{hi:.1f}s" for lo, hi in repaired[:4])
+        more = "" if len(repaired) <= 4 else f" (+{len(repaired) - 4} more)"
+        print(
+            f"beats: subdivided {len(repaired)} passage(s), {covered:.1f}s, "
+            f"tracked at a fraction of the grid's own rate: {where}{more}"
+        )
+
     if config.beats.tempo_hint:
         beats, downbeats, action = correct_octave(beats, downbeats, config.beats.tempo_hint)
         if action:
@@ -416,5 +504,6 @@ def run(document: Document, config: Config) -> Document:
         local_bpm=bpm,
         source=reason,
         spliced=spliced,
+        repaired=repaired,
     )
     return document.model_copy(update={"beat_grid": grid})

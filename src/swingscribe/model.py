@@ -38,6 +38,10 @@ class BeatGrid(BaseModel):
     # there — a drumless intro, typically (open-issue #9). Empty is the normal
     # case. Beats inside these spans are worth trusting less.
     spliced: list[tuple[float, float]] = []
+    # Spans subdivided because the tracker took them at a whole fraction of
+    # the grid's own rate (open-issue #9). Separate from `spliced`: those
+    # beats came from other audio, these were interpolated from this grid.
+    repaired: list[tuple[float, float]] = []
 
 
 class MeterSection(BaseModel):

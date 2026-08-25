@@ -440,13 +440,45 @@ grid keeps its source and borrows only what it is missing. The spliced spans
 land exactly on the damage described above: 0.24-10.98, 11.62-12.26,
 12.88-13.52, 14.14-19.58, plus an outro.
 
-**What is left.** Intro coverage is 84%, not 100%, because the drum stem's own
-half-rate beats between 11.28s and 19.88s are *present* — so they are not a
-gap, and splicing does not touch them. Detecting a locally-wrong beat *rate*
-is a different repair from detecting a missing one, and it is the Corner
-Pocket pattern in docs/meter-plan.md. Not attempted here.
+### Second half: repairing a locally wrong RATE
 
-Also unaddressed, and pre-existing: Giant Steps' drum grid is genuinely
-suspect, so it still takes the v2 wholesale swap to the full mix and ends up
-with 16% octave outliers and 51% intro coverage. That is issue #6's territory,
-not this one.
+Splicing left intro coverage at 84%, because the drum stem's own beats from
+19.88s are *present* — at 0.62s spacing, exactly half the tune's 0.32s pulse.
+Present beats are not a gap, so no coverage test can see them.
+
+`repair_local_rate` subdivides any run of intervals sitting at a whole
+multiple (2x-4x) of the grid's own median interval. This is `correct_octave`'s
+repair applied per passage and seeded from the grid itself rather than from a
+user-supplied `tempo_hint` — the grid's median is the better reference in
+every case where most of the track is tracked correctly, and it needs no
+input. The safety property is the run length: a single doubled interval is a
+dropped beat, a fermata or a rubato moment, so only a *persistent* wrong rate
+counts as evidence. It is deliberately one-directional; a passage tracked too
+FAST would need beats removed, and choosing which to remove is a much less
+safe decision that `correct_octave` still only makes with a user's tempo.
+
+| | Confirmation | All The Things | Giant Steps |
+|---|---|---|---|
+| intro 0-30s, originally | 21% | 98% | 51% |
+| after splicing | 84% | 98% | 51% |
+| **after rate repair** | **101%** | 98% | **100%** |
+| octave outliers before | 2% | 3% | 16% |
+| **octave outliers after** | **1%** | 3% | **5%** |
+| whole-track stdev | 22.0 -> 33.8 | 30.1 | 69.9 -> **54.6** |
+| repaired spans | 19.9-30.0s, 437.1-439.0s | none | 0.3-29.7s, 297.6-336.5s |
+
+Confirmation's repaired span lands exactly on the half-rate stretch described
+above. **Giant Steps was the surprise**: 68 seconds of half-rate tracking that
+nothing had diagnosed, and repairing it cut its octave outliers from 16% to
+5%. Its median stays 250.0 bpm against a truth of 249, so this is a real
+repair and not a doubling error. That was assumed to be issue #6's territory;
+some of #6 may be the same bug.
+
+Confirmation's whole-track stdev is 33.8 against the original drum stem's
+22.0. That is not a regression — the original was steady precisely *because*
+it was ignoring a third of the track. Steadiness measured over more of the
+music is a harder number to score well on.
+
+**What is left.** Giant Steps still has audible coverage gaps in its last 30
+seconds (340.9s onward) that nothing filled, and All The Things reports 187.5
+bpm against a hand-transcription truth of 194. Neither is this issue.
