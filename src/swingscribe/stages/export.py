@@ -31,7 +31,7 @@ from xml.etree import ElementTree
 
 from swingscribe.config import Config
 from swingscribe.model import Document, NotatedNote, Notation
-from swingscribe.stages.notate import TRIPLET_RATIO, spell
+from swingscribe.stages.notate import QUARTER, TRIPLET_RATIO, spell
 
 DIVISIONS = 24  # per quarter note: divisible by 8 (32nds) and by 3 (triplets)
 
@@ -72,7 +72,50 @@ def _duration_ticks(note: NotatedNote) -> int:
     return int(round(note.duration * DIVISIONS))
 
 
-def _append_note(parent, note: NotatedNote, transpose: int, written_key: int) -> None:
+def tuplet_groups(notes: list[NotatedNote]) -> dict[int, str]:
+    """Index -> "start" or "stop" for the ends of each run of tuplet notes.
+
+    `<time-modification>` says how long a tuplet note lasts; it does not say
+    where the group begins and ends. MuseScore draws the bracket and the
+    number from `<notations><tuplet>`, and without it reads a bare run of
+    time-modified notes as a measure it has to repair.
+
+    A run ends at a beat boundary as well as at the first non-tuplet note: two
+    consecutive triplet beats are two triplets, not one six-note group.
+    """
+    marks: dict[int, str] = {}
+    run: list[int] = []
+
+    def close() -> None:
+        if run:
+            marks[run[0]] = "start"
+            marks[run[-1]] = "stop"
+            run.clear()
+
+    position = 0.0
+    beat = 0
+    for index, note in enumerate(notes):
+        if note.tuplet is None:
+            close()
+        else:
+            here = int(position / QUARTER + 1e-9)
+            if run and here != beat:
+                close()
+            if not run:
+                beat = here
+            run.append(index)
+        position += note.duration
+    close()
+    return marks
+
+
+def _append_note(
+    parent,
+    note: NotatedNote,
+    transpose: int,
+    written_key: int,
+    tuplet_mark: str | None = None,
+) -> None:
     element = ElementTree.SubElement(parent, "note")
     if note.is_rest:
         ElementTree.SubElement(element, "rest")
@@ -104,12 +147,15 @@ def _append_note(parent, note: NotatedNote, transpose: int, written_key: int) ->
         modification = ElementTree.SubElement(element, "time-modification")
         ElementTree.SubElement(modification, "actual-notes").text = str(actual)
         ElementTree.SubElement(modification, "normal-notes").text = str(normal)
-    if (note.tie_start or note.tie_stop) and not note.is_rest:
+    tied = (note.tie_start or note.tie_stop) and not note.is_rest
+    if tied or tuplet_mark:
         notations = ElementTree.SubElement(element, "notations")
-        if note.tie_stop:
+        if note.tie_stop and not note.is_rest:
             ElementTree.SubElement(notations, "tied", {"type": "stop"})
-        if note.tie_start:
+        if note.tie_start and not note.is_rest:
             ElementTree.SubElement(notations, "tied", {"type": "start"})
+        if tuplet_mark:
+            ElementTree.SubElement(notations, "tuplet", {"type": tuplet_mark})
 
 
 def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
@@ -156,8 +202,9 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
             direction_type = ElementTree.SubElement(direction, "direction-type")
             words = ElementTree.SubElement(direction_type, "words", {"font-style": "italic"})
             words.text = "Swing"
-        for note in bar.notes:
-            _append_note(measure, note, notation.transpose, written_key)
+        marks = tuplet_groups(bar.notes)
+        for position, note in enumerate(bar.notes):
+            _append_note(measure, note, notation.transpose, written_key, marks.get(position))
 
     ElementTree.indent(root, space="  ")
     body = ElementTree.tostring(root, encoding="unicode")

@@ -4,7 +4,10 @@ All pure arithmetic, so the whole stage is exercised here rather than behind
 an importorskip: key detection, spelling, note values, ties and rests.
 """
 
+import pytest
+
 from swingscribe.model import MeterSection, NotatedNote, QuantizedNote
+from swingscribe.stages import notate
 from swingscribe.stages.notate import (
     build,
     detect_key,
@@ -258,3 +261,70 @@ def test_the_score_starts_at_bar_one_even_if_the_soloist_does_not():
     assert notation.bars[0].number == 1
     assert all(n.is_rest for n in notation.bars[0].notes)
     assert [b.number for b in notation.bars] == [1, 2, 3]
+
+
+# ── short gaps: the rests that are not rests ────────────────────────────────
+
+
+class _FlatBars:
+    """Every bar four quarters long, so `start_of` is just arithmetic."""
+
+    def start_of(self, bar: int) -> float:
+        return (bar - 1) * 4.0
+
+
+def test_close_short_gaps_fills_a_sub_sixteenth_gap():
+    """A note quantized to a sixteenth in a beat whose next onset is a third of
+    a beat away leaves a twelfth-of-a-beat hole. That hole is what breaks the
+    tuplet group, and no transcriber can hear a rest that short."""
+    events = [(1, 0.0, 0.25, 60), (1, 1.0 / 3.0, 1.0 / 3.0, 62)]
+    out = notate.close_short_gaps(events, _FlatBars())
+    assert out[0][2] == pytest.approx(1.0 / 3.0)
+    assert out[1] == events[1]
+
+
+def test_close_short_gaps_leaves_a_real_rest_alone():
+    """A sixteenth rest is a rest. The rule is bounded by a note value, not by
+    a ratio — that is the whole difference from legato_fill."""
+    events = [(1, 0.0, 0.25, 60), (1, 0.5, 0.5, 62)]
+    assert notate.close_short_gaps(events, _FlatBars()) == events
+
+
+def test_close_short_gaps_never_shortens():
+    """A note already reaching the next onset — or past it, which
+    `without_overlap` has usually already trimmed — is not touched."""
+    events = [(1, 0.0, 1.0, 60), (1, 1.0, 1.0, 62)]
+    assert notate.close_short_gaps(events, _FlatBars()) == events
+
+
+def test_close_short_gaps_crosses_a_bar_line():
+    """The gap is measured in absolute time, so the last note of a bar and the
+    first of the next are adjacent like any other pair."""
+    events = [(1, 3.0, 0.9, 60), (2, 0.0, 1.0, 62)]
+    out = notate.close_short_gaps(events, _FlatBars())
+    assert out[0][2] == pytest.approx(1.0)
+
+
+def test_short_gaps_leave_a_notatable_tuplet_group():
+    """The regression this exists for: MuseScore called Yesterdays corrupted
+    because seven beats held a plain sixteenth beside a twelfth-of-a-beat
+    triplet rest, so the group began off the thirds. Every piece of a beat
+    holding a tuplet must land on a sixth of that beat."""
+    quantized = [
+        _q(bar=1, beat=0.0, duration=0.25, pitch=60),
+        _q(bar=1, beat=1.0 / 3.0, duration=1.0 / 3.0, pitch=62),
+        _q(bar=1, beat=2.0 / 3.0, duration=1.0 / 3.0, pitch=64),
+    ]
+    notation = notate.build(quantized, [], swing=True, transpose=0)
+    beat_one = [n for n in notation.bars[0].notes if n.beat < 1.0 - 1e-9]
+    assert any(n.tuplet for n in beat_one)
+    for piece in beat_one:
+        for edge in (piece.beat, piece.beat + piece.duration):
+            sixths = edge * 6.0
+            assert abs(sixths - round(sixths)) < 1e-6, f"{edge} is not a sixth of a beat"
+
+
+def _q(bar: int, beat: float, duration: float, pitch: int) -> QuantizedNote:
+    return QuantizedNote(
+        bar=bar, beat=beat, duration_beats=duration, pitch=pitch, timing_residual=0.0
+    )

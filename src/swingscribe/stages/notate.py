@@ -249,6 +249,51 @@ def fill_rests(notes: list[NotatedNote], bar_length: float) -> list[NotatedNote]
     return filled
 
 
+# The shortest rest anyone writes in this music. Below a sixteenth, a gap
+# between a note's written end and the next onset is not a rest — see
+# close_short_gaps.
+MIN_REST = 0.25
+
+
+def close_short_gaps(
+    events: list[tuple[int, float, float, int]],
+    bars_index,
+    min_rest: float = MIN_REST,
+) -> list[tuple[int, float, float, int]]:
+    """Extend a note to the next onset when the gap is too short to be a rest.
+
+    Quantize snaps ONSETS to the grid it chose for each beat. Durations get no
+    such treatment, so a note's written end can land off that grid — a played
+    length that reached a sixteenth in a beat whose onsets are thirds, or a
+    third in a beat whose onsets are halves. `fill_rests` then writes the
+    difference as a rest of a twelfth or a sixth of a beat.
+
+    Nobody notates those, and the transcriber has no evidence for them: it
+    cannot hear a rest a twelfth of a beat long, only a note that was tongued
+    slightly short. Worse, the rest breaks the beat's tuplet group, because
+    the group no longer begins and ends on thirds — which is what MuseScore
+    reports as a corrupted measure.
+
+    So a gap shorter than a sixteenth goes back to the note that was played.
+    This is deliberately much narrower than `legato_fill`, which asks the
+    aesthetic question (do humans write jazz legato?) and measured neutral. This
+    asks whether the rest is *writable at all*, and is bounded by a note value
+    rather than by a ratio.
+    """
+    if len(events) < 2:
+        return events
+    absolute = [bars_index.start_of(bar) + beat for bar, beat, _d, _p in events]
+    out = []
+    for index, (bar, beat, duration, pitch) in enumerate(events):
+        if index + 1 < len(events):
+            gap = absolute[index + 1] - absolute[index]
+            shortfall = gap - duration
+            if TICK < shortfall < min_rest - TICK:
+                duration = gap
+        out.append((bar, beat, duration, pitch))
+    return out
+
+
 def _section_for_bar(bar: int, sections: list[MeterSection]) -> MeterSection | None:
     best = None
     for section in sections:
@@ -365,6 +410,9 @@ def build(
     last_bar = max(n.bar for n in quantized)
     bars_index = _Bars(sections, first_bar, last_bar + 4)
     events = notated_durations(without_overlap(quantized, bars_index), bars_index, legato_fill)
+    # Before splitting, not after: the splitter can only pick a legal tuplet
+    # group if the durations it is handed already land on the beat's grid.
+    events = close_short_gaps(events, bars_index)
 
     by_bar: dict[int, list[NotatedNote]] = {}
     for bar_number, beat, duration, pitch in events:
