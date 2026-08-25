@@ -72,6 +72,12 @@ class TranscribeConfig(BaseModel):
     # shatters a sustained horn note into repeated fragments (open-issue #1).
     # Set to 0 to disable corroboration and split on every onset.
     onset_rise_db: float = 3.0
+    # A rise alone is weak evidence on a held note: vibrato swells the
+    # harmonics by several dB with no re-articulation. So when the pitch is
+    # the SAME note either side of the onset, the energy must also dip this
+    # far below the sustain first — tonguing interrupts the tone, a swell
+    # does not. 0 disables the extra test (the M3 behaviour).
+    onset_dip_db: float = 0.0
     onset_window_ms: float = 60.0  # lookback/lookahead for that rise
     min_note_ms: float = 60.0  # drop specks shorter than a fast bebop 16th
     pitch_persist_ms: float = 60.0  # a new pitch must hold this long to split a note

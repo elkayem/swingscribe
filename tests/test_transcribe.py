@@ -500,3 +500,45 @@ def test_hz_to_bin_agrees_with_midi_conversion():
     # 20 cents per bin means a semitone is exactly 5 bins, an octave 60.
     assert abs((_hz_to_bin(440.0) - _hz_to_bin(220.0)) - 60.0) < 1e-9
     assert abs((_hz_to_bin(440.0) - _hz_to_bin(415.3047)) - 5.0) < 1e-3
+
+
+def test_a_vibrato_swell_on_a_held_note_is_not_a_re_articulation():
+    """The bug behind the fragmented held note in All The Things.
+
+    Vibrato swells a note's own harmonics by several dB without the player
+    doing anything, so a rise alone let the onset detector cut an 11-beat
+    held note into five. Tonguing a note interrupts it first; a swell never
+    goes below the sustain it came from.
+    """
+    from swingscribe.stages.transcribe import corroborate_onsets
+
+    pitch = [68.0] * 24
+    swell = [1.0] * 10 + [1.0, 1.2, 1.5, 1.9, 2.1] + [2.0] * 9  # rises, never dips
+    assert corroborate_onsets({10}, swell, pitch, rise_db=3.0, window=5) == {10}
+    assert corroborate_onsets({10}, swell, pitch, rise_db=3.0, window=5, dip_db=2.0) == set()
+
+
+def test_a_tongued_repeat_still_splits():
+    """The other half: a real repeated note must survive the dip test."""
+    from swingscribe.stages.transcribe import corroborate_onsets
+
+    pitch = [68.0] * 24
+    tongued = [1.0] * 9 + [0.3, 0.25, 1.6, 2.0, 2.1] + [2.0] * 10  # dips, then attacks
+    assert corroborate_onsets({11}, tongued, pitch, rise_db=3.0, window=5, dip_db=2.0) == {11}
+
+
+def test_the_dip_is_only_required_between_two_of_the_same_note():
+    """A slur into a different pitch has no dip and must not need one."""
+    from swingscribe.stages.transcribe import corroborate_onsets
+
+    pitch = [64.0] * 10 + [68.0] * 14  # a real interval, slurred
+    swell = [1.0] * 10 + [1.0, 1.2, 1.5, 1.9, 2.1] + [2.0] * 9
+    assert corroborate_onsets({10}, swell, pitch, rise_db=3.0, window=5, dip_db=2.0) == {10}
+
+
+def test_dip_defaults_to_off_so_it_changes_nothing_unasked():
+    from swingscribe.stages.transcribe import corroborate_onsets
+
+    pitch = [68.0] * 24
+    swell = [1.0] * 10 + [1.0, 1.2, 1.5, 1.9, 2.1] + [2.0] * 9
+    assert corroborate_onsets({10}, swell, pitch, rise_db=3.0, window=5) == {10}

@@ -258,6 +258,7 @@ def corroborate_onsets(
     pitch_midi: list[float | None],
     rise_db: float,
     window: int,
+    dip_db: float = 0.0,
 ) -> set[int]:
     """Drop onsets that show no fresh attack in the tracked pitch's harmonics.
 
@@ -266,12 +267,24 @@ def corroborate_onsets(
     split is allowed only when harmonic energy rises by `rise_db` across the
     candidate frame, which is what re-articulating the note actually does and
     what a neighbouring instrument's transient does not.
+
+    `dip_db` adds the other half of that argument. A rise alone is weak
+    evidence on a held note, because vibrato swells the harmonics several dB
+    all by itself — measured, an 11-beat held note in All The Things was cut
+    into five by exactly this. Re-articulating a note means interrupting it:
+    the tongue stops the tone before the new attack, so the energy must fall
+    below the sustain it is interrupting *and then* rise. A swell only rises.
+
+    The dip is required only where it means something — where the pitch on
+    both sides is the same note. A split between two different pitches is a
+    slur, and a slurred pair has no dip at all.
     """
     import statistics as _stats
 
     if rise_db <= 0:
         return set(candidates)
-    ratio = 10.0 ** (rise_db / 20.0)
+    rise_ratio = 10.0 ** (rise_db / 20.0)
+    dip_ratio = 10.0 ** (-dip_db / 20.0) if dip_db > 0 else None
     kept: set[int] = set()
     for i in candidates:
         if not (0 <= i < len(pitch_midi)) or pitch_midi[i] is None:
@@ -282,9 +295,23 @@ def corroborate_onsets(
         if not before or not after:
             kept.add(i)
             continue
-        if max(after) >= _stats.median(before) * ratio:
-            kept.add(i)
+        if max(after) < _stats.median(before) * rise_ratio:
+            continue
+        if dip_ratio is not None and _same_note_across(pitch_midi, i, window):
+            trough = min(energy[max(0, i - 2) : i + 3] or [0.0])
+            if trough > _stats.median(before) * dip_ratio:
+                continue  # a swell, not a re-articulation
+        kept.add(i)
     return kept
+
+
+def _same_note_across(pitch_midi: list[float | None], i: int, window: int) -> bool:
+    """Is the tracked pitch the same note either side of frame `i`?"""
+    before = [p for p in pitch_midi[max(0, i - window) : i] if p is not None]
+    after = [p for p in pitch_midi[i : i + window] if p is not None]
+    if not before or not after:
+        return False
+    return round(statistics.median(before)) == round(statistics.median(after))
 
 
 def pick_peaks(strength: list[float], min_separation: int, window: int, delta: float) -> list[int]:
@@ -659,6 +686,7 @@ def analyze(
         pitches,
         rise_db=tc.onset_rise_db,
         window=max(1, round(tc.onset_window_ms / 1000.0 / hop_s)),
+        dip_db=tc.onset_dip_db,
     )
     if log and raw_onsets:
         print(
