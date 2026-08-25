@@ -131,6 +131,8 @@ const stemWave = new WaveView($('wave-stem'), {
 const pianoRoll = new PianoRoll($('pianoroll'), $('lane-f0'), $('lane-gate'), {
   onSelect: (note, index) => renderInspector(note, index),
   onSelectReference: (index) => renderReferenceInspector(index),
+  onSeek: (t) => seekReviewTo(t),
+  onView: (view, spanWidth) => renderRollRange(view, spanWidth),
 });
 
 // ── screen 1: the track picker ──────────────────────────────────────────────
@@ -472,6 +474,7 @@ function tick() {
     // back to wherever the mix transport happens to be.
     if (state.active === 'review' && reviewEngine.duration) {
       const t = reviewEngine.trackTime;
+      if (reviewEngine.playing) pianoRoll.follow(t);  // a zoomed roll must keep up
       pianoRoll.setPlayhead(t);
       $('r-time-now').textContent = clock(reviewEngine.position * state.reviewRate);
       $('time-now').textContent = clock(t);
@@ -1122,9 +1125,42 @@ async function showReview(payload) {
   $('r-time-total').textContent = clock(state.selection.b - state.selection.a, false);
   pianoRoll.opts.voicingThreshold = 0.5;
   pianoRoll.setData({ a: state.selection.a, b: state.selection.b }, payload, state.showBeats ? state.beats : null);
+  // Park the marker at the start rather than leaving it undrawn: a playhead
+  // you cannot see is not obviously one you can move.
+  pianoRoll.setPlayhead(state.selection.a);
   renderInspector(null, -1);
   await loadGroundTruth();
   await loadReviewAudio();
+}
+
+/* Put the review playhead at a track time. The engine counts in the span's own
+   stretched timeline, so a half-speed span is twice as long as the music it
+   holds — hence the divide by the rate rather than a straight subtraction. */
+function seekReviewTo(t) {
+  if (!state.selection || !state.review) return;
+  const { a, b } = state.selection;
+  const clamped = Math.min(b, Math.max(a, t));
+  pianoRoll.setPlayhead(clamped);
+  $('r-time-now').textContent = clock(clamped - a);
+  if (!reviewEngine.duration) return;  // marker still moves before the audio lands
+  state.active = 'review';
+  mix.engine?.pause();
+  stemEngine.pause();
+  reviewEngine.seek((clamped - a) / state.reviewRate);
+  refreshPlayButtons();
+}
+
+/* Only shown while zoomed: at full extent the range is the span, which the
+   review bar already says. */
+function renderRollRange(view, spanWidth) {
+  const node = $('roll-range');
+  const width = view.b - view.a;
+  const zoomed = width < spanWidth - 1e-6;
+  node.hidden = !zoomed;
+  // Below ten seconds m:ss reads "1:01–1:01" and says nothing; the tight end
+  // of the zoom is exactly where the hundredths matter.
+  const precise = width < 10;
+  if (zoomed) node.textContent = `${clock(view.a, precise)}–${clock(view.b, precise)}`;
 }
 
 async function loadReviewAudio() {
@@ -1506,6 +1542,26 @@ $('path-input').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') openTypedPath();
 });
 
+$('r-restart').addEventListener('click', () => {
+  if (!reviewEngine.duration) return;
+  state.active = 'review';
+  mix.engine?.pause();
+  stemEngine.pause();
+  restartFromA();
+  refreshPlayButtons();
+});
+
+/* Zoom about the playhead when it is on screen — that is what you are looking
+   at — and about the middle of the view otherwise. */
+for (const button of document.querySelectorAll('[data-roll-zoom]')) {
+  button.addEventListener('click', () => {
+    const t = pianoRoll.playhead;
+    const inView = t !== null && t >= pianoRoll.view.a && t <= pianoRoll.view.b;
+    pianoRoll.zoomBy(button.dataset.rollZoom === 'in' ? 1 / 1.6 : 1.6, inView ? t : null);
+  });
+}
+$('roll-fit').addEventListener('click', () => pianoRoll.fit());
+
 $('gt-pick').addEventListener('click', () => openPicker('score'));
 $('gt-clear').addEventListener('click', () => clearGroundTruth({ forget: true }));
 
@@ -1742,7 +1798,12 @@ document.addEventListener('keydown', (event) => {
    top" is the gesture you reach for over and over. */
 function restartFromA() {
   if (!state.selection) return;
-  if (state.active === 'stem' && stemEngine.duration) {
+  if (state.active === 'review' && reviewEngine.duration) {
+    reviewEngine.seek(0);
+    if (!reviewEngine.playing) reviewEngine.play(0);
+    pianoRoll.setPlayhead(state.selection.a);
+    pianoRoll.follow(state.selection.a);
+  } else if (state.active === 'stem' && stemEngine.duration) {
     stemEngine.seek(0);
     if (!stemEngine.playing) stemEngine.play(0);
   } else {

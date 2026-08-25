@@ -7,7 +7,9 @@
  * evidence: the raw CREPE f0 against the gated-and-smoothed pitch, and the two
  * gates (periodicity, energy) that decided which frames survived.
  *
- * All times are track-global seconds; the view is fixed to one span [a, b].
+ * All times are track-global seconds. The data covers one span; `view` is the
+ * slice of it currently drawn, which zoom and pan move around inside the span
+ * without any of the note or frame maths knowing that zoom exists.
  */
 
 const PITCH_PAD = 2; // semitones of headroom above/below the note range
@@ -18,6 +20,10 @@ const MIN_PITCH_SPAN = 14; // never zoom the pitch axis tighter than this
 // note is fifteen semitones below its highest gives a very wide range.
 const CLICK_SLACK_S = 0.05;
 const CLICK_SLACK_SEMITONES = 6;
+
+const MIN_VIEW_S = 0.4;   // tightest zoom: about two notes at a bebop tempo
+const DRAG_SLOP_PX = 4;   // movement below this is a click, not a drag
+const FOLLOW_MARGIN = 0.1; // where a scrolled-to playhead lands, as a fraction
 
 /* The four ways a note can come out of the alignment. `matched` and `wrong`
    are pairs and get drawn twice — our note filled, the notated one outlined
@@ -49,7 +55,11 @@ export class PianoRoll {
     this.f0 = this._attach(f0El);
     this.gate = this._attach(gateEl);
 
+    // `span` is the transcribed extent and never moves; `view` is the slice
+    // currently drawn. Keeping them apart is what lets the roll zoom without
+    // any of the note or frame maths knowing about it.
     this.span = { a: 0, b: 1 };
+    this.view = { a: 0, b: 1 };
     this.notes = [];
     this.diag = null;
     this.beats = null;
@@ -58,7 +68,17 @@ export class PianoRoll {
     this.ground = null;                        // the aligned hand transcription, if any
     this.visible = new Set(CLASSES);           // which alignment classes to draw
 
-    this.rollEl.addEventListener('pointerdown', (e) => this._onClick(e));
+    this._drag = null;
+    for (const el of [rollEl, f0El, gateEl]) {
+      el.addEventListener('pointerdown', (e) => this._onPointerDown(e, el));
+      el.addEventListener('pointermove', (e) => this._onPointerMove(e));
+      el.addEventListener('pointerup', (e) => this._onPointerUp(e, el));
+      el.addEventListener('pointercancel', () => { this._drag = null; });
+      // Plain wheel is left to the page: this canvas sits partway down a
+      // scrolling document, and stealing the scroll to pan a 220px strip is
+      // worse than not having the gesture. Modified wheel zooms.
+      el.addEventListener('wheel', (e) => this._onWheel(e, el), { passive: false });
+    }
     this._observer = new ResizeObserver(() => this.draw());
     this._observer.observe(rollEl);
   }
@@ -71,13 +91,18 @@ export class PianoRoll {
   }
 
   setData(span, review, beats) {
+    // Redrawing the same span (the bar grid arriving, say) must not throw away
+    // a zoom the user set; a genuinely new span has nothing to preserve.
+    const sameSpan = this.span.a === span.a && this.span.b === span.b;
     this.span = span;
+    if (!sameSpan) this.view = { ...span };
     this.notes = review ? review.notes : [];
     this.diag = review ? review.diagnostics : null;
     this.beats = beats;
     this.selected = -1;
     this._range();
     this.draw();
+    if (this.opts.onView) this.opts.onView(this.view, this.spanWidth);
   }
 
   /* The aligned hand transcription (or null to drop it). */
@@ -135,12 +160,55 @@ export class PianoRoll {
 
   timeToX(t, width) {
     const w = width ?? this.width;
-    return ((t - this.span.a) / Math.max(1e-6, this.span.b - this.span.a)) * w;
+    return ((t - this.view.a) / Math.max(1e-6, this.view.b - this.view.a)) * w;
   }
 
   xToTime(x, width) {
     const w = width ?? this.width;
-    return this.span.a + (x / Math.max(1, w)) * (this.span.b - this.span.a);
+    return this.view.a + (x / Math.max(1, w)) * (this.view.b - this.view.a);
+  }
+
+  get viewWidth() {
+    return this.view.b - this.view.a;
+  }
+
+  get spanWidth() {
+    return this.span.b - this.span.a;
+  }
+
+  /* Move and resize the drawn window, clamped inside the span. Everything
+     else — zoom, pan, follow — goes through here so the clamp lives once. */
+  setWindow(a, b) {
+    const width = Math.min(this.spanWidth, Math.max(MIN_VIEW_S, b - a));
+    const lo = Math.max(this.span.a, Math.min(a, this.span.b - width));
+    this.view = { a: lo, b: lo + width };
+    this.draw();
+    if (this.opts.onView) this.opts.onView(this.view, this.spanWidth);
+  }
+
+  /* Zoom about a fixed time — the pointer under a scroll, or the playhead
+     under a button — so the thing being looked at stays put. */
+  zoomBy(factor, focus = null) {
+    const width = this.viewWidth;
+    const next = Math.min(this.spanWidth, Math.max(MIN_VIEW_S, width * factor));
+    const at = focus === null ? this.view.a + width / 2 : focus;
+    const ratio = Math.min(1, Math.max(0, (at - this.view.a) / Math.max(1e-6, width)));
+    this.setWindow(at - ratio * next, at - ratio * next + next);
+  }
+
+  fit() {
+    this.setWindow(this.span.a, this.span.b);
+  }
+
+  /* Keep a moving playhead on screen. Scrolls a whole window at a time rather
+     than tracking continuously: a view that slides under a stationary line is
+     far harder to read than one that jumps when the line reaches the edge. */
+  follow(t) {
+    if (this.viewWidth >= this.spanWidth) return;
+    const width = this.viewWidth;
+    if (t >= this.view.a && t <= this.view.b - width * FOLLOW_MARGIN) return;
+    const lo = t - width * FOLLOW_MARGIN;
+    this.setWindow(lo, lo + width);
   }
 
   pitchToY(pitch, height) {
@@ -178,7 +246,7 @@ export class PianoRoll {
     const chorusColor = this._css('--chorus', '#ffd479');
     const chorus = new Set(this.beats.chorus_bars || []);
     for (const [t, number] of this.beats.bars) {
-      if (t < this.span.a || t > this.span.b) continue;
+      if (t < this.view.a || t > this.view.b) continue;
       const x = this.timeToX(t, w);
       const isChorus = chorus.has(t);
       ctx.globalAlpha = number < 1 ? 0.05 : isChorus ? 0.35 : 0.12;
@@ -224,7 +292,7 @@ export class PianoRoll {
       ctx.globalAlpha = this.ground ? 0.14 : 0.4;
       ctx.beginPath();
       for (const t of this.diag.onsets) {
-        if (t < this.span.a || t > this.span.b) continue;
+        if (t < this.view.a || t > this.view.b) continue;
         const x = this.timeToX(t, w);
         ctx.moveTo(x, 0);
         ctx.lineTo(x, h);
@@ -420,10 +488,63 @@ export class PianoRoll {
     return out;
   }
 
-  _onClick(event) {
+  /* Pointer down starts something that is not yet a click: drag past a few
+     pixels and it pans, release without moving and it seeks. Deciding on
+     release is what lets one gesture serve both without a modifier. */
+  _onPointerDown(event, el) {
+    if (event.button !== 0) return;
+    // Capture keeps a pan alive when the pointer leaves the strip, which at
+    // 46px tall is most of them. It throws for a pointer id the browser does
+    // not know, and losing the whole gesture to that would be silly.
+    try { el.setPointerCapture(event.pointerId); } catch { /* not capturable */ }
+    this._drag = {
+      el,
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      viewA: this.view.a,
+      panning: false,
+    };
+  }
+
+  _onPointerMove(event) {
+    const drag = this._drag;
+    if (!drag || event.pointerId !== drag.id) return;
+    const dx = event.clientX - drag.x;
+    if (!drag.panning && Math.abs(dx) < DRAG_SLOP_PX) return;
+    drag.panning = true;
+    const perPixel = this.viewWidth / Math.max(1, drag.el.clientWidth);
+    const lo = drag.viewA - dx * perPixel;
+    this.setWindow(lo, lo + this.viewWidth);
+  }
+
+  _onPointerUp(event, el) {
+    const drag = this._drag;
+    this._drag = null;
+    if (!drag || event.pointerId !== drag.id) return;
+    try { el.releasePointerCapture(event.pointerId); } catch { /* never captured */ }
+    if (drag.panning) return;
+
+    // A click is both "look at this" and "listen from here": the playhead
+    // moves, and any note under it is inspected. Wanting one without the
+    // other has not come up — you click a suspicious note to hear it.
+    const rect = el.getBoundingClientRect();
+    if (this.opts.onSeek) this.opts.onSeek(this.xToTime(event.clientX - rect.left, rect.width));
+    if (el === this.rollEl) this._select(event);
+  }
+
+  _onWheel(event, el) {
+    if (!event.ctrlKey && !event.metaKey && !event.shiftKey) return;
+    event.preventDefault();
+    const rect = el.getBoundingClientRect();
+    const at = this.xToTime(event.clientX - rect.left, rect.width);
+    this.zoomBy(event.deltaY > 0 ? 1.2 : 1 / 1.2, at);
+  }
+
+  _select(event) {
     if (!this.notes.length) return;
     const rect = this.rollEl.getBoundingClientRect();
-    const t = this.xToTime(event.clientX - rect.left);
+    const t = this.xToTime(event.clientX - rect.left, rect.width);
     const h = this.roll.el.clientHeight;
     // The exact inverse of pitchToY, half-semitone offset included. Without
     // that term a click on a note's centre reads half a row high, which only

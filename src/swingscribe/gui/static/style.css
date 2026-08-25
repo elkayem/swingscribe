@@ -361,13 +361,22 @@ select {
   position: relative; width: 100%;
   background: #0d0f16; border: 1px solid var(--line);
   border-radius: var(--radius) var(--radius) 0 0; overflow: hidden;
-  cursor: pointer;
+  /* Click places the playhead and drag pans, so a crosshair rather than a
+     pointer. `pan-y` keeps the page scrollable vertically over the roll while
+     horizontal drags belong to us. */
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+.wave-label .roll-range {
+  text-transform: none; letter-spacing: normal;
+  font: 11px var(--mono); color: var(--accent);
 }
 .pianoroll canvas { display: block; width: 100%; }
 .lanes { display: flex; flex-direction: column; }
 .lane {
   position: relative; width: 100%;
   background: #0d0f16; border: 1px solid var(--line); border-top: none;
+  cursor: crosshair; touch-action: pan-y;
 }
 .lane:last-child { border-radius: 0 0 var(--radius) var(--radius); }
 .lane canvas { display: block; width: 100%; }

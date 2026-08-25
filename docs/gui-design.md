@@ -84,6 +84,23 @@ the actual question unanswered. Measured on a 30s piano-stem span of Gerry's
 Blues: 87 notes, 6 fragment pairs, and every one of them was a periodicity
 dropout rather than an onset split.
 
+**The roll zooms, and the playhead goes where you click.** At full extent a
+90-second solo puts a 0.13s note about two pixels wide, which is enough to see
+fragmentation and not enough to read a phrase, so the roll keeps a `view`
+window inside the `span` — drag to pan, ctrl/shift + scroll or the ±
+chips to zoom, `Fit` to come back. Everything else in the class works in track
+seconds and never learns that zoom exists.
+
+Clicking does both jobs at once: it moves the playhead *and* inspects whatever
+note is under it. Splitting them would need a modifier or a separate ruler
+strip, and wanting one without the other has not come up — you click a
+suspicious note precisely so you can hear it. A drag past a few pixels pans
+instead, decided on release, so one gesture serves both. `Enter` or the
+`⇤ Start` button goes back to the top of the span, matching screen 2's
+transport. While playing, a zoomed view scrolls a window at a time when the
+playhead reaches the edge rather than sliding continuously under a fixed line,
+which is much easier to read.
+
 Implementation notes:
 
 - **`transcribe.analyze()`, not `pipeline.run`.** analyze() returns the

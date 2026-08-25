@@ -178,7 +178,7 @@
   <section class="panel" id="panel-review" hidden>
     <div class="panel-head">
       <h2><span class="step">3</span> Transcribe &amp; review</h2>
-      <div class="panel-note">Click a note to see the frames that produced it — the f0 there, and whether periodicity, energy, or an onset shaped it.</div>
+      <div class="panel-note">Click a note to see the frames that produced it — the f0 there, and whether periodicity, energy, or an onset shaped it. Clicking also moves the playhead, so you can hear what you are looking at. Drag to pan, <kbd>ctrl</kbd>/<kbd>shift</kbd> + scroll or <kbd>+</kbd>/<kbd>−</kbd> to zoom, <kbd>Enter</kbd> to start over.</div>
     </div>
 
     <div class="review-bar">
@@ -204,7 +204,14 @@
       </div>
 
       <div class="pianoroll-wrap">
-        <div class="wave-label">Piano roll over the bar grid <span class="muted" id="review-hint"></span></div>
+        <div class="wave-label">
+          Piano roll over the bar grid <span class="muted" id="review-hint"></span>
+          <span class="spacer"></span>
+          <span class="muted roll-range" id="roll-range" hidden></span>
+          <button class="chip" id="roll-fit" title="Show the whole span">Fit</button>
+          <button class="chip" data-roll-zoom="in" title="Zoom in (or ctrl/shift + scroll). Drag to pan.">+</button>
+          <button class="chip" data-roll-zoom="out" title="Zoom out (or ctrl/shift + scroll)">−</button>
+        </div>
         <div class="pianoroll" id="pianoroll"></div>
         <div class="lanes">
           <div class="lane" id="lane-f0" title="Raw CREPE pitch (dim) vs the smoothed pitch after gating (bright). A gap is a frame gated out."></div>
@@ -226,6 +233,7 @@
 
       <div class="ab-row">
         <button class="play" id="r-play" title="Play / pause (Space)">▶</button>
+        <button class="restart" id="r-restart" title="Play from the start of the span (Enter)">⇤ Start</button>
         <div class="time"><span id="r-time-now">0:00.00</span><span class="sep">/</span><span id="r-time-total">0:00</span></div>
         <div class="ab-toggle" id="review-ab">
           <button data-rab="mix" class="active">Original</button>
