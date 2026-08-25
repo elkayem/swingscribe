@@ -62,6 +62,7 @@ def test_registered_stages_are_current():
         "transcribe",
         "meter",
         "swing",
+        "quantize",
     ]
 
 

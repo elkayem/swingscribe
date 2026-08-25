@@ -169,7 +169,22 @@ class SwingConfig(BaseModel):
 
 
 class QuantizeConfig(BaseModel):
+    # Grid resolution as a note value: 16 means sixteenth notes, i.e. four
+    # steps per quarter-note beat.
     resolution: int = 16
+    # Which stem's notes to quantize. None means "whatever transcribe
+    # analysed", which stays correct when the GUI repoints transcribe.
+    stem: str | None = None
+    # BUR at or below this reads as NO SWING and is never warped. Measured
+    # against 359 hand-annotated WJazzD solos: onsets with no feel at all
+    # still produce BUR ~1.56, because the offbeat region is asymmetric about
+    # 0.5 (docs/wjazzd.md). Warping on a reading near 1.5 injects error rather
+    # than removing it — LATIN, BALLAD and FUNK solos all sit at 1.31-1.53.
+    straight_bur_ceiling: float = 1.6
+    # Let a beat snap to a ternary grid when its notes fit one better. Without
+    # this a genuine triplet figure is silently rewritten as a swung eighth
+    # pair, which post-warp it closely resembles (plan §5).
+    allow_triplets: bool = True
 
 
 class NotateConfig(BaseModel):

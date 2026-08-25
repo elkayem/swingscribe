@@ -160,5 +160,16 @@ Two things about it that are easy to get wrong:
   (`scripts/wjazz_swing.py`, `docs/wjazzd.md`). The database is ODbL — only
   aggregate numbers may enter this repo, and it lives outside it.
 
-Remaining stages (quantize onward) are empty stubs. Do not implement stage
+M5 — Quantize (plan §5 stage 5) landed with it: swing-warp, then grid-snap,
+`timing_residual` preserved. Also pure arithmetic, also fully CI-tested.
+Results and limits: `docs/m5-quantize.md`.
+
+- **Never warp on a BUR near 1.5 unless confidence is high.** The no-swing
+  floor is 1.56 and it scales with confidence — it is a claim about evidence,
+  not about music. Applied ONCE to the pooled track reading; per-span
+  thresholding put a 25.6ms spike in the round trip at exactly the threshold.
+- **`replay_onsets(restore_residual=True)` is exact by construction.** Only
+  the default (replaying the notation) measures anything.
+
+Remaining stages (notate, export) are empty stubs. Do not implement stage
 logic until the corresponding milestone.

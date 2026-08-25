@@ -304,6 +304,15 @@ over a sliding window of N beats (start with N=16):
   pair are dangerously similar. Use duration context to disambiguate.
 - **Acceptance:** round-trip test — quantize → re-render with swing applied → onsets
   land within 20ms of the original.
+  *Met at M5: worst cell 0.00ms over BUR {1.0,1.3,1.6,2.0,2.5} × tempo
+  {80,120,180,260}; on the three real solos the median is 9.6-17.2ms
+  (`docs/m5-quantize.md`). Note the round trip must replay the NOTATION — putting
+  the stored residual back makes it exact by construction and measures nothing.*
+- **Do not warp on a weak reading.** BUR ≈ 1.56 is what feel-free onsets produce,
+  so the floor above applies here too — but scaled by confidence, since it is a
+  claim about evidence rather than music. Apply it ONCE to the pooled track
+  reading: thresholding per window put a 25.6ms spike in the round trip at exactly
+  the threshold value, because adjacent windows fell on opposite sides.
 
 ### Stage 6 — Notate
 - Key detection (Krumhansl or music21's analyzer), then enharmonic spelling. Jazz
