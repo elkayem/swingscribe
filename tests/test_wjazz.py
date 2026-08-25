@@ -12,7 +12,11 @@ import pytest
 
 numpy = pytest.importorskip("numpy")
 
-from swingscribe.wjazz import fit_affine, title_tokens  # noqa: E402
+from swingscribe.wjazz import (  # noqa: E402
+    fit_affine,
+    notated_positions,
+    title_tokens,
+)
 
 
 def synth(n=240, spacing=0.25, offset=97.5, rate=1.0, seed=0):
@@ -91,3 +95,29 @@ def test_title_tokens_ignore_words_every_filename_has():
         "giant",
         "steps",
     }
+
+
+def test_notated_positions_read_the_metrical_annotation():
+    """WJazzD carries a human's NOTATION, not only their onsets: bar, beat,
+    and which tatum of how many subdivisions. That is what lets the notation
+    be scored against solos other than the three bebop ones, which is the
+    control a grid rule tuned on eighth-note lines needs."""
+
+    class FakeDb:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def execute(self, _sql, _params):
+            return iter(self.rows)
+
+    # bar, beat, tatum, division, period, pitch
+    rows = [
+        (1, 1, 2, 2, 4, 57),  # bar 1, beat 1, second of two eighths -> 0.5
+        (1, 3, 1, 1, 4, 62),  # bar 1, beat 3 -> 2.0
+        (3, 2, 2, 3, 4, 55),  # bar 3, beat 2, second of a triplet -> 9.333
+    ]
+    positions = notated_positions(FakeDb(rows), 1)
+    # Positions come back relative to the solo's own first note.
+    assert positions[0] == (0.0, 57)
+    assert abs(positions[1][0] - 1.5) < 1e-9
+    assert abs(positions[2][0] - 8.8333333) < 1e-6

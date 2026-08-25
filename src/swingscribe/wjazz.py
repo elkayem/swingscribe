@@ -154,3 +154,38 @@ def _centre(ref_on, ref_p, est_on, est_p, offset, rate, hits):
             break
         offset, hits = moved, n
     return offset, rate, hits
+
+
+def notated_positions(db, melid: int) -> list[tuple[float, int]]:
+    """(metrical position in quarter notes, pitch) for one WJazzD solo.
+
+    WJazzD annotates every note's place in the bar, not just its time:
+    `bar`, `beat`, and `tatum` out of `division` subdivisions of that beat.
+    So it carries a human's NOTATION as well as a human's onsets, and the
+    notation half is what tells whether we wrote a swung pair as two eighths
+    or as a dotted eighth.
+
+    That matters as a control rather than as more of the same. The three
+    MuseScore solos are all bebop and all eighth-note lines, so a grid rule
+    tuned on them can be rewarded for simply writing everything as eighths.
+    These solos were annotated by different people from different recordings,
+    and `division` runs 1 through 10 across the database.
+
+    Position is returned relative to the solo's own first bar, since which of
+    our bars is their bar one is not knowable and is not being asked.
+    """
+    rows = db.execute(
+        "select bar, beat, tatum, division, period, pitch from melody "
+        "where melid=? order by eventid",
+        (melid,),
+    )
+    out = []
+    for bar, beat, tatum, division, period, pitch in rows:
+        if not period or bar is None:
+            continue
+        position = (bar - 1) * period + (beat - 1) + (tatum - 1) / max(1, division or 1)
+        out.append((float(position), int(pitch)))
+    if not out:
+        return []
+    origin = out[0][0]
+    return [(position - origin, pitch) for position, pitch in out]
