@@ -31,8 +31,14 @@ Stage = Callable[[Document, Config], Document]
 # the cache keys. Grows milestone by milestone (swing at M4, ...).
 STAGES: list[tuple[str, Stage]] = [
     ("ingest", ingest.run),
-    ("separate", separate.run),
+    # Beats sits ABOVE separate: measured over 11 WJazzD-matched solos, the
+    # full mix tracks better than the separated drum stem (mean beat F1 0.929
+    # vs 0.816 -- see stages/beats.py). So the grid needs no stems, and making
+    # that explicit in the chain means it costs seconds instead of the minutes
+    # a separation costs, and survives a change of separation model instead of
+    # being thrown away with it.
     ("beats", beats.run),
+    ("separate", separate.run),
     ("transcribe", transcribe.run),
     # Meter sits BELOW transcribe on purpose, though it belongs with beats
     # conceptually. Chained keys invalidate everything downstream of a changed

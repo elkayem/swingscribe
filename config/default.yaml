@@ -9,7 +9,10 @@ ingest:
   sample_rate: 44100
 
 separate:
-  model: htdemucs_ft        # swappable for a BS-Roformer checkpoint later (§5)
+  # htdemucs_ft is a bag of FOUR models and takes 4x as long for no measured
+  # gain (0.759 vs 0.752 mean note F1 over 9 benchmark solos). htdemucs_6s is
+  # worth picking by hand for a horn solo over a pianist. See config.py.
+  model: htdemucs           # swappable for a BS-Roformer checkpoint later (§5)
   device: auto              # auto | cuda | cpu; auto picks cuda when available
 
 beats:
@@ -73,4 +76,4 @@ gui:
   port: 8420
   open_browser: true
   library_dir: null         # where the track picker looks; null = current directory
-  models: [htdemucs_ft, htdemucs_6s]   # separation models offered, in menu order
+  models: [htdemucs, htdemucs_6s, htdemucs_ft]   # offered in menu order, fast first

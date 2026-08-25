@@ -321,7 +321,9 @@ def test_model_status_reports_readiness_in_config_order(config, tmp_path):
 
     status = library.model_status(document, config)
     assert [entry["model"] for entry in status] == config.gui.models
-    assert [entry["ready"] for entry in status] == [True, False]
+    ready = {entry["model"]: entry["ready"] for entry in status}
+    assert ready["htdemucs_ft"] is True  # the only one with a stem on disk
+    assert all(v is False for k, v in ready.items() if k != "htdemucs_ft")
 
 
 def test_gui_config_never_reaches_a_cache_key(config):

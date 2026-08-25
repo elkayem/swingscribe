@@ -37,16 +37,32 @@ def test_submit_deduplicates_per_kind(tmp_path):
 
 
 def test_progress_maps_stage_fractions_onto_the_kind_weights():
-    """Halfway through separation inside a beats job is not 50% of the job —
+    """Halfway through separation inside a separate job is not 50% of the job —
     the weights say what share of the wall clock each stage actually takes."""
     runner = jobs.JobRunner()
-    job = jobs.Job(id="j", path="x", model="m", kind="beats")
+    job = jobs.Job(id="j", path="x", model="m", kind="separate")
+
+    runner._on_progress(job, ProgressEvent(stage="ingest", fraction=0.5))
+    assert job.fraction == pytest.approx(0.04 * 0.5)
 
     runner._on_progress(job, ProgressEvent(stage="separate", fraction=0.5))
-    assert job.fraction == pytest.approx(0.03 + 0.85 * 0.5)
+    assert job.fraction == pytest.approx(0.04 + 0.96 * 0.5)
+
+
+def test_a_beats_job_does_not_wait_on_a_separation():
+    """Beat tracking reads the mix, not a stem, so a beats job that queued a
+    separation would spend minutes on output it never looks at. The weights are
+    the visible half of that: separation is not one of this kind's stages, so
+    its progress must not move this bar at all."""
+    assert [name for name, _ in jobs.JOB_STAGES["beats"]] == ["ingest", "beats"]
+
+    runner = jobs.JobRunner()
+    job = jobs.Job(id="j", path="x", model="m", kind="beats")
+    runner._on_progress(job, ProgressEvent(stage="separate", fraction=0.5))
+    assert job.fraction == 0.0
 
     runner._on_progress(job, ProgressEvent(stage="beats", fraction=0.5))
-    assert job.fraction == pytest.approx(0.88 + 0.12 * 0.5)
+    assert job.fraction == pytest.approx(0.25 + 0.75 * 0.5)
 
 
 def test_progress_never_walks_backwards():
@@ -90,3 +106,14 @@ def test_transcribe_jobs_of_different_spans_do_not_dedupe():
         assert b.id != a.id  # different span does not
     finally:
         release.set()
+
+
+def test_a_beats_job_does_not_queue_behind_a_separation():
+    """The reason "Beats is slow" outlived making beat tracking fast: one
+    worker, so an 8-second beats job sat behind an 11-minute demucs run. They
+    are different lanes now, and a new job kind is heavy unless it says
+    otherwise."""
+    runner = jobs.JobRunner()
+    assert runner._pool_for("beats") is not runner._pool_for("separate")
+    assert runner._pool_for("transcribe") is runner._pool_for("beats")
+    assert runner._pool_for("some-future-kind") is runner._pool_for("separate")

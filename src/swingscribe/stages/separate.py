@@ -3,7 +3,16 @@
 The model name comes from config so a BS-Roformer checkpoint can drop in
 behind the same interface later. Stems are written as wavs under the cache
 dir in a directory derived from the audio content and model name, so the
-same input always lands in the same place.
+same input always lands in the same place — and because that directory is
+content-addressed, a complete set of stems already sitting in it IS this
+stage's output and is reused rather than recomputed.
+
+That matters more than it looks. Stage outputs are cached under chained keys
+(plan §3), so any config change upstream of this stage invalidates its cache
+entry — correctly, since a different decode would need a different
+separation. But a change that leaves the *audio* identical does not, and
+without this check the honest answer to "you moved a beats setting" was
+eleven minutes of demucs producing the bytes already on disk.
 
 Heavy imports (torch, demucs) stay inside run(): this module must stay
 importable without the ml dependency group, which CI never installs.
@@ -20,6 +29,22 @@ from swingscribe.model import Document
 
 def stems_dir(cache_dir: str | Path, audio_digest: str, model: str) -> Path:
     return Path(cache_dir) / "stems" / f"{audio_digest}-{model}"
+
+
+def existing_stems(out_dir: Path, sources: list[str]) -> dict[str, str] | None:
+    """Stems already on disk for this audio+model, or None if any is missing.
+
+    All-or-nothing against the model's own source list, deliberately: a
+    directory holding three of four wavs is a separation that died partway
+    through, and half a separation reused is a stage that silently returns
+    less than it promises. Pure and path-only so it is testable without demucs.
+    """
+    if not out_dir.is_dir():
+        return None
+    found = {name: out_dir / f"{name}.wav" for name in sources}
+    if not found or not all(path.is_file() and path.stat().st_size > 0 for path in found.values()):
+        return None
+    return {name: str(path) for name, path in found.items()}
 
 
 def _progress_callback():
@@ -64,7 +89,17 @@ def run(document: Document, config: Config) -> Document:
     device = resolve_device(config.separate.device, torch.cuda.is_available())
     print(f"separate: model={config.separate.model} device={device}")
 
+    # Loading the bag is seconds; separating with it is minutes. So build the
+    # separator first either way — it is what knows which stems this model is
+    # supposed to produce, and a partially-written directory must not be
+    # mistaken for a finished one.
     separator = Separator(model=config.separate.model, device=device, callback=_progress_callback())
+    existing = existing_stems(out_dir, separator.model.sources)
+    if existing is not None:
+        progress.report("separate", 1.0, "stems already on disk", cached=True)
+        print(f"separate: reusing {len(existing)} stems in {out_dir}")
+        return document.model_copy(update={"stems": existing})
+
     _origin, separated = separator.separate_audio_file(str(audio_path))
     progress.report("separate", 1.0, "writing stems")
 

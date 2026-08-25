@@ -57,8 +57,8 @@ def test_cache_version_bump_invalidates(tmp_path):
 def test_registered_stages_are_current():
     assert [name for name, _ in pipeline.STAGES] == [
         "ingest",
-        "separate",
         "beats",
+        "separate",
         "transcribe",
         "meter",
         "swing",
@@ -66,6 +66,16 @@ def test_registered_stages_are_current():
         "notate",
         "export",
     ]
+
+
+def test_beats_runs_before_separate():
+    """The grid is tracked from the mix, so it must not chain from the
+    separation: with beats below separate, changing the separation model threw
+    away a beat grid (and the downbeat anchor derived from it) that a different
+    set of stems could not have altered. Ordering IS the invalidation rule
+    under chained keys (plan §3), so this is the only place to say it."""
+    names = [name for name, _ in pipeline.STAGES]
+    assert names.index("beats") < names.index("separate")
 
 
 def test_swing_runs_after_what_it_reads():

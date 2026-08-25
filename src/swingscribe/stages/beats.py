@@ -1,8 +1,24 @@
-"""Stage 2 — BeatTrack: beat_this on the drum stem → BeatGrid (plan §5, M2).
+"""Stage 2 — BeatTrack: beat_this on the mix → BeatGrid (plan §5, M2).
 
-The drum stem is the preferred source — the ride cymbal is the cleanest beat
-reference in jazz and separation already isolated it. Falls back to the full
-mix when the drum stem is missing or near-silent. Runs with dbn=False
+The plan (and this stage until M6) tracked the separated DRUM stem, on the
+reasoning that the ride cymbal is the cleanest pulse in jazz and separation
+had already isolated it. Measured, that is wrong, and expensively so: over 11
+WJazzD-matched solos the full mix scores mean beat F1 **0.929** against the
+drum stem's **0.816**. The stem loses where it matters most — on fast tunes it
+locks to half the pulse, because an isolated kit at 275 bpm is a two-feel with
+nothing to contradict it. Dolores 0.68 → 0.99, Gingerbread Boy 0.60 → 0.98.
+The mix carries the comping and the melody, which disambiguate the rate. It
+loses one tune, Walkin', by 0.03.
+
+So the mix is the default source, `use_drum_stem` is off, and the pipeline
+runs this stage BEFORE separate. That drops the cost of a beat grid from a
+demucs separation (~11 minutes for htdemucs_ft on CPU) to the ~5 seconds
+beat_this itself takes, and means a change of separation model no longer
+throws the grid away.
+
+The drum-stem path is kept, not deleted: `select_source` still prefers a stem
+when `use_drum_stem` is on and the Document carries one, and the fallback and
+splice machinery below is what makes it safe. Runs with dbn=False
 deliberately: the DBN's tempo-continuity prior hurts on expressive jazz, and
 skipping it means madmom is never needed (plan §2).
 
@@ -26,7 +42,8 @@ from swingscribe.model import BeatGrid, Document
 # the cache key (see pipeline._cache_name). v2: grid-quality source comparison.
 # v3: per-passage coverage and splicing (open-issue #9).
 # v4: per-passage rate repair (open-issue #9, second half).
-CACHE_VERSION = 4
+# v5: full mix is the default source, and the stage runs before separate.
+CACHE_VERSION = 5
 
 # |log2(bpm / median)| at or beyond this counts as an octave-error outlier;
 # 0.5 flags anything past ~1.41x off the median, halfway to a doubling.

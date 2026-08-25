@@ -26,12 +26,16 @@ from swingscribe.config import Config
 
 # Stages each job kind walks through, and roughly what share of the wall clock
 # each takes. Ingest is seconds and separation is minutes, so a naive
-# "N stages, 1/N each" bar would sit at 50% for most of a job. A beats job
-# includes separation because beat tracking wants the drum stem — usually a
-# cache hit that flashes past, but honest when it isn't.
+# "N stages, 1/N each" bar would sit at 50% for most of a job.
+#
+# A beats job used to include separation, because beat tracking wanted the drum
+# stem. It no longer does — the mix tracks better as well as faster
+# (stages/beats.py) — so this is now ingest plus a few seconds of beat_this,
+# and the button returns before a separation would have finished loading its
+# first model.
 JOB_STAGES: dict[str, tuple[tuple[str, float], ...]] = {
     "separate": (("ingest", 0.04), ("separate", 0.96)),
-    "beats": (("ingest", 0.03), ("separate", 0.85), ("beats", 0.12)),
+    "beats": (("ingest", 0.25), ("beats", 0.75)),
     # Transcription runs on an already-separated stem, so this is the CREPE pass
     # alone — ~30s for a span, not minutes.
     "transcribe": (("transcribe", 1.0),),
@@ -76,6 +80,19 @@ class Job:
         }
 
 
+# Job kinds that must not queue behind a separation. Beat tracking is ~8
+# seconds and needs no stems at all; on a single worker it sat behind an
+# eleven-minute demucs run, which is indistinguishable from beat tracking
+# being slow and is why "the Beats button takes forever" survived making beat
+# tracking fast.
+#
+# Two single-worker lanes rather than a wider pool: at most one separation and
+# one cheap job run at once, so a second demucs cannot start and halve the
+# first one's cores. Everything unlisted is heavy by default — a new job kind
+# should have to argue that it is cheap.
+LIGHT_KINDS = frozenset({"beats", "transcribe"})
+
+
 class JobRunner:
     """Runs pipeline work off the request thread and reports progress."""
 
@@ -83,7 +100,11 @@ class JobRunner:
         self._lock = threading.Lock()
         self._jobs: dict[str, Job] = {}
         self._by_target: dict[tuple[str, str, str], str] = {}  # (path, model, kind)
-        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="swingscribe-job")
+        self._heavy = ThreadPoolExecutor(max_workers=1, thread_name_prefix="swingscribe-heavy")
+        self._light = ThreadPoolExecutor(max_workers=1, thread_name_prefix="swingscribe-light")
+
+    def _pool_for(self, kind: str) -> ThreadPoolExecutor:
+        return self._light if kind in LIGHT_KINDS else self._heavy
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
@@ -123,7 +144,7 @@ class JobRunner:
         with self._lock:
             self._jobs[job.id] = job
             self._by_target[(job.path, model, kind, variant)] = job.id
-        future: Future = self._pool.submit(self._run, job, config, model)
+        future: Future = self._pool_for(kind).submit(self._run, job, config, model)
         future.add_done_callback(lambda _f: None)
         return job
 
@@ -156,9 +177,15 @@ class JobRunner:
         run_config = config.model_copy(
             update={"separate": config.separate.model_copy(update={"model": model})}
         )
-        stage_list = [("ingest", ingest.run), ("separate", separate.run)]
+        # Beats needs no stems, so a beats job must not queue a separation it
+        # would only wait on. Neither list is a prefix of pipeline.STAGES (which
+        # runs beats between them), so the full pipeline looks these stage
+        # outputs up under different keys and recomputes them — seconds, now
+        # that separate reuses stems already on disk.
         if job.kind == "beats":
-            stage_list.append(("beats", beats.run))
+            stage_list = [("ingest", ingest.run), ("beats", beats.run)]
+        else:
+            stage_list = [("ingest", ingest.run), ("separate", separate.run)]
         document = pipeline.run(job.path, run_config, stages=stage_list)
         job.stems = sorted(library.available_stems(document, run_config, model))
         job.message = "beat grid ready" if job.kind == "beats" else "stems ready"

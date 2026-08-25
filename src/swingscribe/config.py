@@ -24,13 +24,31 @@ class IngestConfig(BaseModel):
 
 
 class SeparateConfig(BaseModel):
-    model: str = "htdemucs_ft"
+    # `htdemucs_ft` is a BAG OF FOUR fine-tuned models and takes 4x as long
+    # (~11 min for a 10-minute track on this machine's CPU, against ~2.8).
+    # Measured over the 9 benchmark solos that used it, it buys nothing:
+    # plain htdemucs scores mean note F1 0.759 against ft's 0.752, better on
+    # 8 of the 9. So the default is the fast one.
+    #
+    # `htdemucs_6s` is still worth choosing by hand for a HORN solo over a
+    # pianist — it routes piano into its own stem, so "other" comes back
+    # cleaner (Walkin' 0.829 against htdemucs's 0.701). It is the wrong
+    # choice when the soloist IS the pianist, for exactly the same reason
+    # (docs/benchmark-deficiencies.md D3).
+    model: str = "htdemucs"
     device: str = "auto"  # auto | cuda | cpu
 
 
 class BeatsConfig(BaseModel):
     dbn: bool = False  # never True — we skip madmom entirely (plan §2)
-    use_drum_stem: bool = True
+    # Prefer a separated drum stem over the full mix, when the Document has
+    # one. Default OFF, and the pipeline runs beats before separate, so
+    # nothing has one: measured over 11 WJazzD-matched solos the mix tracks
+    # BETTER (mean beat F1 0.929 vs 0.816) as well as ~100x faster. Kept as a
+    # switch because the reasoning that chose the stem — the ride cymbal is
+    # the cleanest pulse in jazz — is sound for a tune the mix mistracks, and
+    # a caller that wires beats after separate can still use it.
+    use_drum_stem: bool = False
     checkpoint: str = "final0"
     device: str = "auto"  # auto | cuda | cpu
     # Drum stem must carry at least this fraction of the mix's RMS energy,
@@ -266,8 +284,10 @@ class GuiConfig(BaseModel):
     open_browser: bool = True
     # Where the track picker looks. null = the directory swingscribe was run from.
     library_dir: str | None = None
-    # Separation models offered on the audition screen, in menu order.
-    models: list[str] = ["htdemucs_ft", "htdemucs_6s"]
+    # Separation models offered on the audition screen, in menu order — the
+    # fast default first, then the two that are worth waiting for when the
+    # default disappoints. See SeparateConfig for what each one buys.
+    models: list[str] = ["htdemucs", "htdemucs_6s", "htdemucs_ft"]
 
 
 # Sections that are pipeline stages, and therefore feed cache keys. Membership

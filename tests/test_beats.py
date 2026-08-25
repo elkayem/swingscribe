@@ -4,6 +4,7 @@ test downloads beat_this weights and is opt-in via SWINGSCRIBE_HEAVY_TESTS=1."""
 import pytest
 
 from conftest import requires_heavy
+from swingscribe.config import BeatsConfig
 from swingscribe.stages.beats import (
     infer_beats_per_bar,
     local_bpm_curve,
@@ -95,6 +96,23 @@ def test_select_source_respects_config_off():
     )
     assert path == "mix.wav"
     assert "use_drum_stem=false" in reason
+
+
+def test_the_default_source_is_the_mix():
+    """Not a style preference — a measurement. Over 11 WJazzD-matched solos
+    the mix scores mean beat F1 0.929 against the drum stem's 0.816, because an
+    isolated kit at 275 bpm is a two-feel and the tracker halves the pulse. The
+    mix also costs no separation, which is why this default is what makes the
+    grid affordable at all (see the module docstring)."""
+    assert BeatsConfig().use_drum_stem is False
+    path, reason = select_source(
+        {"drums": "drums.wav"},
+        "mix.wav",
+        BeatsConfig().use_drum_stem,
+        0.05,
+        rms_of=lambda p: 0.1,
+    )
+    assert path == "mix.wav"
 
 
 def test_grid_is_plausible_normal():
