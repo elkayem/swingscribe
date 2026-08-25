@@ -36,63 +36,15 @@ it may be committed beyond aggregate numbers (plan section 12, docs/wjazzd.md).
 
 import argparse
 import json
-import re
 import sqlite3
 from pathlib import Path
 
-ONSET_TOLERANCE_S = 0.05
-# Below this share of the reference matched, we have not found the take. A
-# wrong candidate lands at 2-7% from note density alone; a right one at 20%+.
-MIN_MATCH_RATE = 0.15
-# ...and the runner-up must be this far behind, or the identification is not
-# safe enough to score against.
-MIN_MARGIN = 2.5
-STOPWORDS = frozenset({"the", "a", "an", "of", "on", "solo", "and"})
-RATE_LOW, RATE_HIGH, RATE_STEP = 0.994, 1.006, 0.0005
-
-
-def title_tokens(name: str) -> set[str]:
-    return {w for w in re.findall(r"[a-z]+", name.lower()) if w not in STOPWORDS and len(w) > 2}
-
-
-def _matches(ref_on, ref_p, est_on, est_p, offset, rate):
-    """Boolean per reference note: does one of ours sit on it, same pitch?"""
-    import numpy as np
-
-    t = ref_on * rate + offset
-    index = np.searchsorted(est_on, t)
-    hit = np.zeros(len(t), dtype=bool)
-    for step in (-1, 0, 1):
-        j = np.clip(index + step, 0, len(est_on) - 1)
-        hit |= (np.abs(est_on[j] - t) <= ONSET_TOLERANCE_S) & (est_p[j] == ref_p)
-    return hit
-
-
-def fit_affine(ref_on, ref_p, est_on, est_p, low, high, step=0.01):
-    """(offset, rate, matches) lining their solo up with our notes.
-
-    Coarse offset first at rate 1, then offset and rate jointly nearby. Pitch
-    is part of the criterion throughout: an onset-only fit on a jazz line can
-    lock onto a whole eighth-note slip, which is the bug that made the other
-    benchmark wrong for months (src/swingscribe/benchmark.py).
-    """
-    import numpy as np
-
-    best = (0.0, 1.0, -1)
-    for offset in np.arange(low, high, step):
-        n = int(_matches(ref_on, ref_p, est_on, est_p, offset, 1.0).sum())
-        if n > best[2]:
-            best = (float(offset), 1.0, n)
-    coarse = best[0]
-    pivot = float(ref_on[len(ref_on) // 2])
-    for rate in np.arange(RATE_LOW, RATE_HIGH, RATE_STEP):
-        # A rate change pivots about time zero, so the offset must follow it.
-        centre = coarse - (rate - 1.0) * pivot
-        for offset in np.arange(centre - 1.0, centre + 1.0, 0.005):
-            n = int(_matches(ref_on, ref_p, est_on, est_p, offset, rate).sum())
-            if n > best[2]:
-                best = (float(offset), float(rate), n)
-    return best
+from swingscribe.wjazz import (
+    MIN_MARGIN,
+    MIN_MATCH_RATE,
+    fit_affine,
+    title_tokens,
+)
 
 
 def identify(db, name, est_on, est_p, region):
@@ -111,8 +63,7 @@ def identify(db, name, est_on, est_p, region):
             continue
         ref_on = np.array([m[0] for m in melody])
         ref_p = np.array([int(m[1]) for m in melody])
-        seed = region[0] - float(ref_on[0])
-        offset, rate, hits = fit_affine(ref_on, ref_p, est_on, est_p, seed - 25, seed + 25)
+        offset, rate, hits = fit_affine(ref_on, ref_p, est_on, est_p, region)
         scored.append(
             {
                 "melid": melid,
