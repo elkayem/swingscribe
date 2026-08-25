@@ -5,14 +5,10 @@ transcription worth handing to a musician. Ordered by measured impact, not by
 how interesting the problem is. Every entry has to name a number that would
 move; anything that cannot is an opinion and belongs somewhere else.
 
-Reproduce with:
+Reproduce all of it with one command:
 
 ```bash
-uv run python scripts/score_wjazz.py --db ../wjazz/wjazzd.db --notes .benchmark-notes-c0.2.json
-```
-
-```bash
-uv run python scripts/score_benchmark.py --reuse --step-cost 0.2
+uv run python scripts/run_eval.py --db ../wjazz/wjazzd.db
 ```
 
 ## Two benchmarks, measuring different things
@@ -29,7 +25,7 @@ score has no timestamps, so scoring it in time needs a tempo map and a swing
 model. Asks: *would this notate the way a human notated it?* It necessarily
 charges the gap between performed timing and notated rhythm to the
 transcriber, so it reads lower and always will. This is the right measure of
-`notate` (M6), and a pessimistic one for `transcribe`.
+the notation path, and a pessimistic one for `transcribe`.
 
 Scoring against notation and reading the result as a transcription failure is
 what sent months of attention toward timing. Do not repeat it.
@@ -51,14 +47,14 @@ MuseScore — the three hand-transcribed solos:
 
 | tune | pitch F1 | onset F1 | note F1 |
 |---|---|---|---|
-| Confirmation | 0.736 | 0.585 | 0.489 |
-| All The Things | 0.883 | 0.580 | 0.501 |
-| Giant Steps | 0.686 | 0.622 | 0.500 |
+| Confirmation | 0.762 | 0.596 | 0.514 |
+| All The Things | 0.892 | 0.586 | 0.516 |
+| Giant Steps | 0.702 | 0.611 | 0.512 |
 
 The gap between the two tables is the point. Against audio the transcriber is
-at note F1 0.79; against notation it reads 0.50. Some of that gap is real —
-notating is a further step and M6 has not been built — but it is not evidence
-about hearing.
+at note F1 0.79; against notation it reads 0.51. Some of that gap is real —
+notation idealizes what was played, and that difference is the transcriber's
+to explain — but it is not evidence about hearing.
 
 ## Open deficiencies
 
@@ -82,7 +78,27 @@ Found from the user's report and confirmed by inspection.
 
 Same-pitch fragments as a share of invented notes: All The Things 37%,
 Confirmation 14%, Giant Steps 12%. Costs precision now, and would notate as
-four tied fragments in M6.
+four tied fragments.
+
+**One fix tried and rejected on measurement.** The onset corroboration test
+asks only for a *rise* in the note's own harmonics, and vibrato swells a held
+note by several dB unaided — which is exactly what cut that note into five.
+Requiring the energy to *dip* below the sustain first, where the pitch is the
+same note either side, does fix the case: at 2 dB the held note comes back as
+one 3.20 s note.
+
+It loses overall. Genuine repeated notes are suppressed faster than
+fragments are saved:
+
+| `onset_dip_db` | Orbits | Walkin' | Oleo | Yesterdays | mean |
+|---|---|---|---|---|---|
+| 0 (ships) | 0.828 | 0.829 | 0.674 | 0.835 | **0.791** |
+| 2 | 0.827 | 0.812 | 0.666 | 0.805 | 0.775 |
+| 3 | 0.826 | 0.800 | 0.663 | 0.806 | 0.774 |
+
+Down on every tune. The knob stays, defaulted off, because the mechanism is
+sound and a better rise/dip discriminator may yet win — but it must not be
+turned on without re-running `run_eval.py`.
 
 ### D3 — Octave errors on piano
 
@@ -90,10 +106,24 @@ four tied fragments in M6.
 (2.4% of the solo) but it is a systematic, nameable error rather than noise,
 and it is the one error class a listener notices immediately.
 
-### D4 — M6 (Notate) does not exist
+### D4 — Nothing measures the notation itself
 
-Key detection, enharmonic spelling, note values, ties and rests are all
-stubs. Nothing in either table measures notation, because there is none.
+Notate and export now exist and produce MusicXML that opens, but no number
+on this page scores *notation*. The .mscz benchmark compares pitch sequences
+and onset times, not note values, ties, spelling or bar assembly — so a score
+could be full of unreadable rhythms and every table above would be unmoved.
+
+The obvious measure is available and not yet built: our MusicXML against the
+`.mscz` for the same solo, compared as notated rhythm rather than as time.
+`mscz.py` already parses one side of it.
+
+### D5 — The plan's milestone numbering has drifted from CLAUDE.md's
+
+The plan's table has M5 = "Quantize + Notate + Export" and M6 = "WJazzD eval
+harness + pinned baselines"; CLAUDE.md has M5 = Quantize and M6 = Notate.
+Both readings are now satisfied — quantize, notate, export and the eval
+harness all exist — but the numbering should be reconciled before it is used
+to decide what comes next.
 
 ## Resolved
 
@@ -154,3 +184,15 @@ Recorded so they can be overturned, in the order they were made.
    licence to delete the evidence.
 5. **Beat F1 is scored against WJazzD's human taps at mir_eval's default
    70 ms window.** No allowance is made for the taps themselves being human.
+6. **Notate does not use music21**, which the plan names for it. music21 is
+   not a dependency of this project and "never add a dependency without
+   asking" is explicit (CLAUDE.md), so the stage is pure arithmetic instead.
+   The upside is real — key detection and spelling run in CI like everything
+   else — but this is a plan deviation and should be confirmed or overturned.
+   `model.py`'s notation types carry everything a music21 `Score` would need,
+   so wrapping rather than rewriting is the way back.
+7. **Sidecars were created for two tunes that had none** (Dolores,
+   Gingerbread Boy), with spans covering *every* WJazzD solo on that title,
+   because which soloist was ripped is not knowable without listening —
+   `identify` decides that afterwards from the audio and reports who it
+   found. They are ordinary GUI sidecars and can be edited or deleted.

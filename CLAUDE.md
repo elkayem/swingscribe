@@ -177,5 +177,54 @@ Results and limits: `docs/m5-quantize.md`.
 - **`replay_onsets(restore_residual=True)` is exact by construction.** Only
   the default (replaying the notation) measures anything.
 
-Remaining stages (notate, export) are empty stubs. Do not implement stage
-logic until the corresponding milestone.
+M6 — Notate + Export + the eval harness. All three landed together; the plan
+and this file had drifted apart on what M6 even was (plan §7's table says M6
+is the eval harness, this file said Notate), so both readings were satisfied.
+Results and limits: `docs/m6-notate.md`.
+
+- **Notate does NOT use music21, which the plan names for it.** Everything the
+  stage needs is arithmetic, and keeping it arithmetic means key detection and
+  spelling run in CI like every other stage. This is a plan deviation on the
+  record in `docs/benchmark-deficiencies.md` — confirm or overturn it.
+- **Everything is concert pitch until export.** The benchmark's ground truth is
+  concert pitch; a stage that silently transposed would invalidate every
+  comparison. Written pitch is applied once, at export — and the key signature
+  moves with it, or the part sounds right and is covered in accidentals.
+- **A tuplet is allowed inside one beat and no wider.** Quantize chooses its
+  grid one beat at a time, and a third of a beat is not a note value: without
+  `NotatedNote.tuplet`, 57 of Confirmation's 129 bars did not add up.
+- **24 divisions per quarter** in MusicXML — the smallest divisible by 8 (a
+  thirty-second) and 3 (a triplet).
+
+## Measuring: two benchmarks, and they answer different questions
+
+Confusing them cost months. `docs/benchmark-deficiencies.md` is the running
+list of what is actually wrong; run everything with one command:
+
+    uv run python scripts/run_eval.py --db ../wjazz/wjazzd.db
+
+- **WJazzD (`score_wjazz.py`) is audio against audio** — a human's per-note
+  onsets in seconds for the same recording. Asks "did we hear what was
+  played?" and is the right measure of `transcribe`. Currently **mean note F1
+  0.79, mean beat F1 0.97** over four solos.
+- **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
+  this notate the way a human notated it?" It charges the gap between
+  performed timing and notated rhythm to the transcriber, so it reads lower
+  and always will. Currently mean note F1 0.51.
+
+Reading the second as a transcription failure is exactly the mistake that was
+made. Both are kept; neither subsumes the other.
+
+**Two fitting bugs have now been found in this harness, both of which reported
+a measurement failure as a transcription failure.** Any code that aligns our
+notes to a reference belongs in the package with tests, never in a script:
+`src/swingscribe/benchmark.py` and `src/swingscribe/wjazz.py`.
+
+- A per-window offset chosen by maximizing ONSET hits slips whole eighth
+  notes on a line of near-uniform eighths — it cost note F1 ~0.17 on every
+  tune. Correspondence must come from pitch first.
+- An offset search seeded from the span's start missed a solo that began 26 s
+  into the span, and reported 0.51 where the truth was 0.84.
+
+The control that says a fit is not manufacturing agreement: run it against the
+WRONG take. It scores under 10% there against 79-84% on a right one.
