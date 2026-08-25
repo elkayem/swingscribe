@@ -204,6 +204,26 @@ explicit legato rule moved the mean note-value agreement from 0.4628 to
 0.4665. `notate.legato_fill` ships off.
 
 
+### R6 — Is the CREPE voicing gate set too high?
+
+Swept against WJazzD, mean note F1 over the four solos with beat grids:
+
+| `voicing_threshold` | 0.30 | 0.40 | **0.50** (ships) | 0.60 | 0.70 | 0.80 |
+|---|---|---|---|---|---|---|
+| mean note F1 | 0.787 | 0.789 | **0.791** | 0.794 | 0.788 | 0.765 |
+
+There is a real peak and it is at 0.60, but it beats the shipping 0.50 by
+**0.002** — an order of magnitude less than the spread between tunes at any
+one setting, and measured on four solos. The per-tune picture is mixed
+(Orbits 0.828 → 0.810, Yesterdays 0.835 → 0.842). Moving a shipping default
+on that evidence would be fitting the noise, so **0.50 stays**.
+
+Worth keeping: the curve is flat from 0.30 to 0.70 and only collapses at
+0.80, so the gate is not a lever on overall accuracy. It *is* a lever on the
+precision/recall balance — Oleo's recall runs 0.624 at 0.30 down to 0.471 at
+0.80 — so it is the right knob if recall on a specific tune ever matters more
+than the mean.
+
 ### R5 — A swung eighth pair was being notated as it was played
 
 **The largest single disagreement with the hand transcriptions**, and only
