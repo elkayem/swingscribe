@@ -342,9 +342,17 @@ substantial derivatives, so only aggregate numbers may enter this repo (§12 alr
 requires that). The audio-dependent half — onset F1, pitch accuracy, note F1 — still
 waits on matching recordings.
 
-- Pick ~20 solos spanning eras, tempos, and instruments. Include at least 4 piano
-  solos — WJazzD covers pianists, and the piano path has different failure modes
-  (offset smear from pedaling) that horn fixtures won't surface.
+- Pick ~20 solos spanning eras, tempos, and instruments.
+  `scripts/wjazz_shortlist.py` does this — it walks (instrument × tempo) cells and
+  takes the most canonical solo from each, so one artist you don't own can't cost
+  the whole set.
+- **CORRECTED at M4:** this said "include at least 4 piano solos — WJazzD covers
+  pianists". It barely does. WJazzD is a *wind* database: 157 tenor, 102 trumpet,
+  80 alto — against **6 piano and 6 guitar** solos, with five of the six pianos by
+  Herbie Hancock and every one of them at 262–294 bpm. Take all of them (the
+  shortlist script does), but the polyphonic-soloist failure mode this was meant to
+  cover — the one Giant Steps exposed and M7b exists for — is **not** adequately
+  represented here and will need its own fixtures.
 - Score with `mir_eval`: onset F1 (50ms), pitch accuracy (50 cents), plus your own
   BUR error.
 - **Pin the numbers in `tests/regression/baselines.json` and diff per commit.** Tuning
