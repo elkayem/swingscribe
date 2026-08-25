@@ -122,10 +122,9 @@ def test_merge_ties_does_not_join_a_repeated_note():
     assert len(merge_ties(notes)) == 2
 
 
-def test_notation_scoring_is_blind_to_which_bar_is_bar_one():
+def test_notation_scoring_survives_a_different_bar_one():
     """Our bar numbering starts wherever the span did, theirs at their bar 1.
-    That single constant is the one thing the comparison must forgive, and
-    everything else must survive it."""
+    Measuring intervals rather than absolute positions makes that unaskable."""
     from swingscribe.alignment import align
     from swingscribe.benchmark import score_notation
 
@@ -133,14 +132,43 @@ def test_notation_scoring_is_blind_to_which_bar_is_bar_one():
     estimate = [(float(i) + 16.0, 1.0, 60 + i) for i in range(8)]  # 4 bars later
     aligned = align([p for _, _, p in reference], [p for _, _, p in estimate])
     result = score_notation(reference, estimate, aligned.pairs)
-    assert result["placement"] == 1.0
+    assert result["rhythm"] == 1.0
     assert result["value"] == 1.0
-    assert result["offset"] == 16.0
 
 
-def test_a_wrong_note_value_is_right_in_placement_and_wrong_in_value():
-    """The two numbers are kept apart because they fail independently: a
-    quarter written where a dotted eighth belongs sits in the right place."""
+def test_notation_scoring_survives_a_disagreement_about_the_bar_count():
+    """The reason this measures intervals at all.
+
+    Confirmation notates 130 bars where the hand transcription has 129. Scored
+    on absolute position that difference drifts and swamps everything -- the
+    same notation read 0.34 that way and 0.79 as intervals. A benchmark that
+    cannot tell a rhythm error from a bar-count disagreement is not measuring
+    rhythm.
+    """
+    from swingscribe.alignment import align
+    from swingscribe.benchmark import score_notation
+
+    reference = [(float(i), 1.0, 60 + i % 12) for i in range(60)]
+    estimate = [(float(i) * 1.02 + 9.0, 1.0, 60 + i % 12) for i in range(60)]
+    aligned = align([p for _, _, p in reference], [p for _, _, p in estimate])
+    assert score_notation(reference, estimate, aligned.pairs)["rhythm"] == 1.0
+
+
+def test_a_score_against_itself_is_perfect():
+    """The check any comparison measure has to pass before it is believed."""
+    from swingscribe.alignment import align
+    from swingscribe.benchmark import score_notation
+
+    score = [(0.0, 1.0, 60), (1.0, 0.5, 62), (1.5, 0.5, 64), (2.0, 2.0, 65)]
+    aligned = align([p for _, _, p in score], [p for _, _, p in score])
+    result = score_notation(score, score, aligned.pairs)
+    assert result["rhythm"] == 1.0
+    assert result["value"] == 1.0
+
+
+def test_a_wrong_note_value_is_right_in_rhythm_and_wrong_in_value():
+    """The two numbers are kept apart because they fail independently, and
+    because the fix for each is in a different place."""
     from swingscribe.alignment import align
     from swingscribe.benchmark import score_notation
 
@@ -148,21 +176,26 @@ def test_a_wrong_note_value_is_right_in_placement_and_wrong_in_value():
     estimate = [(0.0, 1.0, 60), (1.0, 1.0, 62), (2.0, 1.0, 64)]
     aligned = align([p for _, _, p in reference], [p for _, _, p in estimate])
     result = score_notation(reference, estimate, aligned.pairs)
-    assert result["placement"] == 1.0
+    assert result["rhythm"] == 1.0
     assert abs(result["value"] - 2 / 3) < 1e-9
 
 
-def test_a_note_written_on_the_wrong_beat_fails_placement():
-    from swingscribe.alignment import align
+def test_a_note_written_on_the_wrong_beat_fails_rhythm():
     from swingscribe.benchmark import score_notation
 
     reference = [(0.0, 1.0, 60), (1.0, 1.0, 62), (2.0, 1.0, 64), (3.0, 1.0, 65)]
     estimate = [(0.0, 1.0, 60), (1.5, 1.0, 62), (2.0, 1.0, 64), (3.0, 1.0, 65)]
-    aligned = align([p for _, _, p in reference], [p for _, _, p in estimate])
-    assert score_notation(reference, estimate, aligned.pairs)["placement"] == 0.75
+    # two intervals ruined by moving one note: the one into it and the one out
+    assert score_notation(reference, estimate, aligned_pairs(reference, estimate))["rhythm"] < 0.5
+
+
+def aligned_pairs(reference, estimate):
+    from swingscribe.alignment import align
+
+    return align([p for _, _, p in reference], [p for _, _, p in estimate]).pairs
 
 
 def test_nothing_matched_scores_zero_rather_than_dividing_by_it():
     from swingscribe.benchmark import score_notation
 
-    assert score_notation([(0.0, 1.0, 60)], [(0.0, 1.0, 72)], [(0, 0)])["placement"] == 0.0
+    assert score_notation([(0.0, 1.0, 60)], [(0.0, 1.0, 72)], [(0, 0)])["rhythm"] == 0.0

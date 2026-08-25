@@ -29,6 +29,15 @@ MIN_MATCH_RATE = 0.15
 # ...and the runner-up must be this far behind, or the identification is not
 # safe enough to score against.
 MIN_MARGIN = 2.5
+# Above this, a candidate is certainly present in the audio and the margin
+# rule does not apply to it. A wrong take reaches 10% on note density alone,
+# so 40% is not a near miss -- it is a solo we transcribed.
+#
+# This exists because a span can hold more than one annotated solo. The user's
+# Dolores covers Herbie Hancock, Miles Davis and Wayne Shorter in turn; two of
+# them matched at 77% and 73%, and the margin rule threw away BOTH on the
+# grounds that they could not be told apart. They could: they are both there.
+CONFIDENT_MATCH_RATE = 0.40
 STOPWORDS = frozenset({"the", "a", "an", "of", "on", "solo", "and"})
 RATE_LOW, RATE_HIGH, RATE_STEP = 0.994, 1.006, 0.0005
 

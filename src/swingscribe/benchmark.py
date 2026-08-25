@@ -127,13 +127,20 @@ def score_notation(
 
     Two numbers, deliberately apart:
 
-    - **placement** — does the note sit in the same place in the bar? Measured
-      as the offset between our notated position and theirs, which is constant
-      when the rhythm is right and wanders when it is not. The median offset
-      absorbs the one legitimate unknown (which of our bars is their bar one);
-      everything else is error.
+    - **rhythm** — is the gap to the next note the same? Written as an
+      interval rather than as an absolute position, and that choice matters.
+      Absolute positions need our bar one to be their bar one, and any
+      disagreement about the total bar count then drifts and swamps the
+      measurement: Confirmation notates 130 bars where the score has 129, and
+      scoring absolute positions read 0.34 against 0.79 for the same notation
+      measured as intervals. An interval is translation-invariant and cannot
+      accumulate, so it measures the rhythm and not the alignment.
     - **value** — is it the same note value? A quarter written where a dotted
-      eighth belongs is right in placement and wrong here.
+      eighth belongs has the right rhythm and the wrong value here.
+
+    Note what neither number can see: a note the alignment did not match at
+    all. This measures the notation of the notes we got, and says nothing
+    about the notes we missed — `note_f1` is where that lives.
     """
     matched = [
         (ri, ei)
@@ -141,21 +148,25 @@ def score_notation(
         if ri is not None and ei is not None and reference[ri][2] == estimate[ei][2]
     ]
     if not matched:
-        return {"placement": 0.0, "value": 0.0, "n_matched": 0.0, "offset": 0.0}
+        return {"rhythm": 0.0, "value": 0.0, "n_matched": 0.0}
 
-    offsets = sorted(estimate[ei][0] - reference[ri][0] for ri, ei in matched)
-    offset = offsets[len(offsets) // 2]
-    placed = sum(
-        1
-        for ri, ei in matched
-        if abs((estimate[ei][0] - reference[ri][0]) - offset) <= NOTATION_TOLERANCE
-    )
+    # Consecutive matched pairs only: a gap that steps over a note one side
+    # has and the other does not is not evidence about rhythm.
+    intervals = 0
+    correct = 0
+    for (ri, ei), (next_ri, next_ei) in zip(matched, matched[1:], strict=False):
+        if next_ri != ri + 1 or next_ei != ei + 1:
+            continue
+        intervals += 1
+        theirs = reference[next_ri][0] - reference[ri][0]
+        ours = estimate[next_ei][0] - estimate[ei][0]
+        if abs(ours - theirs) <= NOTATION_TOLERANCE:
+            correct += 1
     valued = sum(
         1 for ri, ei in matched if abs(estimate[ei][1] - reference[ri][1]) <= NOTATION_TOLERANCE
     )
     return {
-        "placement": placed / len(matched),
+        "rhythm": correct / intervals if intervals else 0.0,
         "value": valued / len(matched),
         "n_matched": float(len(matched)),
-        "offset": offset,
     }

@@ -117,7 +117,7 @@ def wjazz_scores(db_path: Path, runs: dict, grids: dict) -> dict:
     import numpy as np
 
     sys.path.insert(0, str(Path(__file__).parent))
-    from score_wjazz import identify, score, score_beats
+    from score_wjazz import identify_all, score, score_beats
 
     db = sqlite3.connect(db_path)
     out = {}
@@ -128,28 +128,32 @@ def wjazz_scores(db_path: Path, runs: dict, grids: dict) -> dict:
         onsets, pitches = onsets[order], pitches[order]
         ordered = [run["notes"][i] for i in order]
 
-        solo, why = identify(db, name, onsets, pitches, run["region"])
-        if solo is None:
+        found, why = identify_all(db, name, onsets, pitches, run["region"])
+        if not found:
             out[name] = {"skipped": why}
             continue
-        result = score(solo, onsets, ordered)
-        entry = {
-            "performer": solo["performer"],
-            "instrument": solo["instrument"],
-            "tempo": solo["tempo"],
-            "melid": solo["melid"],
-            "note_f1": round(result["note_f1"], 4),
-            "note_precision": round(result["note_precision"], 4),
-            "note_recall": round(result["note_recall"], 4),
-            "onset_f1": round(result["onset_f1"], 4),
-        }
-        if name in grids:
-            beats = score_beats(
-                db, solo["melid"], grids[name]["beats"], solo["offset"], solo["rate"]
-            )
-            if beats:
-                entry["beat_f1"] = round(beats["f_measure"], 4)
-        out[name] = entry
+        for solo in found:
+            result = score(solo, onsets, ordered)
+            entry = {
+                "performer": solo["performer"],
+                "instrument": solo["instrument"],
+                "tempo": solo["tempo"],
+                "melid": solo["melid"],
+                "note_f1": round(result["note_f1"], 4),
+                "note_precision": round(result["note_precision"], 4),
+                "note_recall": round(result["note_recall"], 4),
+                "onset_f1": round(result["onset_f1"], 4),
+            }
+            if name in grids:
+                beats = score_beats(
+                    db, solo["melid"], grids[name]["beats"], solo["offset"], solo["rate"]
+                )
+                if beats:
+                    entry["beat_f1"] = round(beats["f_measure"], 4)
+            # One audio file can hold several annotated solos, so the row is
+            # keyed by the solo, not by the file.
+            key = name if len(found) == 1 else f"{name} [{solo['performer']}]"
+            out[key] = entry
     return out
 
 
@@ -280,7 +284,7 @@ def notation_scores(runs: dict, grids: dict) -> dict:
         aligned = align(their_pitches, [p for _, _, p in shifted])
         result = score_notation(theirs, shifted, aligned.pairs)
         out[name] = {
-            "placement": round(result["placement"], 4),
+            "rhythm": round(result["rhythm"], 4),
             "value": round(result["value"], 4),
             "n_matched": result["n_matched"],
             "bars": float(len(notation.bars)),
@@ -321,6 +325,17 @@ def render(card: dict) -> None:
     for name, e in sorted(skipped.items()):
         print(f"  (not scored) {Path(name).stem[:30]:<30s} {e['skipped']}")
 
+    if card.get("notation"):
+        print("\n== Notation: our score against the hand transcription, as notation ==")
+        header = f"  {'tune':<30s} {'bars':>5s} {'matched':>8s} {'rhythm':>8s} {'value':>7s}"
+        print(header)
+        print("  " + "-" * (len(header) - 2))
+        for name, entry in sorted(card["notation"].items()):
+            print(
+                f"  {Path(name).stem[:30]:<30s} {int(entry['bars']):5d} "
+                f"{int(entry['n_matched']):8d} {entry['rhythm']:8.3f} {entry['value']:7.3f}"
+            )
+
     print("\n== MuseScore: our audio against notated rhythm ==")
     header = f"  {'tune':<30s} {'pitch':>7s} {'chroma':>7s} {'onset':>7s} {'note':>7s}"
     print(header)
@@ -344,6 +359,10 @@ def flatten(card: dict) -> dict[str, float]:
     for name, entry in card["mscz"].items():
         for field, value in entry.items():
             flat[f"mscz/{Path(name).stem}/{field}"] = float(value)
+    for name, entry in card.get("notation", {}).items():
+        for field, value in entry.items():
+            if isinstance(value, (int, float)):
+                flat[f"notation/{Path(name).stem}/{field}"] = float(value)
     for field, value in card["summary"].items():
         flat[f"summary/{field}"] = float(value)
     return flat

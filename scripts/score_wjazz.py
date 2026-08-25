@@ -40,6 +40,7 @@ import sqlite3
 from pathlib import Path
 
 from swingscribe.wjazz import (
+    CONFIDENT_MATCH_RATE,
     MIN_MARGIN,
     MIN_MATCH_RATE,
     fit_affine,
@@ -47,8 +48,8 @@ from swingscribe.wjazz import (
 )
 
 
-def identify(db, name, est_on, est_p, region):
-    """Which WJazzD solo this audio holds, or None if it cannot be told."""
+def candidates(db, name, est_on, est_p, region):
+    """Every WJazzD solo with a matching title, fitted, best first."""
     import numpy as np
 
     wanted = title_tokens(Path(name).stem)
@@ -78,16 +79,41 @@ def identify(db, name, est_on, est_p, region):
                 "ref_p": ref_p,
             }
         )
-    if not scored:
-        return None, "no WJazzD solo with a matching title"
     scored.sort(key=lambda c: -c["match_rate"])
+    return scored
+
+
+def identify_all(db, name, est_on, est_p, region):
+    """Which WJazzD solos this audio holds. Possibly more than one.
+
+    A transcribed span can cover a whole tune, and a whole tune can have three
+    annotated solos in it. Each one is an independent test of the transcriber
+    against a different player on different material, so scoring only the best
+    throws away evidence — and the margin rule, which exists to reject a solo
+    we did NOT find, was rejecting the case where we found two.
+
+    Each accepted solo is scored over its own time span (see `score`), so one
+    player's notes are never counted against another's.
+    """
+    scored = candidates(db, name, est_on, est_p, region)
+    if not scored:
+        return [], "no WJazzD solo with a matching title"
+    confident = [c for c in scored if c["match_rate"] >= CONFIDENT_MATCH_RATE]
+    if confident:
+        return confident, ""
     top = scored[0]
     if top["match_rate"] < MIN_MATCH_RATE:
-        return None, f"best candidate only {top['match_rate']:.1%} - wrong take or wrong issue"
+        return [], f"best candidate only {top['match_rate']:.1%} - wrong take or wrong issue"
     runner_up = scored[1]["match_rate"] if len(scored) > 1 else 0.0
     if runner_up > 0 and top["match_rate"] < MIN_MARGIN * runner_up:
-        return None, f"{top['match_rate']:.1%} vs {runner_up:.1%} - cannot tell the soloists apart"
-    return top, ""
+        return [], f"{top['match_rate']:.1%} vs {runner_up:.1%} - cannot tell the soloists apart"
+    return [top], ""
+
+
+def identify(db, name, est_on, est_p, region):
+    """The single best solo, or None. Kept for callers wanting one answer."""
+    found, why = identify_all(db, name, est_on, est_p, region)
+    return (found[0] if found else None), why
 
 
 def score(solo, est_on, est_notes):
