@@ -195,6 +195,22 @@ Results and limits: `docs/m6-notate.md`.
   `NotatedNote.tuplet`, 57 of Confirmation's 129 bars did not add up.
 - **24 divisions per quarter** in MusicXML — the smallest divisible by 8 (a
   thirty-second) and 3 (a triplet).
+- **Never read more resolution out of a beat than its notes demonstrate.**
+  This one cost the most and was invisible until the notation was scored as
+  notation. A warped offbeat lands near 0.6, not 0.5, so on pure snap error a
+  swung eighth pair wins a TRIPLET grid — and once tuplets were restricted it
+  won a dotted-eighth instead. `choose_grid` now needs three onsets before a
+  tuplet is allowed, offers an eighth-note grid at all, and takes the
+  coarsest grid within `grid_slack` of the best. Rhythm 0.54 → 0.73.
+- **A grid that merges two onsets is too coarse, whatever its snap error.**
+  Two notes on one grid position are one note in a single-line score. Without
+  this, coarsening bought notated rhythm by silently deleting 4.8% of the
+  notes.
+- **`grid_slack` must NOT be tuned on the notation score.** That score rises
+  monotonically to "write everything as eighth notes", which three bebop
+  solos reward and real sixteenth-note material would not. It is set by
+  quantize's own 20 ms round-trip acceptance instead — the measure of what
+  coarsening costs the performance rather than what it buys the page.
 
 ## Measuring: two benchmarks, and they answer different questions
 
