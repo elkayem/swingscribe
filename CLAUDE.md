@@ -71,9 +71,24 @@ of these has broken a tool at least once:
   `ingest.find_ffmpeg()` locates it there when `shutil.which` finds nothing,
   so the app itself doesn't need PATH fixed — but a shell running the tools
   by hand (this file's other commands, ad hoc scripts) still does.
-- **Application Control blocks numba's DLLs** — see the dependency note above.
-- Demucs separation is ~6-13 min per track on CPU. Cache accordingly, and
-  prefer `swingscribe audition` (~1s on cached stems) while iterating.
+- **numba now works here again** (checked 2026-08-25: numba 0.67 / llvmlite
+  0.49 JIT-compile in 0.4s, and librosa 0.11's stft and resample both run).
+  The Application Control block that shaped several decisions has lifted, and
+  librosa has in fact been installed all along as a torchcrepe dependency.
+  This does NOT mean go and add librosa: the numba-free replacements
+  (hand-rolled spectral flux, torchaudio resampling, the weighted_argmax
+  decoder) are measured and working, and `transcribe._import_torchcrepe`'s
+  resampy stub is already a no-op when the real thing imports. It means a new
+  dependency that needs numba is no longer disqualified on sight — verify it
+  on the machine rather than assuming either way.
+- Demucs separation on CPU: **`htdemucs` ~2.8 min** per 10-minute track,
+  `htdemucs_6s` ~2.7, **`htdemucs_ft` ~11** — the last is a bag of FOUR models
+  and that is the whole 4x. It buys nothing measurable (mean note F1 0.759 vs
+  0.752 over the 9 benchmark solos that used it), so `htdemucs` is the
+  default. `jobs>0` does not help; torch already uses every core.
+  `separate.run` reuses a complete set of stems already on disk, so a config
+  change upstream no longer costs a re-separation. Prefer
+  `swingscribe audition` (~1s on cached stems) while iterating.
 
 ## Rules
 
@@ -125,6 +140,13 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   beats conceptually, but chained keys mean anything above transcribe
   invalidates it — so moving a downbeat would re-run CREPE. Don't "tidy" the
   stage order (docs/meter-plan.md).
+- **`beats` runs BEFORE `separate`, and tracks the MIX, not the drum stem.**
+  The plan says drum stem; measured over 11 WJazzD solos the mix wins 0.929
+  to 0.816 beat F1, because an isolated kit at 275 bpm is a two-feel and the
+  tracker halves the pulse. It is also the difference between a Beats button
+  that costs ~5 seconds and one that costs a separation (~11 min). Ordering
+  is what keeps a change of separation model from throwing away the grid and
+  the downbeat anchor with it (docs/benchmark-deficiencies.md R7).
 - **Per-track GUI settings live beside the audio** (`<track>.swingscribe.json`),
   never in the cache dir. The cache is derived data that must stay safely
   deletable; a span and a downbeat are human judgements. Only the disposable
@@ -141,6 +163,72 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
 - `gui.*` config is UI state and must never reach a cache key. `stage_config()`
   enforces this via `STAGE_SECTIONS`; changing a port must not throw away a
   separation.
+- **Export builds its score through `swingscribe/notation.py`, not its own
+  Document.** The eval harness needs exactly the same "notes + a beat grid ->
+  a Notation" assembly, and a second copy of it is the shape of duplication
+  that has already cost this harness twice. The GUI cannot use `pipeline.run`
+  for it: the notes on screen carry the listener's ERASURES, which the pipeline
+  knows nothing about and must not. Everything below transcribe is arithmetic,
+  so export is a plain request, not a job.
+- **`notation_for_span` trims the beat grid to the span first, so bar 1 is the
+  span's first bar** — the way a solo transcription is numbered, and the way
+  the files in `benchmark/` already are. It deliberately does not call
+  `stages/meter.py`: over a span the user selected by ear, with a downbeat they
+  placed by hand, meter derivation has nothing left to decide. The score lands
+  beside the audio like `ab`/`audition`/`click`, never in the cache, with the
+  span in the filename so a second chorus does not overwrite the first.
+- **`ensemble` and `transposition` are per-track sidecar fields with menus
+  built from `config.ENSEMBLES`/`TRANSPOSITIONS`.** Neither is inferable from
+  the signal — one says who is playing, the other which horn — so both can only
+  come from the listener. Build the menus from those constants, never from a
+  hand-copied list, or the UI drifts from what the validator accepts.
+- **An unmatched erasure is not automatically a problem.** `erasures.resolve`
+  splits them: `moved` (a note still sounds there, at another pitch — worth a
+  look) against the rest, which simply vanished because the transcriber no
+  longer emits them. Reporting both as "no longer matches", next to a Discard
+  button, put a warning colour on good news — 26 of Orbits' 33 hand-erased
+  left-hand notes stopped matching because corroboration had already dropped
+  exactly those (M7b).
+
+## M7b — the piano path (current)
+
+The plan routes piano through a polyphonic model, and the measurement says why
+in a way the plan did not anticipate. `docs/m7b-piano.md` has it all; the two
+things not to re-derive:
+
+- **Piano's problem is not polyphony, it is the left hand.** ~78% of our pitch
+  errors on the two piano solos with hand transcriptions are notes a fifth or
+  more BELOW the melody, and a quarter are exact octaves; on horns that is
+  6-15% and 0-2%. Chord tones are only 10% of the Peterson's notes, so a
+  perfect monophonic transcriber still caps at note F1 0.946 there — and we
+  are nowhere near that cap, so polyphony is not yet what is costing us.
+- **The model chosen is `piano_transcription_inference`, not the plan's
+  `transkun`** — 10 dependencies against 25, and its `torchlibrosa` is
+  numba-free. Deviation recorded in docs/m7b-piano.md.
+- Using the model as the PRIMARY line: Giant Steps 0.705 -> 0.879, but the
+  Peterson does **not** improve (0.648 -> 0.627). It detects the notes; we
+  pick the wrong ones. That is **melodic-line selection** (open-issue #8),
+  still open, and it is why the model is not the primary line today.
+- **What ships instead is the model as a SECOND OPINION**
+  (`corroborate.py`). `snap_octaves` moves a note to the oracle's octave when
+  they agree on pitch class (raises recall, fixes D4); `corroborate` drops
+  what the oracle will not vouch for (raises precision). Every piano solo
+  improved on both benchmarks and both halves of F1 — Orbits 0.828 -> 0.895,
+  Gingerbread Boy 0.641 -> 0.715, Oleo 0.674 -> 0.710, Giant Steps 0.705 ->
+  0.765, Lover 0.648 -> 0.698. Mean WJazzD note F1 0.766 -> 0.782.
+- **NEVER route a horn to the piano oracle.** A piano model asked about a
+  saxophone vouches for nothing, and rejection then deletes the whole line.
+  `ensemble` lives per track in the sidecar for this reason, and Dolores stays
+  horn-led even though a third of its span is Hancock's piano.
+- **A note we emit that is not in the hand transcription is not automatically
+  an error.** The hand transcriptions notate the RIGHT HAND ONLY. Corroboration
+  is what separates "we invented it" from "it happened, nobody asked for it" —
+  on Orbits the listener's erasures are 0% corroborated (CREPE was tracking the
+  bass through stem bleed), on the Peterson they are 90% (his left hand).
+- `mscz.Score` now has two views. `melody` (top note per chord) is what every
+  measure through M6 uses and what the time-free aligner needs; `notes` is
+  everything. Scoring polyphony against `melody` would report a polyphonic
+  transcriber as no better than the monophonic one it replaced.
 
 ## Current milestone
 
@@ -217,12 +305,14 @@ Results and limits: `docs/m6-notate.md`.
 Confusing them cost months. `docs/benchmark-deficiencies.md` is the running
 list of what is actually wrong; run everything with one command:
 
-    uv run python scripts/run_eval.py --db ../wjazz/wjazzd.db
+    uv run python scripts/run_eval.py --db wjazz/wjazzd.db
 
 - **WJazzD (`score_wjazz.py`) is audio against audio** — a human's per-note
   onsets in seconds for the same recording. Asks "did we hear what was
   played?" and is the right measure of `transcribe`. Currently **mean note F1
-  0.79, mean beat F1 0.97** over four solos.
+  0.782 and mean beat F1 0.929, both over the same 11 solos**. Quote the `n`
+  with the mean: beat F1 was once reported as 0.97 because it was silently a
+  mean over 4 (R8). `run_eval.py` now pins and prints each mean's own count.
 - **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
   this notate the way a human notated it?" It charges the gap between
   performed timing and notated rhythm to the transcriber, so it reads lower

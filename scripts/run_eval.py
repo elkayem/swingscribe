@@ -1,7 +1,7 @@
 """One command, one scorecard: everything the pipeline is measured by.
 
-    uv run python scripts/run_eval.py --db ../wjazz/wjazzd.db
-    uv run python scripts/run_eval.py --db ../wjazz/wjazzd.db --pin
+    uv run python scripts/run_eval.py --db wjazz/wjazzd.db
+    uv run python scripts/run_eval.py --db wjazz/wjazzd.db --pin
 
 Plan section 7 asks M6 for an eval harness that "prints a scorecard", with
 pinned baselines so a change that moves a number has to say so. This is it.
@@ -65,8 +65,19 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
     for sidecar_path in sorted(BENCH.glob("*.swingscribe.json")):
         sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
         name = sidecar["file"]
-        if name in runs or not (BENCH / name).is_file():
+        if not (BENCH / name).is_file():
             continue
+        # Re-transcribe when the routing changed. The cache is keyed by decode
+        # settings in its filename, but `ensemble` arrived later and lives per
+        # track — a stale entry here would silently report the old routing's
+        # numbers under the new one.
+        cached_run = runs.get(name)
+        wanted = sidecar.get("ensemble") or Config().transcribe.ensemble
+        if cached_run is not None:
+            if cached_run.get("ensemble", Config().transcribe.ensemble) == wanted:
+                continue
+            log(f"  {name}: ensemble {wanted!r} differs from cache — re-transcribing")
+            runs.pop(name)
         base = Config()
         config = base.model_copy(
             update={"separate": base.separate.model_copy(update={"model": sidecar["model"]})}
@@ -78,14 +89,21 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
             / f"{sidecar['stem']}.wav"
         )
         if not stem.is_file():
-            log(f"  {name}: no {sidecar['stem']!r} stem for {sidecar['model']} â€” skipped")
+            log(f"  {name}: no {sidecar['stem']!r} stem for {sidecar['model']} — skipped")
             continue
+        # `ensemble` is a per-track human judgement about the recording, so it
+        # lives in the sidecar beside the audio like the span does. It routes
+        # the piano oracle (M7b): a span with a horn anywhere in it must stay
+        # horn-led, because a piano model asked about a saxophone vouches for
+        # nothing and rejection would delete the line.
+        ensemble = sidecar.get("ensemble") or base.transcribe.ensemble
         settings = base.transcribe.model_copy(
             update={
                 "stem": sidecar["stem"],
                 "region": (low, high),
                 "pitch_step_cost": step_cost,
                 "onset_dip_db": dip_db,
+                "ensemble": ensemble,
             }
         )
         started = time.time()
@@ -94,6 +112,7 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
         runs[name] = {
             "model": sidecar["model"],
             "stem": sidecar["stem"],
+            "ensemble": ensemble,
             "region": [low, high],
             "voiced_fraction": diagnostics.voiced_fraction,
             "notes": [
@@ -108,6 +127,41 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
         }
         cache.write_text(json.dumps(runs), encoding="utf-8")
     return runs
+
+
+GRIDS_CACHE = Path(".benchmark-grids.json")
+
+
+def beat_grids(cache: Path = GRIDS_CACHE, log=print) -> dict:
+    """A beat grid for every sidecar'd track in benchmark/, reusing the cache.
+
+    This used to be an external file passed with --grids, and the file went
+    stale: it held 7 of the 12 tracks, so `summary/wjazz_beat_f1` was a mean
+    over 4 solos while the note score next to it was a mean over 11. A
+    benchmark that silently scores a subset is the same class of mistake as a
+    fit that silently manufactures agreement, so the harness computes its own
+    now -- affordable only because the grid no longer chains from a
+    separation (stages/beats.py) and costs seconds.
+    """
+    from swingscribe.config import Config
+    from swingscribe.gui import library
+    from swingscribe.stages import beats
+
+    grids = json.loads(cache.read_text(encoding="utf-8")) if cache.is_file() else {}
+    for sidecar_path in sorted(BENCH.glob("*.swingscribe.json")):
+        name = json.loads(sidecar_path.read_text(encoding="utf-8"))["file"]
+        if name in grids or not (BENCH / name).is_file():
+            continue
+        config = Config()
+        document = library.ingested_document(BENCH / name, config)
+        started = time.time()
+        # No stems on the document: the mix is the source, and handing this
+        # stage a drum stem would measure a grid the pipeline does not build.
+        grid = beats.run(document, config).beat_grid
+        log(f"  {name}: {len(grid.beats)} beats in {time.time() - started:.0f}s")
+        grids[name] = {"beats": [round(float(b), 4) for b in grid.beats], "source": grid.source}
+        cache.write_text(json.dumps(grids), encoding="utf-8")
+    return grids
 
 
 def wjazz_scores(db_path: Path, runs: dict, grids: dict) -> dict:
@@ -249,7 +303,7 @@ def notation_scores(runs: dict, grids: dict) -> dict:
             ]
         )
         score = mscz.parse(BENCH / by_audio[name])
-        theirs = [(n.position, n.duration, n.pitch) for n in score.notes]
+        theirs = [(n.position, n.duration, n.pitch) for n in score.melody]
         if not ours or not theirs:
             continue
         their_pitches = [p for _, _, p in theirs]
@@ -298,8 +352,15 @@ def render(card: dict) -> None:
                 f"{e['tempo'] or 0:5.0f}  {e['note_f1']:6.3f} {e['note_precision']:6.3f} "
                 f"{e['note_recall']:6.3f} {beat:>6s}"
             )
-        print(f"\n  mean note F1 {card['summary']['wjazz_note_f1']:.3f}   ", end="")
-        print(f"mean beat F1 {card['summary']['wjazz_beat_f1']:.3f}   over {len(wjazz)} solos")
+        # Each mean states its own n. They are not always the same n -- a solo
+        # can be note-scored with no beat grid -- and printing one count for
+        # both is how the two came to be read as the same population.
+        note_n = int(card["summary"]["wjazz_note_n"])
+        beat_n = int(card["summary"].get("wjazz_beat_n", 0))
+        note_f1 = card["summary"]["wjazz_note_f1"]
+        beat_f1 = card["summary"]["wjazz_beat_f1"]
+        print(f"\n  mean note F1 {note_f1:.3f} over {note_n} solos", end="")
+        print(f"   mean beat F1 {beat_f1:.3f} over {beat_n} solos")
     for name, e in sorted(skipped.items()):
         print(f"  (not scored) {Path(name).stem[:30]:<30s} {e['skipped']}")
 
@@ -378,7 +439,9 @@ def compare(card: dict) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Score everything and print one scorecard.")
     parser.add_argument("--db", type=Path, default=None, help="wjazzd.db; skips WJazzD if absent")
-    parser.add_argument("--grids", type=Path, default=None, help="cached beat grids, optional")
+    parser.add_argument(
+        "--grids", type=Path, default=GRIDS_CACHE, help=f"beat-grid cache (default {GRIDS_CACHE})"
+    )
     parser.add_argument("--step-cost", type=float, default=0.2)
     parser.add_argument("--dip-db", type=float, default=0.0)
     parser.add_argument("--pin", action="store_true", help="rewrite the baselines from this run")
@@ -388,7 +451,8 @@ def main() -> None:
     cache = notes_cache(args.step_cost, args.dip_db)
     print(f"== Transcribing (step cost {args.step_cost}, dip {args.dip_db} dB), cache {cache} ==")
     runs = transcribe_all(cache, args.step_cost, args.dip_db)
-    grids = json.loads(args.grids.read_text(encoding="utf-8")) if args.grids else {}
+    print(f"== Beat grids, cache {args.grids} ==")
+    grids = beat_grids(args.grids)
 
     card = {
         "settings": {"step_cost": args.step_cost, "dip_db": args.dip_db},
@@ -400,13 +464,21 @@ def main() -> None:
     scored = [e for e in card["wjazz"].values() if "skipped" not in e]
     if scored:
         card["summary"]["wjazz_note_f1"] = round(statistics.fmean(e["note_f1"] for e in scored), 4)
+        card["summary"]["wjazz_note_n"] = float(len(scored))
         beats = [e["beat_f1"] for e in scored if "beat_f1" in e]
         if beats:
             card["summary"]["wjazz_beat_f1"] = round(statistics.fmean(beats), 4)
+            # Pinned so the denominator can never change silently. It already
+            # did once: beat F1 was a mean over the 4 solos that happened to
+            # have a cached grid, printed beside a note F1 over 11, and the
+            # gap read as agreement between two numbers that were measuring
+            # different populations.
+            card["summary"]["wjazz_beat_n"] = float(len(beats))
     if card["mscz"]:
         card["summary"]["mscz_note_f1"] = round(
             statistics.fmean(e["note_f1"] for e in card["mscz"].values()), 4
         )
+        card["summary"]["mscz_note_n"] = float(len(card["mscz"]))
 
     render(card)
     if args.json:

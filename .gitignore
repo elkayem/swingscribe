@@ -51,10 +51,16 @@ benchmark/
 # Cached benchmark transcriptions (scripts/score_benchmark.py). Note lists
 # derived from commercial recordings — only aggregate metrics ship (plan §12).
 .benchmark-notes*.json
+.benchmark-grids.json
 
-# Weimar Jazz Database and anything derived from it (scripts/wjazz_swing.py).
-# ODbL share-alike, and its contents are transcriptions of commercial
-# recordings — only aggregate metrics ship (plan §12).
+# Weimar Jazz Database and anything derived from it (scripts/wjazz_swing.py,
+# docs/wjazzd.md). ODbL share-alike, and its contents are transcriptions of
+# commercial recordings — only aggregate metrics ship (plan §12). The whole
+# directory is ignored, not just the db file, so a shortlist or export
+# written alongside it can't slip into git either.
+wjazz/
 wjazzd.db
 esac.db
 *.wjazz.json
+.benchmark-piano-notes.json
+.benchmark-notes-oracle.json

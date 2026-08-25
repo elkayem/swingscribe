@@ -69,6 +69,14 @@ TUNES = {
         "Giant Steps",
         "piano",
     ),
+    # The first benchmark solo that is not a single line: 10% of its notes are
+    # chord tones, mostly thirds under the melody (M7b, docs/m7b-piano.md).
+    "lover_come_back": (
+        "04 Lover Come Back To Me.m4a",
+        "Oscar_Peterson_Solo_on_Lover_Come_Back_To_Me.mscz",
+        "Lover Come Back To Me",
+        "piano",
+    ),
 }
 
 
@@ -173,7 +181,7 @@ def score_tune(key: str, run: dict) -> dict:
     windows = []
     for start_bar in range(1, score.bars + 1, WINDOW_BARS):
         index = [
-            i for i, n in enumerate(score.notes) if start_bar <= n.bar < start_bar + WINDOW_BARS
+            i for i, n in enumerate(score.melody) if start_bar <= n.bar < start_bar + WINDOW_BARS
         ]
         if len(index) < 4:  # too few notes for a window to mean anything
             continue

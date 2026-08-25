@@ -1,6 +1,6 @@
 """Measure swing timing against the Weimar Jazz Database (plan §6 layer 2).
 
-    uv run python scripts/wjazz_swing.py --db path/to/wjazzd.db
+    uv run python scripts/wjazz_swing.py --db wjazz/wjazzd.db
 
 WJazzD annotates 456 jazz solos with per-note onsets AND human-tapped beat
 positions, both in seconds. That makes it possible to run our own swing

@@ -1,6 +1,6 @@
 """Pick a spanning shortlist of WJazzD solos to match against a CD collection.
 
-    uv run python scripts/wjazz_shortlist.py --db path/to/wjazzd.db [-n 25]
+    uv run python scripts/wjazz_shortlist.py --db wjazz/wjazzd.db [-n 25]
 
 Plan §6 layer 2 wants "~20 solos spanning eras, tempos, and instruments,
 including at least 4 piano solos". Matching all 456 by hand is not a

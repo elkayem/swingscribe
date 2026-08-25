@@ -8,7 +8,7 @@ move; anything that cannot is an opinion and belongs somewhere else.
 Reproduce all of it with one command:
 
 ```bash
-uv run python scripts/run_eval.py --db ../wjazz/wjazzd.db
+uv run python scripts/run_eval.py --db wjazz/wjazzd.db
 ```
 
 ## Two benchmarks, measuring different things
@@ -38,18 +38,22 @@ solos and each is scored separately:
 
 | tune | soloist | tempo | note F1 | note recall | beat F1 |
 |---|---|---|---|---|---|
-| Nothing Personal | Pat Metheny, guitar | 242 | **0.873** | 0.882 | — |
-| Yesterdays | J.J. Johnson, trombone | 125 | **0.835** | 0.849 | 0.962 |
-| Walkin' | Miles Davis, trumpet | 128 | **0.829** | 0.849 | 0.968 |
-| Orbits | Herbie Hancock, piano | 265 | **0.828** | 0.812 | 0.970 |
-| Nothing Personal | Michael Brecker, tenor | 244 | **0.817** | 0.808 | — |
-| Dolores | Miles Davis, trumpet | 275 | **0.755** | 0.765 | — |
-| Don't Blame Me | Charlie Parker, alto | 64 | **0.754** | 0.777 | — |
-| Dolores | Herbie Hancock, piano | 282 | **0.749** | 0.731 | — |
-| Dolores | Wayne Shorter, tenor | 277 | **0.676** | 0.660 | — |
-| Oleo | Red Garland, piano | 265 | **0.674** | 0.590 | 0.985 |
-| Gingerbread Boy | Herbie Hancock, piano | 286 | **0.641** | 0.610 | — |
-| | | **mean** | **0.766** | | **0.972** |
+| Orbits | Herbie Hancock, piano ★ | 265 | **0.895** | 0.832 | 0.970 |
+| Nothing Personal | Pat Metheny, guitar | 242 | **0.873** | 0.882 | 0.832 |
+| Yesterdays | J.J. Johnson, trombone | 125 | **0.835** | 0.849 | 0.977 |
+| Walkin' | Miles Davis, trumpet | 128 | **0.829** | 0.849 | 0.934 |
+| Nothing Personal | Michael Brecker, tenor | 244 | **0.817** | 0.808 | 0.728 |
+| Dolores | Miles Davis, trumpet | 275 | **0.755** | 0.765 | 0.987 |
+| Don't Blame Me | Charlie Parker, alto | 64 | **0.754** | 0.777 | 0.948 |
+| Dolores | Herbie Hancock, piano | 282 | **0.749** | 0.731 | 0.905 |
+| Gingerbread Boy | Herbie Hancock, piano ★ | 286 | **0.715** | 0.623 | 0.976 |
+| Oleo | Red Garland, piano ★ | 265 | **0.710** | 0.600 | 0.985 |
+| Dolores | Wayne Shorter, tenor | 277 | **0.676** | 0.660 | 0.976 |
+| | | **mean** | **0.782** | | **0.929** |
+
+★ routed to the piano oracle (`ensemble: trio` in the sidecar). Those three
+were 0.828, 0.641 and 0.674 before it — see R10. Dolores is deliberately not
+routed: its span holds a trumpet and a tenor as well as Hancock's piano.
 
 Eleven solos, seven instruments, 64 to 286 bpm, four of them by pianists.
 Four tracks are correctly *not* scored, because WJazzD's versions are by
@@ -62,17 +66,19 @@ human wrote them:
 
 | tune | bars | matched | rhythm | note value |
 |---|---|---|---|---|
-| Giant Steps | 67 | 241 | **0.785** | **0.693** |
-| Confirmation | 130 | 581 | **0.779** | **0.673** |
-| All The Things | 74 | 376 | **0.620** | **0.683** |
+| Giant Steps ★ | 67 | 250 | **0.777** | **0.692** |
+| Confirmation | 134 | 581 | **0.744** | **0.668** |
+| Lover Come Back ★ | 64 | 314 | **0.671** | **0.627** |
+| All The Things | 74 | 380 | **0.618** | **0.682** |
 
 MuseScore — audio against notated rhythm, the pessimistic measure:
 
 | tune | pitch F1 | onset F1 | note F1 |
 |---|---|---|---|
-| Confirmation | 0.762 | 0.596 | 0.514 |
 | All The Things | 0.892 | 0.586 | 0.516 |
-| Giant Steps | 0.702 | 0.611 | 0.512 |
+| Giant Steps ★ | 0.761 | 0.633 | 0.554 |
+| Confirmation | 0.762 | 0.596 | 0.514 |
+| Lover Come Back ★ | 0.710 | 0.428 | 0.266 |
 
 The gap between the first and last tables is the point. Against audio the
 transcriber is at note F1 0.76; against notation it reads 0.51. Some of that
@@ -183,6 +189,138 @@ harness all exist — but the numbering should be reconciled before it is used
 to decide what comes next.
 
 ## Resolved
+
+### R10 — Piano precision was being charged for notes that are not errors
+
+The hand transcriptions notate the **right hand only**. So one of our notes
+being absent from the score means either "we invented it" or "it happened and
+nobody asked for it", and D1/D4 were reading both as the first.
+
+Telling them apart needs no ground truth, only a second detector. CREPE and a
+polyphonic piano model are independent in features, architecture and failure
+mode. Validated against the listener's own erasures, which split cleanly:
+
+| solo | erased notes the piano model also heard | median pitch vs kept |
+|---|---|---|
+| Orbits | **0%** | −17 semitones |
+| Oleo | 10% | −0.5 |
+| Giant Steps | 65% | −10 |
+| Lover Come Back | **90%** | −4.5 |
+
+Orbits is the surprise and the clearest case: the deleted notes sit seventeen
+semitones below the melody and the piano model reports **none** of them,
+because CREPE is tracking the **double bass** through the `other` stem's
+bleed and a piano model correctly declines to call that a piano. The listener
+deleted them by ear; an independent detector agrees, with no score involved.
+
+Lover Come Back is the opposite and equally clear: 90% corroborated. Those are
+Peterson's left hand — real, and out of scope.
+
+Fixed by `src/swingscribe/corroborate.py`, two operations kept separate
+because they do different things: `snap_octaves` moves a note to the oracle's
+octave where the two agree on pitch class (raises RECALL, and is the direct
+fix for D4), then `corroborate` drops what the oracle will not vouch for
+(raises PRECISION). Every piano solo improved on **both** benchmarks and on
+**both** halves of F1:
+
+| solo | | before | after |
+|---|---|---|---|
+| Orbits | WJazzD note F1 | 0.828 | **0.895** |
+| Gingerbread Boy | WJazzD note F1 | 0.641 | **0.715** |
+| Oleo | WJazzD note F1 | 0.674 | **0.710** |
+| Giant Steps | notated melody F1 | 0.705 | **0.765** |
+| Lover Come Back | notated melody F1 | 0.648 | **0.698** |
+
+Mean WJazzD note F1 over all 11 solos: **0.766 -> 0.782**. Gingerbread Boy was
+the worst tune in the benchmark and is no longer in the bottom two.
+
+**The one way this goes badly wrong** is routing a horn to it: a piano model
+asked about a saxophone vouches for nothing, and rejection would then delete
+the whole line. `ensemble` therefore lives per track in the sidecar, and
+Dolores stays horn-led even though a third of its span is Hancock's piano.
+
+### R7 — The beat grid was tracked from the drum stem, and it cost both ways
+
+Symptom the user reported: the GUI's Beats button takes minutes. It did,
+because a beats job ran a full demucs separation first, purely to get a drum
+stem to track — the plan's reasoning being that the ride cymbal is the
+cleanest pulse in jazz.
+
+Measured, over all 11 WJazzD-matched solos, tracking the **full mix** instead:
+
+| tune | soloist | tempo | mix | drum stem |
+|---|---|---|---|---|
+| Gingerbread Boy | Herbie Hancock | 286 | **0.976** | 0.602 |
+| Dolores | Wayne Shorter | 277 | **0.976** | 0.653 |
+| Dolores | Miles Davis | 275 | **0.987** | 0.676 |
+| Dolores | Herbie Hancock | 282 | **0.905** | 0.644 |
+| Nothing Personal | Pat Metheny | 242 | **0.832** | 0.773 |
+| Yesterdays | J.J. Johnson | 125 | **0.977** | 0.962 |
+| Orbits | Herbie Hancock | 265 | 0.970 | 0.970 |
+| Oleo | Red Garland | 265 | 0.985 | 0.985 |
+| Don't Blame Me | Charlie Parker | 64 | 0.948 | 0.948 |
+| Walkin' | Miles Davis | 128 | 0.934 | **0.968** |
+| Nothing Personal | Michael Brecker | 244 | 0.728 | **0.795** |
+| | | **mean** | **0.929** | 0.816 |
+
+The mechanism is visible in the beat counts: on Dolores the stem grid has 938
+beats where the mix has 1690, and on Gingerbread Boy 955 against 2085. An
+isolated drum kit at 275 bpm is a two-feel with nothing to contradict it, so
+the tracker locks to half the pulse — and half-rate scores ≈0.67 by
+construction, which is exactly what those rows show. The mix carries the
+comping and the melody, which fix the rate.
+
+So the drum stem was buying nothing on 3 tunes, losing badly on 4, winning on
+2 (by 0.03 and 0.07), and charging a separation for all of them.
+
+Fixed: `use_drum_stem` defaults off, and **`beats` now runs before `separate`
+in the pipeline**. Ordering is the invalidation rule under chained keys, so
+this is also what stops a change of separation model from throwing away a
+beat grid and the downbeat anchor derived from it. The Beats button went from
+~11 minutes to ~5 seconds. The stem path and its splice/fallback machinery
+are kept behind the flag, not deleted — the reasoning that chose it is sound
+for a tune the mix mistracks, and Walkin' is one.
+
+Two things this cost, both reported rather than buried:
+
+- **Confirmation's notated rhythm fell 0.779 → 0.744**, and its bar count
+  went 130 → 134 against the human's 129. Confirmation is open-issue #9's
+  motivating case: a 20-second drumless intro that the stem path handled by
+  splicing. The mix grid needs no splice there and is slightly less accurate
+  anyway. One tune, one number, against +0.11 mean beat F1 and the workflow.
+- **Walkin' beat F1 fell 0.968 → 0.934**, the only real loss in the table.
+
+### R8 — Beat F1 was a mean over 4 solos printed beside a note F1 over 11
+
+`summary/wjazz_beat_f1` read 0.9715 and was quoted as the beat accuracy of
+the benchmark. It was the mean over the four solos that happened to have a
+grid in a hand-built `--grids` file, which had gone stale at 7 of 12 tracks
+while the note score moved on to 11 solos. Nothing was wrong with the
+number; it was answering a question about a different population than the one
+next to it.
+
+This is the third measurement bug in this harness and the same shape as the
+first two: a *measurement* artefact that reads as a statement about the
+transcriber. Fixed twice over — `run_eval.py` computes its own grids for
+every sidecar'd track (affordable now that a grid costs seconds, R7), and
+every mean now pins and prints its own `n`, so a denominator cannot change
+silently again.
+
+The honest like-for-like: on the four solos that were being scored, the new
+mix grid is a wash (−0.035, +0.015, 0.000, 0.000). All of R7's gain is on the
+seven solos that were never being scored at all.
+
+### R9 — `separate` re-ran demucs over stems already on disk
+
+Stems are written to a directory named for the audio digest and model, so
+they are content-addressed and always correct for that pair. The stage never
+looked: any config change upstream invalidated its cache entry, and the
+honest answer to "you nudged a beats setting" was another eleven minutes of
+demucs producing bytes that were already there.
+
+`separate.run` now checks for a complete set against the model's own source
+list before separating — all-or-nothing, because a directory holding three of
+four wavs is a separation that died partway through.
 
 ### R1 — The .mscz benchmark's window offset fit slipped whole eighth notes
 

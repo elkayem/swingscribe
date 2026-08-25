@@ -9,7 +9,7 @@ run over them with our transcriber taken completely out of the loop.
 before the audio-aligned regression set the plan schedules for M6.
 
 ```bash
-uv run python scripts/wjazz_swing.py --db path/to/wjazzd.db
+uv run python scripts/wjazz_swing.py --db wjazz/wjazzd.db
 ```
 
 The database is ODbL (share-alike on the database and substantial
@@ -17,7 +17,56 @@ derivatives) and its contents are transcriptions of commercial recordings.
 Nothing from it is committed; this file holds aggregate numbers only, which is
 all plan §12 allows anyway. Get it from
 [jazzomat.hfm-weimar.de](https://jazzomat.hfm-weimar.de/download/download.html)
-and keep it outside the repo.
+(see [[wjazzd-location]] for the doubled-path trap in that download link) and
+put it at `wjazz/wjazzd.db` — that whole directory is gitignored (`.gitignore`
+matches `wjazz/` outright, so nothing written there can be committed by
+accident).
+
+## Browsing solos, or picking new ones for the benchmark
+
+`scripts/wjazz_shortlist.py` is the tool for "what's in here, and what should
+I add next" — it doesn't just print everything (456 solos is too many to scan)
+but a curated *spanning* set across instrument and tempo, which is what plan
+§6 actually asks for:
+
+```bash
+uv run python scripts/wjazz_shortlist.py --db wjazz/wjazzd.db -n 30
+```
+
+Each row gives performer, title, tempo, instrument, album, and (when WJazzD
+annotated it) the solo's start time in the track — enough to go find your copy
+of the recording and check whether it's the same take before adding it to
+`benchmark/`. Raising `-n` gives more rows without changing what's already
+picked; the round-robin fills in the next-best cell each time.
+
+For an unfiltered look at anything specific — a soloist, a tune title, an
+instrument you want more of — the two tables that matter are `solo_info`
+(performer, title, instrument, avgtempo, style, rhythmfeel — one row per solo)
+and `melody` (onset, pitch, duration, bar/beat/tatum position — one row per
+note, joined on `melid`). A one-off query from a Python shell:
+
+```python
+import sqlite3
+
+db = sqlite3.connect("wjazz/wjazzd.db")
+for row in db.execute(
+    "select melid, performer, title, avgtempo, rhythmfeel from solo_info "
+    "where instrument = 'p' order by avgtempo"
+):
+    print(row)
+```
+
+Or open the file directly in a SQLite browser (e.g. the free
+[DB Browser for SQLite](https://sqlitebrowser.org/)) if you'd rather click
+through tables than write queries — it's a plain, unencrypted `.db` file, no
+special tooling required.
+
+To look at one solo's actual note-level transcription (pitch, onset, duration,
+metrical position) next to your own — the way you'd sanity-check a match —
+filter `melody` by the `melid` you found in `solo_info`; `wjazz.py`'s
+`notated_positions()` is the same query the eval harness uses internally, if
+you want the exact bar/beat/tatum → quarter-note-position arithmetic rather
+than raw columns.
 
 442 of the 456 solos carry enough evidence to measure; 359 are labelled SWING.
 

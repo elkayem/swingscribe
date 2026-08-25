@@ -1,6 +1,6 @@
 """Score the pipeline against the Weimar Jazz Database's hand transcriptions.
 
-    uv run python scripts/score_wjazz.py --db path/to/wjazzd.db --notes cache.json
+    uv run python scripts/score_wjazz.py --db wjazz/wjazzd.db --notes cache.json
 
 This is the benchmark the `.mscz` one cannot be. WJazzD gives per-note onsets
 **in seconds**, so there is no notated score to place in time: no tempo map,
