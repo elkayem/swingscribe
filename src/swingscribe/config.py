@@ -194,7 +194,28 @@ class QuantizeConfig(BaseModel):
 
 
 class NotateConfig(BaseModel):
-    transposition: Literal["C", "Eb", "Bb"] = "C"
+    """Stage 6. What the page says, as opposed to what was played."""
+
+    # The part's key. Written pitch minus sounding pitch is a property of the
+    # instrument, not of the audio: nothing in the signal says which horn it
+    # was, so it is config and never inferred.
+    transposition: Literal["C", "Eb", "Bb", "Bb-tenor"] = "C"
+    # Which quantized voice to notate; empty means the only one there is.
+    stem: str = ""
+    title: str = ""
+
+    @property
+    def transpose(self) -> int:
+        """Semitones from sounding to written.
+
+        A Bb trumpet part is written a major second above concert; a Bb TENOR
+        part is written a major ninth above, an octave further, so that the
+        horn's range sits on a treble staff. They are the same key and
+        different transpositions, which is why "Bb" alone cannot say it — and
+        both benchmark tenor transcriptions came out +12 against our concert
+        pitch precisely because of this (docs/m3-benchmark.md).
+        """
+        return {"C": 0, "Eb": 9, "Bb": 2, "Bb-tenor": 14}[self.transposition]
 
 
 class ExportConfig(BaseModel):

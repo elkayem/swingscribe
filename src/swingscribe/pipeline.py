@@ -13,7 +13,16 @@ from swingscribe import progress
 from swingscribe.cache import StageCache, root_key, stage_key
 from swingscribe.config import Config
 from swingscribe.model import Document
-from swingscribe.stages import beats, ingest, meter, quantize, separate, swing, transcribe
+from swingscribe.stages import (
+    beats,
+    ingest,
+    meter,
+    notate,
+    quantize,
+    separate,
+    swing,
+    transcribe,
+)
 
 Stage = Callable[[Document, Config], Document]
 
@@ -33,6 +42,7 @@ STAGES: list[tuple[str, Stage]] = [
     # cheap, and anything above transcribe in the chain re-runs CREPE.
     ("swing", swing.run),
     ("quantize", quantize.run),
+    ("notate", notate.run),
 ]
 
 

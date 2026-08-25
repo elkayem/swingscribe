@@ -82,6 +82,57 @@ class QuantizedNote(BaseModel):
     timing_residual: float  # microtiming AFTER swing removal — the expressive layer
 
 
+class NotatedNote(BaseModel):
+    """One notated note or rest: where it sits, how long, and how it is spelled.
+
+    `pitch` stays SOUNDING (concert) throughout. Written pitch is a property of
+    the part, not of the note, and baking the transposition in here would make
+    every downstream comparison against concert-pitch ground truth wrong.
+    """
+
+    beat: float  # quarter notes from the start of its bar
+    duration: float  # quarter notes
+    pitch: int = 0  # sounding MIDI; meaningless when is_rest
+    step: str = "C"  # C..B
+    alter: int = 0  # -1 flat, +1 sharp, 0 natural
+    octave: int = 4
+    is_rest: bool = False
+    # A note too long, or too awkwardly placed, to write as one symbol becomes
+    # several tied together. Both flags are set on the middle of a three-note tie.
+    tie_start: bool = False
+    tie_stop: bool = False
+    # (actual, normal) for a tuplet — (3, 2) for the ordinary triplet. Quantize
+    # chooses a ternary grid per beat where the notes fit one better (plan §5),
+    # and a third of a beat is not a note value: it is an eighth note that has
+    # been told three of them fill a beat. Without this the duration is simply
+    # unwritable and the bar stops adding up.
+    tuplet: tuple[int, int] | None = None
+
+
+class NotatedBar(BaseModel):
+    number: int
+    time_signature: tuple[int, int]
+    notes: list[NotatedNote] = []
+
+
+class Notation(BaseModel):
+    """A notatable score: bars of spelled notes, plus what the part needs.
+
+    Deliberately not a music21 Score. music21 is not a dependency of this
+    project and adding one is not a decision this stage gets to make on its
+    own (CLAUDE.md); everything stage 6 needs — key, spelling, note values,
+    ties, rests — is arithmetic, and keeping it arithmetic means the whole
+    stage runs in CI like every other one.
+    """
+
+    bars: list[NotatedBar] = []
+    key_fifths: int = 0  # -1 = one flat, as MuseScore's concertKey
+    swing: bool = False  # write "Swing" above the staff, eighths straight
+    # Written = sounding + this many semitones. Bb tenor is +14, Eb alto +9.
+    transpose: int = 0
+    title: str = ""
+
+
 class Document(BaseModel):
     audio_path: str
     sample_rate: int
@@ -95,3 +146,6 @@ class Document(BaseModel):
     notes: dict[str, list[NoteEvent]] = {}
     swing: list[SwingSpan] = []
     quantized: dict[str, list[QuantizedNote]] = {}
+    # Set by notate. Additive with a default, so every Document cached before
+    # M6 still deserializes and no separation or transcription is invalidated.
+    notation: Notation | None = None

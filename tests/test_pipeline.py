@@ -63,6 +63,7 @@ def test_registered_stages_are_current():
         "meter",
         "swing",
         "quantize",
+        "notate",
     ]
 
 
