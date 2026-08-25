@@ -97,3 +97,72 @@ def test_solo_shift_is_the_constant_tempo_error():
     deltas = [0.0, 0.1, 0.2, 0.3, 0.4]
     assert solo_shift(deltas) == statistics.median(deltas)
     assert solo_shift([]) == 0.0
+
+
+# ── scoring the notation itself ──────────────────────────────────────────
+
+
+def test_merge_ties_makes_one_note_of_a_tied_pair():
+    """A tie is one note wearing two noteheads. The reference side merges them
+    when parsing, so ours must too — otherwise every tie reads as an extra
+    note the reference does not have, and a correct score loses precision for
+    being correctly notated."""
+    from swingscribe.benchmark import merge_ties
+
+    # a whole note tied across a bar line, then a separate note
+    notes = [(0.0, 4.0, 60, False), (4.0, 2.0, 60, True), (6.0, 2.0, 62, False)]
+    assert merge_ties(notes) == [(0.0, 6.0, 60), (6.0, 2.0, 62)]
+
+
+def test_merge_ties_does_not_join_a_repeated_note():
+    """Two of the same pitch in a row are two notes unless a tie says so."""
+    from swingscribe.benchmark import merge_ties
+
+    notes = [(0.0, 1.0, 60, False), (1.0, 1.0, 60, False)]
+    assert len(merge_ties(notes)) == 2
+
+
+def test_notation_scoring_is_blind_to_which_bar_is_bar_one():
+    """Our bar numbering starts wherever the span did, theirs at their bar 1.
+    That single constant is the one thing the comparison must forgive, and
+    everything else must survive it."""
+    from swingscribe.alignment import align
+    from swingscribe.benchmark import score_notation
+
+    reference = [(float(i), 1.0, 60 + i) for i in range(8)]
+    estimate = [(float(i) + 16.0, 1.0, 60 + i) for i in range(8)]  # 4 bars later
+    aligned = align([p for _, _, p in reference], [p for _, _, p in estimate])
+    result = score_notation(reference, estimate, aligned.pairs)
+    assert result["placement"] == 1.0
+    assert result["value"] == 1.0
+    assert result["offset"] == 16.0
+
+
+def test_a_wrong_note_value_is_right_in_placement_and_wrong_in_value():
+    """The two numbers are kept apart because they fail independently: a
+    quarter written where a dotted eighth belongs sits in the right place."""
+    from swingscribe.alignment import align
+    from swingscribe.benchmark import score_notation
+
+    reference = [(0.0, 0.75, 60), (1.0, 1.0, 62), (2.0, 1.0, 64)]
+    estimate = [(0.0, 1.0, 60), (1.0, 1.0, 62), (2.0, 1.0, 64)]
+    aligned = align([p for _, _, p in reference], [p for _, _, p in estimate])
+    result = score_notation(reference, estimate, aligned.pairs)
+    assert result["placement"] == 1.0
+    assert abs(result["value"] - 2 / 3) < 1e-9
+
+
+def test_a_note_written_on_the_wrong_beat_fails_placement():
+    from swingscribe.alignment import align
+    from swingscribe.benchmark import score_notation
+
+    reference = [(0.0, 1.0, 60), (1.0, 1.0, 62), (2.0, 1.0, 64), (3.0, 1.0, 65)]
+    estimate = [(0.0, 1.0, 60), (1.5, 1.0, 62), (2.0, 1.0, 64), (3.0, 1.0, 65)]
+    aligned = align([p for _, _, p in reference], [p for _, _, p in estimate])
+    assert score_notation(reference, estimate, aligned.pairs)["placement"] == 0.75
+
+
+def test_nothing_matched_scores_zero_rather_than_dividing_by_it():
+    from swingscribe.benchmark import score_notation
+
+    assert score_notation([(0.0, 1.0, 60)], [(0.0, 1.0, 72)], [(0, 0)])["placement"] == 0.0

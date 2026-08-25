@@ -79,3 +79,83 @@ def window_shift(deltas: list[float], fallback: float) -> float:
 def solo_shift(deltas: list[float]) -> float:
     """The whole solo's shift — the fallback, and the constant-tempo error."""
     return statistics.median(deltas) if deltas else 0.0
+
+
+# ── scoring the notation itself ──────────────────────────────────────────
+#
+# Everything above places a notated score in time so its ONSETS can be
+# scored. That leaves the notation unmeasured: note values, where a note sits
+# in its bar, whether a rhythm was written as a triplet or as two sixteenths.
+# A score could be full of unreadable rhythm and move none of those numbers.
+#
+# This compares the two as notation, which needs no tempo map at all — both
+# sides are already in quarter notes from their own bar one. The only unknown
+# is where our bar one is relative to theirs, and that is one constant.
+
+# How far apart two notated positions may be and still count as the same
+# place. A thirty-second note: anything smaller is not a distinction a reader
+# would draw, and anything larger would forgive a wrong note value.
+NOTATION_TOLERANCE = 0.125
+
+
+def merge_ties(notes: list) -> list[tuple[float, float, int]]:
+    """Notated notes → (position, duration, pitch), tied groups merged.
+
+    A tie is one note wearing two noteheads. The reference side merges them
+    when parsing (`mscz.parse`), so ours has to as well or every tie reads as
+    an extra note that the reference does not have.
+    """
+    merged: list[list] = []
+    for position, duration, pitch, tie_stop in notes:
+        if merged and tie_stop and merged[-1][2] == pitch:
+            merged[-1][1] += duration
+            continue
+        merged.append([position, duration, pitch])
+    return [(p, d, int(n)) for p, d, n in merged]
+
+
+def score_notation(
+    reference: list[tuple[float, float, int]],
+    estimate: list[tuple[float, float, int]],
+    pairs: list[tuple[int | None, int | None]],
+) -> dict[str, float]:
+    """How much of the notation we got right, given a pitch-level alignment.
+
+    `pairs` comes from `alignment.align` on the two pitch sequences, so which
+    note is which was decided without consulting rhythm at all — the same
+    separation the onset benchmark relies on, and for the same reason.
+
+    Two numbers, deliberately apart:
+
+    - **placement** — does the note sit in the same place in the bar? Measured
+      as the offset between our notated position and theirs, which is constant
+      when the rhythm is right and wanders when it is not. The median offset
+      absorbs the one legitimate unknown (which of our bars is their bar one);
+      everything else is error.
+    - **value** — is it the same note value? A quarter written where a dotted
+      eighth belongs is right in placement and wrong here.
+    """
+    matched = [
+        (ri, ei)
+        for ri, ei in pairs
+        if ri is not None and ei is not None and reference[ri][2] == estimate[ei][2]
+    ]
+    if not matched:
+        return {"placement": 0.0, "value": 0.0, "n_matched": 0.0, "offset": 0.0}
+
+    offsets = sorted(estimate[ei][0] - reference[ri][0] for ri, ei in matched)
+    offset = offsets[len(offsets) // 2]
+    placed = sum(
+        1
+        for ri, ei in matched
+        if abs((estimate[ei][0] - reference[ri][0]) - offset) <= NOTATION_TOLERANCE
+    )
+    valued = sum(
+        1 for ri, ei in matched if abs(estimate[ei][1] - reference[ri][1]) <= NOTATION_TOLERANCE
+    )
+    return {
+        "placement": placed / len(matched),
+        "value": valued / len(matched),
+        "n_matched": float(len(matched)),
+        "offset": offset,
+    }

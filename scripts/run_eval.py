@@ -174,6 +174,129 @@ def mscz_scores(runs: dict) -> dict:
     return out
 
 
+def notate_run(name: str, run: dict, grid: dict):
+    """Everything from cached notes to a Notation: swing, quantize, notate.
+
+    The stages below transcribe are all pure arithmetic, so this is a second
+    or two per tune and needs no audio -- only the notes and the beat grid.
+    """
+    import json as _json
+
+    from swingscribe.config import Config
+    from swingscribe.model import BeatGrid, Document, MeterSection, NoteEvent
+    from swingscribe.stages import notate, quantize, swing
+
+    low, high = run["region"]
+    beats = [b for b in grid["beats"] if low - 2 <= b <= high + 2]
+    if len(beats) < 8:
+        return None
+    sidecar_path = BENCH / f"{name}.swingscribe.json"
+    sidecar = {}
+    if sidecar_path.is_file():
+        sidecar = _json.loads(sidecar_path.read_text(encoding="utf-8"))
+    anchor = sidecar.get("anchor") or beats[0]
+
+    document = Document(
+        audio_path=str(BENCH / name),
+        sample_rate=44100,
+        beat_grid=BeatGrid(beats=beats, downbeats=[], beats_per_bar=4),
+        meter=[
+            MeterSection(
+                start=beats[0],
+                end=beats[-1],
+                pulses_per_bar=4,
+                time_signature=(4, 4),
+                anchor=anchor,
+                first_bar=1,
+            )
+        ],
+        notes={
+            run["stem"]: [
+                NoteEvent(
+                    onset=n["onset"],
+                    duration=n["duration"],
+                    pitch=n["pitch"],
+                    confidence=n["confidence"],
+                    source="crepe",
+                )
+                for n in run["notes"]
+            ]
+        },
+    )
+    base = Config()
+    config = base.model_copy(
+        update={
+            "swing": base.swing.model_copy(update={"stem": run["stem"]}),
+            "quantize": base.quantize.model_copy(update={"stem": run["stem"]}),
+            "notate": base.notate.model_copy(update={"stem": run["stem"]}),
+        }
+    )
+    for stage in (swing.run, quantize.run, notate.run):
+        document = stage(document, config)
+    return document.notation
+
+
+def notation_scores(runs: dict, grids: dict) -> dict:
+    """Our notation against the hand transcription's, as notation.
+
+    Needs no tempo map: both sides are already in quarter notes from their own
+    bar one, and the single unknown -- which of our bars is their bar one --
+    is one constant that the median absorbs.
+    """
+    sys.path.insert(0, str(Path(__file__).parent))
+    import score_benchmark
+
+    from swingscribe import mscz
+    from swingscribe.alignment import align, best_transposition
+    from swingscribe.benchmark import merge_ties, score_notation
+
+    by_audio = {audio: mscz_name for audio, mscz_name, *_ in score_benchmark.TUNES.values()}
+    out = {}
+    for name, run in sorted(runs.items()):
+        if name not in by_audio or name not in grids:
+            continue
+        notation = notate_run(name, run, grids[name])
+        if notation is None or not notation.bars:
+            continue
+        ours = merge_ties(
+            [
+                (bar_start + note.beat, note.duration, note.pitch, note.tie_stop)
+                for bar_start, bar in _with_starts(notation.bars)
+                for note in bar.notes
+                if not note.is_rest
+            ]
+        )
+        score = mscz.parse(BENCH / by_audio[name])
+        theirs = [(n.position, n.duration, n.pitch) for n in score.notes]
+        if not ours or not theirs:
+            continue
+        their_pitches = [p for _, _, p in theirs]
+        our_pitches = [p for _, _, p in ours]
+        coarse, _ = best_transposition(their_pitches[:120], our_pitches[:160])
+        offset, _ = best_transposition(
+            their_pitches[:120], our_pitches[:160], search=range(coarse - 2, coarse + 3)
+        )
+        shifted = [(pos, dur, pitch + offset) for pos, dur, pitch in ours]
+        aligned = align(their_pitches, [p for _, _, p in shifted])
+        result = score_notation(theirs, shifted, aligned.pairs)
+        out[name] = {
+            "placement": round(result["placement"], 4),
+            "value": round(result["value"], 4),
+            "n_matched": result["n_matched"],
+            "bars": float(len(notation.bars)),
+            "key_fifths": float(notation.key_fifths),
+        }
+    return out
+
+
+def _with_starts(bars):
+    """(absolute quarter position of the bar, bar) for each bar in order."""
+    cursor = 0.0
+    for bar in bars:
+        yield cursor, bar
+        cursor += bar.time_signature[0] * 4.0 / bar.time_signature[1]
+
+
 def render(card: dict) -> None:
     wjazz = {k: v for k, v in card["wjazz"].items() if "skipped" not in v}
     skipped = {k: v for k, v in card["wjazz"].items() if "skipped" in v}
@@ -274,6 +397,7 @@ def main() -> None:
         "settings": {"step_cost": args.step_cost, "dip_db": args.dip_db},
         "wjazz": wjazz_scores(args.db, runs, grids) if args.db else {},
         "mscz": mscz_scores(runs),
+        "notation": notation_scores(runs, grids) if grids else {},
         "summary": {},
     }
     scored = [e for e in card["wjazz"].values() if "skipped" not in e]
