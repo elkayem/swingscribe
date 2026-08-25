@@ -129,6 +129,12 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   never in the cache dir. The cache is derived data that must stay safely
   deletable; a span and a downbeat are human judgements. Only the disposable
   recents index stays under the cache.
+- **Erasures ("not the solo") are matched by content, never by index.** Any
+  config change renumbers every note, so a stored index would silently silence
+  a different one. `gui/erasures.py` matches on (onset, pitch) with exact pitch
+  — a re-decoding that follows another voice must fail to match and be
+  reported, not erase a note nobody judged. They are training data for
+  melodic-line selection (issue #8): never drop one as a side effect.
 - Bar lines are derived by counting beats from an anchor. The beat tracker's
   detected downbeat layer is noise (open-issue #5) and must not be drawn or
   trusted; only its pulse layer is reliable.

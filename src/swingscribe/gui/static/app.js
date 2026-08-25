@@ -43,6 +43,12 @@ const state = {
   reviewMode: 'mix',        // mix | transcription | both
   reviewRate: 1,
   reviewToken: 0,
+  tool: 'inspect',          // inspect | erase — what a click on the roll does
+  silenced: new Set(),      // note indices marked "heard right, not the solo"
+  carried: [],              // stored erasures with no note in this transcription
+  unmatched: [],            // the subset of those inside the span — worth reporting
+  undoStack: [],            // whole-state snapshots; see pushHistory
+  redoStack: [],
   scorePath: null,          // hand transcription chosen for the overlay
   ground: null,             // the aligned overlay: classes, counts, placed notes
   gtClasses: [...CLASSES],  // which alignment classes are drawn
@@ -133,6 +139,8 @@ const pianoRoll = new PianoRoll($('pianoroll'), $('lane-f0'), $('lane-gate'), {
   onSelectReference: (index) => renderReferenceInspector(index),
   onSeek: (t) => seekReviewTo(t),
   onView: (view, spanWidth) => renderRollRange(view, spanWidth),
+  onToggleSilence: (index) => toggleSilence(index),
+  onBand: (indices, restoring) => silenceRun(indices, restoring),
 });
 
 // ── screen 1: the track picker ──────────────────────────────────────────────
@@ -334,6 +342,15 @@ async function loadTrack(track) {
   state.formStart = remembered.form_start ?? null;
   state.click = remembered.click ?? false;
   state.scorePath = remembered.score ?? null;
+  // Carried until a transcription exists to match them against; showReview
+  // replaces these with the server's resolution.
+  state.carried = Array.isArray(remembered.erasures) ? remembered.erasures : [];
+  state.silenced.clear();
+  state.unmatched = [];
+  state.undoStack.length = 0;
+  state.redoStack.length = 0;
+  setTool('inspect');
+  renderEditBar();
   clearGroundTruth();  // the score is remembered; its alignment to a previous track is not
 
   overview.setPeaks(await api(`/api/tracks/${track.id}/peaks`));
@@ -1056,6 +1073,16 @@ function invalidateReview() {
   $('review-summary').hidden = true;
   $('transcribe-btn').disabled = false;
   $('transcribe-btn').textContent = 'Transcribe span';
+  // Note indices belong to one transcription, so they cannot survive — but the
+  // erasures themselves must. Fold them back into the carried list before
+  // dropping the indices, or changing stem would quietly destroy every label.
+  state.carried = erasureList();
+  state.silenced.clear();
+  state.unmatched = state.carried.filter((e) => inSpan(e));
+  state.undoStack.length = 0;
+  state.redoStack.length = 0;
+  pianoRoll.setSilenced(state.silenced);
+  renderEditBar();
   // The overlay is an alignment *to* these notes, so it dies with them — but
   // the chosen score does not: it is still the right score for the next
   // transcription of this solo.
@@ -1124,11 +1151,30 @@ async function showReview(payload) {
   $('review-hint').textContent = `${notes} notes`;
   $('r-time-total').textContent = clock(state.selection.b - state.selection.a, false);
   pianoRoll.opts.voicingThreshold = 0.5;
+  // The server matched the stored erasures onto these notes — by content, not
+  // by index, because re-transcribing renumbers everything (gui/erasures.py).
+  const resolved = payload.erasures ?? { silenced: [], carried: [], unmatched: [] };
+  state.silenced = new Set(resolved.silenced);
+  state.carried = resolved.carried;
+  state.unmatched = resolved.unmatched;
+  state.undoStack.length = 0;
+  state.redoStack.length = 0;
+
   pianoRoll.setData({ a: state.selection.a, b: state.selection.b }, payload, state.showBeats ? state.beats : null);
+  pianoRoll.setSilenced(state.silenced);
   // Park the marker at the start rather than leaving it undrawn: a playhead
   // you cannot see is not obviously one you can move.
   pianoRoll.setPlayhead(state.selection.a);
+  renderEditBar();
   renderInspector(null, -1);
+  if (state.unmatched.length) {
+    const n = state.unmatched.length;
+    toast(
+      n === 1
+        ? '1 stored erasure no longer matches a note here — kept, not discarded'
+        : `${n} stored erasures no longer match notes here — kept, not discarded`,
+    );
+  }
   await loadGroundTruth();
   await loadReviewAudio();
 }
@@ -1234,6 +1280,10 @@ function renderInspector(note, index) {
   const previous = index > 0 ? state.review.notes[index - 1] : null;
   const fragment = isFragmentOf(previous, note);
   if (fragment) chip('split from previous', 'flag');
+  if (state.silenced.has(index)) {
+    chip('silenced', 'cut');
+    remarks.push('Marked "heard right, not the solo" — it is drawn struck out and does not sound in the ear test.');
+  }
 
   // What the hand transcription says about this note, if one is loaded.
   const verdict = state.ground?.estimate_class[index];
@@ -1298,6 +1348,182 @@ function framesBetween(previous, note) {
 function midiName(pitch) {
   const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   return `${names[pitch % 12]}${Math.floor(pitch / 12) - 1}`;
+}
+
+// ── silencing notes ─────────────────────────────────────────────────────────
+// A pianist comps with the left hand behind their own solo; the transcriber
+// hears those notes correctly and they are not wanted. That is a difference of
+// scope, not a transcription error. Every note silenced here is also a labelled
+// example — "heard right, not the solo" — which is the training signal for
+// picking a melodic line out of a polyphonic texture (open issue #8), so the
+// records are written to keep, and nothing is ever dropped quietly.
+
+/* History is whole-state snapshots rather than invertible operations. A
+   toggle, a rubber-band sweep, "restore all" and discarding stale erasures all
+   undo through the same two lines, with no per-operation inverse to get
+   subtly wrong. The state is a few hundred integers; the simplicity is free. */
+const HISTORY_LIMIT = 200;
+
+function editSnapshot() {
+  return { silenced: [...state.silenced], carried: state.carried.map((e) => ({ ...e })) };
+}
+
+function pushHistory() {
+  state.undoStack.push(editSnapshot());
+  if (state.undoStack.length > HISTORY_LIMIT) state.undoStack.shift();
+  state.redoStack.length = 0;
+}
+
+function applyEditSnapshot(snapshot) {
+  state.silenced = new Set(snapshot.silenced);
+  state.carried = snapshot.carried;
+  state.unmatched = state.carried.filter((e) => inSpan(e));
+}
+
+function inSpan(erasure) {
+  if (!state.selection) return true;
+  return erasure.onset >= state.selection.a - 0.03 && erasure.onset <= state.selection.b + 0.03;
+}
+
+function undoEdit() {
+  if (!state.undoStack.length) return;
+  state.redoStack.push(editSnapshot());
+  applyEditSnapshot(state.undoStack.pop());
+  afterEdit();
+}
+
+function redoEdit() {
+  if (!state.redoStack.length) return;
+  state.undoStack.push(editSnapshot());
+  applyEditSnapshot(state.redoStack.pop());
+  afterEdit();
+}
+
+function toggleSilence(index) {
+  pushHistory();
+  if (state.silenced.has(index)) state.silenced.delete(index);
+  else state.silenced.add(index);
+  afterEdit();
+}
+
+function silenceRun(indices, restoring) {
+  pushHistory();
+  for (const index of indices) {
+    if (restoring) state.silenced.delete(index);
+    else state.silenced.add(index);
+  }
+  afterEdit();
+}
+
+function restoreAll() {
+  if (!state.silenced.size) return;
+  pushHistory();
+  state.silenced.clear();
+  afterEdit();
+}
+
+/* Erasures that no longer match are reported, never dropped — so throwing them
+   away has to be a deliberate act, and even then it is undoable. */
+function discardUnmatched() {
+  if (!state.unmatched.length) return;
+  const gone = new Set(state.unmatched.map(erasureId));
+  pushHistory();
+  state.carried = state.carried.filter((e) => !gone.has(erasureId(e)));
+  state.unmatched = [];
+  afterEdit();
+  toast(`Discarded ${gone.size} erasure${gone.size === 1 ? '' : 's'}`);
+}
+
+const erasureId = (e) => `${e.onset}:${e.pitch}`;
+
+function afterEdit() {
+  pianoRoll.setSilenced(state.silenced);
+  renderEditBar();
+  persist();
+  scheduleTranscriptionReload();
+}
+
+/* The list written to the sidecar: everything still carried, plus a fresh
+   record for every note currently silenced. Rebuilt rather than patched, so
+   the file always describes exactly what is on screen. */
+function erasureList() {
+  const made = [];
+  if (state.review) {
+    for (const index of [...state.silenced].sort((a, b) => a - b)) {
+      const note = state.review.notes[index];
+      if (!note) continue;
+      made.push({
+        onset: round3(note.onset),
+        pitch: note.pitch,
+        duration: round3(note.duration),
+        confidence: round3(note.confidence),
+        reason: 'not-solo',
+        stem: state.leadStem,
+        model: state.model,
+      });
+    }
+  }
+  return [...state.carried, ...made].sort((a, b) => a.onset - b.onset);
+}
+
+const round3 = (v) => Math.round(v * 1000) / 1000;
+
+function setTool(tool) {
+  state.tool = tool;
+  pianoRoll.setTool(tool);
+  for (const button of $('tool-group').querySelectorAll('button')) {
+    button.classList.toggle('active', button.dataset.tool === tool);
+  }
+}
+
+function renderEditBar() {
+  const count = state.silenced.size;
+  const total = state.review ? state.review.notes.length : 0;
+  $('silenced-count').textContent = count
+    ? `${count} of ${total} silenced`
+    : 'nothing silenced';
+  $('silenced-count').classList.toggle('has-cuts', count > 0);
+  $('undo-btn').disabled = !state.undoStack.length;
+  $('redo-btn').disabled = !state.redoStack.length;
+  $('restore-all').disabled = !count;
+
+  const stale = state.unmatched.length;
+  $('erasure-warning').hidden = !stale;
+  $('discard-unmatched').hidden = !stale;
+  if (stale) {
+    const where = state.unmatched
+      .slice(0, 6)
+      .map((e) => `${midiName(e.pitch)} at ${clock(e.onset, false)}`)
+      .join(', ');
+    $('erasure-warning').textContent =
+      stale === 1
+        ? '1 erasure no longer matches this transcription'
+        : `${stale} erasures no longer match this transcription`;
+    $('erasure-warning').title =
+      `Kept, not discarded — they still describe notes you judged.\n${where}` +
+      (stale > 6 ? `, and ${stale - 6} more` : '');
+  }
+}
+
+/* The ear test must stop playing what you cut, but re-rendering on every click
+   of a 40-note sweep is wasteful, so it settles first. */
+let transcriptionReloadTimer = null;
+function scheduleTranscriptionReload() {
+  clearTimeout(transcriptionReloadTimer);
+  transcriptionReloadTimer = setTimeout(async () => {
+    if (!state.review || !reviewEngine.has('transcription')) return;
+    const token = state.reviewToken;
+    await persistNow();  // the server reads the erasures from the sidecar
+    const url = `/api/tracks/${state.track.id}/transcription?${reviewParams({ rate: String(state.reviewRate) })}`;
+    reviewEngine.drop('transcription');
+    try {
+      await reviewEngine.load('transcription', url);
+    } catch (error) {
+      if (token === state.reviewToken) toast(`Ear test: ${error.message}`, true);
+      return;
+    }
+    if (token === state.reviewToken) applyReviewMode();
+  }, 700);
 }
 
 // ── the ground-truth overlay ────────────────────────────────────────────────
@@ -1506,26 +1732,40 @@ function updateHandoff() {
 }
 
 let persistTimer = null;
+function settingsPayload() {
+  return {
+    region: [state.selection.a, state.selection.b],
+    stem: state.leadStem,
+    model: state.model,
+    beats_shown: state.showBeats,
+    snap_mode: state.snapMode,
+    time_signature: state.timeSignature,
+    anchor: state.anchor,
+    bars_per_chorus: state.barsPerChorus,
+    form_start: state.formStart,
+    click: state.click,
+    score: state.scorePath,
+    erasures: erasureList(),
+  };
+}
+
 function persist() {
   if (!state.track) return;
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
-    post(`/api/tracks/${state.track.id}/state`, {
-      state: {
-        region: [state.selection.a, state.selection.b],
-        stem: state.leadStem,
-        model: state.model,
-        beats_shown: state.showBeats,
-        snap_mode: state.snapMode,
-        time_signature: state.timeSignature,
-        anchor: state.anchor,
-        bars_per_chorus: state.barsPerChorus,
-        form_start: state.formStart,
-        click: state.click,
-        score: state.scorePath,
-      },
-    }).catch(() => { /* remembering where you were is not worth an error */ });
+    post(`/api/tracks/${state.track.id}/state`, { state: settingsPayload() })
+      .catch(() => { /* remembering where you were is not worth an error */ });
   }, 500);
+}
+
+/* Same write, awaited. The A/B render reads erasures from the sidecar, so it
+   must not be asked for one until the file actually holds them. */
+async function persistNow() {
+  if (!state.track) return;
+  clearTimeout(persistTimer);
+  try {
+    await post(`/api/tracks/${state.track.id}/state`, { state: settingsPayload() });
+  } catch { /* the render will simply be a beat behind */ }
 }
 
 // ── events ──────────────────────────────────────────────────────────────────
@@ -1561,6 +1801,14 @@ for (const button of document.querySelectorAll('[data-roll-zoom]')) {
   });
 }
 $('roll-fit').addEventListener('click', () => pianoRoll.fit());
+
+for (const button of $('tool-group').querySelectorAll('button')) {
+  button.addEventListener('click', () => setTool(button.dataset.tool));
+}
+$('undo-btn').addEventListener('click', undoEdit);
+$('redo-btn').addEventListener('click', redoEdit);
+$('restore-all').addEventListener('click', restoreAll);
+$('discard-unmatched').addEventListener('click', discardUnmatched);
 
 $('gt-pick').addEventListener('click', () => openPicker('score'));
 $('gt-clear').addEventListener('click', () => clearGroundTruth({ forget: true }));
@@ -1734,7 +1982,27 @@ document.addEventListener('keydown', (event) => {
   if (target instanceof Element && target.matches('input, select, textarea')) return;
   if (!state.track) return;
   const shift = event.shiftKey;
+
+  // Undo/redo come first: the switch below deliberately ignores modifiers, so
+  // ctrl+Z would otherwise fall through to whatever "z" happens to mean.
+  if (event.ctrlKey || event.metaKey) {
+    const key = event.key.toLowerCase();
+    if (key === 'z') {
+      event.preventDefault();
+      if (shift) redoEdit(); else undoEdit();
+    } else if (key === 'y') {
+      event.preventDefault();
+      redoEdit();
+    }
+    return;
+  }
+
   switch (event.key.toLowerCase()) {
+    case 'e':
+      // One key for the tool, because erasing a run is a sweep: pick up the
+      // tool, sweep, put it down.
+      setTool(state.tool === 'erase' ? 'inspect' : 'erase');
+      break;
     case ' ':
       event.preventDefault();
       togglePlay();

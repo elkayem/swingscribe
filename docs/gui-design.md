@@ -101,6 +101,82 @@ transport. While playing, a zoomed view scrolls a window at a time when the
 playhead reaches the edge rather than sliding continuously under a fixed line,
 which is much easier to read.
 
+#### Silencing notes that are not the solo
+
+Tommy Flanagan comps with his left hand behind his own right-hand solo. The
+transcriber hears those notes **correctly** and they are not wanted — a
+difference of *scope*, not a transcription error, which the benchmark currently
+charges to us as a mistake. So the review screen lets you silence them.
+
+The cleanup is the obvious half. The valuable half is that **every erasure is a
+labelled example**: heard correctly, not part of the solo, carrying its pitch,
+duration, confidence and — through its neighbours — its register within the
+phrase. That is training signal for melodic-line selection, which is the
+biggest open problem in the project (open issue #8). The file format therefore
+matters as much as the interaction, and nothing is ever dropped quietly.
+
+A **tool palette** under the lanes decides what a click means, because click
+already moved the playhead and inspected a note, and adding "erase" to that
+would silence a note every time you positioned the playhead near one. `Inspect`
+keeps the existing behaviour; `Erase` (or `E`) makes a click on a note silence
+it, a click on empty space still seek, a drag rubber-band a run — left-hand
+comping arrives in clumps and clicking forty notes individually is not viable —
+and alt-drag restore one. Shift-drag still pans. Silenced notes stay **drawn,
+struck through**: you have to see what you cut and be able to change your mind.
+Undo and redo are ctrl+Z / ctrl+shift+Z, and "restore all" is itself undoable.
+History is whole-state snapshots rather than invertible operations, so a
+toggle, a sweep, a restore-all and a discard all undo through the same two
+lines.
+
+**The hit-test is in pixels, not semitones.** It used to accept a click within
+six semitones of a note, which is fine for "inspect the nearest thing" and
+completely wrong once a click can erase: on a solo spanning four octaves that
+is a third of the canvas. It now tests against the drawn rectangle plus a few
+pixels, so the space above and below a note is genuinely empty at every zoom.
+
+Three things this had to get right:
+
+- **Note indices are not stable.** Any config change renumbers every note, so
+  an erasure stored as "note #417" would later silence a *different* one,
+  silently. Each erasure records what the note *was* — onset and pitch, plus a
+  snapshot of duration and confidence so the label still describes its example
+  even against a transcription that can no longer be reproduced — and is
+  matched back by content within 30 ms, pitch exact.
+
+  Pitch is exact on purpose, and a real case proves why. Re-resolving thirteen
+  erasures made against the current Giant Steps transcription (346 notes)
+  onto a different decoding of the same span (377 notes, `pitch_step_cost 0`),
+  eleven matched despite every index changing. The two that did not sat at
+  *exactly* the same onset with pitch 70 where the erasure said 58 — the other
+  decoding followed a different voice at that instant. A pitch tolerance would
+  have silenced a note the listener never judged.
+
+  Candidates are assigned greedily by ascending onset distance, one note per
+  erasure and one erasure per note. Fragmentation routinely leaves two notes of
+  the same pitch 60 ms apart, and a first-match scan would claim whichever came
+  first in the list rather than the nearer one.
+
+- **An erasure that no longer matches is reported, never dropped.** The label
+  still describes a note somebody judged. The edit bar says how many and where;
+  discarding them is a deliberate press, and even that is undoable. Erasures
+  *outside* the current span are carried silently rather than reported —
+  moving the span is routine, and warning about those would cry wolf.
+
+- **They live in the sidecar beside the audio**, like the span and the downbeat
+  anchor, never in the cache: the cache is derived data that must stay safely
+  deletable, and these are human judgements (CLAUDE.md). They key on absolute
+  track time, so one list serves the whole track. They are also **not part of
+  the review's cache key** — silencing a note is a judgement about the music,
+  not a different transcription of it, and must not throw away a 30-second
+  CREPE run.
+
+Silenced notes never reach the A/B render (`gui/erasures.audible`), which is
+resolved server-side by the same function the review screen uses — two
+implementations would eventually disagree, and the place that would show is the
+audio. The render is byte-identical in length either way, so the sample-lock
+against the mix survives. The ground-truth overlay is deliberately *not*
+filtered: it describes the transcription, not the edit.
+
 Implementation notes:
 
 - **`transcribe.analyze()`, not `pipeline.run`.** analyze() returns the

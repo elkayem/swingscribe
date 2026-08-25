@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from swingscribe.config import Config
 from swingscribe.gui import audio as gui_audio
+from swingscribe.gui import erasures as gui_erasures
 from swingscribe.gui import ground_truth, library, peaks, review
 from swingscribe.gui import jobs as gui_jobs
 from swingscribe.model import NoteEvent
@@ -133,6 +134,29 @@ def create_app(config: Config) -> FastAPI:
                 "transcribe": config.transcribe.model_copy(update={"stem": stem, "region": region})
             }
         )
+
+    def resolve_erasures(
+        track_id: str, entry: dict[str, Any], run_config: Config, notes: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Which of this transcription's notes the listener has silenced.
+
+        Read from the sidecar and matched at request time — erasures are not
+        part of the review's cache key, and must not be: silencing a note is a
+        judgement about the music, not a different transcription of it. Both
+        the review screen and the A/B render come through here so they cannot
+        disagree about which notes sound.
+        """
+        settings = library.load_settings(entry["path"], config, track_id)
+        region = run_config.transcribe.region
+        span = (
+            None
+            if region is None
+            else (
+                region[0] or 0.0,
+                entry["document"].audio.duration if region[1] is None else region[1],
+            )
+        )
+        return gui_erasures.resolve(settings.get("erasures") or [], notes, span)
 
     # ── pages and assets ────────────────────────────────────────────────────
 
@@ -401,7 +425,8 @@ def create_app(config: Config) -> FastAPI:
         payload = review.cached_review(entry["document"], run_config, model)
         if payload is None:
             return {"ready": False}
-        return {"ready": True, **payload}
+        resolution = resolve_erasures(track_id, entry, run_config, payload["notes"])
+        return {"ready": True, **payload, "erasures": resolution}
 
     @app.get("/api/tracks/{track_id}/transcription")
     def get_transcription(
@@ -425,7 +450,14 @@ def create_app(config: Config) -> FastAPI:
         payload = review.cached_review(document, run_config, model)
         if payload is None:
             raise HTTPException(404, "not transcribed yet")
-        notes = [NoteEvent(source=stem, **n) for n in payload["notes"]]
+        # A note the listener silenced is still drawn on the roll — you have to
+        # see what you cut — but it must not sound in the ear test, or the A/B
+        # stops describing the transcription you are actually keeping.
+        resolution = resolve_erasures(track_id, entry, run_config, payload["notes"])
+        notes = [
+            NoteEvent(source=stem, **n)
+            for n in gui_erasures.audible(payload["notes"], resolution["silenced"])
+        ]
         resolved_end = document.audio.duration if end is None else end
         try:
             audio = gui_audio.render_transcription(

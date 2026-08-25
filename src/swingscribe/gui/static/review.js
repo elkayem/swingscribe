@@ -15,11 +15,14 @@
 const PITCH_PAD = 2; // semitones of headroom above/below the note range
 const MIN_PITCH_SPAN = 14; // never zoom the pitch axis tighter than this
 
-// How far a click may miss a note and still count. Generous on purpose: at a
-// wide pitch range a note is only a few pixels tall, and a solo whose lowest
-// note is fifteen semitones below its highest gives a very wide range.
+// How far a click may miss a note and still count. Measured in PIXELS against
+// the drawn rectangle, not in semitones: a solo spanning four octaves draws
+// each note about four pixels tall, so a semitone tolerance means something
+// completely different at one zoom than another. A few pixels of padding makes
+// a thin note comfortable to hit while leaving the empty space above and below
+// it genuinely empty — which matters once a click can erase.
 const CLICK_SLACK_S = 0.05;
-const CLICK_SLACK_SEMITONES = 6;
+const HIT_PAD_PX = 4;
 
 const MIN_VIEW_S = 0.4;   // tightest zoom: about two notes at a bebop tempo
 const DRAG_SLOP_PX = 4;   // movement below this is a click, not a drag
@@ -67,6 +70,9 @@ export class PianoRoll {
     this.playhead = null;
     this.ground = null;                        // the aligned hand transcription, if any
     this.visible = new Set(CLASSES);           // which alignment classes to draw
+    this.silenced = new Set();                 // note indices marked "not the solo"
+    this.tool = 'inspect';                     // inspect | erase — what a click and a drag mean
+    this._band = null;                         // rubber-band rectangle while dragging
 
     this._drag = null;
     for (const el of [rollEl, f0El, gateEl]) {
@@ -114,6 +120,20 @@ export class PianoRoll {
 
   setVisibleClasses(classes) {
     this.visible = new Set(classes);
+    this.draw();
+  }
+
+  /* Silenced notes stay on the roll, struck out. Removing them would hide the
+     one thing you need to judge an erasure: what you cut. */
+  setSilenced(indices) {
+    this.silenced = new Set(indices);
+    this.draw();
+  }
+
+  setTool(tool) {
+    this.tool = tool;
+    this._band = null;
+    this.rollEl.classList.toggle('erasing', tool === 'erase');
     this.draw();
   }
 
@@ -211,6 +231,62 @@ export class PianoRoll {
     this.setWindow(lo, lo + width);
   }
 
+  noteHeight(height) {
+    return Math.max(3, height / (this.pitchHi - this.pitchLo));
+  }
+
+  /* The rubber band, plus how many notes it currently holds — a sweep over
+     left-hand comping is worth confirming before it happens. */
+  _drawBand(ctx) {
+    const band = this._band;
+    if (!band) return;
+    const x = Math.min(band.x0, band.x1);
+    const y = Math.min(band.y0, band.y1);
+    const w = Math.abs(band.x1 - band.x0);
+    const h = Math.abs(band.y1 - band.y0);
+    const color = this._css(band.restoring ? '--lead' : '--accent', '#f0a848');
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.12;
+    ctx.fillRect(x, y, w, h);
+    ctx.globalAlpha = 0.8;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+    const count = this.notesInBand(band).length;
+    if (count) {
+      ctx.font = '11px ui-monospace, Menlo, Consolas, monospace';
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 1;
+      ctx.fillText(`${count} note${count === 1 ? '' : 's'}`, x + 4, Math.max(11, y - 3));
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* Notes whose drawn rectangle intersects the band. Comparing what is on
+     screen rather than time and pitch ranges means the selection is exactly
+     what the box looks like it covers, at any zoom. */
+  notesInBand(band) {
+    const w = this.width;
+    const h = this.roll.el.clientHeight;
+    const noteH = this.noteHeight(h);
+    const left = Math.min(band.x0, band.x1);
+    const right = Math.max(band.x0, band.x1);
+    const top = Math.min(band.y0, band.y1);
+    const bottom = Math.max(band.y0, band.y1);
+    const hits = [];
+    this.notes.forEach((n, i) => {
+      const kind = this.classOf(i);
+      if (kind && !this.visible.has(kind)) return;
+      const x0 = this.timeToX(n.onset, w);
+      const x1 = x0 + Math.max(2, this.timeToX(n.onset + n.duration, w) - x0);
+      if (x1 < left || x0 > right) return;
+      const centre = this.pitchToY(n.pitch, h);
+      if (centre + noteH / 2 < top || centre - noteH / 2 > bottom) return;
+      hits.push(i);
+    });
+    return hits;
+  }
+
   pitchToY(pitch, height) {
     const range = Math.max(1, this.pitchHi - this.pitchLo);
     return height - ((pitch - this.pitchLo + 0.5) / range) * height;
@@ -301,32 +377,51 @@ export class PianoRoll {
       ctx.globalAlpha = 1;
     }
 
-    const noteH = Math.max(3, h / (this.pitchHi - this.pitchLo));
+    const noteH = this.noteHeight(h);
     this.notes.forEach((n, i) => {
       const kind = this.classOf(i);
       if (kind && !this.visible.has(kind)) return;
       const x0 = this.timeToX(n.onset, w);
       const x1 = this.timeToX(n.onset + n.duration, w);
-      const y = this.pitchToY(n.pitch, h) - noteH / 2;
+      const width = Math.max(2, x1 - x0);
+      const centre = this.pitchToY(n.pitch, h);
+      const y = centre - noteH / 2;
       const selected = i === this.selected;
+      const cut = this.silenced.has(i);
       // Confidence drives fill: a faint note is one the transcriber was unsure
       // of, which is exactly what you want to eyeball.
       const alpha = 0.35 + 0.6 * Math.min(1, Math.max(0, n.confidence));
-      ctx.globalAlpha = selected ? 1 : alpha;
+      ctx.globalAlpha = cut ? 0.22 : selected ? 1 : alpha;
       ctx.fillStyle = selected
         ? this._css('--accent', '#f0a848')
         : kind
           ? this._classColor(kind)
           : this._css('--lead', '#56cfc0');
-      ctx.fillRect(x0, y, Math.max(2, x1 - x0), noteH - 1);
+      ctx.fillRect(x0, y, width, noteH - 1);
       ctx.globalAlpha = 1;
+      if (cut) {
+        // A line through the middle, in the text colour rather than a fifth
+        // hue: "struck out" has to read the same whatever the note's
+        // alignment class has coloured it. Widened a little so a two-pixel
+        // note still shows the strike.
+        const strike = Math.max(width, 5);
+        ctx.strokeStyle = this._css('--text', '#e6e8ef');
+        ctx.globalAlpha = 0.85;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x0 - (strike - width) / 2, Math.round(centre) + 0.5);
+        ctx.lineTo(x0 - (strike - width) / 2 + strike, Math.round(centre) + 0.5);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       if (selected) {
         ctx.strokeStyle = this._css('--accent', '#f0a848');
-        ctx.strokeRect(x0 - 1, y - 1, Math.max(2, x1 - x0) + 2, noteH + 1);
+        ctx.strokeRect(x0 - 1, y - 1, width + 2, noteH + 1);
       }
     });
 
     this._drawGroundTruth(ctx, w, h, noteH);
+    this._drawBand(ctx);
     this._drawPlayhead(ctx, w, h);
   }
 
@@ -497,13 +592,22 @@ export class PianoRoll {
     // 46px tall is most of them. It throws for a pointer id the browser does
     // not know, and losing the whole gesture to that would be silly.
     try { el.setPointerCapture(event.pointerId); } catch { /* not capturable */ }
+    const rect = el.getBoundingClientRect();
+    // The erase tool takes the drag for the rubber band, so panning moves to
+    // shift-drag while it is selected — one gesture each, and shift is already
+    // the zoom modifier on the wheel.
+    const banding = this.tool === 'erase' && el === this.rollEl && !event.shiftKey;
     this._drag = {
       el,
       id: event.pointerId,
       x: event.clientX,
       y: event.clientY,
+      localX: event.clientX - rect.left,
+      localY: event.clientY - rect.top,
       viewA: this.view.a,
       panning: false,
+      banding,
+      restoring: event.altKey,
     };
   }
 
@@ -511,6 +615,20 @@ export class PianoRoll {
     const drag = this._drag;
     if (!drag || event.pointerId !== drag.id) return;
     const dx = event.clientX - drag.x;
+    if (drag.banding) {
+      if (!drag.dragging && Math.abs(dx) < DRAG_SLOP_PX && Math.abs(event.clientY - drag.y) < DRAG_SLOP_PX) return;
+      drag.dragging = true;
+      const rect = drag.el.getBoundingClientRect();
+      this._band = {
+        x0: drag.localX,
+        y0: drag.localY,
+        x1: event.clientX - rect.left,
+        y1: event.clientY - rect.top,
+        restoring: drag.restoring,
+      };
+      this.draw();
+      return;
+    }
     if (!drag.panning && Math.abs(dx) < DRAG_SLOP_PX) return;
     drag.panning = true;
     const perPixel = this.viewWidth / Math.max(1, drag.el.clientWidth);
@@ -525,10 +643,32 @@ export class PianoRoll {
     try { el.releasePointerCapture(event.pointerId); } catch { /* never captured */ }
     if (drag.panning) return;
 
+    if (drag.dragging && this._band) {
+      const hits = this.notesInBand(this._band);
+      const restoring = this._band.restoring;
+      this._band = null;
+      this.draw();
+      if (hits.length && this.opts.onBand) this.opts.onBand(hits, restoring);
+      return;
+    }
+    this._band = null;
+
+    const rect = el.getBoundingClientRect();
+    if (this.tool === 'erase' && el === this.rollEl) {
+      // Directly on a note, erase it; anywhere else, the click still places
+      // the playhead, so auditioning what you just cut needs no tool change.
+      const hit = this._hit(this.notes, event, rect, (n) => n.onset, (n, i) =>
+        this.visible.has(this.classOf(i) ?? 'matched'),
+      );
+      if (hit.index >= 0) {
+        if (this.opts.onToggleSilence) this.opts.onToggleSilence(hit.index);
+        return;
+      }
+    }
+
     // A click is both "look at this" and "listen from here": the playhead
     // moves, and any note under it is inspected. Wanting one without the
     // other has not come up — you click a suspicious note to hear it.
-    const rect = el.getBoundingClientRect();
     if (this.opts.onSeek) this.opts.onSeek(this.xToTime(event.clientX - rect.left, rect.width));
     if (el === this.rollEl) this._select(event);
   }
@@ -544,24 +684,16 @@ export class PianoRoll {
   _select(event) {
     if (!this.notes.length) return;
     const rect = this.rollEl.getBoundingClientRect();
-    const t = this.xToTime(event.clientX - rect.left, rect.width);
-    const h = this.roll.el.clientHeight;
-    // The exact inverse of pitchToY, half-semitone offset included. Without
-    // that term a click on a note's centre reads half a row high, which only
-    // shifted ties before the ground-truth layer existed — and now decides
-    // between our note and the notated one sitting beside it.
-    const pitch =
-      this.pitchLo - 0.5 + (1 - (event.clientY - rect.top) / h) * (this.pitchHi - this.pitchLo);
     // Both layers are candidates, judged the same way, and the vertically
     // nearer one wins. Searching ours first and only then falling back would
     // make a missed note unclickable whenever any note of ours overlaps it in
     // time — which in a busy passage is most of them, and a missed note is
     // exactly the case with nothing of ours to click instead.
-    const ours = this._nearest(this.notes, t, pitch, (n) => n.onset, (_, i) =>
+    const ours = this._hit(this.notes, event, rect, (n) => n.onset, (n, i) =>
       this.visible.has(this.classOf(i) ?? 'matched'),
     );
     const notated = this.ground
-      ? this._nearest(this.ground.reference_notes, t, pitch, (n) => n.x, (n) =>
+      ? this._hit(this.ground.reference_notes, event, rect, (n) => n.x, (n) =>
           this.visible.has(n.cls),
         )
       : { index: -1, distance: Infinity };
@@ -579,16 +711,25 @@ export class PianoRoll {
     }
   }
 
-  /* Nearest visible note in pitch whose time span contains the click. */
-  _nearest(notes, t, pitch, onsetOf, isVisible) {
+  /* The visible note under the pointer, or index -1.
+   *
+   * Vertical distance is measured in pixels against the drawn rectangle, so
+   * the space above and below a note is genuinely empty — a semitone-based
+   * tolerance meant something different at every zoom, and once a click can
+   * erase a note, "close enough" has to mean what it looks like. */
+  _hit(notes, event, rect, onsetOf, isVisible) {
+    const t = this.xToTime(event.clientX - rect.left, rect.width);
+    const h = this.roll.el.clientHeight;
+    const y = event.clientY - this.rollEl.getBoundingClientRect().top;
+    const reach = this.noteHeight(h) / 2 + HIT_PAD_PX;
     let index = -1;
     let distance = Infinity;
     notes.forEach((n, i) => {
       const onset = onsetOf(n);
       if (t < onset - CLICK_SLACK_S || t > onset + n.duration + CLICK_SLACK_S) return;
       if (!isVisible(n, i)) return;
-      const d = Math.abs(n.pitch - pitch);
-      if (d < distance && d <= CLICK_SLACK_SEMITONES) {
+      const d = Math.abs(y - this.pitchToY(n.pitch, h));
+      if (d < distance && d <= reach) {
         distance = d;
         index = i;
       }

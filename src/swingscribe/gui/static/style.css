@@ -392,6 +392,22 @@ select {
 .swatch.periodicity { background: var(--downbeat); }
 .swatch.gated { background: rgba(226, 102, 107, 0.4); }
 
+/* ── note editing ───────────────────────────────────────────────────────── */
+.edit-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line);
+}
+.tool-group { display: flex; gap: 4px; }
+#silenced-count { font: 12px var(--mono); }
+#silenced-count.has-cuts { color: var(--text); }
+.erasure-warning {
+  font: 11.5px var(--mono); color: var(--gt-wrong); cursor: help;
+}
+/* The erase tool changes what a click does, so it has to be unmistakable from
+   the roll itself and not only from which chip is lit. */
+.pianoroll.erasing { cursor: cell; border-color: var(--accent); }
+.why-chip.cut { border-color: var(--muted); color: var(--muted); text-decoration: line-through; }
+
 .inspector {
   background: var(--panel-2); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px;

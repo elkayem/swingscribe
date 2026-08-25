@@ -224,6 +224,20 @@
           <span><span class="swatch periodicity"></span> periodicity</span>
           <span><span class="swatch gated"></span> energy-gated</span>
         </div>
+
+        <div class="edit-bar" id="edit-bar">
+          <div class="tool-group" id="tool-group">
+            <button class="chip active" data-tool="inspect" title="Click places the playhead and inspects a note; drag pans (E)">Inspect</button>
+            <button class="chip" data-tool="erase" title="Click a note to silence it; drag a box to silence a run, alt-drag to restore one; shift-drag pans (E)">Erase</button>
+          </div>
+          <span class="muted" id="silenced-count">nothing silenced</span>
+          <button class="chip" id="undo-btn" disabled title="Undo (ctrl+Z)">↶</button>
+          <button class="chip" id="redo-btn" disabled title="Redo (ctrl+shift+Z)">↷</button>
+          <button class="chip" id="restore-all" disabled title="Restore every silenced note — itself undoable">Restore all</button>
+          <span class="spacer"></span>
+          <span class="erasure-warning" id="erasure-warning" hidden></span>
+          <button class="chip" id="discard-unmatched" hidden title="Forget these erasures permanently">Discard</button>
+        </div>
       </div>
 
       <div class="inspector" id="inspector">
