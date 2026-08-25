@@ -49,15 +49,36 @@ class ScoreNote:
 
 @dataclass(frozen=True)
 class Score:
+    """A parsed hand transcription, in two views of the same music.
+
+    `melody` is the single line — the top note of every chord. It is what the
+    time-free pitch aligner needs (two notes at one position have no order,
+    and a monophonic transcriber can only ever produce one of them), and it is
+    what every measure through M6 is scored against.
+
+    `notes` is everything, chord tones included. Nothing scores against it yet:
+    it exists because M7b is about the notes a monophonic path structurally
+    cannot reach, and a benchmark that silently dropped them would report a
+    polyphonic transcriber as no better than the one it replaced.
+    """
+
     title: str
-    notes: list[ScoreNote]
+    notes: list[ScoreNote]  # every notated note, chord tones included
+    melody: list[ScoreNote]  # top note of each chord — the single line
     bars: int
     beats_per_bar: float
     key_fifths: int  # -1 = one flat, as MuseScore's concertKey
 
     @property
     def pitches(self) -> list[int]:
-        return [n.pitch for n in self.notes]
+        """The melody's pitches — the sequence the aligner matches on."""
+        return [n.pitch for n in self.melody]
+
+    @property
+    def chord_tones(self) -> list[ScoreNote]:
+        """Everything `melody` leaves out."""
+        top = {(round(n.position, 6), n.pitch) for n in self.melody}
+        return [n for n in self.notes if (round(n.position, 6), n.pitch) not in top]
 
 
 def read_mscx_xml(path: str | Path) -> str:
@@ -92,8 +113,12 @@ def parse(path: str | Path) -> Score:
 
     Handles dotted values, tuplets, and ties (a tied pair becomes one longer
     note, which is what a transcription means and what we would want to
-    reproduce). Chords with several notes contribute their top note only —
-    every benchmark solo is a single line, and the top note is the melody.
+    reproduce).
+
+    A chord contributes its top note to `melody` and ALL of its notes to
+    `notes`. The top note is the melody by convention and by measurement —
+    every solo here is a single line except the Peterson, where 11% of events
+    are dyads he plays as octaves and locked-hands doubling under the tune.
     """
     root = ElementTree.fromstring(read_mscx_xml(path))
     score = root.find("Score")
@@ -112,6 +137,11 @@ def parse(path: str | Path) -> Score:
     beats_per_bar = 4.0
     key_fifths = 0
     notes: list[ScoreNote] = []
+    # Chord tones below the top note, collected in parallel and merged in at
+    # the end. Kept separate through the walk so the melody logic below — ties
+    # included — stays exactly the single-line logic it has always been, and
+    # adding polyphony cannot move a monophonic number.
+    lower: list[ScoreNote] = []
     position = 0.0
     bar_number = 0
     # A tie makes the NEXT note at the same pitch a continuation, not a new
@@ -149,6 +179,16 @@ def parse(path: str | Path) -> Score:
                     ]
                     if pitches:
                         pitch = max(pitches)  # the melody is the top voice
+                        for other in sorted(pitches):
+                            if other != pitch:
+                                lower.append(
+                                    ScoreNote(
+                                        position=cursor,
+                                        duration=duration,
+                                        pitch=other,
+                                        bar=bar_number,
+                                    )
+                                )
                         if pending_tie is not None and notes[pending_tie].pitch == pitch:
                             held = notes[pending_tie]
                             notes[pending_tie] = ScoreNote(
@@ -182,7 +222,8 @@ def parse(path: str | Path) -> Score:
 
     return Score(
         title=title,
-        notes=notes,
+        notes=sorted(notes + lower, key=lambda n: (n.position, n.pitch)),
+        melody=notes,
         bars=bar_number,
         beats_per_bar=beats_per_bar,
         key_fifths=key_fifths,
@@ -208,5 +249,5 @@ def to_note_events(
             confidence=1.0,
             source=source,
         )
-        for n in score.notes
+        for n in score.melody
     ]

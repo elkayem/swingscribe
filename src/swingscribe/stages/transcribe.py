@@ -620,6 +620,72 @@ class FrameDiagnostics:
         return sum(1 for p in self.pitch if p is not None) / max(1, len(self.pitch))
 
 
+def _consult_piano_oracle(
+    mono,
+    rate: int,
+    tc: TranscribeConfig,
+    region_offset: float,
+    notes: list[NoteEvent],
+    *,
+    log: bool = False,
+) -> list[NoteEvent]:
+    """Correct and filter the monophonic line against a polyphonic piano model.
+
+    Kept out of `analyze` so the CREPE path reads as one thing. Failure here
+    is reported and swallowed: the oracle is an improvement to a line that
+    already exists, and a missing checkpoint or an absent `ml` group must not
+    turn a working transcription into no transcription.
+    """
+    from swingscribe import corroborate as corroboration
+    from swingscribe import piano
+
+    if not notes:
+        return notes
+    try:
+        import torch
+
+        # Resolved, not passed through: "auto" reaches torch.load as a
+        # map_location and fails there with a message about storage tags that
+        # says nothing about the real problem.
+        device = resolve_device(tc.device, torch.cuda.is_available())
+        oracle = piano.transcribe(mono, rate, device=device, offset=region_offset)
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        print(f"transcribe: piano oracle unavailable ({type(exc).__name__}: {exc}); keeping CREPE")
+        return notes
+    if not oracle:
+        print("transcribe: piano oracle found no notes; keeping CREPE")
+        return notes
+
+    as_dicts = [
+        {"onset": n.onset, "duration": n.duration, "pitch": n.pitch, "confidence": n.confidence}
+        for n in notes
+    ]
+    kept, stats = corroboration.apply(
+        as_dicts,
+        oracle,
+        onset_tolerance=tc.piano_onset_tolerance,
+        snap=tc.piano_snap_octaves,
+        reject=tc.piano_reject_uncorroborated,
+    )
+    if log or stats["octaves_snapped"] or stats["uncorroborated"]:
+        print(
+            f"transcribe: piano oracle heard {len(oracle)} notes; "
+            f"snapped {stats['octaves_snapped']} octave(s), "
+            f"dropped {stats['input'] - stats['kept']} uncorroborated, "
+            f"{stats['kept']} kept"
+        )
+    return [
+        NoteEvent(
+            onset=n["onset"],
+            duration=n["duration"],
+            pitch=int(n["pitch"]),
+            confidence=n["confidence"],
+            source=f"{tc.stem}:crepe+piano",
+        )
+        for n in kept
+    ]
+
+
 def analyze(
     stem_path: str, tc: TranscribeConfig, *, log: bool = False
 ) -> tuple[list[NoteEvent], FrameDiagnostics]:
@@ -707,6 +773,14 @@ def analyze(
     notes = fold_octave_outliers(notes)
     notes = offset_notes(notes, region_offset)  # back to whole-track time
 
+    # M7b: ask a polyphonic piano model about the same audio and use its
+    # answer to correct octaves and reject notes it never heard. Only for a
+    # pianist — see TranscribeConfig.uses_piano_oracle for why a horn must
+    # never get this. The oracle sees the SAME cropped signal, so its onsets
+    # are in region time and get the same offset applied.
+    if tc.uses_piano_oracle:
+        notes = _consult_piano_oracle(mono, rate, tc, region_offset, notes, log=log)
+
     diagnostics = FrameDiagnostics(
         hop_s=hop_s,
         start=region_offset,
@@ -724,10 +798,15 @@ def run(document: Document, config: Config) -> Document:
     if document.audio is None:
         raise ValueError("transcribe requires ingest to have run first (document.audio is None)")
     tc = config.transcribe
-    if tc.ensemble != "horn-led":
-        raise NotImplementedError(
-            f"ensemble {tc.ensemble!r} is not implemented yet — the piano path arrives at M7b"
-        )
+    # `trio` and `solo-piano` route through the same monophonic line, with a
+    # polyphonic piano model consulted to correct octaves and reject notes it
+    # never heard (M7b, docs/m7b-piano.md). What they do NOT yet do is take
+    # the model's line directly: it hears the left hand too, and choosing
+    # which of its notes is the tune is open-issue #8 and unsolved.
+    #
+    # `solo-piano` additionally means "skip separation" in plan §5. That is a
+    # caller's decision about which audio to hand in, not this stage's, so it
+    # reads whichever stem it is pointed at — `mix` for the raw audio.
     stem_path = document.stems.get(tc.stem)
     if stem_path is None:
         available = ", ".join(sorted(document.stems)) or "none (run separation first)"

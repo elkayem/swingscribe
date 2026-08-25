@@ -137,7 +137,12 @@ def test_open_returns_duration_and_model_readiness(world):
     assert track["duration"] == pytest.approx(6.0)
     assert track["name"] == "Some Tune.m4a"
     ready = {entry["model"]: entry["ready"] for entry in track["models"]}
-    assert ready == {"htdemucs_ft": True, "htdemucs_6s": False}
+    # Every offered model is reported, and only the one with stems on disk is
+    # ready. Keyed off the config rather than a literal so that changing which
+    # models are offered is a config decision, not a test rewrite.
+    assert set(ready) == set(world["config"].gui.models)
+    assert ready["htdemucs_ft"] is True
+    assert all(v is False for k, v in ready.items() if k != "htdemucs_ft")
 
 
 def test_open_rejects_a_missing_file(world):
@@ -327,7 +332,10 @@ def test_beats_endpoint_derives_bars_from_a_cached_grid(world, monkeypatch):
     assert [t for t, _n in payload["bars"]][:3] == pytest.approx([0.0, 2.0, 4.0])
     assert [n for _t, n in payload["bars"]][:3] == [1, 2, 3]
     assert seen["model"] == "htdemucs_6s"
-    assert seen["stages"] == ["ingest", "separate", "beats"]
+    # No separation in the chain. The grid is tracked from the mix, so asking
+    # for it must never be a question that can only be answered by minutes of
+    # demucs — and the answer no longer depends on `model` at all.
+    assert seen["stages"] == ["ingest", "beats"]
 
 
 def test_beats_endpoint_rephases_on_a_new_anchor(world, monkeypatch):
@@ -616,3 +624,50 @@ def test_transcribe_job_and_review_agree_on_the_span(world, monkeypatch):
     )
     assert payload["ready"] is True
     assert payload["notes"][0]["pitch"] == 64
+
+
+def test_the_sidecar_ensemble_reaches_the_transcribe_config(world, monkeypatch):
+    """A GUI transcription of a piano solo must consult the same oracle the
+    benchmark does, or the score you review is not the score that was
+    measured. It rides in the sidecar because it is a judgement about the
+    recording, like the span (M7b)."""
+    from swingscribe.gui import review
+
+    track = open_track(world)
+    world["client"].post(f"/api/tracks/{track['id']}/state", json={"state": {"ensemble": "trio"}})
+
+    seen = {}
+
+    def capture(document, config, model):
+        seen["ensemble"] = config.transcribe.ensemble
+        return None
+
+    monkeypatch.setattr(review, "cached_review", capture)
+    world["client"].get(
+        f"/api/tracks/{track['id']}/review",
+        params={"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0},
+    )
+    assert seen["ensemble"] == "trio"
+
+
+def test_an_unknown_ensemble_in_the_sidecar_is_ignored(world, monkeypatch):
+    """The sidecar is hand-editable. A typo there must fall back to the
+    configured default rather than reaching pydantic as an invalid literal."""
+    from swingscribe.gui import review
+
+    track = open_track(world)
+    world["client"].post(
+        f"/api/tracks/{track['id']}/state", json={"state": {"ensemble": "banjo-led"}}
+    )
+    seen = {}
+
+    def capture(document, config, model):
+        seen["ensemble"] = config.transcribe.ensemble
+        return None
+
+    monkeypatch.setattr(review, "cached_review", capture)
+    response = world["client"].get(
+        f"/api/tracks/{track['id']}/review", params={"model": "htdemucs_ft", "stem": "other"}
+    )
+    assert response.status_code == 200
+    assert seen["ensemble"] == world["config"].transcribe.ensemble

@@ -115,6 +115,39 @@ class TranscribeConfig(BaseModel):
     # comes back pays the cost twice while a real melodic interval pays once.
     # Scale: 5 bins = 1 semitone, 60 bins = an octave.
     pitch_step_cost: float = 0.2
+    # ── M7b: the polyphonic piano model as a second opinion ──────────────
+    # Consult a polyphonic piano model and use it to correct octaves and
+    # reject notes it will not vouch for (src/swingscribe/corroborate.py).
+    # Costs an extra ~0.36x realtime over the span.
+    #
+    # OFF by default because it needs the `ml` group and a 172MB checkpoint,
+    # and because it is only meaningful when the soloist is a pianist — the
+    # oracle would reject a saxophone wholesale. `ensemble` is what turns it
+    # on: trio and solo-piano both do.
+    piano_oracle: bool = False
+    # Correct a note to the oracle's octave where they agree on pitch class.
+    # Raises RECALL (a note at the right octave now matches).
+    piano_snap_octaves: bool = True
+    # Drop notes the oracle will not corroborate. Raises PRECISION. Measured
+    # over both piano solos with hand transcriptions, the two together beat
+    # either alone on both: Giant Steps note F1 0.705 -> 0.765, Lover Come
+    # Back 0.648 -> 0.698 (docs/m7b-piano.md).
+    piano_reject_uncorroborated: bool = True
+    # How far apart the two detectors may place the same note. 0.05 was
+    # tighter at a real cost in recall, 0.20 let unrelated neighbours vouch
+    # for each other; 0.10 was best on both solos.
+    piano_onset_tolerance: float = 0.10
+
+    @property
+    def uses_piano_oracle(self) -> bool:
+        """Whether to consult the piano model for this ensemble.
+
+        `piano_oracle` forces it on; otherwise the ensemble decides, which is
+        the routing plan §5 stage 3 specifies. A horn-led solo must never get
+        it — a piano model asked about a saxophone vouches for nothing, and
+        rejection would then delete the entire line.
+        """
+        return self.piano_oracle or self.ensemble in ("trio", "solo-piano")
 
 
 class MeterConfig(BaseModel):

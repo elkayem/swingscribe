@@ -109,7 +109,13 @@ def create_app(config: Config) -> FastAPI:
         library.remember_open(config, track_id, entry["path"])
         return entry
 
-    def review_config(stem: str, start: float | None, end: float | None) -> Config:
+    def review_config(
+        stem: str,
+        start: float | None,
+        end: float | None,
+        track_path: str | None = None,
+        track_id: str | None = None,
+    ) -> Config:
         """Base config with the review span and lead stem folded into transcribe.
 
         Region is stored as (start, end|None); a null start means from zero.
@@ -129,9 +135,20 @@ def create_app(config: Config) -> FastAPI:
             if start is None and end is None
             else (round(start or 0.0, span), None if end is None else round(end, span))
         )
+        # `ensemble` rides along from the sidecar, so a GUI transcription of a
+        # piano solo consults the same oracle the benchmark does (M7b). It
+        # belongs in the key: it changes the notes, so a run with it on must
+        # not serve a review computed without it.
+        ensemble = config.transcribe.ensemble
+        if track_path is not None and track_id is not None:
+            stored = library.load_settings(track_path, config, track_id).get("ensemble")
+            if stored in ("horn-led", "trio", "solo-piano"):
+                ensemble = stored
         return config.model_copy(
             update={
-                "transcribe": config.transcribe.model_copy(update={"stem": stem, "region": region})
+                "transcribe": config.transcribe.model_copy(
+                    update={"stem": stem, "region": region, "ensemble": ensemble}
+                )
             }
         )
 
@@ -306,10 +323,10 @@ def create_app(config: Config) -> FastAPI:
     ) -> dict[str, Any]:
         """The bar grid for this track+model, or ready:false.
 
-        Never computes the beat grid: beat tracking (and the separation it
-        chains from) can cost minutes, and "draw the bars if they're free" must
-        not be a call that might block. When this says not ready, the client
-        starts a kind="beats" job and asks again.
+        Never computes the beat grid: even at seconds rather than the minutes
+        it cost when it chained from a separation, "draw the bars if they're
+        free" must not be a call that might block. When this says not ready,
+        the client starts a kind="beats" job and asks again.
 
         The *meter* on top of it is re-derived here on every call, because that
         is microseconds of pure arithmetic (stages/meter.py). So the query
@@ -318,7 +335,7 @@ def create_app(config: Config) -> FastAPI:
         functions run inside the pipeline for the transcription itself.
         """
         from swingscribe import pipeline
-        from swingscribe.stages import beats, ingest, meter, separate
+        from swingscribe.stages import beats, ingest, meter
 
         entry = resolve(track_id)
         run_config = config.model_copy(
@@ -328,10 +345,15 @@ def create_app(config: Config) -> FastAPI:
                 )
             }
         )
+        # No separation in this chain: the grid is tracked from the mix
+        # (stages/beats.py), so `model` no longer selects a different grid —
+        # switching separation models keeps the beats and the downbeat anchor
+        # you already set. The parameter stays because the client sends it for
+        # every track call and the rest of them still need it.
         document = pipeline.cached_document(
             entry["path"],
             run_config,
-            stages=[("ingest", ingest.run), ("separate", separate.run), ("beats", beats.run)],
+            stages=[("ingest", ingest.run), ("beats", beats.run)],
         )
         grid = document.beat_grid if document else None
         if grid is None or not grid.beats:
@@ -421,7 +443,7 @@ def create_app(config: Config) -> FastAPI:
         this endpoint is the only thing that serves them.
         """
         entry = resolve(track_id)
-        run_config = review_config(stem, start, end)
+        run_config = review_config(stem, start, end, entry["path"], track_id)
         payload = review.cached_review(entry["document"], run_config, model)
         if payload is None:
             return {"ready": False}
@@ -446,7 +468,7 @@ def create_app(config: Config) -> FastAPI:
         """
         entry = resolve(track_id)
         document = entry["document"]
-        run_config = review_config(stem, start, end)
+        run_config = review_config(stem, start, end, entry["path"], track_id)
         payload = review.cached_review(document, run_config, model)
         if payload is None:
             raise HTTPException(404, "not transcribed yet")
@@ -505,7 +527,7 @@ def create_app(config: Config) -> FastAPI:
         if not ground_truth.is_score(score_path):
             raise HTTPException(400, f"not a MuseScore file: {score_path.name}")
 
-        run_config = review_config(stem, start, end)
+        run_config = review_config(stem, start, end, entry["path"], track_id)
         payload = review.cached_review(document, run_config, model)
         if payload is None:
             raise HTTPException(404, "transcribe the span first")
@@ -535,7 +557,13 @@ def create_app(config: Config) -> FastAPI:
         if request.kind == "transcribe":
             if not request.stem:
                 raise HTTPException(400, "a transcribe job needs a stem")
-            run_config = review_config(request.stem, request.start, request.end)
+            run_config = review_config(
+                request.stem,
+                request.start,
+                request.end,
+                entry["path"],
+                library.file_digest(entry["path"]),
+            )
             # variant keys the job (and its cache) to this exact span+stem+config,
             # so two spans never dedupe onto each other.
             variant = review.review_key(entry["document"], run_config, request.model)

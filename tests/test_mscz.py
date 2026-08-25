@@ -160,3 +160,65 @@ def test_to_note_events_scales_with_tempo(tmp_path):
     fast = mscz.to_note_events(score, bpm=240.0)
     assert slow[0].duration == 1.0
     assert fast[0].duration == 0.25
+
+
+# ── chords: what a monophonic path structurally cannot reach ────────────────
+
+
+def polychord(pitches: list[int], duration: str = "quarter") -> str:
+    """A Chord element carrying several Notes, the way MuseScore writes a dyad."""
+    heads = "".join(f"<Note><pitch>{p}</pitch></Note>" for p in pitches)
+    return f"<Chord><durationType>{duration}</durationType>{heads}</Chord>"
+
+
+CHORDS = polychord([60]) + polychord([64, 67]) + polychord([60, 72], "half")
+
+
+def test_melody_is_the_top_note_of_every_chord(tmp_path):
+    """The single line, unchanged by chords now being kept — this is what the
+    time-free aligner matches on, and two notes at one position have no order
+    for it to match against."""
+    score = parse_body(tmp_path, CHORDS)
+    assert score.pitches == [60, 67, 72]
+    assert [n.position for n in score.melody] == [0.0, 1.0, 2.0]
+
+
+def test_notes_keeps_every_chord_tone(tmp_path):
+    """M7b is precisely about these. A benchmark that dropped them would score
+    a polyphonic transcriber identically to the monophonic one it replaces."""
+    score = parse_body(tmp_path, CHORDS)
+    assert [(n.position, n.pitch) for n in score.notes] == [
+        (0.0, 60),
+        (1.0, 64),
+        (1.0, 67),
+        (2.0, 60),
+        (2.0, 72),
+    ]
+
+
+def test_chord_tones_are_what_the_melody_leaves_out(tmp_path):
+    score = parse_body(tmp_path, CHORDS)
+    assert [(n.position, n.pitch) for n in score.chord_tones] == [(1.0, 64), (2.0, 60)]
+    assert len(score.melody) + len(score.chord_tones) == len(score.notes)
+
+
+def test_a_chord_tone_carries_its_chord_duration(tmp_path):
+    score = parse_body(tmp_path, CHORDS)
+    lower = next(n for n in score.notes if n.position == 2.0 and n.pitch == 60)
+    assert lower.duration == 2.0
+
+
+def test_a_monophonic_score_has_no_chord_tones(tmp_path):
+    """The four solos measured through M6 are single lines, so keeping chords
+    must leave them bit-identical — which is what makes this change free."""
+    score = parse_body(tmp_path, chord(60) + chord(62) + chord(64))
+    assert score.chord_tones == []
+    assert score.notes == score.melody
+
+
+def test_to_note_events_stays_monophonic(tmp_path):
+    """It feeds the MuseScore audio-vs-notation metric. Rendering chord tones
+    there would charge a monophonic transcriber for notes it cannot reach and
+    silently move a pinned number."""
+    score = parse_body(tmp_path, CHORDS)
+    assert [e.pitch for e in mscz.to_note_events(score, bpm=120.0)] == [60, 67, 72]

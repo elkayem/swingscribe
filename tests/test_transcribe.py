@@ -5,6 +5,7 @@ import statistics
 
 import pytest
 
+from swingscribe.config import Config, TranscribeConfig
 from swingscribe.model import NoteEvent
 from swingscribe.stages.transcribe import (
     fill_short_gaps,
@@ -542,3 +543,86 @@ def test_dip_defaults_to_off_so_it_changes_nothing_unasked():
     pitch = [68.0] * 24
     swell = [1.0] * 10 + [1.0, 1.2, 1.5, 1.9, 2.1] + [2.0] * 9
     assert corroborate_onsets({10}, swell, pitch, rise_db=3.0, window=5) == {10}
+
+
+# ── M7b: routing to the piano oracle ─────────────────────────────────────
+
+
+def test_a_horn_never_consults_the_piano_oracle():
+    """A piano model asked about a saxophone vouches for nothing, so rejection
+    would delete the whole line. This is the guard that makes the default safe."""
+    assert TranscribeConfig(ensemble="horn-led").uses_piano_oracle is False
+
+
+def test_the_piano_ensembles_consult_it():
+    """Plan §5 stage 3 routes on `ensemble`; this is that routing."""
+    assert TranscribeConfig(ensemble="trio").uses_piano_oracle is True
+    assert TranscribeConfig(ensemble="solo-piano").uses_piano_oracle is True
+
+
+def test_the_oracle_can_be_forced_on_for_a_horn_led_config():
+    """An escape hatch for measurement — the benchmark spans are horn-led by
+    default even when the soloist is a pianist."""
+    assert TranscribeConfig(ensemble="horn-led", piano_oracle=True).uses_piano_oracle is True
+
+
+def test_oracle_settings_reach_the_cache_key():
+    """They change the notes, so they must change the key — otherwise a run
+    with the oracle on would serve notes computed without it (plan §3)."""
+    base = Config()
+    key = base.stage_config("transcribe")
+    for field in (
+        "piano_oracle",
+        "piano_snap_octaves",
+        "piano_reject_uncorroborated",
+        "piano_onset_tolerance",
+    ):
+        assert field in key, field
+
+
+def test_an_unavailable_oracle_leaves_the_line_alone(monkeypatch):
+    """A missing checkpoint or an absent ml group must not turn a working
+    transcription into no transcription — the oracle improves a line that
+    already exists."""
+    from swingscribe import piano
+    from swingscribe.stages import transcribe as stage
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("no checkpoint here")
+
+    monkeypatch.setattr(piano, "transcribe", explode)
+    notes = [NoteEvent(onset=1.0, duration=0.2, pitch=60, confidence=0.9, source="other:crepe")]
+    tc = TranscribeConfig(ensemble="trio")
+    assert stage._consult_piano_oracle(None, 44100, tc, 0.0, notes) == notes
+
+
+def test_an_oracle_that_hears_nothing_leaves_the_line_alone(monkeypatch):
+    from swingscribe import piano
+    from swingscribe.stages import transcribe as stage
+
+    monkeypatch.setattr(piano, "transcribe", lambda *a, **k: [])
+    notes = [NoteEvent(onset=1.0, duration=0.2, pitch=60, confidence=0.9, source="other:crepe")]
+    assert (
+        stage._consult_piano_oracle(None, 44100, TranscribeConfig(ensemble="trio"), 0.0, notes)
+        == notes
+    )
+
+
+def test_the_oracle_corrects_an_octave_and_drops_a_phantom(monkeypatch):
+    """The two measured effects, end to end through the stage: a note at the
+    wrong octave is moved (recall), a note nobody else heard goes (precision)."""
+    from swingscribe import piano
+    from swingscribe.stages import transcribe as stage
+
+    monkeypatch.setattr(
+        piano,
+        "transcribe",
+        lambda *a, **k: [{"onset": 1.0, "duration": 0.2, "pitch": 72, "velocity": 80}],
+    )
+    notes = [
+        NoteEvent(onset=1.0, duration=0.2, pitch=60, confidence=0.9, source="other:crepe"),
+        NoteEvent(onset=5.0, duration=0.2, pitch=43, confidence=0.5, source="other:crepe"),
+    ]
+    got = stage._consult_piano_oracle(None, 44100, TranscribeConfig(ensemble="trio"), 0.0, notes)
+    assert [n.pitch for n in got] == [72]
+    assert got[0].source == "other:crepe+piano"

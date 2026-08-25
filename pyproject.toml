@@ -41,6 +41,16 @@ ml = [
     # Transcription metrics. CLAUDE.md: mir_eval is the source of truth for
     # scoring — never hand-roll it. Pure numpy/scipy, no numba.
     "mir_eval>=0.7",
+    # M7b: polyphonic piano transcription (Kong et al., MIT). Plan §5 names
+    # transkun; this was chosen over it and the deviation is recorded in
+    # docs/m7b-piano.md. Two reasons, both about the tree rather than the
+    # model: transkun resolves 25 packages including tensorboard, matplotlib,
+    # seaborn, pandas, grpcio and sox, and this one resolves 10. And its only
+    # real dependency, torchlibrosa, is a pure-PyTorch reimplementation of
+    # librosa's spectrogram ops — so it stays clear of numba, whose DLLs
+    # Application Control blocks here (see torchcrepe above, same reason).
+    # NOT basic-pitch: it pulls resampy (numba) and TensorFlow.
+    "piano-transcription-inference>=0.0.6",
 ]
 # Local GUI (plan §13, M8). Its own group for the same reason as `ml`: plain
 # `uv sync` — and therefore CI — must stay light. Dev machines opt in with

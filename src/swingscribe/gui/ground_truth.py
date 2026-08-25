@@ -212,7 +212,7 @@ def overlay(
         kind = "matched" if reference[ri] == estimate[ei] + offset else "wrong"
         ref_class[ri], est_class[ei] = kind, kind
         ref_partner[ri], est_partner[ei] = ei, ri
-        anchors.append((score.notes[ri].position, float(notes[ei]["onset"])))
+        anchors.append((score.melody[ri].position, float(notes[ei]["onset"])))
 
     anchors = _monotone(anchors)
     positions = [p for p, _ in anchors]
@@ -221,7 +221,7 @@ def overlay(
     # ── place the score horizontally ──────────────────────────────────────
     reference_notes = []
     drifts = []
-    for index, note in enumerate(score.notes):
+    for index, note in enumerate(score.melody):
         x, rate = _place(note.position, positions, times, seconds_per_quarter, start)
         drifts.append(x - (start + note.position * seconds_per_quarter))
         reference_notes.append(
