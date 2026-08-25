@@ -51,6 +51,42 @@ def phrase(
     return notes
 
 
+def swung_phrase(
+    pitches: list[int],
+    bpm: float = 180.0,
+    bur: float = 2.0,
+    start: float = 0.25,
+    gap_fraction: float = 0.15,
+) -> tuple[list[SynthNote], list[float]]:
+    """Eighth-note pairs at a KNOWN beat-upbeat ratio, plus the beat grid.
+
+    The ground truth M4 is scored against (plan §6 layer 1). Notes alternate
+    long-short within each beat: at BUR b the offbeat lands at phase
+    b/(1+b), so b=1.0 puts it at 0.5 (straight) and b=2.0 at 0.667 (triplet).
+
+    Returns (notes, beats). The grid is exact and comes back with the notes
+    because the swing estimator needs both, and deriving one from the other
+    in a test would be assuming the thing under test.
+    """
+    beat = 60.0 / bpm
+    phase = bur / (1.0 + bur)
+    notes = []
+    for index, pitch in enumerate(pitches):
+        whole, half = divmod(index, 2)
+        offset = phase * beat if half else 0.0
+        length = (1.0 - phase) * beat if half else phase * beat
+        notes.append(
+            SynthNote(
+                onset=start + whole * beat + offset,
+                duration=length * (1.0 - gap_fraction),
+                pitch=pitch,
+            )
+        )
+    n_beats = (len(pitches) + 1) // 2
+    beats = [start + i * beat for i in range(n_beats + 1)]
+    return notes, beats
+
+
 def held_note_phrase(pitch: int = 57, hold: float = 1.5, start: float = 0.25) -> list[SynthNote]:
     """One long held note — the case open-issue #1 shattered."""
     return [SynthNote(onset=start, duration=hold, pitch=pitch)]

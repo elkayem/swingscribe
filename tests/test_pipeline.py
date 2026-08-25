@@ -61,7 +61,17 @@ def test_registered_stages_are_current():
         "beats",
         "transcribe",
         "meter",
+        "swing",
     ]
+
+
+def test_swing_runs_after_what_it_reads():
+    """swing needs both the beat grid and the notes, and sits below transcribe
+    for the same caching reason meter does — it is milliseconds of arithmetic
+    and must never be a reason to re-run CREPE."""
+    names = [name for name, _ in pipeline.STAGES]
+    assert names.index("swing") > names.index("beats")
+    assert names.index("swing") > names.index("transcribe")
 
 
 def test_meter_runs_below_transcribe():

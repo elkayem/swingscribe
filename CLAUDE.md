@@ -138,9 +138,21 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
 
 ## Current milestone
 
-M3 — monophonic transcription (plan §7): transcribe stage runs CREPE on the
-"other" stem with periodicity+energy gating, persistence-based segmentation
-(vibrato/scoops never split notes), and octave folding; `swingscribe ab
-<file>` writes the §6 stereo ear test (original left, rendered transcription
-right) plus the transcribed MIDI. Remaining stages (swing onward) are empty
-stubs. Do not implement stage logic until the corresponding milestone.
+M4 — SwingModel (plan §5 stage 4). The swing stage turns onsets + the beat
+grid into per-window `SwingSpan`s: offbeat phase φ, BUR = φ/(1−φ), and a
+confidence. Pure arithmetic, no heavy imports, so the whole stage and its
+acceptance criterion run in CI. Results and limits: `docs/m4-swing.md`.
+
+Two things about it that are easy to get wrong:
+
+- **`confidence` is the load-bearing number, not `is_swung`.** Measured, our
+  real solos have offbeat phase spread 0.106–0.134 against uniform noise's
+  0.144, so no statistic separates "swung" from "no grid at all" at a 16-beat
+  window. `is_swung` is a z-test against straight — the warp-or-not question
+  M5 needs — and confidence is what says whether to believe it. Filter on
+  confidence.
+- **BUR precision is set upstream.** ±5% needs onsets good to ~10ms; the
+  estimator itself is already at its sampling limit (phase bias +0.0002).
+
+Remaining stages (quantize onward) are empty stubs. Do not implement stage
+logic until the corresponding milestone.

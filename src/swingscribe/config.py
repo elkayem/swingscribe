@@ -130,7 +130,42 @@ class MeterConfig(BaseModel):
 
 
 class SwingConfig(BaseModel):
+    # Beats per BUR estimate. Windows tile the grid, they do not slide — see
+    # swing.swing_spans. 16 is four bars of 4/4: long enough to gather
+    # offbeats, short enough to see a player change feel mid-chorus.
     window_beats: int = 16
+    # Which stem's notes carry the solo. None means "whatever transcribe
+    # analysed", which is the right default and the only one that stays
+    # correct when the GUI points transcribe at a different stem.
+    stem: str | None = None
+    # Onsets in this phase band are treated as offbeats. Below the floor are
+    # downbeat attacks, which carry no swing information.
+    offbeat_low: float = 0.35
+    offbeat_high: float = 0.85
+    # A window with fewer offbeats than this gets NO span rather than a
+    # guessed one — a rest or a passage of whole notes is not evidence.
+    min_onsets: int = 4
+    # φ above this reads as swung rather than straight (0.5 is dead straight;
+    # 0.55 is BUR 1.22, about the least swing anyone would notate).
+    swung_phase_threshold: float = 0.55
+    # ...and only if it is that far above straight by at least this many
+    # standard errors. This is the real classifier — see swing.swing_spans.
+    min_z: float = 2.0
+    # A weak floor on peak concentration, as a multiple of what pure noise
+    # gives. Deliberately weak: measured, concentration barely separates real
+    # swing from random scatter at this window size, so it can only reject the
+    # most obviously scattered windows.
+    min_peak_ratio: float = 1.2
+    # Histogram bin for locating the peak, and the half-width of the cluster
+    # whose median becomes the estimate. The bin is deliberately coarser than
+    # the precision we need; the cluster median supplies the precision.
+    bin_width: float = 0.02
+    cluster_width: float = 0.06
+    # Relative BUR uncertainty at which confidence is halved. The estimator
+    # sits at its sampling limit, so at fast tempos a window can be certain
+    # the feel is swung while leaving BUR loose by ~10%; this is what makes
+    # that visible downstream rather than hiding it behind a tight cluster.
+    target_precision: float = 0.10
 
 
 class QuantizeConfig(BaseModel):

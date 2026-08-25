@@ -13,7 +13,7 @@ from swingscribe import progress
 from swingscribe.cache import StageCache, root_key, stage_key
 from swingscribe.config import Config
 from swingscribe.model import Document
-from swingscribe.stages import beats, ingest, meter, separate, transcribe
+from swingscribe.stages import beats, ingest, meter, separate, swing, transcribe
 
 Stage = Callable[[Document, Config], Document]
 
@@ -29,6 +29,9 @@ STAGES: list[tuple[str, Stage]] = [
     # stage, so this placement makes moving a downbeat re-run only
     # swing/quantize (milliseconds) instead of CREPE (docs/meter-plan.md).
     ("meter", meter.run),
+    # swing after meter for the same reason meter is after transcribe: it is
+    # cheap, and anything above transcribe in the chain re-runs CREPE.
+    ("swing", swing.run),
 ]
 
 
