@@ -310,12 +310,43 @@ class _Bars:
         return section.time_signature if section else (4, 4)
 
 
+def notated_durations(
+    events: list[tuple[int, float, float, int]],
+    bars_index,
+    legato_fill: float,
+) -> list[tuple[int, float, float, int]]:
+    """Played lengths → written lengths.
+
+    Jazz is written legato and played detached. Measured on the three hand
+    transcriptions, **90-93% of notated notes fill the gap to the next note
+    exactly, and none exceed it** — so a written eighth is usually just "the
+    space until the next note", regardless of how short it was tongued.
+    Notating the played length instead writes a bebop eighth as a sixteenth,
+    which is the single biggest disagreement with the human scores.
+
+    The remaining 7-11% are notes genuinely followed by a rest, and they are
+    told apart by how much of the gap the player actually filled.
+    """
+    if legato_fill <= 0 or len(events) < 2:
+        return events
+    absolute = [bars_index.start_of(bar) + beat for bar, beat, _d, _p in events]
+    out = []
+    for index, (bar, beat, duration, pitch) in enumerate(events):
+        if index + 1 < len(events):
+            gap = absolute[index + 1] - absolute[index]
+            if gap > TICK and duration >= legato_fill * gap:
+                duration = gap
+        out.append((bar, beat, duration, pitch))
+    return out
+
+
 def build(
     quantized: list,
     sections: list[MeterSection],
     swing: bool,
     transpose: int,
     title: str = "",
+    legato_fill: float = 0.0,
 ) -> Notation:
     """Quantized notes → bars of spelled, tied, rest-filled notation."""
     if not quantized:
@@ -333,7 +364,7 @@ def build(
             first_bar = opening
     last_bar = max(n.bar for n in quantized)
     bars_index = _Bars(sections, first_bar, last_bar + 4)
-    events = without_overlap(quantized, bars_index)
+    events = notated_durations(without_overlap(quantized, bars_index), bars_index, legato_fill)
 
     by_bar: dict[int, list[NotatedNote]] = {}
     for bar_number, beat, duration, pitch in events:
@@ -394,6 +425,7 @@ def run(document: Document, config: Config) -> Document:
         swing=swung,
         transpose=config.notate.transpose,
         title=config.notate.title,
+        legato_fill=config.notate.legato_fill,
     )
     print(
         f"notate: {len(notation.bars)} bars, key {notation.key_fifths:+d} fifths, "

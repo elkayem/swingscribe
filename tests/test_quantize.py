@@ -347,3 +347,45 @@ def test_run_names_the_missing_stem():
     )
     with pytest.raises(ValueError, match="needs notes for the 'other' stem"):
         run(document, Config())
+
+
+def test_two_notes_in_a_beat_are_never_a_triplet():
+    """The largest single disagreement with the hand transcriptions.
+
+    Warping is imperfect — the phase estimate is shrunk toward the track mean
+    and real playing scatters around it — so a warped offbeat routinely lands
+    near 0.58 rather than 0.5. On pure snap error ternary then beats binary,
+    and an even eighth pair gets notated as a triplet. Measured against the
+    hand scores that was happening on a third of all intervals.
+
+    A tuplet has to be visible in the notes: three of them, at least.
+    """
+    from swingscribe.stages.quantize import choose_grid
+
+    swung_pair = [0.0, 0.62]  # a warped offbeat that did not quite reach 0.5
+    assert choose_grid(swung_pair, (4, 3), min_onsets_for_tuplet=3) == 4
+    # ...and on pure arithmetic it would have gone the other way:
+    assert choose_grid(swung_pair, (4, 3), min_onsets_for_tuplet=1) == 3
+
+
+def test_three_notes_that_really_are_a_triplet_still_are():
+    """The other half. Suppressing tuplets entirely would be a worse error
+    than allowing them too freely — a bebop line is full of real triplets."""
+    from swingscribe.stages.quantize import choose_grid
+
+    triplet = [0.0, 1 / 3, 2 / 3]
+    assert choose_grid(triplet, (4, 3), min_onsets_for_tuplet=3) == 3
+
+
+def test_a_beat_of_four_sixteenths_stays_binary():
+    from swingscribe.stages.quantize import choose_grid
+
+    assert choose_grid([0.0, 0.25, 0.5, 0.75], (4, 3), min_onsets_for_tuplet=3) == 4
+
+
+def test_the_tuplet_floor_cannot_leave_a_beat_with_no_grid():
+    """If every candidate were ternary, requiring three onsets must still
+    return something rather than falling off the end."""
+    from swingscribe.stages.quantize import choose_grid
+
+    assert choose_grid([0.0, 0.5], (3,), min_onsets_for_tuplet=3) == 3

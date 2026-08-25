@@ -163,7 +163,9 @@ def snap(position: float, divisions: int) -> tuple[float, float]:
     return snapped, position - snapped
 
 
-def choose_grid(offsets: list[float], candidates: tuple[int, ...]) -> int:
+def choose_grid(
+    offsets: list[float], candidates: tuple[int, ...], min_onsets_for_tuplet: int = 3
+) -> int:
     """Pick the subdivision that the notes in one beat actually fit.
 
     Post-warp, a swung eighth pair (0, 0.5) and a triplet figure (0, 1/3, 2/3)
@@ -171,11 +173,34 @@ def choose_grid(offsets: list[float], candidates: tuple[int, ...]) -> int:
     as the first. So both are tried and the one with less total snap error
     wins. Ties go to the earlier candidate, which is the binary grid — the
     commoner reading, and the one a notation program renders without fuss.
+
+    **Least snap error is not enough on its own, and measurement said so.**
+    Warping is imperfect — the phase estimate is shrunk toward the track mean
+    and real playing scatters around it — so a warped offbeat routinely lands
+    near 0.58 rather than 0.5. Binary is then 0.08 away and ternary 0.07, and
+    ternary wins on arithmetic while being wrong on music. Scored against the
+    hand transcriptions, that turned an even eighth pair into a triplet or a
+    dotted-eighth pair on **37% of Confirmation's intervals, 56% of All The
+    Things'** — the single largest disagreement with a human score, and
+    exactly the error the swing warp exists to prevent.
+
+    So a tuplet also has to be *visible*: it needs at least
+    `min_onsets_for_tuplet` notes in the beat. You cannot see a triplet in two
+    notes, and two notes in a beat post-warp are an eighth pair by
+    construction. This is a claim about what the evidence can support, not a
+    preference for binary.
     """
     if not offsets:
         return candidates[0]
-    best, best_error = candidates[0], None
-    for divisions in candidates:
+    allowed = [
+        divisions
+        for divisions in candidates
+        if divisions % 3 != 0 or len(offsets) >= min_onsets_for_tuplet
+    ]
+    if not allowed:
+        allowed = [candidates[0]]
+    best, best_error = allowed[0], None
+    for divisions in allowed:
         error = sum(abs(snap(offset, divisions)[1]) for offset in offsets)
         if best_error is None or error < best_error - 1e-12:
             best, best_error = divisions, error
@@ -223,6 +248,7 @@ def quantize_notes(
     resolution: int = 16,
     straight_bur_ceiling: float = 1.6,
     allow_triplets: bool = True,
+    min_onsets_for_tuplet: int = 3,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -258,7 +284,10 @@ def quantize_notes(
     per_beat: dict[int, list[float]] = {}
     for index, position, _duration, _pitch in warped:
         per_beat.setdefault(index, []).append(position - index)
-    grids = {index: choose_grid(offsets, candidates) for index, offsets in per_beat.items()}
+    grids = {
+        index: choose_grid(offsets, candidates, min_onsets_for_tuplet)
+        for index, offsets in per_beat.items()
+    }
 
     out, positions = [], []
     for index, position, duration, pitch in warped:
@@ -348,6 +377,7 @@ def run(document: Document, config: Config) -> Document:
         resolution=qc.resolution,
         straight_bur_ceiling=qc.straight_bur_ceiling,
         allow_triplets=qc.allow_triplets,
+        min_onsets_for_tuplet=qc.min_onsets_for_tuplet,
     )
 
     by_beat, track = pooled_phase(document.swing, qc.straight_bur_ceiling)

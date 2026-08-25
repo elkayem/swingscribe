@@ -197,6 +197,12 @@ class QuantizeConfig(BaseModel):
     # this a genuine triplet figure is silently rewritten as a swung eighth
     # pair, which post-warp it closely resembles (plan §5).
     allow_triplets: bool = True
+    # How many onsets a beat needs before a TERNARY grid may be chosen for it.
+    # You cannot see a triplet in two notes, and post-warp two notes in a beat
+    # are an eighth pair by construction — letting arithmetic alone decide
+    # notated a swung pair as a triplet on a third of all intervals. 1 or 2
+    # restores the pre-M6 behaviour.
+    min_onsets_for_tuplet: int = 3
 
 
 class NotateConfig(BaseModel):
@@ -209,6 +215,15 @@ class NotateConfig(BaseModel):
     # Which quantized voice to notate; empty means the only one there is.
     stem: str = ""
     title: str = ""
+    # A note whose PLAYED length reaches this fraction of the gap to the next
+    # note would be written as filling that gap. Humans notate that way — 90
+    # to 93% of the notes in the hand transcriptions fill their gap exactly
+    # and none exceed it — but so, already, do we: `notate.without_overlap`
+    # truncates each note at the next onset, and 93-96% of our notated notes
+    # come out filling their gap without any help. So this changes almost
+    # nothing (mean note-value agreement 0.4628 off, 0.4665 at 0.75) and
+    # ships OFF. Kept because the measurement is worth not repeating.
+    legato_fill: float = 0.0
 
     @property
     def transpose(self) -> int:
