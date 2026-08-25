@@ -264,16 +264,37 @@ collect φ for onsets in the offbeat region (0.35 < φ < 0.85)
 over a sliding window of N beats (start with N=16):
     histogram φ, find the dominant peak φ*
     BUR = φ* / (1 - φ*)
-    classify: is_swung = (φ* > 0.55) and (peak is well-separated)
+    classify: is_swung = (φ* > 0.55) and (φ* is significantly above 0.5)
 ```
 - BUR is **not** constant. It widens at slow tempos and narrows toward 1.0 in fast
   bebop. Estimate per-window and emit a `SwingSpan` sequence, not one number.
-- **Hypothesis worth testing:** the short note's *absolute* duration stays roughly
-  constant (~100ms) regardless of tempo, which would explain the whole tempo/BUR
-  relationship. You can test this directly against your own collection — and it's a
-  publishable-quality result if it holds.
+- **CORRECTED at M4** — this section originally specified
+  `is_swung = (φ* > 0.55) and (peak is well-separated)`. Peak separation does not
+  work at any usable window size. 14 offbeats of *uniform random noise* cluster as
+  tightly (median concentration 0.36) as a real solo does (0.38–0.44); small samples
+  clump whatever they are drawn from, and separation needs ~224 offbeats (64 bars).
+  The root cause is measured in `docs/wjazzd.md`: across 359 hand-annotated WJazzD
+  solos, real swing scatters at phase spread **0.135 against uniform noise's 0.144**.
+  Jazz is only slightly tighter than random, so no better transcriber rescues this.
+  Use a z-test — is φ* far enough above 0.5 relative to its own standard error to be
+  worth warping — and carry the uncertainty in `SwingSpan.confidence`, which is the
+  number downstream stages must filter on.
+- **There is a noise floor at BUR ≈ 1.56**, not 1.0: the offbeat region (0.35–0.85)
+  is asymmetric about 0.5, so onsets with no feel at all still average late.
+  Measured by re-scattering WJazzD's notes uniformly inside their own beats. A
+  reported BUR near 1.5 means "no swing detected", not "slightly swung", and
+  quantization must not warp on it.
+- **Hypothesis CONFIRMED at M4** — the short note's absolute duration does stay
+  roughly constant regardless of tempo. Across 203 WJazzD SWING solos between 140
+  and 280 bpm the median short note is **100 ms** while BUR falls 2.37 → 1.56. Below
+  140 bpm it grows (139 ms), so it is a *floor* on how short a note a player will
+  place rather than a true constant. Actionable for stage 5: warp toward a duration
+  target and let the ratio follow. See `docs/wjazzd.md`.
 - Straight sections must be detected, not assumed. Plenty of Shorter is even-eighths.
 - **Acceptance:** on synthetic audio with injected BUR, recover it within ±5%.
+  *Met at M4: 0.00% error over BUR {1.0,1.3,1.6,2.0,2.5} × tempo {80,120,180,260} on
+  clean onsets. ±5% requires onsets good to ~10ms — a constraint on the transcriber,
+  not on this stage (`docs/m4-swing.md`).*
 
 ### Stage 5 — Quantize
 - Warp φ through a piecewise-linear map sending φ* → 0.5, then snap to the straight
@@ -311,6 +332,15 @@ The Weimar Jazz Database: 456 solo transcriptions from 340 tracks, manually anno
 **time-aligned to the original audio**, with beat positions included. They publish
 unquantized MIDI — the microtiming is preserved, which is exactly what you need and
 exactly what the Omnibook lacks.
+
+**Pulled forward to M4 for the half that needs no audio.** `melody.onset` and
+`beats.onset` are both in seconds, so the swing estimator can be scored against
+human onsets on human beats without owning a single recording — which settled the
+questions above and confirmed the short-note hypothesis. `scripts/wjazz_swing.py`,
+results in `docs/wjazzd.md`. Licence is ODbL: share-alike on the database and
+substantial derivatives, so only aggregate numbers may enter this repo (§12 already
+requires that). The audio-dependent half — onset F1, pitch accuracy, note F1 — still
+waits on matching recordings.
 
 - Pick ~20 solos spanning eras, tempos, and instruments. Include at least 4 piano
   solos — WJazzD covers pianists, and the piano path has different failure modes

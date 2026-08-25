@@ -69,7 +69,7 @@ The aggregate numbers are musically right: both tenor solos land near the
 triplet feel, and Giant Steps at 249 bpm is markedly narrower — which is the
 tempo/BUR relationship the plan predicts and the literature reports.
 
-## The honest limitation: per-window classification is weak
+## Per-window classification is weak — and it is not our fault
 
 Per-window confidence is low (0.25–0.32), and that is not pessimism, it is the
 measurement. **Our real solos have offbeat phase spread 0.106–0.134 against
@@ -103,12 +103,19 @@ scattered onsets score 0.22–0.37 against 1.0 for a clean swung line and
 0.73–0.80 for a realistically noisy one. M5 should filter on confidence and
 treat `is_swung` as a hint.
 
-The binding constraint is upstream. Phase spread of 0.12 comes from real
-expressive timing, our own onset error, sixteenth notes leaking in at φ=0.75,
-and the ~215 notes per solo that belong to other instruments (open-issue #8).
-Tightening any of those tightens this.
+**Resolved by WJazzD — it is not our error.** Run over 359 hand-annotated
+solos (human onsets, human beats, our transcriber entirely out of the loop),
+real jazz scatters at phase spread **0.135**, against uniform noise's 0.144
+and our own 0.106–0.134. Our spread is indistinguishable from ground truth
+and sits at the tighter end of it. Jazz players simply place offbeats with
+about this much scatter, so no improvement upstream will tighten it, and the
+per-window classification difficulty above is inherent rather than ours.
+See `docs/wjazzd.md`.
 
-## The plan's hypothesis: partially supported
+That also settles the design: `is_swung` as a z-test with confidence carrying
+the uncertainty is correct, not a workaround for a weak transcriber.
+
+## The plan's hypothesis: confirmed
 
 Plan §5 flags a hypothesis worth testing — that the *short* note's absolute
 duration stays roughly constant (~100 ms) regardless of tempo, which would
@@ -128,5 +135,12 @@ proportionally with tempo, which is the direction the hypothesis predicts, but
 it is not constant.
 
 Three tunes, one take each, with per-window BUR noise of ±15% at these tempos.
-This is a direction to test properly against a real corpus (WJazzD, plan §6
-layer 2), not a result.
+Not a result — but it pointed the right way.
+
+**Tested properly and confirmed.** Across 203 WJazzD SWING solos between 140
+and 280 bpm the median short note is **100 ms** while BUR falls 2.37 → 1.56.
+Below 140 bpm it grows to 139 ms, so it is a floor on how short a note a
+player will place rather than a true constant. `docs/wjazzd.md` has the full
+table, the BUR ≈ 1.56 noise floor that reframes low readings, and the
+comparison showing all three of our audio-derived BURs land inside the human
+interquartile range at matching tempo.

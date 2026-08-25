@@ -145,14 +145,20 @@ acceptance criterion run in CI. Results and limits: `docs/m4-swing.md`.
 
 Two things about it that are easy to get wrong:
 
-- **`confidence` is the load-bearing number, not `is_swung`.** Measured, our
-  real solos have offbeat phase spread 0.106–0.134 against uniform noise's
-  0.144, so no statistic separates "swung" from "no grid at all" at a 16-beat
-  window. `is_swung` is a z-test against straight — the warp-or-not question
-  M5 needs — and confidence is what says whether to believe it. Filter on
-  confidence.
+- **`confidence` is the load-bearing number, not `is_swung`.** No statistic
+  separates "swung" from "no grid at all" at a 16-beat window, and that is
+  *inherent*: across 359 hand-annotated WJazzD solos real jazz scatters at
+  phase spread 0.135 against uniform noise's 0.144. `is_swung` is a z-test
+  against straight — the warp-or-not question M5 needs — and confidence says
+  whether to believe it. Filter on confidence.
+- **BUR ≈ 1.56 is the noise floor, not "slightly swung."** The offbeat region
+  is asymmetric about 0.5, so feel-free onsets still average late. Never warp
+  on a reading near 1.5.
 - **BUR precision is set upstream.** ±5% needs onsets good to ~10ms; the
   estimator itself is already at its sampling limit (phase bias +0.0002).
+- Swing timing is validated against WJazzD without any audio
+  (`scripts/wjazz_swing.py`, `docs/wjazzd.md`). The database is ODbL — only
+  aggregate numbers may enter this repo, and it lives outside it.
 
 Remaining stages (quantize onward) are empty stubs. Do not implement stage
 logic until the corresponding milestone.
