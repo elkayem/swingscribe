@@ -33,17 +33,30 @@ what sent months of attention toward timing. Do not repeat it.
 ## Current state
 
 WJazzD — note F1 is onset within 50 ms **and** exact pitch, against a human
-annotation of the same recording:
+annotation of the same recording. One audio file can hold several annotated
+solos and each is scored separately:
 
 | tune | soloist | tempo | note F1 | note recall | beat F1 |
 |---|---|---|---|---|---|
-| Orbits | Herbie Hancock, piano | 265 | **0.828** | 0.812 | 0.970 |
-| Walkin' | Miles Davis, trumpet | 128 | **0.829** | 0.849 | 0.968 |
 | Yesterdays | J.J. Johnson, trombone | 125 | **0.835** | 0.849 | 0.962 |
-| Oleo | Red Garland, piano | 265 | **0.674** | 0.589 | 0.985 |
-| | | **mean** | **0.791** | | **0.971** |
+| Walkin' | Miles Davis, trumpet | 128 | **0.829** | 0.849 | 0.968 |
+| Orbits | Herbie Hancock, piano | 265 | **0.828** | 0.812 | 0.970 |
+| Dolores | Miles Davis, trumpet | 275 | **0.755** | 0.765 | — |
+| Dolores | Herbie Hancock, piano | 282 | **0.749** | 0.731 | — |
+| Dolores | Wayne Shorter, tenor | 277 | **0.676** | 0.660 | — |
+| Oleo | Red Garland, piano | 265 | **0.674** | 0.590 | 0.985 |
+| | | **mean** | **0.764** | | **0.972** |
 
-MuseScore — the three hand-transcribed solos:
+Notation — of the notes we get right, how many are *written* the way the
+human wrote them:
+
+| tune | bars | matched | rhythm | note value |
+|---|---|---|---|---|
+| Giant Steps | 67 | 241 | **0.785** | **0.693** |
+| Confirmation | 130 | 581 | **0.779** | **0.673** |
+| All The Things | 74 | 376 | **0.620** | **0.683** |
+
+MuseScore — audio against notated rhythm, the pessimistic measure:
 
 | tune | pitch F1 | onset F1 | note F1 |
 |---|---|---|---|
@@ -51,10 +64,10 @@ MuseScore — the three hand-transcribed solos:
 | All The Things | 0.892 | 0.586 | 0.516 |
 | Giant Steps | 0.702 | 0.611 | 0.512 |
 
-The gap between the two tables is the point. Against audio the transcriber is
-at note F1 0.79; against notation it reads 0.51. Some of that gap is real —
-notation idealizes what was played, and that difference is the transcriber's
-to explain — but it is not evidence about hearing.
+The gap between the first and last tables is the point. Against audio the
+transcriber is at note F1 0.76; against notation it reads 0.51. Some of that
+gap is real — notation idealizes what was played, and that difference is the
+transcriber's to explain — but it is not evidence about hearing.
 
 ## Open deficiencies
 
@@ -100,24 +113,44 @@ Down on every tune. The knob stays, defaulted off, because the mechanism is
 sound and a better rise/dip discriminator may yet win — but it must not be
 turned on without re-running `run_eval.py`.
 
-### D3 — Octave errors on piano
+### D3 — For a piano soloist, `htdemucs_6s` is the wrong model
+
+**Measured: 6-stem separation of a piano solo produces a quarter to a
+twentieth of the notes.** The 6-stem model routes piano into its own `piano`
+stem, so `other` — which is what every sidecar asks for — comes back nearly
+empty when the soloist *is* the pianist. The 4-stem `htdemucs_ft` has no
+piano stem, so its `other` keeps the piano and works.
+
+| tune, piano soloist | `htdemucs_ft` / other | `htdemucs_6s` / other | `htdemucs_6s` / piano |
+|---|---|---|---|
+| Oleo (Red Garland) | 285 notes, F1 0.674 | 71 notes | 149 notes, no match |
+| Gingerbread Boy (Hancock) | to be measured | 485 notes over 316 s, no match | — |
+
+Not a defect in the pipeline so much as a trap in choosing the stem, but it
+cost a whole tune off the benchmark and it will do so again. **A piano
+soloist wants `htdemucs_ft`.** Horn soloists are unaffected: Walkin' and
+Yesterdays are both 6-stem and score 0.83.
+
+### D4 — Octave errors on piano
 
 **11 of Orbits' 18 pitch errors are exactly +12.** Small in absolute terms
 (2.4% of the solo) but it is a systematic, nameable error rather than noise,
 and it is the one error class a listener notices immediately.
 
-### D4 — Nothing measures the notation itself
+### D5 — Notation: All The Things lags the other two on rhythm
 
-Notate and export now exist and produce MusicXML that opens, but no number
-on this page scores *notation*. The .mscz benchmark compares pitch sequences
-and onset times, not note values, ties, spelling or bar assembly — so a score
-could be full of unreadable rhythms and every table above would be unmoved.
+Rhythm is 0.78 on two tunes and **0.620** on All The Things; note value sits
+at 0.67-0.69 across all three. Both numbers roughly doubled once the two grid
+bugs below were fixed, so what remains is no longer dominated by one cause.
 
-The obvious measure is available and not yet built: our MusicXML against the
-`.mscz` for the same solo, compared as notated rhythm rather than as time.
-`mscz.py` already parses one side of it.
+Worth knowing before digging: at a SIXTEENTH-note tolerance rather than a
+thirty-second, rhythm was already 0.92-0.94 before any of this work. The
+disagreements are all one small unit — nobody is writing unreadable rhythm.
 
-### D5 — The plan's milestone numbering has drifted from CLAUDE.md's
+All The Things is also the tune whose beat grid the tracker warned about (58
+octave-error outliers, stdev 30.1 bpm), which is the first thing to check.
+
+### D6 — The plan's milestone numbering has drifted from CLAUDE.md's
 
 The plan's table has M5 = "Quantize + Notate + Export" and M6 = "WJazzD eval
 harness + pinned baselines"; CLAUDE.md has M5 = Quantize and M6 = Notate.
@@ -160,6 +193,45 @@ plateau ended. `src/swingscribe/wjazz.py`, tested in `tests/test_wjazz.py`.
 Investigated and **false**. I had compared the raw fitted offset against the
 span rather than the placed first onset; the user's spans cover every
 annotated solo to within 0.4 s.
+
+### R4 — Note values are not being written from played durations
+
+Tested and **the hypothesis was right about humans and wrong about us**. 90
+to 93% of the notes in the hand transcriptions fill the gap to the next note
+exactly and none exceed it; but 93-96% of ours already do too, because
+`notate.without_overlap` truncates every note at the next onset. Adding an
+explicit legato rule moved the mean note-value agreement from 0.4628 to
+0.4665. `notate.legato_fill` ships off.
+
+
+### R5 — A swung eighth pair was being notated as it was played
+
+**The largest single disagreement with the hand transcriptions**, and only
+visible once the notation was scored as notation. Their even eighth (0.500 of
+a quarter) came out as ours 0.667, 0.333, 0.750 or 0.250 — a triplet or a
+dotted-eighth pair. That is exactly the failure the swing warp exists to
+prevent.
+
+Both halves were `choose_grid` reading more resolution out of a beat than its
+notes can demonstrate. Warping is imperfect — the phase estimate is shrunk
+toward the track mean and real playing scatters — so a warped offbeat
+routinely lands near 0.6 rather than 0.5. On pure snap error, ternary beats
+binary there; and once tuplets were restricted, the sixteenth grid took it
+instead.
+
+Fixed in 49f5f79 and 26a3402: a tuplet needs three onsets to be visible, an
+eighth-note grid became a candidate at all, and the coarsest grid within
+`grid_slack` of the best wins — with the hard constraint that a grid which
+merges two onsets is too coarse whatever its error.
+
+  rhythm 0.539 → 0.728      value 0.463 → 0.683
+
+The stopping rule matters as much as the fix. The notation score rises
+monotonically all the way to "write everything as eighth notes", which three
+bebop solos would reward and any music with real sixteenths would not, so
+`grid_slack` is **not** set from it. It is set by quantize's own acceptance
+criterion — plan §5's 20 ms round trip, which measures what coarsening costs
+the *performance*. 0.05 is the largest value that stays inside it.
 
 ## Assumptions on the record
 
