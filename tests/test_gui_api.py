@@ -398,7 +398,7 @@ def test_beats_endpoint_rejects_a_nonsense_time_signature(world, monkeypatch):
     assert response.status_code == 400
 
 
-def _seed_review(world, monkeypatch, *, stem="other", start=1.0, end=3.0):
+def _seed_review(world, monkeypatch, *, stem="other", start=1.0, end=3.0, pitches=(64,)):
     """Populate the review cache for a span without running CREPE."""
     from dataclasses import dataclass
 
@@ -420,14 +420,23 @@ def _seed_review(world, monkeypatch, *, stem="other", start=1.0, end=3.0):
 
     from swingscribe.model import NoteEvent
 
-    notes = [NoteEvent(onset=start + 0.1, duration=0.2, pitch=64, confidence=0.8, source=stem)]
+    notes = [
+        NoteEvent(
+            onset=round(start + 0.1 + 0.5 * index, 3),
+            duration=0.2,
+            pitch=pitch,
+            confidence=0.8,
+            source=stem,
+        )
+        for index, pitch in enumerate(pitches)
+    ]
     diag = Diag(
         start=start,
         f0_midi=[64.0, 64.0],
         periodicity=[0.9, 0.9],
         energy_ok=[True, True],
         pitch=[64.0, 64.0],
-        onsets=[start + 0.1],
+        onsets=[note.onset for note in notes],
     )
     monkeypatch.setattr("swingscribe.stages.transcribe.analyze", lambda sp, tc: (notes, diag))
 
@@ -671,3 +680,184 @@ def test_an_unknown_ensemble_in_the_sidecar_is_ignored(world, monkeypatch):
     )
     assert response.status_code == 200
     assert seen["ensemble"] == world["config"].transcribe.ensemble
+
+
+# ── export ──────────────────────────────────────────────────────────────────
+
+
+def _seed_beats(monkeypatch, world, step: float = 0.5, count: int = 13):
+    """A cached beat grid, without running beat_this.
+
+    The export endpoint never tracks beats itself — that is the Beats button's
+    job — so what it needs is a cache hit, which is what this fakes.
+    """
+    from swingscribe.model import BeatGrid, Document
+
+    def cached(path, config, stages):
+        return Document(
+            audio_path=str(path),
+            sample_rate=world["rate"],
+            beat_grid=BeatGrid(
+                beats=[round(i * step, 6) for i in range(count)], downbeats=[], beats_per_bar=4
+            ),
+        )
+
+    monkeypatch.setattr("swingscribe.pipeline.cached_document", cached)
+
+
+def test_export_needs_a_transcription_first(world, monkeypatch):
+    """409 with the fix in the message, not 500: the button is telling you
+    which earlier button you still owe it."""
+    _seed_beats(monkeypatch, world)
+    track = open_track(world)
+    response = world["client"].post(
+        f"/api/tracks/{track['id']}/export",
+        params={"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0},
+    )
+    assert response.status_code == 409
+    assert "transcribe" in response.json()["detail"].lower()
+
+
+def test_export_needs_a_beat_grid_first(world, monkeypatch):
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0)
+    monkeypatch.setattr("swingscribe.pipeline.cached_document", lambda p, c, stages: None)
+    response = world["client"].post(
+        f"/api/tracks/{track['id']}/export",
+        params={"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0},
+    )
+    assert response.status_code == 409
+    assert "beats" in response.json()["detail"].lower()
+
+
+def test_export_writes_musicxml_beside_the_audio(world, monkeypatch):
+    """Beside the audio, never in the cache: the cache is deletable derived
+    data, and a score you have to dig out of it is a score you will not open."""
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0)
+    _seed_beats(monkeypatch, world)
+    response = world["client"].post(
+        f"/api/tracks/{track['id']}/export",
+        params={"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    written = pathlib.Path(payload["path"])
+    assert written.parent == world["source"].parent
+    assert written.suffix == ".musicxml"
+    assert payload["bars"] >= 1
+    assert "<score-partwise" in written.read_text(encoding="utf-8")
+
+
+def test_the_span_is_in_the_filename(world, monkeypatch):
+    """Exporting a second chorus must not overwrite the first."""
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0)
+    _seed_beats(monkeypatch, world)
+    payload = (
+        world["client"]
+        .post(
+            f"/api/tracks/{track['id']}/export",
+            params={"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0},
+        )
+        .json()
+    )
+    assert "1-3s" in pathlib.Path(payload["path"]).name
+
+
+def test_a_silenced_note_does_not_come_back_on_the_page(world, monkeypatch):
+    """The score must hold exactly the notes the A/B render plays. An erasure
+    that survives into the export is a note nobody asked for, in print."""
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0, pitches=(64, 67, 71))
+    _seed_beats(monkeypatch, world)
+    params = {"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0}
+    before = world["client"].post(f"/api/tracks/{track['id']}/export", params=params).json()
+
+    world["client"].post(
+        f"/api/tracks/{track['id']}/state",
+        json={"state": {"erasures": [{"onset": 1.6, "pitch": 67, "reason": "not-solo"}]}},
+    )
+    after = world["client"].post(f"/api/tracks/{track['id']}/export", params=params).json()
+    assert after["notes"] == before["notes"] - 1
+    # The erased note is gone from the page too, not merely from the count:
+    # a G4 written where nobody asked for one is the whole failure mode.
+    xml = pathlib.Path(after["path"]).read_text(encoding="utf-8")
+    assert "<step>G</step>" not in xml
+
+
+def test_export_says_so_when_every_note_is_silenced(world, monkeypatch):
+    """Rather than writing an empty score and calling it a success."""
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0)
+    _seed_beats(monkeypatch, world)
+    world["client"].post(
+        f"/api/tracks/{track['id']}/state",
+        json={"state": {"erasures": [{"onset": 1.1, "pitch": 64, "reason": "not-solo"}]}},
+    )
+    response = world["client"].post(
+        f"/api/tracks/{track['id']}/export",
+        params={"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0},
+    )
+    assert response.status_code == 409
+    assert "silenced" in response.json()["detail"]
+
+
+def test_transposition_comes_from_the_sidecar(world, monkeypatch):
+    """Nothing in the audio says which horn it was, so it can only come from
+    the listener — and the key signature has to move with it."""
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0)
+    _seed_beats(monkeypatch, world)
+    world["client"].post(
+        f"/api/tracks/{track['id']}/state", json={"state": {"transposition": "Bb-tenor"}}
+    )
+    payload = (
+        world["client"]
+        .post(
+            f"/api/tracks/{track['id']}/export",
+            params={"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0},
+        )
+        .json()
+    )
+    assert payload["transpose"] == 14
+    xml = pathlib.Path(payload["path"]).read_text(encoding="utf-8")
+    assert "<transpose>" in xml
+
+
+def test_a_typo_in_the_sidecar_transposition_falls_back_to_concert(world, monkeypatch):
+    """The sidecar is hand-editable; a bad value there must not break the
+    button or reach pydantic as an invalid literal."""
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0)
+    _seed_beats(monkeypatch, world)
+    world["client"].post(
+        f"/api/tracks/{track['id']}/state", json={"state": {"transposition": "F-horn"}}
+    )
+    payload = (
+        world["client"]
+        .post(
+            f"/api/tracks/{track['id']}/export",
+            params={"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0},
+        )
+        .json()
+    )
+    assert payload["transpose"] == 0
+
+
+def test_the_exported_score_can_be_downloaded_back(world, monkeypatch):
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0)
+    _seed_beats(monkeypatch, world)
+    params = {"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0}
+    missing = world["client"].get(f"/api/tracks/{track['id']}/export", params=params)
+    assert missing.status_code == 404
+    world["client"].post(f"/api/tracks/{track['id']}/export", params=params)
+    response = world["client"].get(f"/api/tracks/{track['id']}/export", params=params)
+    assert response.status_code == 200
+    assert "<score-partwise" in response.text
+    assert ".musicxml" in response.headers["content-disposition"]
+
+
+def test_config_offers_exactly_what_the_validator_accepts(world):
+    """The menus are built from this, so a hand-copied list here would drift
+    and start offering values the server rejects."""
+    from swingscribe.config import ENSEMBLES, TRANSPOSITIONS
+
+    payload = world["client"].get("/api/config").json()
+    assert payload["ensembles"] == list(ENSEMBLES)
+    assert payload["transpositions"] == list(TRANSPOSITIONS)
+    assert payload["default_ensemble"] in ENSEMBLES
+    assert payload["default_transposition"] in TRANSPOSITIONS

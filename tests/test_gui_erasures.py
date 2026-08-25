@@ -130,6 +130,42 @@ def test_erasures_outside_the_span_are_carried_but_not_reported():
     assert resolved["carried"] == [stored[1]]
 
 
+def test_a_vanished_erasure_is_not_reported_as_moved():
+    """The transcriber no longer emits that note at all. That is it agreeing
+    with the cut you made by hand -- which is what corroboration did to most of
+    Orbits' erased left hand (M7b) -- so it must not be lumped in with the case
+    that actually needs a second look."""
+    stored = [erasures.record(note(11.0, 64), "other", "m")]
+    resolved = erasures.resolve(stored, [note(20.0, 60)], SPAN)
+    assert len(resolved["unmatched"]) == 1
+    assert resolved["moved"] == []
+
+
+def test_an_erasure_with_another_pitch_at_that_moment_is_moved():
+    """Something is still sounding there, an octave off or on another voice.
+    This is the one worth looking at."""
+    stored = [erasures.record(note(11.0, 64), "other", "m")]
+    resolved = erasures.resolve(stored, [note(11.005, 52)], SPAN)
+    assert len(resolved["unmatched"]) == 1
+    assert resolved["moved"] == resolved["unmatched"]
+
+
+def test_moved_is_a_subset_of_unmatched():
+    """A matched erasure is silenced, not reported at all -- so an erasure can
+    never be both silenced and moved."""
+    stored = [
+        erasures.record(note(11.0, 64), "other", "m"),  # matches exactly
+        erasures.record(note(10.5, 71), "other", "m"),  # a 62 sounds there instead
+        erasures.record(note(12.01, 55), "other", "m"),  # a 67 sounds there instead
+        erasures.record(note(12.6, 60), "other", "m"),  # nothing there at all
+    ]
+    resolved = erasures.resolve(stored, NOTES, SPAN)
+    assert resolved["silenced"] == [2]
+    assert len(resolved["unmatched"]) == 3
+    assert len(resolved["moved"]) == 2
+    assert all(e in resolved["unmatched"] for e in resolved["moved"])
+
+
 def test_no_span_reports_everything():
     stored = [erasures.record(note(200.0, 70), "other", "m")]
     assert len(erasures.resolve(stored, NOTES, None)["unmatched"]) == 1

@@ -332,10 +332,24 @@ select {
 .toast.error { border-color: var(--danger); color: var(--danger); }
 
 /* ── Screen 4: transcribe & review ─────────────────────────────────────────── */
-.review-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.review-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 #transcribe-btn { background: var(--accent); border-color: var(--accent); color: #17130a; }
 #transcribe-btn:hover:not(:disabled) { background: #ffbb5c; border-color: #ffbb5c; }
 #review-summary { font: 12px var(--mono); }
+/* Small selects that sit inline with a button rather than in a form. */
+.picker-label { font-size: 12px; color: var(--muted); cursor: help; }
+.review-bar select, .export-bar select { padding: 5px 8px; font-size: 13px; }
+
+/* ── export ─────────────────────────────────────────────────────────────── */
+/* Below the ear test on purpose: exporting is the last thing you do, after
+   you have heard the span and cut what does not belong to it. */
+.export-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line);
+}
+#export-info { font: 12px var(--mono); }
+#export-info.written { color: var(--lead); }
+#export-download { text-decoration: none; line-height: 1.6; }
 
 /* ── ground truth ───────────────────────────────────────────────────────── */
 .gt-bar {
@@ -403,6 +417,9 @@ select {
 .erasure-warning {
   font: 11.5px var(--mono); color: var(--gt-wrong); cursor: help;
 }
+/* An erasure whose note the transcriber no longer emits is agreement, not a
+   fault. Colouring it like an error put a Discard button next to good news. */
+.erasure-warning.benign { color: var(--muted); }
 /* The erase tool changes what a click does, so it has to be unmistakable from
    the roll itself and not only from which chip is lit. */
 .pianoroll.erasing { cursor: cell; border-color: var(--accent); }

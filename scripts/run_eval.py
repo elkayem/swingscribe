@@ -78,7 +78,7 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
             / f"{sidecar['stem']}.wav"
         )
         if not stem.is_file():
-            log(f"  {name}: no {sidecar['stem']!r} stem for {sidecar['model']} — skipped")
+            log(f"  {name}: no {sidecar['stem']!r} stem for {sidecar['model']} â€” skipped")
             continue
         settings = base.transcribe.model_copy(
             update={
@@ -183,61 +183,39 @@ def notate_run(name: str, run: dict, grid: dict):
 
     The stages below transcribe are all pure arithmetic, so this is a second
     or two per tune and needs no audio -- only the notes and the beat grid.
+    The assembly itself lives in the package (swingscribe.notation), because
+    the GUI's Export button needs exactly the same thing and a second copy of
+    it here is how the scoring harness has gone wrong before (CLAUDE.md).
     """
     import json as _json
 
     from swingscribe.config import Config
-    from swingscribe.model import BeatGrid, Document, MeterSection, NoteEvent
-    from swingscribe.stages import notate, quantize, swing
+    from swingscribe.model import NoteEvent
+    from swingscribe.notation import notation_for_span
 
-    low, high = run["region"]
-    beats = [b for b in grid["beats"] if low - 2 <= b <= high + 2]
-    if len(beats) < 8:
-        return None
     sidecar_path = BENCH / f"{name}.swingscribe.json"
     sidecar = {}
     if sidecar_path.is_file():
         sidecar = _json.loads(sidecar_path.read_text(encoding="utf-8"))
-    anchor = sidecar.get("anchor") or beats[0]
 
-    document = Document(
-        audio_path=str(BENCH / name),
-        sample_rate=44100,
-        beat_grid=BeatGrid(beats=beats, downbeats=[], beats_per_bar=4),
-        meter=[
-            MeterSection(
-                start=beats[0],
-                end=beats[-1],
-                pulses_per_bar=4,
-                time_signature=(4, 4),
-                anchor=anchor,
-                first_bar=1,
+    return notation_for_span(
+        str(BENCH / name),
+        [
+            NoteEvent(
+                onset=n["onset"],
+                duration=n["duration"],
+                pitch=n["pitch"],
+                confidence=n["confidence"],
+                source="crepe",
             )
+            for n in run["notes"]
         ],
-        notes={
-            run["stem"]: [
-                NoteEvent(
-                    onset=n["onset"],
-                    duration=n["duration"],
-                    pitch=n["pitch"],
-                    confidence=n["confidence"],
-                    source="crepe",
-                )
-                for n in run["notes"]
-            ]
-        },
+        grid["beats"],
+        tuple(run["region"]),
+        stem=run["stem"],
+        config=Config(),
+        anchor=sidecar.get("anchor"),
     )
-    base = Config()
-    config = base.model_copy(
-        update={
-            "swing": base.swing.model_copy(update={"stem": run["stem"]}),
-            "quantize": base.quantize.model_copy(update={"stem": run["stem"]}),
-            "notate": base.notate.model_copy(update={"stem": run["stem"]}),
-        }
-    )
-    for stage in (swing.run, quantize.run, notate.run):
-        document = stage(document, config)
-    return document.notation
 
 
 def notation_scores(runs: dict, grids: dict) -> dict:

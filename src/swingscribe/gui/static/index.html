@@ -183,6 +183,8 @@
 
     <div class="review-bar">
       <button id="transcribe-btn">Transcribe span</button>
+      <label class="picker-label" for="ensemble-select" title="Who is playing. A trio or solo piano gets a second opinion from the polyphonic piano model; a horn never does — a piano model asked about a saxophone vouches for nothing.">Ensemble</label>
+      <select id="ensemble-select"></select>
       <span class="muted" id="review-range"></span>
       <span class="spacer"></span>
       <span class="muted" id="review-summary" hidden></span>
@@ -261,6 +263,15 @@
         </div>
         <span class="spacer"></span>
         <span class="hint">A wrong downbeat is obvious against the bar lines; open issue #1 shows as repeated same-pitch fragments.</span>
+      </div>
+
+      <div class="export-bar" id="export-bar">
+        <button id="export-btn" title="Write this span as MusicXML, beside the audio">Export MusicXML</button>
+        <label class="picker-label" for="transpose-select" title="The part's key. Nothing in the audio says which horn it was, so this can only come from you — and the key signature moves with it.">Written for</label>
+        <select id="transpose-select"></select>
+        <span class="muted" id="export-info">Bars are numbered from 1 within the span, and silenced notes are left out.</span>
+        <span class="spacer"></span>
+        <a class="chip" id="export-download" hidden download>Download</a>
       </div>
     </div>
   </section>

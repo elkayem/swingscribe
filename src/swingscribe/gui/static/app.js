@@ -47,6 +47,7 @@ const state = {
   silenced: new Set(),      // note indices marked "heard right, not the solo"
   carried: [],              // stored erasures with no note in this transcription
   unmatched: [],            // the subset of those inside the span — worth reporting
+  moved: [],                // of those, the ones with a note still sounding there
   undoStack: [],            // whole-state snapshots; see pushHistory
   redoStack: [],
   scorePath: null,          // hand transcription chosen for the overlay
@@ -54,6 +55,9 @@ const state = {
   gtClasses: [...CLASSES],  // which alignment classes are drawn
   formStart: null,          // seconds; where the tune's form begins (bar 1)
   click: false,             // mix a metronome onto the audition
+  ensemble: null,           // horn-led | trio | solo-piano; null = server default
+  transposition: null,      // the exported part's key; null = server default
+  exported: null,           // {path, bars, notes, ...} from the last export
 };
 
 const mix = { engine: null };
@@ -342,11 +346,16 @@ async function loadTrack(track) {
   state.formStart = remembered.form_start ?? null;
   state.click = remembered.click ?? false;
   state.scorePath = remembered.score ?? null;
+  state.ensemble = remembered.ensemble ?? null;
+  state.transposition = remembered.transposition ?? null;
+  state.exported = null;
+  renderChoices();
   // Carried until a transcription exists to match them against; showReview
   // replaces these with the server's resolution.
   state.carried = Array.isArray(remembered.erasures) ? remembered.erasures : [];
   state.silenced.clear();
   state.unmatched = [];
+  state.moved = [];
   state.undoStack.length = 0;
   state.redoStack.length = 0;
   setTool('inspect');
@@ -1066,6 +1075,10 @@ function reviewParams(extra) {
    describe a different passage. */
 function invalidateReview() {
   state.review = null;
+  // The score on disk still exists, but it no longer describes these notes.
+  // Leaving the "wrote 64 bars" line up would claim otherwise.
+  state.exported = null;
+  renderExport();
   reviewEngine.stop();
   reviewEngine.reset(0, 1);
   if (state.active === 'review') state.active = 'mix';
@@ -1079,6 +1092,7 @@ function invalidateReview() {
   state.carried = erasureList();
   state.silenced.clear();
   state.unmatched = state.carried.filter((e) => inSpan(e));
+  state.moved = [];  // nothing to compare against until a transcription exists
   state.undoStack.length = 0;
   state.redoStack.length = 0;
   pianoRoll.setSilenced(state.silenced);
@@ -1153,10 +1167,11 @@ async function showReview(payload) {
   pianoRoll.opts.voicingThreshold = 0.5;
   // The server matched the stored erasures onto these notes — by content, not
   // by index, because re-transcribing renumbers everything (gui/erasures.py).
-  const resolved = payload.erasures ?? { silenced: [], carried: [], unmatched: [] };
+  const resolved = payload.erasures ?? { silenced: [], carried: [], unmatched: [], moved: [] };
   state.silenced = new Set(resolved.silenced);
   state.carried = resolved.carried;
   state.unmatched = resolved.unmatched;
+  state.moved = resolved.moved ?? [];
   state.undoStack.length = 0;
   state.redoStack.length = 0;
 
@@ -1168,11 +1183,17 @@ async function showReview(payload) {
   renderEditBar();
   renderInspector(null, -1);
   if (state.unmatched.length) {
+    // "No longer matches" was one message for two opposite situations. A note
+    // that is simply GONE means the transcriber now agrees with the cut you
+    // made by hand — which is what corroboration did to most of Orbits' erased
+    // left hand (M7b) — and reporting that as a problem, next to a Discard
+    // button, is how good news gets thrown away.
     const n = state.unmatched.length;
+    const moved = state.moved.length;
     toast(
-      n === 1
-        ? '1 stored erasure no longer matches a note here — kept, not discarded'
-        : `${n} stored erasures no longer match notes here — kept, not discarded`,
+      moved
+        ? `${n} stored erasure${n === 1 ? '' : 's'} unmatched — ${moved} now at a different pitch, worth a look`
+        : `${n} erased note${n === 1 ? ' is' : 's are'} already gone from this transcription — labels kept`,
     );
   }
   await loadGroundTruth();
@@ -1378,6 +1399,10 @@ function applyEditSnapshot(snapshot) {
   state.silenced = new Set(snapshot.silenced);
   state.carried = snapshot.carried;
   state.unmatched = state.carried.filter((e) => inSpan(e));
+  // Undo restores labels, not the server's classification of them, so keep
+  // only the ones still carried rather than re-deriving what "moved" means.
+  const live = new Set(state.unmatched.map(erasureId));
+  state.moved = state.moved.filter((e) => live.has(erasureId(e)));
 }
 
 function inSpan(erasure) {
@@ -1430,6 +1455,7 @@ function discardUnmatched() {
   pushHistory();
   state.carried = state.carried.filter((e) => !gone.has(erasureId(e)));
   state.unmatched = [];
+  state.moved = [];
   afterEdit();
   toast(`Discarded ${gone.size} erasure${gone.size === 1 ? '' : 's'}`);
 }
@@ -1488,19 +1514,30 @@ function renderEditBar() {
   $('restore-all').disabled = !count;
 
   const stale = state.unmatched.length;
+  const moved = state.moved.length;
+  const vanished = stale - moved;
   $('erasure-warning').hidden = !stale;
   $('discard-unmatched').hidden = !stale;
+  // Only a MOVED erasure is a warning: something is still sounding there, at
+  // another pitch. A vanished one means the transcriber stopped emitting that
+  // note, which is agreement rather than a fault, so it is not coloured as one.
+  $('erasure-warning').classList.toggle('benign', moved === 0);
   if (stale) {
     const where = state.unmatched
       .slice(0, 6)
       .map((e) => `${midiName(e.pitch)} at ${clock(e.onset, false)}`)
       .join(', ');
+    const parts = [];
+    if (vanished) parts.push(`${vanished} already gone`);
+    if (moved) parts.push(`${moved} at another pitch`);
     $('erasure-warning').textContent =
-      stale === 1
-        ? '1 erasure no longer matches this transcription'
-        : `${stale} erasures no longer match this transcription`;
+      `${stale} erasure${stale === 1 ? '' : 's'} unmatched · ${parts.join(', ')}`;
     $('erasure-warning').title =
-      `Kept, not discarded — they still describe notes you judged.\n${where}` +
+      (vanished
+        ? `${vanished} describe notes this transcription no longer emits — it now agrees with you.\n`
+        : '') +
+      (moved ? `${moved} have a note at that moment but at another pitch — worth a look.\n` : '') +
+      `All kept, not discarded — each one is a labelled example.\n${where}` +
       (stale > 6 ? `, and ${stale - 6} more` : '');
   }
 }
@@ -1745,6 +1782,8 @@ function settingsPayload() {
     form_start: state.formStart,
     click: state.click,
     score: state.scorePath,
+    ensemble: state.ensemble,
+    transposition: state.transposition,
     erasures: erasureList(),
   };
 }
@@ -1768,6 +1807,102 @@ async function persistNow() {
   } catch { /* the render will simply be a beat behind */ }
 }
 
+/* ── choices that are not in the audio ──────────────────────────────────────
+   Two settings nothing in the signal can tell us: who is playing, and what key
+   the part is written in. Both live in the track's sidecar beside the audio,
+   because both are judgements a person made about a specific recording.
+
+   The menus are built from /api/config rather than written out here, so they
+   offer exactly what the config's validator accepts — a hand-copied list is a
+   list that drifts and starts offering values the server will reject. */
+
+const LABELS = {
+  'horn-led': 'Horn-led',
+  trio: 'Trio (piano)',
+  'solo-piano': 'Solo piano',
+  C: 'C — concert',
+  Bb: 'B♭ — trumpet, soprano',
+  'Bb-tenor': 'B♭ tenor — written +9th',
+  Eb: 'E♭ — alto, baritone',
+};
+
+let choices = null;
+
+function fillSelect(node, values, fallback) {
+  node.replaceChildren(...values.map((value) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = LABELS[value] ?? value;
+    return option;
+  }));
+  node.dataset.fallback = fallback;
+}
+
+async function loadChoices() {
+  try {
+    choices = await api('/api/config');
+  } catch {
+    return;  // the pickers stay empty; every other screen still works
+  }
+  fillSelect($('ensemble-select'), choices.ensembles ?? [], choices.default_ensemble ?? 'horn-led');
+  fillSelect($('transpose-select'), choices.transpositions ?? [], choices.default_transposition ?? 'C');
+  renderChoices();
+}
+
+function renderChoices() {
+  const ensemble = $('ensemble-select');
+  const transpose = $('transpose-select');
+  if (ensemble.options.length) ensemble.value = state.ensemble ?? ensemble.dataset.fallback;
+  if (transpose.options.length) transpose.value = state.transposition ?? transpose.dataset.fallback;
+}
+
+/* ── export ─────────────────────────────────────────────────────────────────
+   The whole notation chain below transcribe is arithmetic, so this is a plain
+   request with no job and no progress bar (gui/musicxml.py). A 409 is not a
+   failure — it is the button naming the earlier step you still owe it — so it
+   is shown as a normal message rather than an error. */
+
+async function startExport() {
+  if (!state.selection || !state.leadStem || !state.review) return;
+  const btn = $('export-btn');
+  btn.disabled = true;
+  try {
+    await persistNow();  // the server reads transposition from the sidecar
+    const result = await post(`/api/tracks/${state.track.id}/export?${reviewParams()}`);
+    state.exported = result;
+    renderExport();
+    toast(`Wrote ${result.name}`);
+  } catch (error) {
+    state.exported = null;
+    renderExport(error.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderExport(message) {
+  const info = $('export-info');
+  const link = $('export-download');
+  const written = state.exported;
+  info.classList.toggle('written', Boolean(written));
+  if (message) {
+    info.textContent = message;
+    link.hidden = true;
+    return;
+  }
+  if (!written) {
+    info.textContent = 'Bars are numbered from 1 within the span, and silenced notes are left out.';
+    link.hidden = true;
+    return;
+  }
+  const key = written.transpose ? ` · written ${written.transpose > 0 ? '+' : ''}${written.transpose}` : '';
+  info.textContent =
+    `${written.bars} bars · ${written.notes} notes · ${written.time_signature}` +
+    `${written.swing ? ' · swing' : ''}${key} → ${written.path}`;
+  link.href = `/api/tracks/${state.track.id}/export?${reviewParams()}`;
+  link.hidden = false;
+}
+
 // ── events ──────────────────────────────────────────────────────────────────
 
 $('open-picker').addEventListener('click', () => openPicker('track'));
@@ -1780,6 +1915,26 @@ const openTypedPath = () => {
 $('path-open').addEventListener('click', openTypedPath);
 $('path-input').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') openTypedPath();
+});
+
+$('export-btn').addEventListener('click', startExport);
+
+$('transpose-select').addEventListener('change', (event) => {
+  state.transposition = event.target.value;
+  // Only changes how the page is written, never which notes were heard, so the
+  // review stands and this is a re-export rather than a re-transcription.
+  state.exported = null;
+  renderExport();
+  persist();
+});
+
+$('ensemble-select').addEventListener('change', async (event) => {
+  state.ensemble = event.target.value;
+  await persistNow();  // review_config reads this back off the sidecar
+  // This one DOES change the notes: a trio consults the polyphonic piano model
+  // and a horn never does (M7b). So the span needs transcribing again.
+  invalidateReview();
+  toast('Ensemble changed — transcribe the span again');
 });
 
 $('r-restart').addEventListener('click', () => {
@@ -2090,5 +2245,6 @@ function currentTime() {
 // ── go ──────────────────────────────────────────────────────────────────────
 
 $('picker').hidden = false;
+loadChoices();
 refreshPicker();
 requestAnimationFrame(tick);

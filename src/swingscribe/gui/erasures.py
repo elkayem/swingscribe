@@ -99,6 +99,16 @@ def resolve(
 
     Returns the note indices to silence, and the erasures inside the span that
     matched nothing. Unmatched erasures are *reported*, never dropped.
+
+    An unmatched erasure is further split into `vanished` and `moved`, because
+    they mean opposite things and the interface was calling both a problem.
+    An erasure with no note near it at all means the transcriber no longer
+    emits that note — which is what happened the first time the piano oracle
+    ran over a solo whose left hand had been erased by hand: 26 of 33 labels
+    stopped matching because corroboration had already dropped exactly those
+    notes (M7b). That is the tool catching up with the listener, not a fault.
+    A `moved` erasure is the one worth a second look: something is still
+    sounding there, at a different pitch.
     """
     candidates = []
     for ei, erasure in enumerate(erasures):
@@ -125,6 +135,9 @@ def resolve(
         claimed_notes.add(ni)
 
     carried = [erasure for index, erasure in enumerate(erasures) if index not in claimed_erasures]
+    unmatched = [e for e in carried if _in_span(e, span)]
+    onsets = [note["onset"] for note in notes]
+    moved = [e for e in unmatched if any(abs(t - e["onset"]) <= TOLERANCE_S for t in onsets)]
     return {
         "silenced": sorted(claimed_notes),
         # Everything that found no note, so the client can write the list back
@@ -133,7 +146,10 @@ def resolve(
         "carried": carried,
         # The subset worth telling the user about: inside the span they are
         # looking at, and therefore genuinely missing rather than out of view.
-        "unmatched": [e for e in carried if _in_span(e, span)],
+        "unmatched": unmatched,
+        # Of those, the ones with SOMETHING still sounding at that moment. The
+        # rest vanished, which usually means the transcriber agrees with you now.
+        "moved": moved,
         "stored": len(erasures),
     }
 

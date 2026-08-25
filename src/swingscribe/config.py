@@ -9,7 +9,7 @@ values must stay JSON-serializable.
 """
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import yaml
 from pydantic import BaseModel
@@ -17,6 +17,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Repo-root default; fine for development checkouts, which is all M0 supports.
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "default.yaml"
+
+# Named as types so the GUI can offer exactly what the config accepts. A menu
+# built from a hand-copied list is a menu that drifts out of step with the
+# validator and starts offering values that will be rejected.
+Ensemble = Literal["horn-led", "trio", "solo-piano"]
+Transposition = Literal["C", "Eb", "Bb", "Bb-tenor"]
+ENSEMBLES: tuple[str, ...] = get_args(Ensemble)
+TRANSPOSITIONS: tuple[str, ...] = get_args(Transposition)
 
 
 class IngestConfig(BaseModel):
@@ -60,7 +68,7 @@ class BeatsConfig(BaseModel):
 
 
 class TranscribeConfig(BaseModel):
-    ensemble: Literal["horn-led", "trio", "solo-piano"] = "horn-led"
+    ensemble: Ensemble = "horn-led"
     # Which separated stem carries the solo. htdemucs_ft gives
     # drums/bass/other/vocals; htdemucs_6s adds guitar/piano.
     stem: str = "other"
@@ -274,7 +282,7 @@ class NotateConfig(BaseModel):
     # The part's key. Written pitch minus sounding pitch is a property of the
     # instrument, not of the audio: nothing in the signal says which horn it
     # was, so it is config and never inferred.
-    transposition: Literal["C", "Eb", "Bb", "Bb-tenor"] = "C"
+    transposition: Transposition = "C"
     # Which quantized voice to notate; empty means the only one there is.
     stem: str = ""
     title: str = ""

@@ -18,11 +18,12 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from swingscribe.config import Config
+from swingscribe.config import ENSEMBLES, TRANSPOSITIONS, Config
 from swingscribe.gui import audio as gui_audio
 from swingscribe.gui import erasures as gui_erasures
 from swingscribe.gui import ground_truth, library, peaks, review
 from swingscribe.gui import jobs as gui_jobs
+from swingscribe.gui import musicxml as gui_musicxml
 from swingscribe.model import NoteEvent
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -142,7 +143,7 @@ def create_app(config: Config) -> FastAPI:
         ensemble = config.transcribe.ensemble
         if track_path is not None and track_id is not None:
             stored = library.load_settings(track_path, config, track_id).get("ensemble")
-            if stored in ("horn-led", "trio", "solo-piano"):
+            if stored in ENSEMBLES:
                 ensemble = stored
         return config.model_copy(
             update={
@@ -194,6 +195,10 @@ def create_app(config: Config) -> FastAPI:
             "models": config.gui.models,
             "default_model": config.separate.model,
             "default_stem": config.transcribe.stem,
+            "ensembles": list(ENSEMBLES),
+            "default_ensemble": config.transcribe.ensemble,
+            "transpositions": list(TRANSPOSITIONS),
+            "default_transposition": config.notate.transposition,
             "library_dir": str(library.library_dir(config)),
         }
 
@@ -489,6 +494,73 @@ def create_app(config: Config) -> FastAPI:
             raise HTTPException(500, f"could not render transcription: {exc}") from exc
         return Response(
             content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store"}
+        )
+
+    # ── notation ────────────────────────────────────────────────────────────
+
+    @app.post("/api/tracks/{track_id}/export")
+    def post_export(
+        track_id: str,
+        model: str,
+        stem: str,
+        start: float | None = None,
+        end: float | None = None,
+    ) -> dict[str, Any]:
+        """Write the reviewed span to MusicXML beside the audio.
+
+        A POST because it writes a file, but not a job: everything below
+        transcribe is arithmetic, so this answers in milliseconds
+        (gui/musicxml.py). Preconditions the user can fix come back as 409 with
+        the fix in the message; a 409 here is not an error, it is the button
+        telling you which of the earlier buttons you still owe it.
+        """
+        entry = resolve(track_id)
+        run_config = review_config(stem, start, end, entry["path"], track_id)
+        payload = review.cached_review(entry["document"], run_config, model)
+        if payload is None:
+            raise HTTPException(409, "transcribe the span first")
+        # Through resolve_erasures, so the score holds exactly the notes the
+        # A/B render plays. A silenced note must not come back on the page.
+        resolution = resolve_erasures(track_id, entry, run_config, payload["notes"])
+        audible = gui_erasures.audible(payload["notes"], resolution["silenced"])
+        settings = library.load_settings(entry["path"], config, track_id)
+        try:
+            return gui_musicxml.export_span(
+                entry["document"], config, run_config, entry["path"], audible, settings
+            )
+        except gui_musicxml.NotReady as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(500, f"could not notate the span: {exc}") from exc
+
+    @app.get("/api/tracks/{track_id}/export")
+    def get_export(
+        track_id: str,
+        start: float | None = None,
+        end: float | None = None,
+    ) -> FileResponse:
+        """Download a score this track has already exported.
+
+        The file lives beside the audio, which is the point — but the browser
+        cannot reach a local path from a page, so this hands it back over HTTP
+        for anyone whose audio is not on the machine running the browser.
+        """
+        entry = resolve(track_id)
+        span = (
+            None
+            if start is None and end is None
+            else (
+                round(start or 0.0, SPAN_PRECISION),
+                None if end is None else round(end, SPAN_PRECISION),
+            )
+        )
+        path = gui_musicxml.export_path(entry["path"], span)
+        if not path.is_file():
+            raise HTTPException(404, "not exported yet")
+        return FileResponse(
+            path,
+            media_type="application/vnd.recordare.musicxml+xml",
+            filename=path.name,
         )
 
     # ── ground truth ────────────────────────────────────────────────────────
