@@ -94,30 +94,31 @@ def notate_config(config: Config, settings: dict[str, Any], title: str) -> Confi
     )
 
 
-def export_span(
+def build_notation(
     document: Document,
     config: Config,
     run_config: Config,
     audio_path: str,
     notes: list[dict[str, Any]],
     settings: dict[str, Any],
-) -> dict[str, Any]:
-    """Write the reviewed span to MusicXML and say what was written.
+):
+    """The reviewed span as a Notation, or raise something the user can fix.
 
     `run_config` is the review's config -- it carries the span and the lead
     stem, and is what the notes were produced under. `notes` is already the
     AUDIBLE list: erasures were resolved by the caller, through the one module
     allowed to resolve them.
-    """
-    from swingscribe.stages.export import to_musicxml
 
+    Shared by the Export button and the Score button so they cannot disagree
+    about what was notated: scoring a different Notation from the one on disk
+    would be a number about nothing.
+    """
     if not notes:
-        raise NotReady("nothing to export - every note in this span is silenced")
+        raise NotReady("nothing to notate - every note in this span is silenced")
 
     beats = beat_times(document, config)
     region = run_config.transcribe.region or (0.0, None)
     stem = run_config.transcribe.stem
-    title = Path(audio_path).stem
     signature, pulses = meter_from_settings(
         settings.get("time_signature"), settings.get("pulses_per_bar"), config
     )
@@ -127,7 +128,7 @@ def export_span(
         beats,
         region,
         stem=stem,
-        config=notate_config(config, settings, title),
+        config=notate_config(config, settings, Path(audio_path).stem),
         anchor=settings.get("anchor"),
         time_signature=signature,
         pulses_per_bar=pulses,
@@ -135,7 +136,24 @@ def export_span(
     )
     if notation is None or not notation.bars:
         raise NotReady("the span is too short to bar out - select at least a couple of bars")
+    return notation
 
+
+def export_span(
+    document: Document,
+    config: Config,
+    run_config: Config,
+    audio_path: str,
+    notes: list[dict[str, Any]],
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Write the reviewed span to MusicXML and say what was written."""
+    from swingscribe.stages.export import to_musicxml
+
+    notation = build_notation(document, config, run_config, audio_path, notes, settings)
+    region = run_config.transcribe.region or (0.0, None)
+    title = Path(audio_path).stem
+    signature = notation.bars[0].time_signature
     path = export_path(audio_path, region)
     xml = to_musicxml(notation, part_name=title)
     try:
@@ -152,4 +170,59 @@ def export_span(
         "swing": notation.swing,
         "transpose": notation.transpose,
         "time_signature": f"{signature[0]}/{signature[1]}",
+    }
+
+
+def score_span(
+    document: Document,
+    config: Config,
+    run_config: Config,
+    audio_path: str,
+    notes: list[dict[str, Any]],
+    settings: dict[str, Any],
+    score_path: Path,
+) -> dict[str, Any]:
+    """Score the span's notation against a hand transcription, as notation.
+
+    A DIFFERENT QUESTION from the F1 already on the ground-truth bar, and the
+    difference is the most expensive confusion in this project (CLAUDE.md).
+    That one is time-free and pitch-only: did we hear the right notes? This
+    one asks whether the notes we did get are written the way a human wrote
+    them -- the gap to the next note, and the note value. It is the measure of
+    what the Export button just produced, and until now it existed only in
+    `scripts/run_eval.py`.
+
+    It reads lower than the pitch F1 and always will, because it charges the
+    gap between performed timing and notated rhythm. Read as transcription
+    accuracy it is simply the wrong number.
+    """
+    from swingscribe import mscz
+    from swingscribe.benchmark import score_against_notation
+
+    notation = build_notation(document, config, run_config, audio_path, notes, settings)
+    try:
+        reference = mscz.parse(score_path)
+    except Exception as exc:
+        raise NotReady(f"could not read {score_path.name}: {exc}") from exc
+
+    result = score_against_notation(notation, reference)
+    if not result["n_matched"]:
+        raise NotReady(
+            f"no note in {score_path.name} lined up with ours - is this the score for this span?"
+        )
+    # `trusted` travels WITH the numbers rather than replacing them. Low
+    # coverage means either the wrong score or a bad transcription, and the
+    # second is a real result worth seeing — but rhythm alone cannot tell the
+    # two apart, so it must never be shown without this (benchmark.py).
+    return {
+        "score": score_path.name,
+        "rhythm": round(result["rhythm"], 3),
+        "value": round(result["value"], 3),
+        "matched": int(result["n_matched"]),
+        "reference": int(result["reference"]),
+        "coverage": round(result["coverage"], 3),
+        "trusted": bool(result["trusted"]),
+        "transposition": int(result["transposition"]),
+        "bars": len(notation.bars),
+        "reference_bars": reference.bars,
     }

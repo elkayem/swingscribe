@@ -182,6 +182,21 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   the signal — one says who is playing, the other which horn — so both can only
   come from the listener. Build the menus from those constants, never from a
   hand-copied list, or the UI drifts from what the validator accepts.
+- **The Score button and the F1 on the ground-truth bar are DIFFERENT
+  QUESTIONS**, and this is the project's most expensive confusion appearing in
+  the UI. The bar's F1 is time-free and pitch-only (`gui/ground_truth.py`):
+  did we hear the right notes? The Score button asks whether the notes we got
+  are WRITTEN the way a human wrote them, through
+  `benchmark.score_against_notation` — shared with `run_eval.py`, never
+  reimplemented. It reads lower and always will.
+- **Never show that rhythm number without its coverage.** Measured over every
+  notation the benchmark can build against every hand score on disk, coverage
+  is 0.69-0.74 on a right pairing and 0.16-0.36 on fourteen wrong ones — but
+  rhythm on a WRONG pairing reads up to 0.583, higher than All The Things
+  scores against its own correct score (0.618). Two eighth-note bebop lines
+  agree about most gaps by chance, so rhythm cannot tell you it is describing
+  the wrong tune. `COVERAGE_FLOOR = 0.5` sits in coverage's gap and is what
+  `trusted` keys on; below it the numbers are withheld, not shown.
 - **An unmatched erasure is not automatically a problem.** `erasures.resolve`
   splits them: `moved` (a note still sounds there, at another pitch — worth a
   look) against the rest, which simply vanished because the transcriber no

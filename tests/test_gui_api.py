@@ -861,3 +861,130 @@ def test_config_offers_exactly_what_the_validator_accepts(world):
     assert payload["transpositions"] == list(TRANSPOSITIONS)
     assert payload["default_ensemble"] in ENSEMBLES
     assert payload["default_transposition"] in TRANSPOSITIONS
+
+
+# ── scoring the notation against a hand transcription ───────────────────────
+
+
+def _hand_transcription(tmp_path, pitches=(64, 67, 71)) -> pathlib.Path:
+    """A one-bar .mscx holding these pitches as quarter notes.
+
+    Written here rather than committed: the real benchmark scores are
+    derivative works of commercial recordings and must never enter git.
+    """
+    chords = "".join(
+        f"<Chord><durationType>quarter</durationType><Note><pitch>{p}</pitch></Note></Chord>"
+        for p in pitches
+    )
+    path = tmp_path / "Hand Transcription.mscx"
+    path.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<museScore version="4.70"><Score><Division>480</Division>'
+        '<metaTag name="workTitle">Hand</metaTag><Staff><Measure><voice>'
+        "<KeySig><concertKey>0</concertKey></KeySig>"
+        "<TimeSig><sigN>4</sigN><sigD>4</sigD></TimeSig>"
+        f"{chords}</voice></Measure></Staff></Score></museScore>",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_notation_score_needs_a_transcription_first(world, monkeypatch, tmp_path):
+    _seed_beats(monkeypatch, world)
+    track = open_track(world)
+    response = world["client"].get(
+        f"/api/tracks/{track['id']}/notation-score",
+        params={
+            "model": "htdemucs_ft",
+            "stem": "other",
+            "score": str(_hand_transcription(tmp_path)),
+            "start": 1.0,
+            "end": 3.0,
+        },
+    )
+    assert response.status_code == 409
+
+
+def test_notation_score_rejects_something_that_is_not_a_score(world, monkeypatch, tmp_path):
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0)
+    _seed_beats(monkeypatch, world)
+    not_a_score = tmp_path / "notes.txt"
+    not_a_score.write_text("64 67 71", encoding="utf-8")
+    response = world["client"].get(
+        f"/api/tracks/{track['id']}/notation-score",
+        params={
+            "model": "htdemucs_ft",
+            "stem": "other",
+            "score": str(not_a_score),
+            "start": 1.0,
+            "end": 3.0,
+        },
+    )
+    assert response.status_code == 400
+
+
+def test_notation_score_reports_rhythm_and_value(world, monkeypatch, tmp_path):
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0, pitches=(64, 67, 71))
+    _seed_beats(monkeypatch, world)
+    response = world["client"].get(
+        f"/api/tracks/{track['id']}/notation-score",
+        params={
+            "model": "htdemucs_ft",
+            "stem": "other",
+            "score": str(_hand_transcription(tmp_path)),
+            "start": 1.0,
+            "end": 3.0,
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert 0.0 <= payload["rhythm"] <= 1.0
+    assert 0.0 <= payload["value"] <= 1.0
+    assert payload["matched"] == 3
+    assert payload["reference"] == 3
+    assert payload["coverage"] == 1.0
+    assert payload["trusted"] is True
+    assert payload["score"] == "Hand Transcription.mscx"
+
+
+def test_a_score_that_barely_lines_up_is_marked_untrusted(world, monkeypatch, tmp_path):
+    """Rhythm against the wrong tune reads as high as 0.58, so the number must
+    never travel without what it rests on (benchmark.COVERAGE_FLOOR)."""
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0, pitches=(64, 67, 71))
+    _seed_beats(monkeypatch, world)
+    # Twenty notated notes against our three: most of their score is unaccounted for.
+    wrong = _hand_transcription(tmp_path, pitches=tuple(40 + (i * 5) % 30 for i in range(20)))
+    payload = (
+        world["client"]
+        .get(
+            f"/api/tracks/{track['id']}/notation-score",
+            params={
+                "model": "htdemucs_ft",
+                "stem": "other",
+                "score": str(wrong),
+                "start": 1.0,
+                "end": 3.0,
+            },
+        )
+        .json()
+    )
+    assert payload["trusted"] is False
+    assert payload["coverage"] < 0.5
+
+
+def test_export_and_score_notate_the_same_thing(world, monkeypatch, tmp_path):
+    """Scoring a different Notation from the one written to disk would be a
+    number about nothing, so both go through build_notation."""
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0, pitches=(64, 67, 71))
+    _seed_beats(monkeypatch, world)
+    params = {"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0}
+    exported = world["client"].post(f"/api/tracks/{track['id']}/export", params=params).json()
+    scored = (
+        world["client"]
+        .get(
+            f"/api/tracks/{track['id']}/notation-score",
+            params={**params, "score": str(_hand_transcription(tmp_path))},
+        )
+        .json()
+    )
+    assert scored["bars"] == exported["bars"]

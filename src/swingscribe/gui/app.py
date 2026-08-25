@@ -533,6 +533,52 @@ def create_app(config: Config) -> FastAPI:
         except Exception as exc:
             raise HTTPException(500, f"could not notate the span: {exc}") from exc
 
+    @app.get("/api/tracks/{track_id}/notation-score")
+    def get_notation_score(
+        track_id: str,
+        model: str,
+        stem: str,
+        score: str,
+        start: float | None = None,
+        end: float | None = None,
+    ) -> dict[str, Any]:
+        """How this span's NOTATION compares to a hand transcription's.
+
+        Not the same question as the F1 on the ground-truth bar, which is
+        time-free and pitch-only. This one asks whether the notes we got are
+        written the way a human wrote them, and it reads lower for that reason
+        (gui/musicxml.py). Cheap enough to answer in the request: it re-notates
+        cached notes, which is arithmetic.
+        """
+        entry = resolve(track_id)
+        score_path = Path(score).expanduser()
+        if not score_path.is_file():
+            raise HTTPException(404, f"no such score: {score_path}")
+        if not ground_truth.is_score(score_path):
+            raise HTTPException(400, f"not a MuseScore file: {score_path.name}")
+
+        run_config = review_config(stem, start, end, entry["path"], track_id)
+        payload = review.cached_review(entry["document"], run_config, model)
+        if payload is None:
+            raise HTTPException(409, "transcribe the span first")
+        resolution = resolve_erasures(track_id, entry, run_config, payload["notes"])
+        audible = gui_erasures.audible(payload["notes"], resolution["silenced"])
+        settings = library.load_settings(entry["path"], config, track_id)
+        try:
+            return gui_musicxml.score_span(
+                entry["document"],
+                config,
+                run_config,
+                entry["path"],
+                audible,
+                settings,
+                score_path,
+            )
+        except gui_musicxml.NotReady as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(422, f"could not score against {score_path.name}: {exc}") from exc
+
     @app.get("/api/tracks/{track_id}/export")
     def get_export(
         track_id: str,

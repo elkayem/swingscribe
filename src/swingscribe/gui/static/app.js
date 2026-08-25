@@ -58,6 +58,8 @@ const state = {
   ensemble: null,           // horn-led | trio | solo-piano; null = server default
   transposition: null,      // the exported part's key; null = server default
   exported: null,           // {path, bars, notes, ...} from the last export
+  exportedAt: null,         // what the tree looked like when it was written
+  notationScore: null,      // {rhythm, value, matched} against the hand transcription
 };
 
 const mix = { engine: null };
@@ -349,6 +351,8 @@ async function loadTrack(track) {
   state.ensemble = remembered.ensemble ?? null;
   state.transposition = remembered.transposition ?? null;
   state.exported = null;
+  state.exportedAt = null;
+  state.notationScore = null;
   renderChoices();
   // Carried until a transcription exists to match them against; showReview
   // replaces these with the server's resolution.
@@ -1075,9 +1079,9 @@ function reviewParams(extra) {
    describe a different passage. */
 function invalidateReview() {
   state.review = null;
-  // The score on disk still exists, but it no longer describes these notes.
-  // Leaving the "wrote 64 bars" line up would claim otherwise.
-  state.exported = null;
+  // The file on disk survives — deleting the memory of it would be a lie in
+  // the other direction. It is simply behind now, which renderExport says.
+  state.notationScore = null;
   renderExport();
   reviewEngine.stop();
   reviewEngine.reset(0, 1);
@@ -1172,6 +1176,7 @@ async function showReview(payload) {
   state.carried = resolved.carried;
   state.unmatched = resolved.unmatched;
   state.moved = resolved.moved ?? [];
+  state.notationScore = null;
   state.undoStack.length = 0;
   state.redoStack.length = 0;
 
@@ -1465,6 +1470,11 @@ const erasureId = (e) => `${e.onset}:${e.pitch}`;
 function afterEdit() {
   pianoRoll.setSilenced(state.silenced);
   renderEditBar();
+  // Silencing a note after exporting is the quietest way to end up with a
+  // file on disk that no longer matches the screen, and a stale score is
+  // worse than none. It also invalidates any number measured against it.
+  state.notationScore = null;
+  renderExport();
   persist();
   scheduleTranscriptionReload();
 }
@@ -1597,7 +1607,11 @@ function clearGroundTruth({ forget = false } = {}) {
   state.ground = null;
   if (forget) state.scorePath = null;
   pianoRoll.setGroundTruth(null);
+  // A number is only meaningful beside the score it was measured against, so
+  // dropping the score drops the number with it.
+  state.notationScore = null;
   renderGroundTruthBar();
+  renderExport();
   if (forget) persist();
 }
 
@@ -1621,6 +1635,7 @@ async function loadGroundTruth() {
   pianoRoll.setVisibleClasses(state.gtClasses);
   pianoRoll.setGroundTruth(state.ground);
   renderGroundTruthBar();
+  renderExport();
   return 'ok';
 }
 
@@ -1862,6 +1877,22 @@ function renderChoices() {
    failure — it is the button naming the earlier step you still owe it — so it
    is shown as a normal message rather than an error. */
 
+/* What the exported file was written FROM. Anything in here changing means the
+   file on disk is behind what is on screen — including a note silenced after
+   the export, which is the easy one to miss. */
+function exportSignature() {
+  if (!state.selection) return null;
+  return JSON.stringify({
+    a: state.selection.a, b: state.selection.b,
+    stem: state.leadStem, model: state.model,
+    transposition: state.transposition,
+    token: state.reviewToken,
+    silenced: [...state.silenced].sort((x, y) => x - y),
+    timeSignature: state.timeSignature,
+    anchor: state.anchor,
+  });
+}
+
 async function startExport() {
   if (!state.selection || !state.leadStem || !state.review) return;
   const btn = $('export-btn');
@@ -1870,21 +1901,58 @@ async function startExport() {
     await persistNow();  // the server reads transposition from the sidecar
     const result = await post(`/api/tracks/${state.track.id}/export?${reviewParams()}`);
     state.exported = result;
+    state.exportedAt = exportSignature();
     renderExport();
     toast(`Wrote ${result.name}`);
   } catch (error) {
     state.exported = null;
+    state.exportedAt = null;
     renderExport(error.message);
   } finally {
     btn.disabled = false;
   }
 }
 
+/* ── scoring the notation ───────────────────────────────────────────────────
+   A DIFFERENT question from the F1 on the ground-truth bar, and keeping them
+   apart is the most expensive lesson in this project. That one is time-free
+   and pitch-only: did we hear the right notes? This asks whether the notes we
+   did get are written the way a human wrote them. It reads lower, always. */
+
+async function startNotationScore() {
+  if (!state.review || !state.scorePath) return;
+  const btn = $('score-btn');
+  btn.disabled = true;
+  $('score-btn').textContent = 'Scoring…';
+  try {
+    await persistNow();
+    const params = reviewParams({ score: state.scorePath });
+    state.notationScore = await api(`/api/tracks/${state.track.id}/notation-score?${params}`);
+    renderExport();
+  } catch (error) {
+    state.notationScore = null;
+    renderExport(error.message);
+  } finally {
+    btn.disabled = false;
+    $('score-btn').textContent = 'Score it';
+  }
+}
+
 function renderExport(message) {
   const info = $('export-info');
   const link = $('export-download');
+  const stale = $('export-stale');
   const written = state.exported;
-  info.classList.toggle('written', Boolean(written));
+  const behind = Boolean(written) && state.exportedAt !== exportSignature();
+
+  $('score-btn').hidden = !(state.review && state.scorePath);
+  stale.hidden = !behind;
+  stale.title =
+    'Something that would change the page has changed since it was written — the span, ' +
+    'the transposition, the notes, or which of them are silenced. Export again to catch it up.';
+  info.classList.toggle('written', Boolean(written) && !behind);
+  renderScoreLine();
+
   if (message) {
     info.textContent = message;
     link.hidden = true;
@@ -1895,12 +1963,57 @@ function renderExport(message) {
     link.hidden = true;
     return;
   }
-  const key = written.transpose ? ` · written ${written.transpose > 0 ? '+' : ''}${written.transpose}` : '';
+  const key = written.transpose
+    ? ` · written ${written.transpose > 0 ? '+' : ''}${written.transpose}`
+    : '';
   info.textContent =
     `${written.bars} bars · ${written.notes} notes · ${written.time_signature}` +
     `${written.swing ? ' · swing' : ''}${key} → ${written.path}`;
   link.href = `/api/tracks/${state.track.id}/export?${reviewParams()}`;
   link.hidden = false;
+}
+
+/* The notation score, on its own line under the export.
+
+   Two numbers, deliberately apart: rhythm is the gap to the next note, value
+   is the note value written for it (benchmark.score_notation).
+
+   COVERAGE LEADS WHEN IT IS LOW, and that is not decoration. Measured over
+   every notation the benchmark can build against every hand score on disk,
+   coverage is 0.69-0.74 on a right pairing and 0.16-0.36 on a wrong one -- but
+   rhythm on a wrong pairing still reads up to 0.583, HIGHER than All The Things
+   scores against its own correct score. Two bebop lines agree about most gaps
+   by chance, so rhythm is never shown here without what it rests on. */
+function renderScoreLine() {
+  const line = $('score-line');
+  const s = state.notationScore;
+  line.hidden = !s;
+  if (!s) return;
+  const pct = Math.round(s.coverage * 100);
+  line.classList.toggle('untrusted', !s.trusted);
+  if (!s.trusted) {
+    line.textContent =
+      `Only ${pct}% of ${s.score} lined up with ours (${s.matched}/${s.reference}) — ` +
+      'too little to read a rhythm score from';
+    line.title =
+      'Either this is not the score for this span, or the transcription of it went badly. ' +
+      'A right pairing covers about 70% of the notated notes; a wrong one covers 16-36%. ' +
+      'Rhythm cannot tell those apart — it reads as high as 0.58 against the wrong tune — ' +
+      'so it is withheld rather than shown as if it meant something.';
+    return;
+  }
+  line.textContent =
+    `vs ${s.score}: rhythm ${s.rhythm.toFixed(3)} · value ${s.value.toFixed(3)} ` +
+    `· ${pct}% lined up (${s.matched}/${s.reference})`;
+  line.title =
+    'NOT the pitch F1 above, which asks whether we heard the right notes. This asks ' +
+    'whether the ones we got are WRITTEN the way a human wrote them: rhythm is the gap ' +
+    'to the next note, value is the note value chosen for it. It charges the gap between ' +
+    'performed timing and notated rhythm, so it reads lower and always will.\n' +
+    `Our ${s.bars} bars against their ${s.reference_bars}` +
+    (s.transposition
+      ? `, their score written ${s.transposition > 0 ? '+' : ''}${s.transposition} semitones`
+      : '');
 }
 
 // ── events ──────────────────────────────────────────────────────────────────
@@ -1918,12 +2031,13 @@ $('path-input').addEventListener('keydown', (event) => {
 });
 
 $('export-btn').addEventListener('click', startExport);
+$('score-btn').addEventListener('click', startNotationScore);
 
 $('transpose-select').addEventListener('change', (event) => {
   state.transposition = event.target.value;
   // Only changes how the page is written, never which notes were heard, so the
-  // review stands and this is a re-export rather than a re-transcription.
-  state.exported = null;
+  // review stands and this is a re-export rather than a re-transcription. The
+  // file already on disk is now behind, and says so rather than disappearing.
   renderExport();
   persist();
 });
@@ -2170,6 +2284,11 @@ document.addEventListener('keydown', (event) => {
       break;
     case 'l':
       $('loop').click();
+      break;
+    case 'x':
+      // eXport. Every other control on the review screen has a key; this is
+      // the one you press most once a span is settled.
+      if (state.review) startExport();
       break;
     case 's':
       $('snap-toggle').click();

@@ -188,6 +188,29 @@ Both readings are now satisfied — quantize, notate, export and the eval
 harness all exist — but the numbering should be reconciled before it is used
 to decide what comes next.
 
+### D7 — The notation score is not self-validating, and rhythm looks fine on the wrong tune
+
+Measured 2026-08-25, building every notation the benchmark can from cached
+notes and scoring it against every hand transcription on disk (16 pairings,
+2 of them correct):
+
+| pairing | coverage | rhythm |
+|---|---|---|
+| right (n=2) | 0.69 – 0.74 | 0.671 – 0.777 |
+| wrong (n=14) | 0.16 – 0.36 | 0.077 – 0.583 |
+
+**Coverage separates the two cleanly and rhythm does not.** A wrong pairing
+scoring rhythm 0.583 is higher than All The Things scores against its own
+correct score (0.618), because both sides are eighth-note bebop lines and
+most gaps are half a quarter note on both. Anything reporting rhythm without
+coverage can therefore be describing the wrong tune and look plausible — the
+same class of failure as R1 and R2, caught this time before it cost anything.
+
+`benchmark.COVERAGE_FLOOR = 0.5` sits in the gap; below it the GUI withholds
+the numbers rather than showing them. What would move: more right pairings.
+Two is thin, and the floor should be re-derived once there are more hand
+transcriptions to check it against.
+
 ## Resolved
 
 ### R10 — Piano precision was being charged for notes that are not errors

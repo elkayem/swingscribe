@@ -275,16 +275,15 @@ def notate_run(name: str, run: dict, grid: dict):
 def notation_scores(runs: dict, grids: dict) -> dict:
     """Our notation against the hand transcription's, as notation.
 
-    Needs no tempo map: both sides are already in quarter notes from their own
-    bar one, and the single unknown -- which of our bars is their bar one --
-    is one constant that the median absorbs.
+    The comparison itself lives in `swingscribe.benchmark` -- anything that
+    aligns our notes to a reference belongs in the package with tests, never
+    in a script (CLAUDE.md), and the GUI's Score button needs the same numbers.
     """
     sys.path.insert(0, str(Path(__file__).parent))
     import score_benchmark
 
     from swingscribe import mscz
-    from swingscribe.alignment import align, best_transposition
-    from swingscribe.benchmark import merge_ties, score_notation
+    from swingscribe.benchmark import score_against_notation
 
     by_audio = {audio: mscz_name for audio, mscz_name, *_ in score_benchmark.TUNES.values()}
     out = {}
@@ -294,27 +293,9 @@ def notation_scores(runs: dict, grids: dict) -> dict:
         notation = notate_run(name, run, grids[name])
         if notation is None or not notation.bars:
             continue
-        ours = merge_ties(
-            [
-                (bar_start + note.beat, note.duration, note.pitch, note.tie_stop)
-                for bar_start, bar in _with_starts(notation.bars)
-                for note in bar.notes
-                if not note.is_rest
-            ]
-        )
-        score = mscz.parse(BENCH / by_audio[name])
-        theirs = [(n.position, n.duration, n.pitch) for n in score.melody]
-        if not ours or not theirs:
+        result = score_against_notation(notation, mscz.parse(BENCH / by_audio[name]))
+        if not result["n_matched"]:
             continue
-        their_pitches = [p for _, _, p in theirs]
-        our_pitches = [p for _, _, p in ours]
-        coarse, _ = best_transposition(their_pitches[:120], our_pitches[:160])
-        offset, _ = best_transposition(
-            their_pitches[:120], our_pitches[:160], search=range(coarse - 2, coarse + 3)
-        )
-        shifted = [(pos, dur, pitch + offset) for pos, dur, pitch in ours]
-        aligned = align(their_pitches, [p for _, _, p in shifted])
-        result = score_notation(theirs, shifted, aligned.pairs)
         out[name] = {
             "rhythm": round(result["rhythm"], 4),
             "value": round(result["value"], 4),
@@ -323,14 +304,6 @@ def notation_scores(runs: dict, grids: dict) -> dict:
             "key_fifths": float(notation.key_fifths),
         }
     return out
-
-
-def _with_starts(bars):
-    """(absolute quarter position of the bar, bar) for each bar in order."""
-    cursor = 0.0
-    for bar in bars:
-        yield cursor, bar
-        cursor += bar.time_signature[0] * 4.0 / bar.time_signature[1]
 
 
 def render(card: dict) -> None:

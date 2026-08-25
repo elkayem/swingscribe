@@ -266,12 +266,19 @@
       </div>
 
       <div class="export-bar" id="export-bar">
-        <button id="export-btn" title="Write this span as MusicXML, beside the audio">Export MusicXML</button>
+        <button id="export-btn" title="Write this span as MusicXML, beside the audio (X)">Export MusicXML</button>
         <label class="picker-label" for="transpose-select" title="The part's key. Nothing in the audio says which horn it was, so this can only come from you — and the key signature moves with it.">Written for</label>
         <select id="transpose-select"></select>
-        <span class="muted" id="export-info">Bars are numbered from 1 within the span, and silenced notes are left out.</span>
+        <button class="chip" id="score-btn" hidden title="Score this notation against the loaded hand transcription — a different question from the pitch F1 above">Score it</button>
         <span class="spacer"></span>
+        <span class="export-stale" id="export-stale" hidden>file on disk is older than what you see</span>
         <a class="chip" id="export-download" hidden download>Download</a>
+      </div>
+      <!-- Two lines, not one: where the file went and how it scored are both
+           worth keeping on screen, and the second used to hide the first. -->
+      <div class="export-lines">
+        <span class="muted" id="export-info">Bars are numbered from 1 within the span, and silenced notes are left out.</span>
+        <span class="muted" id="score-line" hidden></span>
       </div>
     </div>
   </section>

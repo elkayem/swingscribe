@@ -170,3 +170,100 @@ def score_notation(
         "value": valued / len(matched),
         "n_matched": float(len(matched)),
     }
+
+
+# Fraction of the reference's notes that must line up before the rhythm and
+# value numbers mean anything. MEASURED, not guessed: scoring every notation
+# we can build against every hand transcription on disk gives coverage
+# 0.69-0.74 on the two right pairings and 0.16-0.36 on fourteen wrong ones —
+# no overlap, and a wide gap to sit in.
+#
+# Coverage is the discriminator and RHYTHM IS NOT. A wrong pairing still
+# scores rhythm 0.077-0.583, and 0.583 is higher than All The Things reads on
+# its own correct score (0.618). Both sides are eighth-note bebop lines, so
+# most gaps are half a quarter note on both and agree by chance. A rhythm
+# number shown without its coverage is a number that cannot tell you it is
+# about the wrong tune — which is exactly the failure this project has hit
+# twice (docs/benchmark-deficiencies.md R1, R2).
+COVERAGE_FLOOR = 0.5
+
+# Prefix sizes for the transposition search, matching gui/ground_truth.py and
+# scripts/score_benchmark.py. The offset is constant, so a prefix settles it
+# and a full search over ~900 notes each side is minutes of pure Python.
+HEAD_REFERENCE = 120
+HEAD_ESTIMATE = 160
+
+
+def bar_starts(bars: list) -> list[float]:
+    """Absolute position, in quarter notes, of each bar's first beat."""
+    starts = []
+    cursor = 0.0
+    for bar in bars:
+        starts.append(cursor)
+        cursor += bar.time_signature[0] * 4.0 / bar.time_signature[1]
+    return starts
+
+
+def notation_notes(notation) -> list[tuple[float, float, int]]:
+    """A Notation flattened to (quarter position, duration, pitch), ties merged.
+
+    Rests are dropped: they carry no pitch, so the alignment has nothing to
+    match them on, and the gap they occupy is already visible as the interval
+    between the notes either side.
+    """
+    return merge_ties(
+        [
+            (start + note.beat, note.duration, note.pitch, note.tie_stop)
+            for start, bar in zip(bar_starts(notation.bars), notation.bars, strict=True)
+            for note in bar.notes
+            if not note.is_rest
+        ]
+    )
+
+
+def score_against_notation(notation, score) -> dict[str, float]:
+    """Our Notation against a parsed `mscz.Score`, as notation.
+
+    This is the measure that answers "would this notate the way a human
+    notated it?", and it needs NO TEMPO MAP: both sides are already in quarter
+    notes counted from their own bar one, and the single unknown -- which of
+    our bars is their bar one -- is one constant that the interval-based
+    rhythm measure is immune to by construction (see `score_notation`).
+
+    Transposition is measured, never assumed. A hand transcription may be
+    written an octave or more from concert pitch, and our own tracker makes
+    octave errors; in a raw comparison those are indistinguishable. Scored
+    without detecting it, Confirmation reads 0.121 where the truth is 0.736.
+
+    Scored against `score.melody`, the top note of each chord. Our line is
+    monophonic, so scoring it against every chord tone would charge us for
+    notes a single-line score cannot hold (`mscz.Score`).
+    """
+    from swingscribe.alignment import align, best_transposition
+
+    ours = notation_notes(notation)
+    theirs = [(n.position, n.duration, n.pitch) for n in score.melody]
+    if not ours or not theirs:
+        return {"rhythm": 0.0, "value": 0.0, "n_matched": 0.0, "transposition": 0.0}
+
+    their_pitches = [p for _, _, p in theirs]
+    our_pitches = [p for _, _, p in ours]
+    coarse, _ = best_transposition(their_pitches[:HEAD_REFERENCE], our_pitches[:HEAD_ESTIMATE])
+    offset, _ = best_transposition(
+        their_pitches[:HEAD_REFERENCE],
+        our_pitches[:HEAD_ESTIMATE],
+        search=range(coarse - 2, coarse + 3),
+    )
+    shifted = [(position, duration, pitch + offset) for position, duration, pitch in ours]
+    aligned = align(their_pitches, [p for _, _, p in shifted])
+    result = score_notation(theirs, shifted, aligned.pairs)
+    coverage = result["n_matched"] / len(theirs)
+    return {
+        **result,
+        "transposition": float(offset),
+        "reference": float(len(theirs)),
+        # How much of their score ours accounted for, and whether that is
+        # enough for the rest of these numbers to be about the same music.
+        "coverage": coverage,
+        "trusted": coverage >= COVERAGE_FLOOR,
+    }

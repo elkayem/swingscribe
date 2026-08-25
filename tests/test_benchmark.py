@@ -199,3 +199,189 @@ def test_nothing_matched_scores_zero_rather_than_dividing_by_it():
     from swingscribe.benchmark import score_notation
 
     assert score_notation([(0.0, 1.0, 60)], [(0.0, 1.0, 72)], [(0, 0)])["rhythm"] == 0.0
+
+
+# ── a whole Notation against a whole Score ──────────────────────────────────
+# The GUI's Score button and the eval harness both go through this, so what is
+# under test is that they cannot drift apart -- and that the transposition is
+# found rather than assumed.
+
+
+def _bar(notes, signature=(4, 4)):
+    from swingscribe.model import NotatedBar
+
+    return NotatedBar(number=1, time_signature=signature, notes=notes)
+
+
+def _note(beat, duration, pitch, tie_stop=False, rest=False):
+    from swingscribe.model import NotatedNote
+
+    return NotatedNote(
+        beat=beat,
+        duration=duration,
+        pitch=pitch,
+        step="C",
+        alter=0,
+        octave=4,
+        is_rest=rest,
+        tie_stop=tie_stop,
+    )
+
+
+def _notation(bars):
+    from swingscribe.model import Notation
+
+    return Notation(bars=bars)
+
+
+class _Score:
+    """The two fields `score_against_notation` reads off an mscz.Score."""
+
+    def __init__(self, melody, bars=2):
+        self.melody = melody
+        self.bars = bars
+
+
+class _ScoreNote:
+    def __init__(self, position, duration, pitch):
+        self.position, self.duration, self.pitch = position, duration, pitch
+
+
+def test_bar_starts_accumulate_the_time_signature():
+    from swingscribe.benchmark import bar_starts
+
+    bars = [_bar([], (4, 4)), _bar([], (3, 4)), _bar([], (4, 4))]
+    assert bar_starts(bars) == [0.0, 4.0, 7.0]
+
+
+def test_notation_notes_are_absolute_and_drop_rests():
+    from swingscribe.benchmark import notation_notes
+
+    notation = _notation(
+        [
+            _bar([_note(0.0, 1.0, 60), _note(1.0, 1.0, 0, rest=True), _note(2.0, 2.0, 62)]),
+            _bar([_note(0.0, 4.0, 64)]),
+        ]
+    )
+    assert notation_notes(notation) == [(0.0, 1.0, 60), (2.0, 2.0, 62), (4.0, 4.0, 64)]
+
+
+def test_notation_notes_merges_a_tie_across_a_barline():
+    from swingscribe.benchmark import notation_notes
+
+    notation = _notation(
+        [
+            _bar([_note(0.0, 4.0, 60)]),
+            _bar([_note(0.0, 2.0, 60, tie_stop=True), _note(2.0, 2.0, 62)]),
+        ]
+    )
+    assert notation_notes(notation) == [(0.0, 6.0, 60), (6.0, 2.0, 62)]
+
+
+def test_a_notation_scored_against_its_own_notes_is_perfect():
+    from swingscribe.benchmark import notation_notes, score_against_notation
+
+    notation = _notation(
+        [
+            _bar([_note(0.0, 1.0, 60), _note(1.0, 1.0, 62), _note(2.0, 2.0, 64)]),
+            _bar([_note(0.0, 1.0, 65), _note(1.0, 1.0, 67), _note(2.0, 2.0, 69)]),
+        ]
+    )
+    melody = [_ScoreNote(p, d, n) for p, d, n in notation_notes(notation)]
+    result = score_against_notation(notation, _Score(melody))
+    assert result["rhythm"] == 1.0
+    assert result["value"] == 1.0
+    assert result["n_matched"] == 6.0
+    assert result["transposition"] == 0.0
+
+
+def test_the_transposition_is_measured_not_assumed():
+    """A hand transcription written an octave up must not read as six wrong
+    notes. Undetected, Confirmation scores 0.121 where the truth is 0.736."""
+    from swingscribe.benchmark import notation_notes, score_against_notation
+
+    notation = _notation(
+        [
+            _bar([_note(0.0, 1.0, 60), _note(1.0, 1.0, 62), _note(2.0, 2.0, 64)]),
+            _bar([_note(0.0, 1.0, 65), _note(1.0, 1.0, 67), _note(2.0, 2.0, 69)]),
+        ]
+    )
+    melody = [_ScoreNote(p, d, n + 12) for p, d, n in notation_notes(notation)]
+    result = score_against_notation(notation, _Score(melody))
+    assert result["transposition"] == 12.0
+    assert result["rhythm"] == 1.0
+    assert result["n_matched"] == 6.0
+
+
+def test_an_empty_side_scores_zero_rather_than_raising():
+    from swingscribe.benchmark import score_against_notation
+
+    notation = _notation([_bar([_note(0.0, 4.0, 0, rest=True)])])
+    assert score_against_notation(notation, _Score([]))["n_matched"] == 0.0
+
+
+def test_the_wrong_score_does_not_manufacture_agreement():
+    """The control this project relies on: run a fit against the WRONG take
+    and it must collapse. A fit that still reads high there is measuring its
+    own search, not the music -- that mistake has been made twice here.
+
+    COVERAGE is the number that collapses, and rhythm is emphatically not.
+    See `test_coverage_is_the_discriminator_and_rhythm_is_not`.
+    """
+    import random
+
+    from swingscribe.benchmark import COVERAGE_FLOOR, notation_notes, score_against_notation
+
+    rng = random.Random(7)
+    scale = [60, 62, 64, 65, 67, 69, 71, 72]
+    notation = _notation(
+        [
+            _bar(
+                [_note(float(beat), 1.0, scale[(bar * 4 + beat) % len(scale)]) for beat in range(4)]
+            )
+            for bar in range(8)
+        ]
+    )
+    right = [_ScoreNote(p, d, n) for p, d, n in notation_notes(notation)]
+    good = score_against_notation(notation, _Score(right, bars=8))
+    assert good["rhythm"] == 1.0
+    assert good["coverage"] == 1.0
+    assert good["trusted"] is True
+
+    # Same note count, unrelated pitches at unrelated positions.
+    wrong = [
+        _ScoreNote(i * rng.choice([0.5, 1.0, 1.5]), 1.0, rng.randint(40, 84)) for i in range(32)
+    ]
+    bad = score_against_notation(notation, _Score(wrong, bars=8))
+    assert bad["coverage"] < COVERAGE_FLOOR
+    assert bad["trusted"] is False
+
+
+def test_coverage_is_the_discriminator_and_rhythm_is_not():
+    """Why `trusted` exists at all, and why it keys on coverage.
+
+    Measured over every notation the benchmark can build against every hand
+    score on disk: coverage runs 0.69-0.74 on the two RIGHT pairings and
+    0.16-0.36 on fourteen WRONG ones, with no overlap. Rhythm over the same
+    wrong pairings reaches 0.583 -- higher than All The Things reads against
+    its OWN correct score (0.618). Two eighth-note bebop lines agree about
+    most gaps by chance, so a rhythm number cannot tell you it is describing
+    the wrong tune. The floor therefore sits in coverage's gap, and this test
+    is what stops someone "tidying" it to a rounder number outside it.
+    """
+    from swingscribe.benchmark import COVERAGE_FLOOR
+
+    assert 0.36 < COVERAGE_FLOOR < 0.69
+
+
+def test_coverage_counts_their_notes_not_ours():
+    """Half their score matched is half their score matched, however many
+    notes we invented on top of it."""
+    from swingscribe.benchmark import notation_notes, score_against_notation
+
+    notation = _notation([_bar([_note(float(b), 1.0, 60 + b) for b in range(4)]) for _ in range(2)])
+    ours = notation_notes(notation)
+    melody = [_ScoreNote(p, d, n) for p, d, n in ours]
+    result = score_against_notation(notation, _Score(melody, bars=2))
+    assert result["reference"] == float(len(melody))
+    assert result["coverage"] == result["n_matched"] / result["reference"]
