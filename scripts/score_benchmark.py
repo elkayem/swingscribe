@@ -38,13 +38,16 @@ from pathlib import Path
 
 from swingscribe import metrics, mscz
 from swingscribe.alignment import align, best_transposition, to_chroma
+from swingscribe.benchmark import anchor_map, solo_shift, window_shift
 from swingscribe.config import Config
 from swingscribe.model import NoteEvent
 
 BENCH = Path("benchmark")
 WINDOW_BARS = 4
-OFFSET_SEARCH_S = 1.0  # per-window drift the fit may absorb
-OFFSET_STEP_S = 0.01
+# How far outside a window's notated span to look for our notes. Only sets
+# which of our notes are eligible to match; the window's placement comes from
+# the alignment (see `window_shift`), not from a search over this range.
+WINDOW_MARGIN_S = 1.0
 
 # tune key -> (audio file, .mscz transcription, title, soloist's instrument)
 TUNES = {
@@ -127,24 +130,6 @@ def transcribe_all(cache_path: Path, step_cost: float = 0.0) -> dict:
     return runs
 
 
-def fit_offset(ref_onsets: list[float], est_onsets: list[float]) -> float:
-    """The constant shift that best lines one window up with the score."""
-    if not ref_onsets or not est_onsets:
-        return 0.0
-    best, best_hits = 0.0, -1
-    steps = int(OFFSET_SEARCH_S / OFFSET_STEP_S)
-    for k in range(-steps, steps + 1):
-        shift = k * OFFSET_STEP_S
-        hits = sum(
-            1
-            for r in ref_onsets
-            if any(abs(r + shift - e) <= metrics.ONSET_TOLERANCE_S for e in est_onsets)
-        )
-        if hits > best_hits:
-            best, best_hits = shift, hits
-    return best
-
-
 def score_tune(key: str, run: dict) -> dict:
     _, mscz_name, title, instrument = TUNES[key]
     score = mscz.parse(BENCH / mscz_name)
@@ -179,22 +164,24 @@ def score_tune(key: str, run: dict) -> dict:
 
     # --- onset timing, per window ----------------------------------------
     ref_events = mscz.to_note_events(score, bpm, start_seconds=lo)
+    # Which of our notes is which notated note, established with no timing.
+    # `pitch` is the alignment computed above; only true matches anchor, since
+    # a substitution pairs two notes that are not the same note.
+    anchor_of = anchor_map(pitch.pairs, ref_pitches, shifted)
+    whole_solo = solo_shift([est[ei].onset - ref_events[ri].onset for ri, ei in anchor_of.items()])
+
     windows = []
     for start_bar in range(1, score.bars + 1, WINDOW_BARS):
-        ref_win = [
-            e
-            for e, n in zip(ref_events, score.notes, strict=True)
-            if start_bar <= n.bar < start_bar + WINDOW_BARS
+        index = [
+            i for i, n in enumerate(score.notes) if start_bar <= n.bar < start_bar + WINDOW_BARS
         ]
-        if len(ref_win) < 4:  # too few notes to fit an offset against
+        if len(index) < 4:  # too few notes for a window to mean anything
             continue
-        w_lo = min(e.onset for e in ref_win) - 0.5 * beat_s - OFFSET_SEARCH_S
-        w_hi = max(e.onset for e in ref_win) + 1.5 * beat_s + OFFSET_SEARCH_S
-        est_win = [n for n in est if w_lo <= n.onset <= w_hi]
-        if not est_win:
-            windows.append({"onset_f1": 0.0, "note_f1": 0.0, "n_ref": len(ref_win), "shift": 0.0})
-            continue
-        shift = fit_offset([e.onset for e in ref_win], [n.onset for n in est_win])
+        ref_win = [ref_events[i] for i in index]
+        shift = window_shift(
+            [est[anchor_of[i]].onset - ref_events[i].onset for i in index if i in anchor_of],
+            whole_solo,
+        )
         moved = [
             NoteEvent(
                 onset=e.onset + shift,
@@ -205,6 +192,12 @@ def score_tune(key: str, run: dict) -> dict:
             )
             for e in ref_win
         ]
+        w_lo = min(e.onset for e in moved) - 0.5 * beat_s - WINDOW_MARGIN_S
+        w_hi = max(e.onset for e in moved) + 1.5 * beat_s + WINDOW_MARGIN_S
+        est_win = [n for n in est if w_lo <= n.onset <= w_hi]
+        if not est_win:
+            windows.append({"onset_f1": 0.0, "note_f1": 0.0, "n_ref": len(ref_win), "shift": shift})
+            continue
         scored = metrics.score_notes(moved, est_win)
         windows.append(
             {

@@ -36,6 +36,9 @@ from bars/span and a per-window constant offset to absorb drift. Rhythm
 *within* a window is genuinely tested; rhythm across the solo is not, and
 cannot be until M5 gives us a real tempo map. Treat this as a floor.
 
+How that per-window offset is chosen turned out to matter more than anything
+else on this page — see "The onset numbers were wrong" below.
+
 ## Results
 
 | | Confirmation | All The Things | Giant Steps |
@@ -48,9 +51,13 @@ cannot be until M5 gives us a real tempo map. Treat this as a floor.
 | precision / recall | 0.64 / 0.86 | 0.86 / 0.91 | 0.65 / 0.73 |
 | chroma F1 | 0.741 | 0.883 | 0.773 |
 | matched / wrong / invented / missed | 579 / 67 / 253 / 29 | 382 / 17 / 46 / 21 | 245 / 63 / 69 / 29 |
-| onset F1 (windowed) | 0.604 | 0.650 | 0.645 |
-| note F1 (onset+pitch) | 0.325 | 0.341 | 0.360 |
-| drift the fit absorbed | 1.94 s | 0.78 s | 1.56 s |
+| onset F1 (windowed) | 0.585 | 0.580 | 0.622 |
+| note F1 (onset+pitch) | **0.489** | **0.501** | **0.500** |
+| drift the fit absorbed | 0.94 s | 0.30 s | 0.22 s |
+
+The onset and note rows were **0.604/0.325, 0.650/0.341, 0.645/0.360** until
+the scoring bug below was found. The pitch rows are unaffected: they never
+used timing at all.
 
 ## What the numbers say
 
@@ -115,6 +122,58 @@ tolerance, and note F1 drops to ~0.33 because it needs onset *and* pitch on
 the same note. Quantization is M5's job and there is no tempo map yet — the
 per-window fit had to absorb up to 1.94 s of drift, which is 6 beats at
 Confirmation's tempo. Do not read these as a verdict on M3.
+
+## The onset numbers were wrong, and wrong in a way that misled us
+
+Note F1 sat at 0.33 against an onset F1 of 0.60 for months. Read plainly that
+says "it finds the notes and puts them in the wrong place", and it sent
+attention toward timing. It was a bug in the scorer.
+
+The per-window offset was chosen by searching for the shift that maximized
+**onset hits**. Onsets carry no identity. In a bebop line of near-uniform
+eighths, a shift of a whole eighth note lines up almost exactly as many
+onsets as the truth does, and the search has no evidence with which to
+prefer the truth. Measured, it slipped **12 of 32 windows on Confirmation, 9
+of 18 on All The Things, and 6 of 16 on Giant Steps** — and the slips landed
+on *integer numbers of eighth notes* (−1, −3, −4, −5, −6, −7, −8), not on a
+continuum, which is how a beat slip is told apart from real tempo drift.
+
+A slipped window is the worst kind of wrong, because it hides:
+
+- its **onsets still coincide**, so onset F1 is unharmed — even flattered;
+- every note in it is compared against its *neighbour's* pitch, so note F1
+  goes to nearly zero.
+
+Which is precisely the signature the table showed. The "drift the fit
+absorbed" column was the visible symptom all along: 1.94 s of drift across
+one solo is six beats, and no rhythm section drifts six beats.
+
+**The fix.** The shift now comes from the pitch-sequence alignment, which
+establishes which of our notes is which notated note using no timing at all.
+Each aligned pair gives one (ours − notated) delta, and the window's shift is
+their median — a robust location estimate over an independently derived
+correspondence, rather than a search over the number being reported. It
+cannot slip a beat, because pitch pins the correspondence first.
+
+Two things worth stating about the result:
+
+- **This is not the metric being gamed.** An independent method — fitting the
+  shift by maximizing onset *and pitch* hits together — lands within 0.03 of
+  it on all three solos (0.558 / 0.582 / 0.576 against 0.574 / 0.571 / 0.607
+  before the harness's honesty adjustment below). Two methods that share no
+  machinery agree.
+- **Windows with too few anchors are scored, not dropped.** A passage we
+  failed to transcribe has no aligned pairs; it falls back to the solo-wide
+  shift and scores badly. Dropping it would have removed our worst playing
+  from the average, and would have read about 0.08 higher.
+
+Onset F1 went *down* slightly (0.604 → 0.585, 0.650 → 0.580, 0.645 → 0.622).
+That is the correction working: some of the old onset matches were the
+spurious ones a slipped window produces.
+
+The logic now lives in `src/swingscribe/benchmark.py` with tests in
+`tests/test_benchmark.py`, rather than untested inside the script — which is
+the reason it survived this long. One of those tests reproduces the slip.
 
 ## Follow-up: Viterbi f0 decoding
 
