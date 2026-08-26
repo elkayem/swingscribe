@@ -37,6 +37,21 @@ DURATION_BEATS = {
 }
 
 
+# Ottava (8va / 8vb) shift in semitones, by MuseScore subtype.
+#
+# MuseScore 4 stores the WRITTEN pitch under an ottava, not the sounding one,
+# and carries the octave in a separate <Spanner type="Ottava">. MEASURED, not
+# assumed: aligning the Peterson solo against our transcription of the same
+# recording matches 10 of the 11 notes under its 8vb once the shift is applied
+# and 1 of 11 without it. Ignoring the spanner is a GROUND TRUTH error — it
+# charges the transcriber for an octave the score never claimed.
+#
+# 58 notes across 5 of the 10 hand transcriptions sit under one; on the Wynton
+# Kelly and Carl Perkins solos that is ~10% of the line. Writing a high passage
+# 8va to keep it on the staff is ordinary notation, not a mistake.
+OTTAVA_SHIFT = {"8va": 12, "8vb": -12, "15ma": 24, "15mb": -24, "22ma": 36, "22mb": -36}
+
+
 @dataclass(frozen=True)
 class ScoreNote:
     """One notated note. Positions are in quarter notes from the start."""
@@ -147,6 +162,11 @@ def parse(path: str | Path) -> Score:
     # A tie makes the NEXT note at the same pitch a continuation, not a new
     # note; hold the index of the note waiting to be extended.
     pending_tie: int | None = None
+    # Semitones to add to every note until the ottava closes. The start and end
+    # markers arrive inline in voice order, so a running offset gives exactly
+    # the right half-open span: a note at the end marker's own tick is already
+    # outside, which is what the spanner's declared length says too.
+    ottava = 0
 
     for measure in staff.findall("Measure"):
         bar_number += 1
@@ -167,13 +187,21 @@ def parse(path: str | Path) -> Score:
                     tuplet_ratio = normal / actual if actual else 1.0
                 elif element.tag == "endTuplet":
                     tuplet_ratio = 1.0
+                elif element.tag == "Spanner" and element.get("type") == "Ottava":
+                    # The start marker carries the <Ottava>; the end marker is
+                    # the same tag with only a <prev> back-reference.
+                    spanner = element.find("Ottava")
+                    if spanner is not None:
+                        ottava = OTTAVA_SHIFT.get(spanner.findtext("subtype", ""), 0)
+                    else:
+                        ottava = 0
                 elif element.tag == "Rest":
                     cursor += _duration_of(element, beats_per_bar) * tuplet_ratio
                     pending_tie = None  # a rest breaks any tie
                 elif element.tag == "Chord":
                     duration = _duration_of(element, beats_per_bar) * tuplet_ratio
                     pitches = [
-                        int(n.findtext("pitch", "0"))
+                        int(n.findtext("pitch", "0")) + ottava
                         for n in element.findall("Note")
                         if n.findtext("pitch")
                     ]

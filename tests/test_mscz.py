@@ -222,3 +222,71 @@ def test_to_note_events_stays_monophonic(tmp_path):
     silently move a pinned number."""
     score = parse_body(tmp_path, CHORDS)
     assert [e.pitch for e in mscz.to_note_events(score, bpm=120.0)] == [60, 67, 72]
+
+
+def ottava_start(subtype: str = "8va") -> str:
+    return f'<Spanner type="Ottava"><Ottava><subtype>{subtype}</subtype></Ottava></Spanner>'
+
+
+def ottava_end() -> str:
+    return (
+        '<Spanner type="Ottava"><prev><location><measures>0</measures></location></prev></Spanner>'
+    )
+
+
+def test_ottava_shifts_written_pitch_to_sounding_pitch(tmp_path):
+    """8va means the notes under it SOUND an octave above what is written.
+
+    MuseScore 4 stores the written pitch and carries the octave in a separate
+    spanner, so a parser that ignores it reports the wrong octave for those
+    notes — and charges the transcriber for a mistake the score never made.
+    """
+    body = chord(60) + ottava_start("8va") + chord(62) + chord(64) + ottava_end() + chord(65)
+    score = parse_body(tmp_path, body)
+    assert score.pitches == [60, 74, 76, 65]
+
+
+def test_ottava_bassa_shifts_down(tmp_path):
+    body = chord(60) + ottava_start("8vb") + chord(62) + ottava_end() + chord(64)
+    assert parse_body(tmp_path, body).pitches == [60, 50, 64]
+
+
+def test_two_octave_ottava(tmp_path):
+    body = ottava_start("15ma") + chord(60) + ottava_end() + chord(62)
+    assert parse_body(tmp_path, body).pitches == [84, 62]
+
+
+def test_note_at_the_end_marker_is_outside_the_ottava(tmp_path):
+    """The span is half-open. MuseScore's own declared length says so: a
+    spanner of one quarter starting at an eighth covers two eighths, not
+    three."""
+    body = (
+        ottava_start("8va")
+        + chord(60, "eighth")
+        + chord(62, "eighth")
+        + ottava_end()
+        + chord(64, "eighth")
+    )
+    assert parse_body(tmp_path, body).pitches == [72, 74, 64]
+
+
+def test_an_unclosed_ottava_runs_to_the_end(tmp_path):
+    body = chord(60) + ottava_start("8va") + chord(62) + chord(64)
+    assert parse_body(tmp_path, body).pitches == [60, 74, 76]
+
+
+def test_ottava_shifts_every_note_of_a_chord(tmp_path):
+    body = (
+        ottava_start("8vb")
+        + "<Chord><durationType>quarter</durationType>"
+        + "<Note><pitch>60</pitch></Note><Note><pitch>64</pitch></Note></Chord>"
+    )
+    score = parse_body(tmp_path, body)
+    assert sorted(n.pitch for n in score.notes) == [48, 52]
+    assert score.pitches == [52]
+
+
+def test_an_unknown_ottava_subtype_is_left_alone(tmp_path):
+    """Better to report the written pitch than to invent a shift."""
+    body = ottava_start("nonsense") + chord(60)
+    assert parse_body(tmp_path, body).pitches == [60]
