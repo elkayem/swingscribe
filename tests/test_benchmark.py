@@ -385,3 +385,66 @@ def test_coverage_counts_their_notes_not_ours():
     result = score_against_notation(notation, _Score(melody, bars=2))
     assert result["reference"] == float(len(melody))
     assert result["coverage"] == result["n_matched"] / result["reference"]
+
+
+def _notation_of(events, duration=0.5):
+    """A 4/4 Notation holding notes at the given (quarter position, pitch)."""
+    from swingscribe.model import NotatedBar, NotatedNote, Notation
+
+    last = max((position for position, _p in events), default=0.0)
+    count = int(last // 4) + 1
+    bars = [NotatedBar(number=i + 1, time_signature=(4, 4), notes=[]) for i in range(count)]
+    for position, pitch in events:
+        index = int(position // 4)
+        bars[index].notes.append(
+            NotatedNote(beat=position - index * 4, duration=duration, pitch=pitch)
+        )
+    return Notation(title="t", bars=bars)
+
+
+def _straight_eighths(pitches, start=0.0):
+    """A line of straight eighths as (position_in_quarters, pitch)."""
+    return [(start + i * 0.5, p) for i, p in enumerate(pitches)]
+
+
+def test_wjazz_notation_scores_rhythm_and_reports_no_value():
+    """WJazzD stores a note's metrical POSITION but not its notated VALUE, so
+    a `value` number here would be invented."""
+    from swingscribe.benchmark import score_against_wjazz_notation
+
+    pitches = [60, 62, 64, 65, 67, 69, 71, 72]
+    notation = _notation_of(_straight_eighths(pitches))
+    result = score_against_wjazz_notation(notation, _straight_eighths(pitches))
+    assert result["rhythm"] == 1.0
+    assert "value" not in result
+    assert result["coverage"] == 1.0
+    assert result["trusted"] is True
+
+
+def test_wjazz_notation_penalises_a_rhythm_written_wrong():
+    from swingscribe.benchmark import score_against_wjazz_notation
+
+    pitches = [60, 62, 64, 65, 67, 69, 71, 72]
+    # We wrote every gap as a quarter where the annotation says an eighth.
+    ours = _notation_of([(i * 1.0, p) for i, p in enumerate(pitches)])
+    result = score_against_wjazz_notation(ours, _straight_eighths(pitches))
+    assert result["coverage"] == 1.0  # the notes are all there
+    assert result["rhythm"] < 0.2  # the rhythm is not
+
+
+def test_wjazz_notation_measures_the_transposition():
+    """The solo may be annotated at concert pitch and ours written elsewhere."""
+    from swingscribe.benchmark import score_against_wjazz_notation
+
+    pitches = [60, 62, 64, 65, 67, 69, 71, 72]
+    ours = _notation_of([(i * 0.5, p + 12) for i, p in enumerate(pitches)])
+    result = score_against_wjazz_notation(ours, _straight_eighths(pitches))
+    assert result["transposition"] == -12.0
+    assert result["rhythm"] == 1.0
+
+
+def test_wjazz_notation_is_empty_without_an_annotation():
+    from swingscribe.benchmark import score_against_wjazz_notation
+
+    notation = _notation_of(_straight_eighths([60, 62]))
+    assert score_against_wjazz_notation(notation, [])["n_matched"] == 0.0

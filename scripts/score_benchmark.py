@@ -82,7 +82,7 @@ def discover_tunes(bench: Path = BENCH) -> dict[str, tuple[str, str, str, str]]:
     partial run is more useful than none.
     """
     found = {}
-    for sidecar_path in sorted(bench.glob("*.swingscribe.json")):
+    for sidecar_path in sorted(bench.rglob("*.swingscribe.json")):
         try:
             sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -90,6 +90,10 @@ def discover_tunes(bench: Path = BENCH) -> dict[str, tuple[str, str, str, str]]:
         audio_name, score_path = sidecar.get("file"), sidecar.get("score")
         if not audio_name or not score_path:
             continue
+        # Keys are relative to benchmark/, which now has subfolders.
+        folder = sidecar_path.parent.relative_to(bench)
+        if folder != Path("."):
+            audio_name = f"{folder.as_posix()}/{audio_name}"
         mscz_name = Path(score_path).name
         if not (bench / audio_name).is_file() or not (bench / mscz_name).is_file():
             continue

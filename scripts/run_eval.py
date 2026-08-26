@@ -54,6 +54,21 @@ def notes_cache(step_cost: float, dip_db: float) -> Path:
     return Path(f".benchmark-notes-c{step_cost}-d{dip_db}.json")
 
 
+def sidecar_name(sidecar_path: Path, sidecar: dict) -> str:
+    """The track's key: its path relative to benchmark/, with forward slashes.
+
+    `sidecar["file"]` is a bare filename, because the sidecar lives beside its
+    audio and does not need to say where that is. Once benchmark/ has
+    subfolders (benchmark/wjazzd/, added when the library outgrew one flat
+    directory) the bare name no longer locates the file, and two tracks in
+    different folders could collide on it. Forward slashes so a key pinned on
+    Windows matches one pinned anywhere else.
+    """
+    folder = sidecar_path.parent.relative_to(BENCH)
+    name = sidecar.get("file") or sidecar_path.name.removesuffix(".swingscribe.json")
+    return name if folder == Path(".") else f"{folder.as_posix()}/{name}"
+
+
 def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> dict:
     """Transcribe every sidecar'd span in benchmark/, reusing what is cached."""
     from swingscribe.config import Config
@@ -62,9 +77,9 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
     from swingscribe.stages.separate import stems_dir
 
     runs = json.loads(cache.read_text(encoding="utf-8")) if cache.is_file() else {}
-    for sidecar_path in sorted(BENCH.glob("*.swingscribe.json")):
+    for sidecar_path in sorted(BENCH.rglob("*.swingscribe.json")):
         sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        name = sidecar["file"]
+        name = sidecar_name(sidecar_path, sidecar)
         if not (BENCH / name).is_file():
             continue
         # Re-transcribe when the routing changed. The cache is keyed by decode
@@ -247,7 +262,7 @@ def notate_run(name: str, run: dict, grid: dict):
     from swingscribe.model import NoteEvent
     from swingscribe.notation import notation_for_span
 
-    sidecar_path = BENCH / f"{name}.swingscribe.json"
+    sidecar_path = BENCH / f"{name}.swingscribe.json"  # name carries any subfolder
     sidecar = {}
     if sidecar_path.is_file():
         sidecar = _json.loads(sidecar_path.read_text(encoding="utf-8"))
@@ -306,6 +321,47 @@ def notation_scores(runs: dict, grids: dict) -> dict:
     return out
 
 
+def wjazz_notation_scores(db_path: Path, card_wjazz: dict, runs: dict, grids: dict) -> dict:
+    """Our notation against WJazzD's metrical annotation, per identified solo.
+
+    This is the notation benchmark the MuseScore set cannot be on its own: ten
+    hand transcriptions, all bebop eighth-note lines, can reward a grid rule
+    for writing everything as eighths. WJazzD is hundreds of solos annotated by
+    different people, with `division` running 1 through 10 — and it writes a
+    swung pair as two eighths, which is the convention we target.
+
+    Only `rhythm`: WJazzD stores metrical position, not notated value.
+    """
+    import sqlite3
+
+    from swingscribe.benchmark import score_against_wjazz_notation
+    from swingscribe.wjazz import notated_positions
+
+    db = sqlite3.connect(db_path)
+    out = {}
+    for key, entry in sorted(card_wjazz.items()):
+        if "melid" not in entry:
+            continue
+        # The row may be keyed "file [performer]" when one file holds several
+        # annotated solos; the notes and grid are the file's.
+        name = key.split(" [")[0]
+        if name not in runs or name not in grids:
+            continue
+        notation = notate_run(name, runs[name], grids[name])
+        if notation is None or not notation.bars:
+            continue
+        result = score_against_wjazz_notation(notation, notated_positions(db, entry["melid"]))
+        if not result["n_matched"]:
+            continue
+        out[key] = {
+            "rhythm": round(result["rhythm"], 4),
+            "n_matched": result["n_matched"],
+            "coverage": round(result["coverage"], 4),
+            "trusted": float(bool(result["trusted"])),
+        }
+    return out
+
+
 def render(card: dict) -> None:
     wjazz = {k: v for k, v in card["wjazz"].items() if "skipped" not in v}
     skipped = {k: v for k, v in card["wjazz"].items() if "skipped" in v}
@@ -348,6 +404,26 @@ def render(card: dict) -> None:
                 f"{int(entry['n_matched']):8d} {entry['rhythm']:8.3f} {entry['value']:7.3f}"
             )
 
+    if card.get("wjazz_notation"):
+        print("\n== Notation: our score against WJazzD's metrical annotation ==")
+        print("  (rhythm only — WJazzD stores metrical position, not notated value)")
+        header = f"  {'solo':<34s} {'matched':>8s} {'cover':>7s} {'rhythm':>8s}"
+        print(header)
+        print("  " + "-" * (len(header) - 2))
+        rows = sorted(card["wjazz_notation"].items())
+        for name, entry in rows:
+            flag = "" if entry["trusted"] else "   (untrusted — too little lined up)"
+            print(
+                f"  {Path(name).stem[:34]:<34s} {int(entry['n_matched']):8d} "
+                f"{entry['coverage']:7.3f} {entry['rhythm']:8.3f}{flag}"
+            )
+        trusted = [e for _n, e in rows if e["trusted"]]
+        if trusted:
+            print(
+                f"\n  mean rhythm {statistics.fmean(e['rhythm'] for e in trusted):.3f} "
+                f"over {len(trusted)} solo(s)"
+            )
+
     print("\n== MuseScore: our audio against notated rhythm ==")
     header = f"  {'tune':<30s} {'pitch':>7s} {'chroma':>7s} {'onset':>7s} {'note':>7s}"
     print(header)
@@ -375,6 +451,10 @@ def flatten(card: dict) -> dict[str, float]:
         for field, value in entry.items():
             if isinstance(value, (int, float)):
                 flat[f"notation/{Path(name).stem}/{field}"] = float(value)
+    for name, entry in card.get("wjazz_notation", {}).items():
+        for field, value in entry.items():
+            if isinstance(value, (int, float)):
+                flat[f"wjazz-notation/{Path(name).stem}/{field}"] = float(value)
     for field, value in card["summary"].items():
         flat[f"summary/{field}"] = float(value)
     return flat
@@ -427,11 +507,17 @@ def main() -> None:
     print(f"== Beat grids, cache {args.grids} ==")
     grids = beat_grids(args.grids)
 
+    wjazz = wjazz_scores(args.db, runs, grids) if args.db else {}
     card = {
         "settings": {"step_cost": args.step_cost, "dip_db": args.dip_db},
-        "wjazz": wjazz_scores(args.db, runs, grids) if args.db else {},
+        "wjazz": wjazz,
         "mscz": mscz_scores(runs),
         "notation": notation_scores(runs, grids) if grids else {},
+        # WJazzD carries a human's NOTATION as well as their onsets, so the
+        # same solos answer both questions.
+        "wjazz_notation": (
+            wjazz_notation_scores(args.db, wjazz, runs, grids) if args.db and grids else {}
+        ),
         "summary": {},
     }
     scored = [e for e in card["wjazz"].values() if "skipped" not in e]

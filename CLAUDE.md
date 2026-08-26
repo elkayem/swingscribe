@@ -240,6 +240,19 @@ things not to re-derive:
   is what separates "we invented it" from "it happened, nobody asked for it" —
   on Orbits the listener's erasures are 0% corroborated (CREPE was tracking the
   bass through stem bleed), on the Peterson they are 90% (his left hand).
+- **The second voice is a REVIEW AID and is not part of the transcription.**
+  `corroborate.second_voice` rides on `FrameDiagnostics`, which nothing
+  downstream consumes, and `transcribe.piano_second_voice` is OFF in the plain
+  Config. The GUI turns it on for its own review screen only. Putting it in
+  `notes` would halve precision on every benchmark while describing the same
+  playing — and the Score button must never see it either, because it compares
+  our line against a single notated melody.
+- **Two voices of one performance share ONE swing reading.** `notation.py`
+  notates the overlay separately (quantize writes one note per grid position,
+  so two simultaneous notes in one list are a grid too coarse and one gets
+  dropped) but hands it the LINE's swing spans. Run on its own the overlay
+  reads a different BUR — 2.21 against the line's 1.51 on Giant Steps — and
+  warps a different set of beats, so the voices drift apart on the page.
 - **The listener does not want us to pick the line — they want to SEE the top
   one or two notes and delete the rest.** That flips the target from precision
   to recall, and recall is where the oracle is strong: top-2 of each onset
@@ -354,6 +367,24 @@ made. Both are kept; neither subsumes the other.
   a ground-truth bug worth an octave on 58 notes across 5 of the 10 hand
   scores. Writing a passage 8va to keep it on the staff is ordinary notation,
   not an error on the transcriber's side — do not "correct" it back.
+- **WJazzD carries a human's NOTATION, not just their onsets.** Every note has
+  `bar`, `beat`, and `tatum` out of `division` subdivisions — a swung pair is
+  two eighths, which is the convention we target. `wjazz.notated_positions`
+  reads it and `benchmark.score_against_wjazz_notation` scores against it.
+  **Rhythm only**: WJazzD stores metrical position but not notated VALUE (its
+  `duration` column is performed seconds), so a `value` number there would be
+  invented. This is the control the MuseScore set cannot be — those are ten
+  bebop eighth-note lines, which reward a grid rule for writing everything as
+  eighths; `division` runs 1 through 10 across 456 WJazzD solos.
+- **A WJazzD track needs NO span selection.** WJazzD's onsets are in its own
+  excerpt's time base (every solo starts 1-8s in), so there is nothing to seed
+  a span from — but `score_wjazz.identify_all` finds the solo inside a whole
+  track by content. Sidecar the full duration and let it search: Clifford
+  Brown's Sandu was located at offset 38.6s and scored note F1 0.867. Do not
+  ask the listener to select spans for these.
+- **`benchmark/` has SUBFOLDERS now** (`benchmark/wjazzd/`). Track keys are the
+  path relative to `benchmark/` with forward slashes, so a key pinned on
+  Windows matches one pinned anywhere else. Both harness globs are `rglob`.
 - **`score_benchmark.TUNES` is DERIVED from the sidecars, never hand-listed.**
   A hand-maintained table is why seven hand transcriptions sat unmeasured
   while the benchmark reported a mean over four. A score picked in the GUI is

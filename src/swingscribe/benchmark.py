@@ -267,3 +267,56 @@ def score_against_notation(notation, score) -> dict[str, float]:
         "coverage": coverage,
         "trusted": coverage >= COVERAGE_FLOOR,
     }
+
+
+def score_against_wjazz_notation(notation, positions: list[tuple[float, int]]) -> dict[str, float]:
+    """Our Notation against WJazzD's METRICAL annotation, as notation.
+
+    WJazzD gives every note a `bar`, a `beat`, and a `tatum` out of `division`
+    subdivisions of that beat, so it carries a human's notation as well as a
+    human's onsets — and it writes a swung pair as two eighths, which is
+    exactly the convention we target. `wjazz.notated_positions` turns that into
+    quarter notes from the solo's own bar one.
+
+    Why this matters more than one more hand transcription: the MuseScore
+    scores are ten solos, all bebop, all eighth-note lines, so a grid rule
+    tuned on them can be rewarded for simply writing everything as eighths.
+    WJazzD is 456 solos annotated by different people, and `division` runs 1
+    through 10 across the database. It is the control that set cannot be.
+
+    **Only `rhythm` is reported, and that is a property of the source.** WJazzD
+    stores a note's metrical POSITION but not its notated VALUE — its
+    `duration` column is performed seconds, not a note value — so there is
+    nothing to compare a dotted eighth against. Returning a `value` here would
+    be inventing one. `rhythm` is the interval question, and the interval
+    question is the whole of "did we write the swing straight?"
+    """
+    from swingscribe.alignment import align, best_transposition
+
+    ours = notation_notes(notation)
+    if not ours or not positions:
+        return {"rhythm": 0.0, "n_matched": 0.0, "transposition": 0.0, "coverage": 0.0}
+
+    # A duration of zero on the reference side: `score_notation` reads it only
+    # for `value`, which is not reported, and never for `rhythm`.
+    theirs = [(position, 0.0, pitch) for position, pitch in positions]
+    their_pitches = [p for _, p in positions]
+    our_pitches = [p for _, _, p in ours]
+    coarse, _ = best_transposition(their_pitches[:HEAD_REFERENCE], our_pitches[:HEAD_ESTIMATE])
+    offset, _ = best_transposition(
+        their_pitches[:HEAD_REFERENCE],
+        our_pitches[:HEAD_ESTIMATE],
+        search=range(coarse - 2, coarse + 3),
+    )
+    shifted = [(position, duration, pitch + offset) for position, duration, pitch in ours]
+    aligned = align(their_pitches, [p for _, _, p in shifted])
+    result = score_notation(theirs, shifted, aligned.pairs)
+    coverage = result["n_matched"] / len(theirs)
+    return {
+        "rhythm": result["rhythm"],
+        "n_matched": result["n_matched"],
+        "transposition": float(offset),
+        "reference": float(len(theirs)),
+        "coverage": coverage,
+        "trusted": coverage >= COVERAGE_FLOOR,
+    }
