@@ -50,8 +50,11 @@ benchmark/
 
 # Cached benchmark transcriptions (scripts/score_benchmark.py). Note lists
 # derived from commercial recordings — only aggregate metrics ship (plan §12).
-.benchmark-notes*.json
-.benchmark-grids.json
+# One glob for ALL of them, deliberately: the per-file list this replaced let
+# an ad hoc `.benchmark-oracle-soul.json` land untracked and UNIGNORED, which
+# is the one mistake this rule exists to prevent. Anything a benchmark script
+# caches must match this pattern.
+.benchmark-*.json
 
 # Weimar Jazz Database and anything derived from it (scripts/wjazz_swing.py,
 # docs/wjazzd.md). ODbL share-alike, and its contents are transcriptions of
@@ -62,5 +65,3 @@ wjazz/
 wjazzd.db
 esac.db
 *.wjazz.json
-.benchmark-piano-notes.json
-.benchmark-notes-oracle.json

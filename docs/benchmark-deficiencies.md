@@ -211,7 +211,138 @@ the numbers rather than showing them. What would move: more right pairings.
 Two is thin, and the floor should be re-derived once there are more hand
 transcriptions to check it against.
 
+### D8 — Block-chord piano: we track an inner voice, an octave under the line
+
+**Soul Station (Wynton Kelly) is the worst tune in the benchmark** — note F1
+0.182, pitch F1 0.536 — and it is not a tempo problem (100 bpm) nor an
+alignment one (grid 100.0 bpm against the score's implied 101.4).
+
+The failure is **localised**, which is what distinguishes it from D1. Matches
+by decile of the solo:
+
+    0.81  0.86  0.71  0.38  0.91  0.76  0.19  0.05  0.24  0.45
+
+Bar by bar, the cause is plain:
+
+| bars | score melody | score chord tones | ours | score range | our range |
+|---|---|---|---|---|---|
+| 1-8 | 58 | 0 | 59 | 54-78 | 38-78 |
+| 21-24 | 32 | 14 | 33 | 72-93 | 54-84 |
+| **25-28** | **24** | **20** | **13** | **71-83** | **55-72** |
+| 29-32 | 28 | 8 | 26 | 60-84 | 44-84 |
+
+Kelly ends the solo in block chords. Where the texture thickens we produce
+half the notes **an octave below the melody** — not missing the line, tracking
+a different voice of the same chord. This score is 21% chord tones against the
+Peterson's 10%, so it is the benchmark's first genuinely chordal piano solo.
+
+It is also the clearest case for the top-N reading (docs/m7b-piano.md):
+
+| | whole solo recall | bars 25-32 recall |
+|---|---|---|
+| our pipeline | 0.538 | 0.288 |
+| oracle top-1 | 0.637 | 0.519 |
+| oracle top-2 | 0.835 | 0.596 |
+| oracle loudest-of-cluster | **0.722** (F1 0.537, ours 0.536) | — |
+
+Loudest-of-cluster is the striking one: same F1 as what ships, with recall
+0.538 → 0.722. Strictly more of the line on screen for the same amount of
+deleting.
+
+### D7 update — the coverage floor now has ten right pairings, not two
+
+D7 set `COVERAGE_FLOOR = 0.5` from two correct pairings reading 0.69-0.74
+against fourteen wrong ones at 0.16-0.36, and flagged two as thin evidence.
+With ten:
+
+| tune | coverage |
+|---|---|
+| Someday My Prince Will Come | 0.932 |
+| For Minors Only (Art Pepper) | 0.917 |
+| All The Things You Are | 0.912 |
+| Confirmation | 0.865 |
+| There Will Never Be Another You | 0.851 |
+| Giant Steps | 0.742 |
+| Lover Come Back To Me | 0.734 |
+| Melody For C | 0.703 |
+| For Minors Only (Carl Perkins) | 0.664 |
+| **Soul Station** | **0.538** |
+
+The floor survives — every correct pairing clears it — but the margin is far
+thinner than two samples suggested. Soul Station is a *correct* pairing at
+0.538, against wrong pairings reaching 0.36. Do not raise the floor on the
+strength of the old two-sample range; there is now about 0.18 of daylight, and
+it is the hardest tune that sits closest to the edge.
+
 ## Resolved
+
+
+### R12 — 8va/8vb in the hand transcriptions was read as an octave error
+
+**MuseScore 4 stores the WRITTEN pitch under an ottava**, and carries the
+octave in a separate `<Spanner type="Ottava">`. `mscz.parse` ignored the
+spanner, so every note under an 8va or 8vb came out an octave from what the
+score says — a ground-truth bug, charging the transcriber for an octave the
+score never claimed. It is the third bug of this shape (see R1, R2): a
+measurement failure reported as a transcription failure.
+
+Writing a high passage 8va to keep it on the staff is ordinary notation. The
+listener flagged it as expected behaviour on their side, which it is; the
+defect was entirely in the reader.
+
+**Measured, not assumed.** Two cheap heuristics disagreed and both were
+inconclusive — boundary melodic intervals said "sounding", the mid-staff
+pitch range of every ottava'd passage said "written". The recording settled
+it. Aligning the Peterson solo against our transcription of the same audio:
+
+| reading | notes under the 8vb that match |
+|---|---|
+| as stored | 1 / 11 |
+| +12 | 0 / 11 |
+| **-12 (the 8vb applied)** | **10 / 11** |
+
+Lover Come Back To Me `pitch_f1` 0.7104 → 0.7301 from this alone.
+
+The span is half-open: MuseScore's own declared length (`measures=1,
+fractions=-3/4` = one quarter) covers two eighths, not three, so a note at
+the end marker's tick is already outside.
+
+Affects 58 notes across 5 of the 10 hand transcriptions — ~10% of the line on
+the Wynton Kelly and Carl Perkins solos, 3.3% overall.
+
+**Where the evidence is thinner.** The decisive test is the Peterson 8vb, and
+it was re-run against the polyphonic piano model rather than our own
+transcription after noticing that the first test was nearly circular: CREPE's
+octave errors are the very failure being adjudicated, so agreeing with CREPE
+could have meant agreeing with our own mistake. Independently, the oracle
+matches the shifted pitches 100% and the written ones 55%.
+
+Soul Station's three 8va spans do **not** replicate that cleanly (oracle
+agreement 50/62/70% written against 50/50/80% shifted). They are 20 notes in
+bars 20-23, inside the stretch where that solo fails for an unrelated reason
+(D8), so they are a poor test bed rather than counter-evidence. The reading is
+kept because the file format cannot store 8va and 8vb by different rules, the
+Peterson case is unambiguous, and the musical argument only points one way: an
+ottava exists to bring notes that are off the staff back onto it, so a stored
+pitch sitting mid-staff under an 8va must be the written one.
+
+### R11 — Seven hand transcriptions sat unmeasured behind a hand-maintained table
+
+`score_benchmark.TUNES` was a literal dict pairing audio to `.mscz`. The GUI
+already records the chosen score in the sidecar beside the audio, so the table
+was duplicating information the app writes — and duplication of exactly the
+kind CLAUDE.md warns about, because the failure is silent: seven scores were
+added to `benchmark/` and the benchmark went on reporting a mean over four.
+
+`TUNES` is now derived from the sidecars. A score the listener picks in the
+app is benchmarked by virtue of having been picked. The benchmark went from
+4 tunes (2 piano) to 10 (6 piano) with no new pairing code.
+
+Related routing bug found at the same time: three of the four new piano solos
+had `ensemble: null`, so they defaulted to horn-led and never consulted the
+piano oracle — the M7b work worth +0.05 to +0.07 note F1 on piano. Unset is
+not the same as chosen, and nothing was warning about it.
+
 
 ### R10 — Piano precision was being charged for notes that are not errors
 

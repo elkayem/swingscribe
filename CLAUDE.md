@@ -240,6 +240,19 @@ things not to re-derive:
   is what separates "we invented it" from "it happened, nobody asked for it" —
   on Orbits the listener's erasures are 0% corroborated (CREPE was tracking the
   bass through stem bleed), on the Peterson they are 90% (his left hand).
+- **The listener does not want us to pick the line — they want to SEE the top
+  one or two notes and delete the rest.** That flips the target from precision
+  to recall, and recall is where the oracle is strong: top-2 of each onset
+  cluster contains the note the human notated 93-96% of the time, against 0.74
+  recall for what ships. Precision is ~0.5, which is the trade they asked for.
+- **The oracle's `velocity` is an unused melody cue.** Loudest-of-cluster beats
+  highest-of-cluster on the hard case (Peterson 0.583 -> 0.715 F1). A register
+  floor does NOT generalise — `>= 55` helped Giant Steps and hurt Lover.
+- **Never filter notes by duration.** Measured against 302 erasure labels, a
+  0.12s floor removes 41% of erased notes and 28% of KEPT ones — barely better
+  than random. Confidence does separate them (AUC 0.830), but at a 0.65 floor
+  it still costs 7% of kept notes to remove 30% of erased ones, so it is a
+  cue for SHADING the review UI, not for deleting.
 - `mscz.Score` now has two views. `melody` (top note per chord) is what every
   measure through M6 uses and what the time-free aligner needs; `notes` is
   everything. Scoring polyphony against `melody` would report a polyphonic
@@ -335,6 +348,25 @@ list of what is actually wrong; run everything with one command:
 
 Reading the second as a transcription failure is exactly the mistake that was
 made. Both are kept; neither subsumes the other.
+
+- **`.mscz` stores the WRITTEN pitch under an 8va/8vb**, with the octave in a
+  separate `<Spanner type="Ottava">`; `mscz.parse` applies it. Ignoring it was
+  a ground-truth bug worth an octave on 58 notes across 5 of the 10 hand
+  scores. Writing a passage 8va to keep it on the staff is ordinary notation,
+  not an error on the transcriber's side — do not "correct" it back.
+- **`score_benchmark.TUNES` is DERIVED from the sidecars, never hand-listed.**
+  A hand-maintained table is why seven hand transcriptions sat unmeasured
+  while the benchmark reported a mean over four. A score picked in the GUI is
+  benchmarked because it was picked.
+- **`ensemble: null` is not `horn-led`, but it behaves like it.** Three of the
+  four new piano solos silently skipped the piano oracle that way. Check the
+  routing before believing a piano number.
+- **The GUI and the harness use DIFFERENT cache directories** —
+  `benchmark/.swingscribe-cache` (relative to the track) versus
+  `./.swingscribe-cache` (relative to the cwd run_eval is invoked from). The
+  same track gets separated twice. Copy the one stem across rather than
+  re-separating; do not "fix" it by repointing the harness, which orphans
+  every separation already in the root cache.
 
 **Two fitting bugs have now been found in this harness, both of which reported
 a measurement failure as a transcription failure.** Any code that aligns our

@@ -50,34 +50,60 @@ WINDOW_BARS = 4
 WINDOW_MARGIN_S = 1.0
 
 # tune key -> (audio file, .mscz transcription, title, soloist's instrument)
-TUNES = {
-    "confirmation": (
-        "02 Confirmation.m4a",
-        "Dexter_Gordon_solo_on_Confirmation.mscz",
-        "Confirmation",
-        "tenor sax",
-    ),
-    "all_the_things": (
-        "All_The_Things_You_Are.m4a",
-        "Hank Mobley on All The Things You Are.mscz",
-        "All The Things You Are",
-        "tenor sax",
-    ),
-    "giant_steps": (
-        "06 Giant Steps.m4a",
-        "Tommy Flanagan Solo on Giant Steps.mscz",
-        "Giant Steps",
-        "piano",
-    ),
-    # The first benchmark solo that is not a single line: 10% of its notes are
-    # chord tones, mostly thirds under the melody (M7b, docs/m7b-piano.md).
-    "lover_come_back": (
-        "04 Lover Come Back To Me.m4a",
-        "Oscar_Peterson_Solo_on_Lover_Come_Back_To_Me.mscz",
-        "Lover Come Back To Me",
-        "piano",
-    ),
-}
+#
+# DERIVED from the sidecars, not hand-listed. The GUI already records the
+# chosen .mscz beside the audio, so a second hand-maintained table here is
+# pure duplication -- and it is duplication that silently costs measurements:
+# seven hand transcriptions sat in benchmark/ unmeasured because nobody
+# added a row. A score the listener picks in the app is now benchmarked by
+# virtue of having been picked.
+INSTRUMENT_OF = {"trio": "piano", "solo-piano": "piano", "horn-led": "horn"}
+
+
+def tune_key(audio_name: str) -> str:
+    """A stable slug for a track, used only inside this script."""
+    stem = Path(audio_name).stem
+    # Album track numbers ("02 Confirmation", "1-17 Star Eyes") are not part
+    # of the tune's name.
+    words = [w for w in stem.replace("_", " ").split() if not w[0].isdigit()]
+    return "_".join(words).lower().replace("'", "")
+
+
+def tune_title(audio_name: str) -> str:
+    stem = Path(audio_name).stem
+    return " ".join(w for w in stem.replace("_", " ").split() if not w[0].isdigit())
+
+
+def discover_tunes(bench: Path = BENCH) -> dict[str, tuple[str, str, str, str]]:
+    """Every track whose sidecar names a hand transcription we can read.
+
+    Skips anything whose audio or .mscz is missing rather than failing: the
+    benchmark folder is a personal library that differs per machine, and a
+    partial run is more useful than none.
+    """
+    found = {}
+    for sidecar_path in sorted(bench.glob("*.swingscribe.json")):
+        try:
+            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        audio_name, score_path = sidecar.get("file"), sidecar.get("score")
+        if not audio_name or not score_path:
+            continue
+        mscz_name = Path(score_path).name
+        if not (bench / audio_name).is_file() or not (bench / mscz_name).is_file():
+            continue
+        instrument = INSTRUMENT_OF.get(sidecar.get("ensemble") or "", "horn")
+        found[tune_key(audio_name)] = (
+            audio_name,
+            mscz_name,
+            tune_title(audio_name),
+            instrument,
+        )
+    return found
+
+
+TUNES = discover_tunes()
 
 
 def transcribe_all(cache_path: Path, step_cost: float = 0.0) -> dict:

@@ -252,3 +252,83 @@ It also exposed an interface bug: the review screen reported all 33 as
 "erasures no longer match this transcription", in a warning colour, beside a
 Discard button. `erasures.resolve` now separates `moved` from vanished, and
 only the former is a warning.
+
+## Line selection, reframed by the listener (2026-08-25)
+
+The plan and issue #8 both treat "which note is the melody" as something the
+software must decide. The listener's actual workflow does not:
+
+> At this point, I'm not too worried about whether the left hand gets captured
+> or not... Most of the time, with piano music I'll use the top one or two
+> notes (what the right hand plays) so it would be good to at least see it.
+
+That changes the target from *precision* to *recall*. A note that is on the
+screen can be deleted in one keystroke; a note that is missing has to be found
+by ear. So the question is not "can we pick the line?" but "is the right note
+present at all?"
+
+**It is, and by a wide margin.** Clustering the oracle's polyphonic output by
+onset (50 ms) and keeping the top N pitches of each cluster, scored against the
+hand transcriptions — which notate the right hand only, so they are exactly the
+target this asks about:
+
+| | Giant Steps recall | Lover Come Back recall |
+|---|---|---|
+| our pipeline (ships today) | 0.742 | 0.734 |
+| oracle top-1 | 0.917 | 0.701 |
+| **oracle top-2** | **0.958** | **0.925** |
+| oracle top-3 | 0.961 | 0.967 |
+
+Soul Station, added later and the worst tune in the benchmark (D8), makes the
+same case more sharply — 0.538 recall today against 0.835 for top-2, and 0.288
+against 0.596 over the block-chord ending where we currently track an inner
+voice an octave under the line.
+
+Top-2 is the knee. Precision is 0.60 / 0.41 / 0.30, so between half and two
+thirds of what is shown would be deleted — which is the trade the listener
+asked for, and the reason this is a *review* feature and not a new default.
+
+### Velocity is an unused melody cue
+
+The oracle reports a velocity per note and nothing reads it. Taking the
+*loudest* note of each cluster rather than the highest:
+
+| | Giant Steps F1 | Lover Come Back F1 |
+|---|---|---|
+| oracle top-1 (highest) | 0.858 | 0.583 |
+| oracle loudest of cluster | 0.864 | **0.715** |
+| top-2, nearest CREPE's contour | 0.825 | 0.702 |
+| our pipeline (ships today) | 0.761 | 0.730 |
+
+On Soul Station it is better still: recall 0.538 → **0.722** at an F1 that
+matches what ships (0.537 vs 0.536). Strictly more of the line on screen for
+the same amount of deleting, which is the shape of win this workflow wants.
+
+On the Peterson — the hard case, locked hands and octave doubling — loudness
+recovers most of what "highest" throws away (0.583 → 0.715). It still does not
+beat the current pipeline there, so this is not a drop-in replacement; it is
+evidence that the selector should weigh loudness, and that a register floor
+should not be trusted (`>= 55` helped Giant Steps and hurt Lover).
+
+### What the erasure labels say, which is not what register predicts
+
+302 hand-made "not the solo" labels now exist across 11 tracks. The intuition
+that they are mostly low left-hand material is **wrong**: median pitch is 60,
+and only 24% sit below G3.
+
+Against the notes that were kept:
+
+| property | erased (median) | kept (median) | separates? |
+|---|---|---|---|
+| duration | 0.130 s | 0.150 s | **no** |
+| confidence | 0.708 | 0.851 | yes — AUC **0.830** |
+
+A duration floor is a trap: at 0.12 s it removes 41% of erased notes and 28%
+of kept ones, which is barely better than deleting at random. Nobody should
+"tidy up" with one.
+
+Confidence is genuinely informative. At a 0.65 floor it removes 30% of what
+the listener deleted and only 7% of what they kept. That is **not** an
+argument for auto-deleting — losing 7% of good notes to save a third of the
+clicks is the wrong trade when recall is the point. It is an argument for
+*shading* low-confidence notes in the review UI so the eye goes to them first.
