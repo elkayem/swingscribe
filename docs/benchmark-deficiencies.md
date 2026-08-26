@@ -274,6 +274,37 @@ thinner than two samples suggested. Soul Station is a *correct* pairing at
 strength of the old two-sample range; there is now about 0.18 of daylight, and
 it is the hardest tune that sits closest to the edge.
 
+### D10 — So What: right recording, right places, wrong notes
+
+The only one of the nine new WJazzD tracks that did not score. `identify_all`
+withheld it at a best candidate of **14.0%** against the 15% floor, so the
+guard did its job — but the diagnosis is worth keeping, because it is NOT the
+take-matching failure that floor exists to catch.
+
+All three annotated soloists lock on at musically correct, correctly ordered
+offsets, and our note density inside each located window matches theirs almost
+exactly:
+
+| soloist | window | theirs | ours |
+|---|---|---|---|
+| Miles Davis | 91.7-204.4s | 221 (2.0/s) | 255 (2.3/s) |
+| John Coltrane | 207.1-315.0s | 479 (4.4/s) | 478 (4.4/s) |
+| Cannonball Adderley | 317.6-422.9s | 445 (4.2/s) | 464 (4.4/s) |
+
+So it is the right recording, and we are producing the right *number* of notes
+in the right *places*. Only 10-14% of them are the right note.
+
+Ruled out: a wrong issue (the measured rate is 1.004-1.008, and rate is fitted
+anyway) and a tuning offset (+0 semitones beats every shift from -4 to +4;
++1 halves the match rate). What is left is the transcription itself. So What is
+the hardest texture in the set — a modal tune at a quiet dynamic, 1959 Columbia
+balance, Miles muted and distant, and Bill Evans comping continuously under
+everything. A monophonic tracker in that texture produces a plausible stream of
+the wrong voice, which is exactly what these numbers look like.
+
+Untried: a different stem, and whether the `other` stem of `htdemucs_6s` is
+actually holding the horns alone here.
+
 ### D9 — Metheny's guitar line notates worst of anything measured
 
 `Nothing Personal` (Pat Metheny, 242 bpm) is heard well — WJazzD note F1
