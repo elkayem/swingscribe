@@ -274,7 +274,64 @@ thinner than two samples suggested. Soul Station is a *correct* pairing at
 strength of the old two-sample range; there is now about 0.18 of daylight, and
 it is the hardest tune that sits closest to the edge.
 
+### D9 — Metheny's guitar line notates worst of anything measured
+
+`Nothing Personal` (Pat Metheny, 242 bpm) is heard well — WJazzD note F1
+**0.873**, third best of twenty — and notated worse than anything else:
+**rhythm 0.254** against WJazzD's metrical annotation, at coverage 0.744 so
+the pairing is sound. Every other trusted solo is 0.44 to 0.72.
+
+Hearing the notes and writing them are separate failures, and this is the
+cleanest example yet of the second without the first. It is also the only
+guitar in the set. Unexamined.
+
 ## Resolved
+
+### R13 — The WJazzD notation scores were measuring the aligner, not the notation
+
+First run of the new WJazzD notation benchmark read mean rhythm 0.533 with
+nine of twenty pairings below the coverage floor — including Clifford Brown's
+George's Dilemma at coverage 0.517 while its note F1 was 0.914. Hearing 91% of
+the notes and lining up 52% of the notation is not a coherent pair of numbers,
+and the incoherence was the tell.
+
+The cause: a WJazzD track's sidecar covers the WHOLE TRACK, because the solo's
+position is not known in advance (that is what `identify_all` is for). So we
+notated five minutes — head, every other soloist — and handed a **global**
+aligner 450 reference notes against ~1500 of ours. `alignment.align` is global
+on purpose, because both sides are meant to cover the same span of music; here
+they did not.
+
+Fixed by notating only the located solo: `identify_all` already returns the
+offset and rate that place the annotation in our timeline, so the window is
+free. Notes are cut to it as well as the beat grid.
+
+| | before | after |
+|---|---|---|
+| George's Dilemma | 0.517 / 0.318 | **0.895 / 0.718** |
+| Joy Spring | 0.426 / 0.359 | **0.877 / 0.717** |
+| Sandu | 0.627 / 0.522 | **0.886 / 0.651** |
+| Gingerbread Boy | 0.137 / 0.417 | **0.645 / 0.546** |
+| trusted pairings | 11 of 20 | **19 of 20** |
+| mean rhythm | 0.533 | **0.581** |
+
+Fourth bug of this shape (R1, R2, R12): a measurement failure that reads as a
+transcription failure. The control that caught it was the same one as always —
+a number that disagreed with another number about the same music.
+
+### R11b — A silent subset, again: two of three sidecar globs
+
+`benchmark/` grew subfolders and `transcribe_all` and `discover_tunes` were
+made recursive. `beat_grids` was not. Every track under `benchmark/wjazzd/`
+therefore got no beat grid, which silently cost them **both** their beat score
+and their notation score — `wjazz_beat_f1` stayed a mean over 11 beside a note
+F1 over 20, which is precisely the R8 failure the function's own docstring
+warns about, reintroduced three lines above it.
+
+`tests/test_eval_harness.py` now guards discovery, including a structural check
+that no sidecar walk in either script uses a flat glob. The scripts had no
+tests at all before this.
+
 
 
 ### R12 — 8va/8vb in the hand transcriptions was read as an octave error

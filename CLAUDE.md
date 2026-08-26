@@ -351,7 +351,7 @@ list of what is actually wrong; run everything with one command:
 - **WJazzD (`score_wjazz.py`) is audio against audio** — a human's per-note
   onsets in seconds for the same recording. Asks "did we hear what was
   played?" and is the right measure of `transcribe`. Currently **mean note F1
-  0.782 and mean beat F1 0.929, both over the same 11 solos**. Quote the `n`
+  0.801 and mean beat F1 0.940, both over the same 20 solos**. Quote the `n`
   with the mean: beat F1 was once reported as 0.97 because it was silently a
   mean over 4 (R8). `run_eval.py` now pins and prints each mean's own count.
 - **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
@@ -376,6 +376,14 @@ made. Both are kept; neither subsumes the other.
   invented. This is the control the MuseScore set cannot be — those are ten
   bebop eighth-note lines, which reward a grid rule for writing everything as
   eighths; `division` runs 1 through 10 across 456 WJazzD solos.
+- **Notate only the LOCATED solo, never the whole track.** A WJazzD sidecar
+  covers the whole file, so notating its region writes the head and every
+  other soloist too — and `alignment.align` is GLOBAL, so it is then matching
+  450 reference notes against 1500 of ours and measuring nothing about
+  notation. `identify_all` returns the offset and rate that place the
+  annotation in our timeline; use them. This read mean rhythm 0.533 with 9 of
+  20 pairings below the coverage floor before the trim and 0.581 with 19 of 20
+  after (R13).
 - **A WJazzD track needs NO span selection.** WJazzD's onsets are in its own
   excerpt's time base (every solo starts 1-8s in), so there is nothing to seed
   a span from — but `score_wjazz.identify_all` finds the solo inside a whole

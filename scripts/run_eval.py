@@ -163,8 +163,13 @@ def beat_grids(cache: Path = GRIDS_CACHE, log=print) -> dict:
     from swingscribe.stages import beats
 
     grids = json.loads(cache.read_text(encoding="utf-8")) if cache.is_file() else {}
-    for sidecar_path in sorted(BENCH.glob("*.swingscribe.json")):
-        name = json.loads(sidecar_path.read_text(encoding="utf-8"))["file"]
+    for sidecar_path in sorted(BENCH.rglob("*.swingscribe.json")):
+        # rglob and the subfolder-qualified key, matching transcribe_all. With
+        # the flat glob this silently skipped every track under benchmark/
+        # wjazzd/, which cost them their beat score AND their notation score --
+        # the exact "scores a subset without saying so" failure this docstring
+        # is about, reintroduced by making two of three globs recursive.
+        name = sidecar_name(sidecar_path, json.loads(sidecar_path.read_text(encoding="utf-8")))
         if name in grids or not (BENCH / name).is_file():
             continue
         config = Config()
@@ -208,6 +213,13 @@ def wjazz_scores(db_path: Path, runs: dict, grids: dict) -> dict:
                 "instrument": solo["instrument"],
                 "tempo": solo["tempo"],
                 "melid": solo["melid"],
+                # Where the annotated solo actually sits in OUR timeline. The
+                # notation scorer needs it: a whole-track region notates the
+                # head and every other soloist too, and a global aligner given
+                # 450 reference notes against 1500 of ours is not measuring
+                # notation any more.
+                "solo_start": round(float(solo["ref_on"][0]) * solo["rate"] + solo["offset"], 3),
+                "solo_end": round(float(solo["ref_on"][-1]) * solo["rate"] + solo["offset"], 3),
                 "note_f1": round(result["note_f1"], 4),
                 "note_precision": round(result["note_precision"], 4),
                 "note_recall": round(result["note_recall"], 4),
@@ -247,7 +259,12 @@ def mscz_scores(runs: dict) -> dict:
     return out
 
 
-def notate_run(name: str, run: dict, grid: dict):
+# How far either side of the located solo to notate. Enough that a bar is not
+# clipped mid-phrase, small enough that the neighbouring soloist stays out.
+SOLO_MARGIN_S = 1.0
+
+
+def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | None = None):
     """Everything from cached notes to a Notation: swing, quantize, notate.
 
     The stages below transcribe are all pure arithmetic, so this is a second
@@ -278,9 +295,13 @@ def notate_run(name: str, run: dict, grid: dict):
                 source="crepe",
             )
             for n in run["notes"]
+            # A region override means the run covers more music than we are
+            # notating (a whole track against one annotated solo), so the
+            # notes have to be cut to it as well as the beat grid.
+            if region is None or region[0] <= n["onset"] <= region[1]
         ],
         grid["beats"],
-        tuple(run["region"]),
+        region or tuple(run["region"]),
         stem=run["stem"],
         config=Config(),
         anchor=sidecar.get("anchor"),
@@ -347,7 +368,12 @@ def wjazz_notation_scores(db_path: Path, card_wjazz: dict, runs: dict, grids: di
         name = key.split(" [")[0]
         if name not in runs or name not in grids:
             continue
-        notation = notate_run(name, runs[name], grids[name])
+        # Notate ONLY the located solo, not the whole track. The alignment
+        # underneath is global on purpose (both sides are meant to cover the
+        # same music), so handing it a five-minute notation against a
+        # one-chorus annotation measures nothing about notation.
+        window = (entry["solo_start"] - SOLO_MARGIN_S, entry["solo_end"] + SOLO_MARGIN_S)
+        notation = notate_run(name, runs[name], grids[name], region=window)
         if notation is None or not notation.bars:
             continue
         result = score_against_wjazz_notation(notation, notated_positions(db, entry["melid"]))
