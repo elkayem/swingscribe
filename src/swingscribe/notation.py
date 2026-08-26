@@ -105,12 +105,20 @@ def notation_for_span(
     time_signature: tuple[int, int] = (4, 4),
     pulses_per_bar: int = 4,
     sample_rate: int = 44100,
+    second_voice: list[NoteEvent] | None = None,
 ) -> Notation | None:
     """Run swing, quantize and notate over one span. None if it is too short.
 
     `config` supplies the notate settings that are genuinely choices -- the
     part's transposition, the title, legato fill -- while the stem is forced
     onto all three stages so a caller cannot half-set it.
+
+    `second_voice` is the piano review overlay (corroborate.second_voice). It
+    is notated SEPARATELY and merged in as voice 2 rather than being mixed
+    into `notes`, because quantize chooses one grid per beat and notate writes
+    one note per grid position: two simultaneous notes in a single list are
+    not a chord to it, they are a grid that is too coarse, and it would
+    silently drop one of them (CLAUDE.md, M6).
     """
     from swingscribe.stages import notate, quantize, swing
 
@@ -135,4 +143,56 @@ def notation_for_span(
     )
     for stage in (swing.run, quantize.run, notate.run):
         document = stage(document, run_config)
-    return document.notation
+    notation = document.notation
+    if notation is not None and second_voice:
+        merge_second_voice(notation, _notate_only(second_voice, document, run_config))
+    return notation
+
+
+def _notate_only(notes: list[NoteEvent], document: Document, run_config: Config) -> Notation | None:
+    """The same stages over a different note list, on the SAME grid AND warp.
+
+    Re-using the beat grid and meter matters: the two voices have to be
+    measured against one clock, or bar 12 of one is not bar 12 of the other.
+
+    Re-using the SWING SPANS matters just as much and is easier to miss.
+    Swing is estimated from onsets, and the overlay's onsets are a different
+    (smaller, chordal) sample of the same playing — run on its own it reads a
+    different BUR (2.21 against the line's 1.51 on Giant Steps) and warps a
+    different set of beats. Two voices of one performance warped by different
+    amounts drift apart on the page. The line's reading wins because the line
+    is what the swing estimator is built for: a melodic stream of onsets.
+    """
+    from swingscribe.stages import notate, quantize
+
+    stem = run_config.notate.stem
+    second = Document(
+        audio_path=document.audio_path,
+        sample_rate=document.sample_rate,
+        beat_grid=document.beat_grid,
+        meter=document.meter,
+        swing=list(document.swing),
+        notes={stem: list(notes)},
+    )
+    for stage in (quantize.run, notate.run):
+        second = stage(second, run_config)
+    return second.notation
+
+
+def merge_second_voice(notation: Notation, overlay: Notation | None) -> Notation:
+    """Fold `overlay`'s notes into `notation` as voice 2, bar by bar.
+
+    Rests are kept, not dropped: a voice whose durations do not fill the bar
+    does not add up, and a bar that does not add up is the one thing every
+    MusicXML reader complains about. They can be hidden in the notation editor;
+    an unreadable file cannot be fixed there.
+    """
+    if overlay is None:
+        return notation
+    by_number = {bar.number: bar for bar in overlay.bars}
+    for bar in notation.bars:
+        other = by_number.get(bar.number)
+        if other is None:
+            continue
+        bar.notes.extend(note.model_copy(update={"voice": 2}) for note in other.notes)
+    return notation

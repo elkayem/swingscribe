@@ -136,7 +136,7 @@ def _append_note(
     if note.tie_start and not note.is_rest:
         ElementTree.SubElement(element, "tie", {"type": "start"})
 
-    ElementTree.SubElement(element, "voice").text = "1"
+    ElementTree.SubElement(element, "voice").text = str(note.voice)
     written = note.duration * (TRIPLET_RATIO if note.tuplet else 1.0)
     kind, dots = note_type(written)
     ElementTree.SubElement(element, "type").text = kind
@@ -156,6 +156,24 @@ def _append_note(
             ElementTree.SubElement(notations, "tied", {"type": "start"})
         if tuplet_mark:
             ElementTree.SubElement(notations, "tuplet", {"type": tuplet_mark})
+
+
+def voices_of(bar) -> list[tuple[int, list[NotatedNote]]]:
+    """The bar's notes grouped by voice, lowest voice number first.
+
+    A bar with only voice 1 — every bar, unless the piano second-voice overlay
+    is on — comes back as a single group, so the common path writes exactly
+    what it always did.
+    """
+    grouped: dict[int, list[NotatedNote]] = {}
+    for note in bar.notes:
+        grouped.setdefault(note.voice, []).append(note)
+    return sorted(grouped.items())
+
+
+def voice_notes_before(bar, number: int) -> list[NotatedNote]:
+    """Everything already written in this measure before voice `number`."""
+    return [n for n in bar.notes if n.voice < number]
 
 
 def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
@@ -202,9 +220,19 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
             direction_type = ElementTree.SubElement(direction, "direction-type")
             words = ElementTree.SubElement(direction_type, "words", {"font-style": "italic"})
             words.text = "Swing"
-        marks = tuplet_groups(bar.notes)
-        for position, note in enumerate(bar.notes):
-            _append_note(measure, note, notation.transpose, written_key, marks.get(position))
+        # Voices are written one after another, each rewound to the barline by
+        # a <backup>. MusicXML has no interleaved form: a reader consumes a
+        # voice until the duration runs out, so voice 2 must start by undoing
+        # voice 1's advance or it lands in the next bar.
+        for offset, (number, voice_notes) in enumerate(voices_of(bar)):
+            if offset:
+                backup = ElementTree.SubElement(measure, "backup")
+                ElementTree.SubElement(backup, "duration").text = str(
+                    sum(_duration_ticks(n) for n in voice_notes_before(bar, number))
+                )
+            marks = tuplet_groups(voice_notes)
+            for position, note in enumerate(voice_notes):
+                _append_note(measure, note, notation.transpose, written_key, marks.get(position))
 
     ElementTree.indent(root, space="  ")
     body = ElementTree.tostring(root, encoding="unicode")

@@ -77,6 +77,20 @@ def _payload(notes: list[NoteEvent], diagnostics: Any) -> dict[str, Any]:
             }
             for n in notes
         ],
+        # The piano review overlay: the rest of the top two notes the oracle
+        # heard (M7b). A SEPARATE key, not more entries in "notes", because
+        # everything that scores, exports or erases treats "notes" as the
+        # transcription — mixing them would put a review aid into every
+        # measurement.
+        "second_voice": [
+            {
+                "onset": round(float(n["onset"]), _ROUND),
+                "duration": round(float(n["duration"]), _ROUND),
+                "pitch": int(n["pitch"]),
+                "confidence": round(float(n.get("velocity", 0)) / 127.0, _ROUND),
+            }
+            for n in getattr(diagnostics, "second_voice", []) or []
+        ],
         "diagnostics": {
             "hop_s": diagnostics.hop_s,
             "start": round(diagnostics.start, _ROUND),

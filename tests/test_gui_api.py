@@ -11,7 +11,7 @@ import time
 import pytest
 
 from swingscribe.config import Config
-from swingscribe.model import AudioRef, Document
+from swingscribe.model import AudioRef, Document, NoteEvent
 
 pytest.importorskip("fastapi", reason="gui dependency group not installed")
 soundfile = pytest.importorskip("soundfile", reason="ml dependency group not installed")
@@ -988,3 +988,44 @@ def test_export_and_score_notate_the_same_thing(world, monkeypatch, tmp_path):
         .json()
     )
     assert scored["bars"] == exported["bars"]
+
+
+def test_the_review_payload_carries_the_second_voice_separately(tmp_path, monkeypatch):
+    """It must never arrive as extra entries in `notes`: everything that
+    scores, exports or erases treats `notes` as the transcription."""
+    from swingscribe.gui import review
+
+    class Diag:
+        hop_s = 0.01
+        start = 0.0
+        f0_midi = [60.0]
+        periodicity = [0.9]
+        energy_ok = [True]
+        pitch = [60.0]
+        onsets = [0.0]
+        second_voice = [{"onset": 1.0, "duration": 0.2, "pitch": 64, "velocity": 80}]
+        voiced_fraction = 1.0
+
+    notes = [NoteEvent(onset=1.0, duration=0.2, pitch=72, confidence=0.9, source="other")]
+    payload = review._payload(notes, Diag())
+    assert [n["pitch"] for n in payload["notes"]] == [72]
+    assert [n["pitch"] for n in payload["second_voice"]] == [64]
+
+
+def test_a_payload_without_a_second_voice_still_has_the_key(tmp_path):
+    """The client reads it unconditionally; a missing key would be a crash on
+    every horn track."""
+    from swingscribe.gui import review
+
+    class Diag:
+        hop_s = 0.01
+        start = 0.0
+        f0_midi = [60.0]
+        periodicity = [0.9]
+        energy_ok = [True]
+        pitch = [60.0]
+        onsets = [0.0]
+        voiced_fraction = 1.0
+
+    payload = review._payload([], Diag())
+    assert payload["second_voice"] == []

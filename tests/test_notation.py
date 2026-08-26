@@ -162,3 +162,116 @@ def test_transposition_travels_from_config_to_the_notation():
     )
     assert notation is not None
     assert notation.transpose == 14
+
+
+def test_the_second_voice_is_notated_separately_and_merged_as_voice_2():
+    """Two simultaneous notes in ONE list are not a chord to notate -- they are
+    a grid too coarse, and one of them gets dropped. So the overlay is notated
+    on its own and folded in afterwards."""
+    from swingscribe.notation import notation_for_span
+
+    beats = [i * 0.5 for i in range(40)]
+    line = [
+        NoteEvent(onset=t, duration=0.45, pitch=72, confidence=0.9, source="other")
+        for t in (0.0, 0.5, 1.0, 1.5, 2.0)
+    ]
+    under = [
+        NoteEvent(onset=t, duration=0.45, pitch=60, confidence=0.9, source="other")
+        for t in (0.0, 0.5, 1.0, 1.5, 2.0)
+    ]
+    notation = notation_for_span(
+        "x.wav", line, beats, (0.0, 20.0), stem="other", second_voice=under
+    )
+    assert notation is not None
+    pitched = [n for bar in notation.bars for n in bar.notes if not n.is_rest]
+    assert 72 in [n.pitch for n in pitched if n.voice == 1]
+    assert 60 in [n.pitch for n in pitched if n.voice == 2]
+    # Neither voice ate the other.
+    assert len([n for n in pitched if n.voice == 1 and n.pitch == 72]) >= 4
+    assert len([n for n in pitched if n.voice == 2 and n.pitch == 60]) >= 4
+
+
+def test_without_a_second_voice_everything_stays_voice_1():
+    from swingscribe.notation import notation_for_span
+
+    beats = [i * 0.5 for i in range(40)]
+    line = [
+        NoteEvent(onset=t, duration=0.45, pitch=72, confidence=0.9, source="other")
+        for t in (0.0, 0.5, 1.0, 1.5, 2.0)
+    ]
+    notation = notation_for_span("x.wav", line, beats, (0.0, 20.0), stem="other")
+    assert notation is not None
+    assert {n.voice for bar in notation.bars for n in bar.notes} == {1}
+
+
+def test_merge_is_a_no_op_when_the_overlay_could_not_be_notated():
+    from swingscribe.model import Notation as N
+    from swingscribe.notation import merge_second_voice
+
+    notation = N(title="t", bars=[])
+    assert merge_second_voice(notation, None) is notation
+
+
+def test_both_voices_share_one_swing_reading():
+    """Swing is estimated from onsets, and the overlay is a different sample of
+    the same playing — run on its own it reads a different BUR and warps a
+    different set of beats, so the two voices drift apart on the page."""
+    from swingscribe.notation import notation_for_span
+    from swingscribe.stages import swing as swing_stage
+
+    beats = [i * 0.5 for i in range(40)]
+    line = [
+        NoteEvent(onset=t, duration=0.2, pitch=72, confidence=0.9, source="other")
+        for t in (0.0, 0.35, 0.5, 0.85, 1.0, 1.35, 1.5, 1.85)
+    ]
+    calls = []
+    real = swing_stage.run
+
+    def counting(document, config):
+        calls.append(1)
+        return real(document, config)
+
+    swing_stage.run = counting
+    try:
+        notation_for_span("x.wav", line, beats, (0.0, 20.0), stem="other", second_voice=list(line))
+    finally:
+        swing_stage.run = real
+    # Once, for the line. The overlay inherits that reading rather than
+    # estimating its own.
+    assert sum(calls) == 1
+
+
+def test_the_overlay_inherits_the_line_s_swing_spans():
+    from swingscribe.model import BeatGrid, Document, SwingSpan
+    from swingscribe.notation import _notate_only
+
+    captured = {}
+    from swingscribe.stages import quantize as quantize_stage
+
+    real = quantize_stage.run
+
+    def capture(document, config):
+        captured["swing"] = list(document.swing)
+        return real(document, config)
+
+    quantize_stage.run = capture
+    try:
+        parent = Document(
+            audio_path="x.wav",
+            sample_rate=44100,
+            beat_grid=BeatGrid(beats=[i * 0.5 for i in range(20)], downbeats=[], beats_per_bar=4),
+            swing=[SwingSpan(start_beat=0, end_beat=16, bur=1.8, confidence=0.9, is_swung=True)],
+            notes={"other": []},
+        )
+        # The real caller forces the stem onto every stage; a bare Config
+        # would file the notes under "" and quantize would not find them.
+        run_config = Config().model_copy(
+            update={
+                "quantize": Config().quantize.model_copy(update={"stem": "other"}),
+                "notate": Config().notate.model_copy(update={"stem": "other"}),
+            }
+        )
+        _notate_only([], parent, run_config)
+    finally:
+        quantize_stage.run = real
+    assert [s.bur for s in captured["swing"]] == [1.8]

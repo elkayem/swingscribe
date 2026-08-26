@@ -593,7 +593,7 @@ def test_an_unavailable_oracle_leaves_the_line_alone(monkeypatch):
     monkeypatch.setattr(piano, "transcribe", explode)
     notes = [NoteEvent(onset=1.0, duration=0.2, pitch=60, confidence=0.9, source="other:crepe")]
     tc = TranscribeConfig(ensemble="trio")
-    assert stage._consult_piano_oracle(None, 44100, tc, 0.0, notes) == notes
+    assert stage._consult_piano_oracle(None, 44100, tc, 0.0, notes) == (notes, [])
 
 
 def test_an_oracle_that_hears_nothing_leaves_the_line_alone(monkeypatch):
@@ -602,10 +602,9 @@ def test_an_oracle_that_hears_nothing_leaves_the_line_alone(monkeypatch):
 
     monkeypatch.setattr(piano, "transcribe", lambda *a, **k: [])
     notes = [NoteEvent(onset=1.0, duration=0.2, pitch=60, confidence=0.9, source="other:crepe")]
-    assert (
-        stage._consult_piano_oracle(None, 44100, TranscribeConfig(ensemble="trio"), 0.0, notes)
-        == notes
-    )
+    assert stage._consult_piano_oracle(
+        None, 44100, TranscribeConfig(ensemble="trio"), 0.0, notes
+    ) == (notes, [])
 
 
 def test_the_oracle_corrects_an_octave_and_drops_a_phantom(monkeypatch):
@@ -623,6 +622,35 @@ def test_the_oracle_corrects_an_octave_and_drops_a_phantom(monkeypatch):
         NoteEvent(onset=1.0, duration=0.2, pitch=60, confidence=0.9, source="other:crepe"),
         NoteEvent(onset=5.0, duration=0.2, pitch=43, confidence=0.5, source="other:crepe"),
     ]
-    got = stage._consult_piano_oracle(None, 44100, TranscribeConfig(ensemble="trio"), 0.0, notes)
+    got, extra = stage._consult_piano_oracle(
+        None, 44100, TranscribeConfig(ensemble="trio"), 0.0, notes
+    )
     assert [n.pitch for n in got] == [72]
     assert got[0].source == "other:crepe+piano"
+    # The review overlay is opt-in and stays empty unless it is asked for.
+    assert extra == []
+
+
+def test_the_second_voice_is_opt_in_and_never_joins_the_line(monkeypatch):
+    """The listener's review aid must not become part of the transcription:
+    doubling the note count would halve precision on every benchmark while
+    describing the same playing."""
+    from swingscribe import piano
+    from swingscribe.stages import transcribe as stage
+
+    monkeypatch.setattr(
+        piano,
+        "transcribe",
+        lambda *a, **k: [
+            {"onset": 1.0, "duration": 0.2, "pitch": 72, "velocity": 90},
+            {"onset": 1.0, "duration": 0.2, "pitch": 64, "velocity": 60},
+            {"onset": 1.0, "duration": 0.2, "pitch": 48, "velocity": 50},
+        ],
+    )
+    notes = [NoteEvent(onset=1.0, duration=0.2, pitch=72, confidence=0.9, source="other:crepe")]
+    tc = TranscribeConfig(ensemble="trio", piano_second_voice=True)
+    line, extra = stage._consult_piano_oracle(None, 44100, tc, 0.0, notes)
+
+    assert [n.pitch for n in line] == [72]  # the line is untouched
+    assert [n["pitch"] for n in extra] == [64]  # the second of the top two
+    assert 48 not in [n["pitch"] for n in extra]  # the third is not offered

@@ -145,10 +145,21 @@ def create_app(config: Config) -> FastAPI:
             stored = library.load_settings(track_path, config, track_id).get("ensemble")
             if stored in ENSEMBLES:
                 ensemble = stored
+        # The review screen always wants the piano second-voice overlay when
+        # the oracle is running at all: the listener asked to SEE the top one
+        # or two notes and delete the rest. It is off in the plain Config
+        # because it must never reach a measurement (config.py), and on here
+        # because this is the one place whose job is review.
+        second_voice = ensemble in ("trio", "solo-piano")
         return config.model_copy(
             update={
                 "transcribe": config.transcribe.model_copy(
-                    update={"stem": stem, "region": region, "ensemble": ensemble}
+                    update={
+                        "stem": stem,
+                        "region": region,
+                        "ensemble": ensemble,
+                        "piano_second_voice": second_voice,
+                    }
                 )
             }
         )
@@ -524,9 +535,15 @@ def create_app(config: Config) -> FastAPI:
         resolution = resolve_erasures(track_id, entry, run_config, payload["notes"])
         audible = gui_erasures.audible(payload["notes"], resolution["silenced"])
         settings = library.load_settings(entry["path"], config, track_id)
+        # The overlay goes through erasures too: a second-voice note the
+        # listener silenced on the review screen must not reappear on the page.
+        overlay = payload.get("second_voice") or []
+        if overlay:
+            silenced = resolve_erasures(track_id, entry, run_config, overlay)["silenced"]
+            overlay = gui_erasures.audible(overlay, silenced)
         try:
             return gui_musicxml.export_span(
-                entry["document"], config, run_config, entry["path"], audible, settings
+                entry["document"], config, run_config, entry["path"], audible, settings, overlay
             )
         except gui_musicxml.NotReady as exc:
             raise HTTPException(409, str(exc)) from exc

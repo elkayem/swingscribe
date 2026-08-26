@@ -64,6 +64,8 @@ export class PianoRoll {
     this.span = { a: 0, b: 1 };
     this.view = { a: 0, b: 1 };
     this.notes = [];
+    this.second = [];
+    this.showSecond = true;
     this.diag = null;
     this.beats = null;
     this.selected = -1;
@@ -103,12 +105,24 @@ export class PianoRoll {
     this.span = span;
     if (!sameSpan) this.view = { ...span };
     this.notes = review ? review.notes : [];
+    // The piano second-voice overlay: the rest of the top two notes the oracle
+    // heard. Held apart from `notes` for the same reason the server holds it
+    // apart -- everything that scores, exports or erases treats `notes` as the
+    // transcription, and this is a suggestion, not a claim.
+    this.second = (review && review.second_voice) || [];
     this.diag = review ? review.diagnostics : null;
     this.beats = beats;
     this.selected = -1;
     this._range();
     this.draw();
     if (this.opts.onView) this.opts.onView(this.view, this.spanWidth);
+  }
+
+  /* Show or hide the piano second-voice overlay. */
+  setShowSecondVoice(on) {
+    this.showSecond = !!on;
+    this._range();
+    this.draw();
   }
 
   /* The aligned hand transcription (or null to drop it). */
@@ -144,6 +158,7 @@ export class PianoRoll {
      notes would push off the top or bottom of the canvas. */
   _range() {
     const pitches = this.notes.map((n) => n.pitch);
+    if (this.showSecond) for (const n of this.second) pitches.push(n.pitch);
     if (this.ground) for (const n of this.ground.reference_notes) pitches.push(n.pitch);
     if (!pitches.length) {
       this.pitchLo = 48;
@@ -378,6 +393,24 @@ export class PianoRoll {
     }
 
     const noteH = this.noteHeight(h);
+
+    // Drawn first, so the line always sits on top of what is merely offered,
+    // and outlined rather than filled: it must never be mistaken for a note
+    // we are claiming was played.
+    if (this.showSecond && this.second.length) {
+      ctx.save();
+      ctx.strokeStyle = this._css('--second-voice', '#8a7fd0');
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.75;
+      for (const n of this.second) {
+        const x0 = this.timeToX(n.onset, w);
+        const x1 = this.timeToX(n.onset + n.duration, w);
+        const y = this.pitchToY(n.pitch, h) - noteH / 2;
+        ctx.strokeRect(x0 + 0.5, y + 0.5, Math.max(2, x1 - x0) - 1, noteH - 2);
+      }
+      ctx.restore();
+    }
+
     this.notes.forEach((n, i) => {
       const kind = this.classOf(i);
       if (kind && !this.visible.has(kind)) return;

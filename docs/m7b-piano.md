@@ -332,3 +332,44 @@ the listener deleted and only 7% of what they kept. That is **not** an
 argument for auto-deleting — losing 7% of good notes to save a third of the
 clicks is the wrong trade when recall is the point. It is an argument for
 *shading* low-confidence notes in the review UI so the eye goes to them first.
+
+## What shipped: the second voice as a review overlay
+
+Built to the listener's own spec — *"second voice on the same staff; if it
+isn't correct, I'll delete it."*
+
+- `corroborate.second_voice` clusters the oracle's output by onset (50 ms),
+  keeps the top two of each simultaneity, and drops whatever the line already
+  shows. Taken from the oracle's own clustering rather than relative to our
+  note, because the case that most needs it is the one where our note is
+  **wrong**: over Soul Station's block-chord ending we track an inner voice an
+  octave under the melody, so the note worth offering is the one *above* ours.
+- It never enters the scored note list. It rides on `FrameDiagnostics` — the
+  overlay nothing downstream consumes — and `piano_second_voice` is off in the
+  plain `Config`. The GUI turns it on for review only. The Score button does
+  not see it either: that measure compares our line against a single notated
+  melody, and a second voice on the page would score as a page full of notes
+  the human never wrote.
+- `notation.py` notates it **separately** and merges it as voice 2. It cannot
+  simply join `notes`: quantize picks one grid per beat and notate writes one
+  note per grid position, so two simultaneous notes in one list are not a
+  chord to it — they are a grid that is too coarse, and one of them would be
+  silently dropped (M6).
+- Both voices share **one** swing reading. Estimated on its own the overlay
+  reads BUR 2.21 against the line's 1.51 on Giant Steps and warps 144 beats
+  against 224 — two voices of one performance, warped differently, drift apart
+  on the page. The line's reading wins: a melodic stream of onsets is what the
+  swing estimator is built for.
+- Rests are kept in voice 2. A voice whose durations do not fill the bar does
+  not add up, and a bar that does not add up is the one thing every MusicXML
+  reader complains about. They can be hidden in the notation editor; an
+  unreadable file cannot be fixed there.
+
+Verified end to end on Giant Steps: 320 line notes plus 235 offered, 67 bars,
+**all 67 measures add up in both voices**.
+
+In the app it is a `2nd voice` chip in the edit bar (key `V`), shown only when
+there is an overlay to show, drawn outlined rather than filled and underneath
+the line — it must never be mistaken for a note we are claiming was played.
+Deleting an overlay note in the GUI is not wired yet; the erasure index space
+is keyed to `notes`. Export it and delete in the notation editor for now.

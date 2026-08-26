@@ -3,7 +3,7 @@
 Pure numpy over note dicts, so all of it runs in CI without the ml group.
 """
 
-from swingscribe.corroborate import apply, corroborate, snap_octaves
+from swingscribe.corroborate import apply, corroborate, second_voice, snap_octaves
 
 
 def note(onset: float, pitch: int, duration: float = 0.2) -> dict:
@@ -144,3 +144,42 @@ def test_device_auto_is_resolved_before_it_reaches_the_model():
 
     assert resolve_device("auto", cuda_available=False) == "cpu"
     assert resolve_device("auto", cuda_available=True) == "cuda"
+
+
+def test_second_voice_takes_the_top_two_of_each_simultaneity():
+    """A four-note chord contributes its top two, not all four."""
+    oracle = [note(1.0, p) for p in (48, 55, 64, 72)]
+    got = second_voice([], oracle)
+    assert sorted(n["pitch"] for n in got) == [64, 72]
+
+
+def test_second_voice_leaves_out_what_is_already_on_screen():
+    oracle = [note(1.0, 72), note(1.0, 64)]
+    ours = [note(1.0, 72)]
+    got = second_voice(ours, oracle)
+    assert [n["pitch"] for n in got] == [64]
+
+
+def test_second_voice_offers_the_note_ABOVE_ours_when_ours_is_low():
+    """The case that most needs this: we tracked an inner voice an octave under
+    the melody (D8), so the note worth showing is above ours, not below."""
+    oracle = [note(2.0, 60), note(2.0, 72)]  # ours, and the melody above it
+    ours = [note(2.0, 60)]
+    assert [n["pitch"] for n in second_voice(ours, oracle)] == [72]
+
+
+def test_second_voice_separates_clusters_by_onset():
+    oracle = [note(1.00, 72), note(1.01, 64), note(3.00, 71), note(3.01, 62)]
+    got = second_voice([], oracle)
+    # Both pairs survive, and each note keeps its OWN onset -- clustering
+    # decides what is simultaneous, it does not quantize anything.
+    assert sorted((round(n["onset"], 2), n["pitch"]) for n in got) == [
+        (1.0, 72),
+        (1.01, 64),
+        (3.0, 71),
+        (3.01, 62),
+    ]
+
+
+def test_second_voice_is_empty_without_an_oracle():
+    assert second_voice([note(1.0, 60)], []) == []

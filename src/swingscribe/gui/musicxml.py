@@ -101,6 +101,7 @@ def build_notation(
     audio_path: str,
     notes: list[dict[str, Any]],
     settings: dict[str, Any],
+    second_voice: list[dict[str, Any]] | None = None,
 ):
     """The reviewed span as a Notation, or raise something the user can fix.
 
@@ -112,6 +113,11 @@ def build_notation(
     Shared by the Export button and the Score button so they cannot disagree
     about what was notated: scoring a different Notation from the one on disk
     would be a number about nothing.
+
+    `second_voice` is the piano review overlay and is passed by EXPORT ONLY.
+    The Score button must never see it: it compares our line against a hand
+    transcription's single melody, and a second voice on the page would be
+    scored as a page full of notes the human did not write.
     """
     if not notes:
         raise NotReady("nothing to notate - every note in this span is silenced")
@@ -133,6 +139,9 @@ def build_notation(
         time_signature=signature,
         pulses_per_bar=pulses,
         sample_rate=document.sample_rate,
+        second_voice=(
+            [NoteEvent(source=stem, **note) for note in second_voice] if second_voice else None
+        ),
     )
     if notation is None or not notation.bars:
         raise NotReady("the span is too short to bar out - select at least a couple of bars")
@@ -146,11 +155,14 @@ def export_span(
     audio_path: str,
     notes: list[dict[str, Any]],
     settings: dict[str, Any],
+    second_voice: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Write the reviewed span to MusicXML and say what was written."""
     from swingscribe.stages.export import to_musicxml
 
-    notation = build_notation(document, config, run_config, audio_path, notes, settings)
+    notation = build_notation(
+        document, config, run_config, audio_path, notes, settings, second_voice
+    )
     region = run_config.transcribe.region or (0.0, None)
     title = Path(audio_path).stem
     signature = notation.bars[0].time_signature

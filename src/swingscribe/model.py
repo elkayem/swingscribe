@@ -107,6 +107,15 @@ class NotatedNote(BaseModel):
     # been told three of them fill a beat. Without this the duration is simply
     # unwritable and the bar stops adding up.
     tuplet: tuple[int, int] | None = None
+    # Which voice on the staff this note belongs to. 1 is the line; 2 is the
+    # piano review overlay (the rest of the top two notes the oracle heard),
+    # written as a second voice on the SAME staff so the listener can delete
+    # what they do not want without leaving the score.
+    #
+    # MIGRATION: additive with a default, so every cached Notation written
+    # before this deserializes unchanged as voice 1, and no cache key moves —
+    # keys come from stage config, not from the schema. Nothing is invalidated.
+    voice: int = 1
 
 
 class NotatedBar(BaseModel):

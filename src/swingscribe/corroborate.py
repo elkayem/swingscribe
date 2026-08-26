@@ -131,3 +131,61 @@ def apply(
         "uncorroborated": int((~found).sum()),
         "kept": len(kept),
     }
+
+
+# How close two oracle notes must be to count as struck together. Tighter than
+# ONSET_TOLERANCE on purpose: this groups one detector's own output, where a
+# chord really is simultaneous, rather than reconciling two detectors that
+# segment differently.
+CLUSTER_TOLERANCE = 0.05
+
+
+def second_voice(
+    notes: list[dict[str, Any]],
+    oracle: list[dict[str, Any]],
+    onset_tolerance: float = ONSET_TOLERANCE,
+    cluster_tolerance: float = CLUSTER_TOLERANCE,
+) -> list[dict[str, Any]]:
+    """The rest of the top TWO notes the oracle heard — a review aid, not a line.
+
+    The listener's workflow for piano is not "pick the melody for me", it is
+    "show me the top one or two notes and I will delete the rest". That makes
+    RECALL the target, and recall is where the oracle is strong: the top two of
+    each simultaneity hold the note a human notated 84-96% of the time, against
+    0.54-0.74 for the monophonic line alone (docs/m7b-piano.md).
+
+    It is deliberately taken from the oracle's own clustering rather than
+    relative to our note, because the case that most needs it is the one where
+    our note is WRONG: over Soul Station's block-chord ending we track an inner
+    voice an octave under the melody (D8), so the note worth showing is the one
+    ABOVE ours, not below.
+
+    Whatever is already in `notes` is left out, so this is only what the review
+    screen is not showing yet.
+
+    NOT part of the transcription. It never enters the scored note list — it
+    rides on FrameDiagnostics, which nothing downstream consumes — because
+    doubling the note count would halve precision on every benchmark while
+    describing the same playing.
+    """
+    if not oracle:
+        return []
+    ordered = sorted(oracle, key=lambda n: (float(n["onset"]), -int(n["pitch"])))
+    top_two: list[dict[str, Any]] = []
+    cluster: list[dict[str, Any]] = []
+    for note in ordered:
+        if cluster and float(note["onset"]) - float(cluster[0]["onset"]) > cluster_tolerance:
+            top_two += sorted(cluster, key=lambda n: -int(n["pitch"]))[:2]
+            cluster = []
+        cluster.append(note)
+    top_two += sorted(cluster, key=lambda n: -int(n["pitch"]))[:2]
+
+    if not notes:
+        return top_two
+    onsets, pitches = _arrays(notes)
+    out = []
+    for note in top_two:
+        near = np.abs(onsets - float(note["onset"])) <= onset_tolerance
+        if not np.any(near & (pitches == int(note["pitch"]))):
+            out.append(note)
+    return out

@@ -35,6 +35,7 @@ const state = {
   auditionToken: 0,
   beats: null,              // whole-file derived grid from /beats
   showBeats: true,          // draw the grid when we have one
+  showSecond: true,         // draw the piano second-voice overlay when there is one
   snapMode: 'off',          // off | beat | bar — what A/B placement snaps to
   timeSignature: null,      // null = server default (4/4)
   anchor: null,             // seconds; null = auto-detected downbeat
@@ -672,6 +673,25 @@ function updateBars() {
       : `${bars} bars`;
 }
 
+/* The overlay only exists for a pianist, so the button only exists then too:
+   a control that is permanently inert on horn tracks teaches people to ignore
+   the row it sits in. */
+function renderSecondVoiceToggle(payload) {
+  const chip = $('second-voice-toggle');
+  const count = (payload && payload.second_voice && payload.second_voice.length) || 0;
+  chip.hidden = count === 0;
+  chip.classList.toggle('active', state.showSecond);
+  chip.textContent = state.showSecond ? `2nd voice · ${count}` : '2nd voice';
+}
+
+function toggleSecondVoice() {
+  const chip = $('second-voice-toggle');
+  if (chip.hidden) return;
+  state.showSecond = !state.showSecond;
+  pianoRoll.setShowSecondVoice(state.showSecond);
+  renderSecondVoiceToggle(state.review);
+}
+
 async function toggleBeats() {
   if (state.beats) {
     state.showBeats = !state.showBeats;
@@ -1182,6 +1202,8 @@ async function showReview(payload) {
 
   pianoRoll.setData({ a: state.selection.a, b: state.selection.b }, payload, state.showBeats ? state.beats : null);
   pianoRoll.setSilenced(state.silenced);
+  pianoRoll.setShowSecondVoice(state.showSecond);
+  renderSecondVoiceToggle(payload);
   // Park the marker at the start rather than leaving it undrawn: a playhead
   // you cannot see is not obviously one you can move.
   pianoRoll.setPlayhead(state.selection.a);
@@ -2193,6 +2215,7 @@ for (const button of $('review-rate').querySelectorAll('button')) {
 $('review-rate').querySelector('[data-rrate="1"]').classList.add('active');
 
 $('beats-toggle').addEventListener('click', toggleBeats);
+$('second-voice-toggle').addEventListener('click', toggleSecondVoice);
 
 $('click-toggle').addEventListener('click', () => {
   state.click = !state.click;
@@ -2289,6 +2312,11 @@ document.addEventListener('keydown', (event) => {
       // eXport. Every other control on the review screen has a key; this is
       // the one you press most once a span is settled.
       if (state.review) startExport();
+      break;
+    case 'v':
+      // Voice. Toggling the overlay off is how you check the line underneath
+      // it, so it wants to be as cheap as toggling the beat grid.
+      toggleSecondVoice();
       break;
     case 's':
       $('snap-toggle').click();

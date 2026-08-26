@@ -145,6 +145,17 @@ class TranscribeConfig(BaseModel):
     # tighter at a real cost in recall, 0.20 let unrelated neighbours vouch
     # for each other; 0.10 was best on both solos.
     piano_onset_tolerance: float = 0.10
+    # Also surface the REST of the top two notes the oracle heard, as a review
+    # overlay (corroborate.second_voice). The listener asked to see the top one
+    # or two and delete what they do not want, which makes recall the target:
+    # top-2 holds the note a human notated 84-96% of the time against 0.54-0.74
+    # for the line alone.
+    #
+    # OFF by default, and it must stay off for any measurement: the second
+    # voice is not part of the transcription and never enters the scored note
+    # list. It rides on FrameDiagnostics, which nothing downstream consumes.
+    # The GUI turns it on for its own review screen.
+    piano_second_voice: bool = False
 
     @property
     def uses_piano_oracle(self) -> bool:

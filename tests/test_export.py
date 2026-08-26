@@ -174,3 +174,64 @@ def test_the_document_declares_itself_musicxml():
     xml = to_musicxml(Notation(bars=[bar_of([note(0.0, 4.0)])]))
     assert xml.startswith("<?xml version=")
     assert "score-partwise" in xml.split("\n")[1]  # the DOCTYPE
+
+
+def test_a_single_voice_bar_writes_no_backup():
+    """The common path must be byte-for-byte what it always was."""
+    notation = Notation(
+        title="One voice",
+        bars=[
+            NotatedBar(
+                number=1,
+                time_signature=(4, 4),
+                notes=[NotatedNote(beat=0.0, duration=4.0, pitch=60, step="C", octave=4)],
+            )
+        ],
+    )
+    xml = to_musicxml(notation)
+    assert "<backup>" not in xml
+    assert "<voice>1</voice>" in xml
+
+
+def test_a_second_voice_is_rewound_to_the_barline():
+    """MusicXML has no interleaved form: voice 2 must undo voice 1's advance
+    with a <backup>, or it lands in the next bar."""
+    notation = Notation(
+        title="Two voices",
+        bars=[
+            NotatedBar(
+                number=1,
+                time_signature=(4, 4),
+                notes=[
+                    NotatedNote(beat=0.0, duration=2.0, pitch=72, step="C", octave=5),
+                    NotatedNote(beat=2.0, duration=2.0, pitch=74, step="D", octave=5),
+                    NotatedNote(beat=0.0, duration=4.0, pitch=60, step="C", octave=4, voice=2),
+                ],
+            )
+        ],
+    )
+    xml = to_musicxml(notation)
+    assert "<voice>2</voice>" in xml
+    # Rewound by the whole bar: two half notes at 24 divisions per quarter.
+    assert "<backup>" in xml
+    assert f"<duration>{4 * DIVISIONS}</duration>" in xml.split("<backup>")[1]
+    # And voice 1 is written before voice 2.
+    assert xml.index("<voice>1</voice>") < xml.index("<backup>") < xml.index("<voice>2</voice>")
+
+
+def test_voices_are_grouped_not_interleaved():
+    from swingscribe.stages.export import voices_of
+
+    bar = NotatedBar(
+        number=1,
+        time_signature=(4, 4),
+        notes=[
+            NotatedNote(beat=0.0, duration=1.0, pitch=72, voice=1),
+            NotatedNote(beat=0.0, duration=1.0, pitch=60, voice=2),
+            NotatedNote(beat=1.0, duration=1.0, pitch=74, voice=1),
+        ],
+    )
+    numbers = [n for n, _notes in voices_of(bar)]
+    assert numbers == [1, 2]
+    assert [n.pitch for n in voices_of(bar)[0][1]] == [72, 74]
+    assert [n.pitch for n in voices_of(bar)[1][1]] == [60]

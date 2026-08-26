@@ -34,6 +34,7 @@ this module must stay importable without the ml dependency group.
 Only the horn-led ensemble is implemented; trio/solo-piano arrive at M7b.
 """
 
+import dataclasses
 import math
 import statistics
 import sys
@@ -610,6 +611,13 @@ class FrameDiagnostics:
     energy_ok: list[bool]  # passed the silence-floor gate
     pitch: list[float | None]  # after both gates and median smoothing
     onsets: list[float]  # detected onset times (note-split candidates)
+    # The rest of the top two notes the piano oracle heard (M7b). A REVIEW
+    # AID: the listener asked to see the top one or two and delete the rest,
+    # which makes recall the target. It rides here, on the overlay nothing
+    # downstream consumes, precisely so it can never enter the scored note
+    # list — doubling the note count would halve precision on every benchmark
+    # while describing the same playing. Empty for anything but a pianist.
+    second_voice: list[dict] = dataclasses.field(default_factory=list)
 
     @property
     def times(self) -> list[float]:
@@ -628,8 +636,11 @@ def _consult_piano_oracle(
     notes: list[NoteEvent],
     *,
     log: bool = False,
-) -> list[NoteEvent]:
+) -> tuple[list[NoteEvent], list[dict]]:
     """Correct and filter the monophonic line against a polyphonic piano model.
+
+    Returns the corrected line and, separately, the review-only second voice —
+    separately because only the first is the transcription.
 
     Kept out of `analyze` so the CREPE path reads as one thing. Failure here
     is reported and swallowed: the oracle is an improvement to a line that
@@ -640,7 +651,7 @@ def _consult_piano_oracle(
     from swingscribe import piano
 
     if not notes:
-        return notes
+        return notes, []
     try:
         import torch
 
@@ -651,10 +662,10 @@ def _consult_piano_oracle(
         oracle = piano.transcribe(mono, rate, device=device, offset=region_offset)
     except Exception as exc:  # noqa: BLE001 — see docstring
         print(f"transcribe: piano oracle unavailable ({type(exc).__name__}: {exc}); keeping CREPE")
-        return notes
+        return notes, []
     if not oracle:
         print("transcribe: piano oracle found no notes; keeping CREPE")
-        return notes
+        return notes, []
 
     as_dicts = [
         {"onset": n.onset, "duration": n.duration, "pitch": n.pitch, "confidence": n.confidence}
@@ -674,7 +685,7 @@ def _consult_piano_oracle(
             f"dropped {stats['input'] - stats['kept']} uncorroborated, "
             f"{stats['kept']} kept"
         )
-    return [
+    line = [
         NoteEvent(
             onset=n["onset"],
             duration=n["duration"],
@@ -684,6 +695,12 @@ def _consult_piano_oracle(
         )
         for n in kept
     ]
+    extra = (
+        corroboration.second_voice(kept, oracle, onset_tolerance=tc.piano_onset_tolerance)
+        if tc.piano_second_voice
+        else []
+    )
+    return line, extra
 
 
 def analyze(
@@ -778,8 +795,9 @@ def analyze(
     # pianist — see TranscribeConfig.uses_piano_oracle for why a horn must
     # never get this. The oracle sees the SAME cropped signal, so its onsets
     # are in region time and get the same offset applied.
+    second_voice: list[dict] = []
     if tc.uses_piano_oracle:
-        notes = _consult_piano_oracle(mono, rate, tc, region_offset, notes, log=log)
+        notes, second_voice = _consult_piano_oracle(mono, rate, tc, region_offset, notes, log=log)
 
     diagnostics = FrameDiagnostics(
         hop_s=hop_s,
@@ -789,6 +807,7 @@ def analyze(
         energy_ok=list(energetic[:count]),
         pitch=pitches,
         onsets=sorted(region_offset + f * hop_s for f in onset_frames),
+        second_voice=second_voice,
     )
     progress.report("transcribe", 1.0, f"{len(notes)} notes")
     return notes, diagnostics
