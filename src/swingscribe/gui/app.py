@@ -145,12 +145,13 @@ def create_app(config: Config) -> FastAPI:
             stored = library.load_settings(track_path, config, track_id).get("ensemble")
             if stored in ENSEMBLES:
                 ensemble = stored
-        # The review screen always wants the piano second-voice overlay when
-        # the oracle is running at all: the listener asked to SEE the top one
-        # or two notes and delete the rest. It is off in the plain Config
-        # because it must never reach a measurement (config.py), and on here
-        # because this is the one place whose job is review.
-        second_voice = ensemble in ("trio", "solo-piano")
+        # The second-voice overlay is OFF. Shown as a separate voice, the top
+        # two of every simultaneity is mostly left hand, and the listener could
+        # not see what to keep. The recall it was there for now arrives inside
+        # the single line instead (corroborate.fill_gaps, on by default for
+        # piano), which is the shape the listener actually asked for: one
+        # monophonic line, top note, delete what does not belong.
+        second_voice = False
         return config.model_copy(
             update={
                 "transcribe": config.transcribe.model_copy(
@@ -208,6 +209,16 @@ def create_app(config: Config) -> FastAPI:
             "default_stem": config.transcribe.stem,
             "ensembles": list(ENSEMBLES),
             "default_ensemble": config.transcribe.ensemble,
+            # Which of those ensembles actually consults the piano model,
+            # ASKED of the config rather than hand-listed in the UI. The
+            # listener transcribed a Sonny Clark piano solo as "horn-led" and
+            # lost notes to it with nothing on screen saying so; a list copied
+            # into app.js would answer that question until the routing moved.
+            "piano_oracle_ensembles": [
+                name
+                for name in ENSEMBLES
+                if config.transcribe.model_copy(update={"ensemble": name}).uses_piano_oracle
+            ],
             "transpositions": list(TRANSPOSITIONS),
             "default_transposition": config.notate.transposition,
             "library_dir": str(library.library_dir(config)),

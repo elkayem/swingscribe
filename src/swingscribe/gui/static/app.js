@@ -1875,6 +1875,12 @@ function fillSelect(node, values, fallback) {
   node.dataset.fallback = fallback;
 }
 
+/* Which ensembles consult the polyphonic piano model, from /api/config.
+   Declared above its first assignment: `let` is hoisted into the temporal
+   dead zone, so writing to it from loadChoices before this line ran would
+   throw rather than default. */
+let pianoOracleEnsembles = [];
+
 async function loadChoices() {
   try {
     choices = await api('/api/config');
@@ -1882,8 +1888,27 @@ async function loadChoices() {
     return;  // the pickers stay empty; every other screen still works
   }
   fillSelect($('ensemble-select'), choices.ensembles ?? [], choices.default_ensemble ?? 'horn-led');
+  // Asked of the server, never listed here: the UI must not be the second
+  // place the routing is written down.
+  pianoOracleEnsembles = choices.piano_oracle_ensembles ?? [];
   fillSelect($('transpose-select'), choices.transpositions ?? [], choices.default_transposition ?? 'C');
   renderChoices();
+}
+
+/* Say out loud what the ensemble choice routes to.
+
+   The choice is not cosmetic and its consequence is invisible: a piano solo
+   left on Horn-led is transcribed with no second opinion, which costs notes
+   the model heard perfectly well (M7b: every piano solo improved on both
+   halves of F1 once it was consulted). The listener hit exactly that. */
+function renderEnsembleHint() {
+  const hint = $('ensemble-hint');
+  if (!hint) return;
+  const ensemble = $('ensemble-select').value;
+  if (!ensemble || !pianoOracleEnsembles.length) { hint.textContent = ''; return; }
+  hint.textContent = pianoOracleEnsembles.includes(ensemble)
+    ? '· piano model consulted'
+    : '· no piano model — pick Trio or Solo piano for a pianist';
 }
 
 function renderChoices() {
@@ -1891,6 +1916,7 @@ function renderChoices() {
   const transpose = $('transpose-select');
   if (ensemble.options.length) ensemble.value = state.ensemble ?? ensemble.dataset.fallback;
   if (transpose.options.length) transpose.value = state.transposition ?? transpose.dataset.fallback;
+  renderEnsembleHint();
 }
 
 /* ── export ─────────────────────────────────────────────────────────────────
@@ -2066,6 +2092,7 @@ $('transpose-select').addEventListener('change', (event) => {
 
 $('ensemble-select').addEventListener('change', async (event) => {
   state.ensemble = event.target.value;
+  renderEnsembleHint();
   await persistNow();  // review_config reads this back off the sidecar
   // This one DOES change the notes: a trio consults the polyphonic piano model
   // and a horn never does (M7b). So the span needs transcribing again.

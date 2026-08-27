@@ -863,6 +863,27 @@ def test_config_offers_exactly_what_the_validator_accepts(world):
     assert payload["default_transposition"] in TRANSPOSITIONS
 
 
+def test_config_says_which_ensembles_consult_the_piano_model(world):
+    """The routing, asked of the config rather than listed twice.
+
+    The consequence of this choice is invisible on screen and expensive: a
+    piano solo left on horn-led gets no second opinion, and the listener hit
+    exactly that on a Sonny Clark solo. The UI shows it, so it has to be told
+    -- and told by the same property `transcribe` branches on, or the label
+    will go on saying "consulted" after the routing has moved.
+    """
+    from swingscribe.config import ENSEMBLES, TranscribeConfig
+
+    payload = world["client"].get("/api/config").json()
+    routed = payload["piano_oracle_ensembles"]
+    assert set(routed) <= set(ENSEMBLES)
+    for name in ENSEMBLES:
+        expected = TranscribeConfig(ensemble=name).uses_piano_oracle
+        assert (name in routed) is expected, name
+    # The one that must never be in it, whatever else changes.
+    assert "horn-led" not in routed
+
+
 # ── scoring the notation against a hand transcription ───────────────────────
 
 
