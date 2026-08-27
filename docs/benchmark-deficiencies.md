@@ -274,6 +274,109 @@ thinner than two samples suggested. Soul Station is a *correct* pairing at
 strength of the old two-sample range; there is now about 0.18 of daylight, and
 it is the hardest tune that sits closest to the edge.
 
+### D11 - The notater has no idea what tempo it is writing at
+
+Over 456 WJazzD solos the median notated interval stays between 96 and 166 ms
+at every tempo, while the note value it is written as steps sixteenth (under
+120 bpm) to triplet eighth (120-160) to eighth (over 160). Regressing
+log(interval in quarters) on log(tempo): slope 0.705, r = 0.690.
+
+`choose_grid` and `grid_slack` know nothing about this. `grid_slack` is a
+constant set by quantize's round-trip acceptance, and the M6 rule that it must
+not be tuned on the notation score still stands - but a constant cannot be
+right from 63 bpm to 340 bpm, and this is the table that says what it should
+vary with. It predicts the observed failure directly: the only benchmark score
+that produced thirty-second notes is at a tempo where WJazzD says the running
+value is a sixteenth.
+
+Untried. The measurement is cheap (`scripts` + the db, no audio); the change
+is not, because it moves every notation number.
+
+### D12 - We write triplets at a quarter of the human rate
+
+0.9% of our notated notes carry a time modification, against 4.1% in the ten
+hand transcriptions and 23.9% of WJazzD's 197,177 notated intervals. 444 of
+456 WJazzD solos use ternary divisions on more than 10% of their notes, so
+this is not a property of a few tunes.
+
+Where a human writes a triplet we write sixteenths and a tie, which is the
+same complaint as D11 from the other side. The suspect is `choose_grid`'s rule
+that three onsets must be present before a tuplet is allowed at all - added in
+M6 for a good reason (a warped offbeat lands near 0.6 and wins a triplet grid
+on snap error alone) and never re-measured since the swing warp changed
+underneath it.
+
+One structural fact that survives and constrains any fix: of 97,499 annotated
+WJazzD beats, **zero** mix binary and ternary notes inside a single beat. The
+per-beat exclusive grid choice is right; only the threshold is wrong.
+
+### D13 - Two tracks hold three annotated solos, and the filenames say one
+
+Content identification on the benchmark's own cached notes finds three
+soloists inside `Miles_Davis_Dolores` (Miles 76.9%, Herbie Hancock 73.7%,
+Wayne Shorter 64.6%) and two inside `Pat_Metheny_Nothing_Personal` (Metheny
+88.7%, Michael Brecker 81.2%). The listener reports the same of The Sidewinder
+(Lee Morgan and Joe Henderson).
+
+`identify_all` handles this correctly and scores each solo over its own span,
+and title-token matching means a filename naming one soloist does not hide the
+others. But the filename is now the only human-readable record of what is in
+the file, and it is wrong for at least three tracks. Nothing is mis-measured
+today; this is a trap laid for the next person reading a scorecard.
+
+### D14 - Our tie rate is 2-8x the human's, and nobody has looked
+
+The readability measure reports it now, over thirty notations. Ours runs
+**0.030 to 0.180** notes tied into the next; the ten hand transcriptions sit
+at **0.022** (82 tie starts in 3646 notes, counted off the .mscz XML).
+
+Some of that is legitimate -- a long note crossing a barline has to be tied.
+Some of it is `split_for_meter`'s recursion fragmenting a value that should
+have been one symbol, which is what the listener meant by "strange ties".
+Nobody has separated the two, and the instrument to do it now exists.
+
+Not folded into the readability composite on purpose: a page is not unreadable
+for having a tie, so it is reported beside the score rather than inside it.
+
+### D15 - `choose_grid` does not know that a beat is binary OR ternary, never both
+
+**Zero of WJazzD's 97,499 annotated beats mix binary and ternary
+subdivisions.** Every beat in 456 human-annotated solos commits to one grid.
+
+`choose_grid` chooses per beat with no reference to its neighbours and no such
+constraint, which is a strong free prior being thrown away. Likely related to
+D12 (we under-write triplets 4x): a lone ternary onset in a run of ternary
+beats currently has to clear the three-onset gate by itself.
+
+### D16 - The benchmark cannot see the slow-tempo failure mode
+
+Notating all 456 WJazzD solos from the annotators' own metrical positions, and
+scoring the page for readability, gives a **monotone** relation with tempo:
+
+        bpm      n   readability   rest<8th   note<16th    ties
+       <100     59       0.5689       2.95      43.60%    0.248
+    100-140     97       0.8518       2.71      13.78%    0.175
+    140-200    138       0.9275       1.91       6.07%    0.151
+    200-280    121       0.9728       1.58       1.34%    0.124
+      >=280     41       0.9863       1.24       0.15%    0.109
+
+At a slow tempo a human divides the beat far more finely -- `division` 8, 12
+and up -- and 43.6% of the resulting values fall below the sixteenth that
+`notate.WRITABLE_VALUES` floors at. A constant value floor is simply the wrong
+shape across this range, which is D11 arriving from a third direction.
+
+**But our own numbers show no tempo trend at all**: mean notated rhythm reads
+0.615 below 145 bpm (n=7) and 0.565 at or above it (n=13). That is not evidence
+that we are fine at slow tempos. It is evidence that we cannot tell, because
+**exactly one of the twenty benchmarked solos is under 100 bpm** (Charlie
+Parker's Don't Blame Me, 64 bpm) -- and its WJazzD-derived score is the worst
+readability of everything generated, 0.331, while our own notation of it reads
+1.000. A page can be perfectly writable and still be the wrong page.
+
+The benchmark is bebop at 125-286 bpm. That is exactly the regime a fixed grid
+handles well. Adding two or three ballads is the cheapest way to make the
+existing measures able to fail.
+
 ### D10 — So What: right recording, right places, wrong notes
 
 The only one of the nine new WJazzD tracks that did not score. `identify_all`
@@ -317,6 +420,55 @@ cleanest example yet of the second without the first. It is also the only
 guitar in the set. Unexamined.
 
 ## Resolved
+
+### R15 - The notes cache did not know which transcriber wrote it
+
+`run_eval`'s note cache is keyed by track name, in a file whose name carries
+the two decode settings the sweep varies (`step_cost`, `dip_db`). Nothing else
+about the transcriber entered the key. A cached entry was reused whenever the
+sidecar's `ensemble` still matched.
+
+So a change to the STAGE was invisible to it. The piano gap-fill (M7b) added a
+step that changes the note list with no config change the cache could see, and
+the first run after it re-transcribed exactly ONE track of the nine piano
+solos - the one whose `ensemble` the listener had just edited. The other eight
+were scored with notes computed before the feature existed, and the scorecard
+gave no sign.
+
+This is precisely the staleness hole the pipeline's chained keys exist to
+close (CLAUDE.md section 3), reintroduced in the harness because this cache is
+keyed by filename rather than by content. The fix mirrors
+`pipeline._cache_name`: `transcribe_fingerprint` hashes the whole resolved
+`TranscribeConfig` plus the stage's `CACHE_VERSION`, canonicalised the same
+way, and an entry without a fingerprint is treated as unknown provenance and
+recomputed once.
+
+`transcribe_settings` is now the single definition of what the transcriber is
+asked for, used both to fingerprint a cached run and to compute a fresh one,
+so the two cannot drift apart - which is how the `ensemble` check that
+preceded it managed to cover one field and miss the rest.
+
+### R14 - Renaming eight tracks scored all eight twice
+
+The notes cache is keyed by track name and only ever added to; nothing pruned
+an entry whose track was gone. Everything downstream iterates those keys
+rather than the sidecars, so after the listener's tracks were renamed, each
+one was scored under BOTH names with identical numbers, and
+`summary/wjazz_note_f1` was reported as a mean over 32 where the truth was a
+mean over 20. `1-17 Star Eyes.m4a` had no audio at all and had been scored
+from a cache entry for an unknown length of time.
+
+Same family as R8 (a mean over 4 printed beside a mean over 11) and R11b (two
+of three globs made recursive), with the sign flipped: a silent SUPERSET
+rather than a silent subset. `transcribe_all` now returns only runs whose
+track is on disk, and says how many it ignored. The orphans stay in the cache
+FILE - they cost minutes of CREPE each and come straight back if a rename is
+reverted - they simply are not scored.
+
+Both of these are now pinned by `tests/test_eval_harness.py`, which is the
+third time that file has grown a guard for this class of bug. The lesson it
+keeps teaching: **a harness that decides what to score deserves the same tests
+as the code it scores.**
 
 ### R13 — The WJazzD notation scores were measuring the aligner, not the notation
 

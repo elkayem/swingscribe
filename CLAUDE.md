@@ -240,13 +240,31 @@ things not to re-derive:
   is what separates "we invented it" from "it happened, nobody asked for it" —
   on Orbits the listener's erasures are 0% corroborated (CREPE was tracking the
   bass through stem bleed), on the Peterson they are 90% (his left hand).
-- **The second voice is a REVIEW AID and is not part of the transcription.**
-  `corroborate.second_voice` rides on `FrameDiagnostics`, which nothing
-  downstream consumes, and `transcribe.piano_second_voice` is OFF in the plain
-  Config. The GUI turns it on for its own review screen only. Putting it in
-  `notes` would halve precision on every benchmark while describing the same
-  playing — and the Score button must never see it either, because it compares
-  our line against a single notated melody.
+- **The second voice OVERLAY is switched off, everywhere.** The listener tried
+  it and could not read it: top-2-of-every-simultaneity is mostly left hand.
+  `corroborate.second_voice` still exists — `fill_gaps` is built on it — but
+  `piano_second_voice` is False in the plain Config *and* in the GUI, and if it
+  is ever turned back on it still may not enter `notes` or reach the Score
+  button.
+- **What replaced it is `corroborate.fill_gaps`: the oracle merged INTO the
+  single line, wherever the line has a hole.** Four tests, each earning its
+  place — a hole and not a disagreement (60 ms), the line's own register (±12
+  semitones of the local median), the oracle's velocity (≥0.45 normalised),
+  and HALF a claimed duration counting as covered, because our durations are
+  the gated extent of a pitch and overrun the next note. Measured over four
+  piano spans: recall 0.680 → 0.744 for precision 0.677 → 0.666, all four
+  improving on recall AND F1. On by default for piano; `uses_piano_oracle`
+  still gates it, so **a horn never sees it**.
+- **The missing-note complaint is a PIANO problem.** Over the same six spans
+  the horns read recall 0.917 and 0.936 against 0.538-0.697 for the pianos.
+  Do not go looking for missing notes on a horn.
+- **Loosening the transcribe gates does not buy recall — this is measured, not
+  assumed.** `voicing_threshold`, `min_note_ms`, `pitch_persist_ms`,
+  `median_filter_ms`, a pitch-stability rescue and a confidence-weighted
+  short-note floor were all swept over six cached spans: every one costs about
+  two false notes per true one, and NOTHING beats the shipped settings on F1.
+  The GUI's cached reviews carry raw f0 + periodicity + energy, so this sweep
+  costs no CREPE — re-run it before touching a threshold.
 - **Two voices of one performance share ONE swing reading.** `notation.py`
   notates the overlay separately (quantize writes one note per grid position,
   so two simultaneous notes in one list are a grid too coarse and one gets
@@ -270,6 +288,52 @@ things not to re-derive:
   measure through M6 uses and what the time-free aligner needs; `notes` is
   everything. Scoring polyphony against `melody` would report a polyphonic
   transcriber as no better than the monophonic one it replaced.
+
+- **There is a THIRD kind of measure now, and it needs no reference at all.**
+  `benchmark.readability(notation)` asks whether the page is *writable* --
+  sub-eighth rests, note values below a sixteenth, and the tie rate beside
+  them. It exists because the listener could name two defects (a sixteenth
+  rest before a lay-back, "dotted 1/32 notes with strange ties") that NOTHING
+  in `score_notation` could see, and because `value` actively fights the
+  repair: absorbing an unwritable rest makes an eighth a dotted eighth, which
+  `value` calls wrong. Anchored on the ten hand scores -- a human reads
+  **0.995** (6 sub-eighth rests in 487, 13 sub-sixteenth values in 3646). We
+  read **0.994 over thirty notations**, with zero sub-sixteenth values
+  anywhere: `split_points` had already fixed the bar-18 complaint, and this is
+  what proves it across every score rather than one. Because it needs no
+  reference it runs over the WJazzD solos too, which is the widest measurement
+  in the project. **Ties are reported beside it, never inside it** -- a page is
+  not unreadable for having a tie, and ours run 0.030-0.180 against the
+  human's 0.022 (D14, nobody has looked yet).
+- **`snap_values` changes nothing in the shipped pipeline, and that is the
+  finding.** Durations were never snapped to a grid, only onsets -- but
+  `notated_durations` already replaces 90-93% of them with the gap to the next
+  onset, which is grid-to-grid. Mean readability 0.9941 -> 0.9939, no other
+  number moves. It is decisive only where durations are performed seconds with
+  no gap to inherit: a score built from WJazzD's annotation goes 0.788 ->
+  0.982. Two variants measured and rejected: taking whichever grid is nearer
+  (puts a triplet rest in a beat of sixteenths), and preferring a value whose
+  leftover gap is writable (0.9941 -> 0.9678). Candidates must not be rounded
+  -- 0.333333 doubled misses a sixth of a beat by 2e-6 and MuseScore calls
+  that a corrupt file.
+- **A SCORE can be built from WJazzD, and this file used to say it could not.**
+  "It stores metrical position but not notated value" is true about the columns
+  and wrong about the conclusion: in a single line the written value is the
+  distance to the next onset less any rest, and the positions are exact. The
+  Jazzomat PDFs are rendered from these same columns.
+  `wjazz.annotation_notation` builds it, `scripts/wjazz_score.py` writes it as
+  MusicXML, and `mscz.parse_any` reads MusicXML so the GUI's ground-truth view
+  accepts it. **What it is evidence about**: positions and pitches, which are a
+  human's. **What it is not**: note values and rests, which are ours applied to
+  a human's grid -- which is why `score_against_wjazz_notation` still reports
+  rhythm only. ODbL is share-alike, so the generated files are derivatives of
+  the database and stay out of the repo; the script refuses an `--out` inside
+  it.
+- **The GUI says out loud which ensembles consult the piano model.** The
+  routing is invisible and expensive -- a piano solo left on `horn-led` gets no
+  second opinion and loses notes the model heard perfectly well. `/api/config`
+  reports `piano_oracle_ensembles` derived from `uses_piano_oracle` itself, so
+  the label cannot go on saying "consulted" after the routing has moved.
 
 ## Current milestone
 
@@ -311,6 +375,35 @@ and this file had drifted apart on what M6 even was (plan §7's table says M6
 is the eval harness, this file said Notate), so both readings were satisfied.
 Results and limits: `docs/m6-notate.md`.
 
+- **A metrical unit is halved, UNLESS it is three of something.**
+  `split_points` — 4/4 halves, 3/4 divides in three, 5/4 peels off the largest
+  whole value. Bare halving is unimplemented triple metre, not an
+  approximation of it: 3 → 1.5 → 0.75 never lands on a beat, and on the one 3/4
+  score in the benchmark it left 12 of 66 bars short of their time signature
+  and 14 notes of duration ZERO.
+- **`MIN_REST` is an EIGHTH, not a sixteenth.** Counted over the ten hand
+  transcriptions, the listener wrote one sixteenth rest in 504 rests; we were
+  writing 9.4 per hundred notes. A player behind the beat leaves a sixteenth of
+  silence before every offbeat, and writing it down records the feel as a
+  rhythm. Raising it removed 93% of sub-eighth rests and moved the notated
+  rhythm score on any of the ten — rhythm compares onset POSITIONS, and closing
+  a gap changes a duration. It DOES cost notated `value` 0.672 → 0.628, because
+  an eighth becomes a dotted eighth; that is on the record as the price.
+- **The gap is closed from the LEFT, and the other side was measured.** Pulling
+  the note AFTER the gap back scores better (rhythm 0.711 → 0.752, value
+  unchanged) and still may not ship: the moved onset lands on the previous
+  note's off-grid end, which inside a ternary beat is not a third, so it breaks
+  the tuplet group `close_short_gaps` exists to protect. That +0.041 is D11
+  arriving from a second direction — fix `choose_grid`, not the repair pass.
+- **The running note value is set by TEMPO, and the notater does not know
+  that.** Over 456 WJazzD solos the median notated interval stays 96-166 ms at
+  every tempo while the value it is written as steps 16th (under 120 bpm) →
+  triplet eighth (120-160) → eighth (over 160). `grid_slack` is a constant and
+  cannot be right across that range (docs/m6-notate.md).
+- **We under-write triplets by 4x.** 0.9% of our notes against 4.1% in the hand
+  scores and 23.9% of WJazzD's 197k notated intervals; 444 of 456 solos use
+  ternary on more than 10% of their notes. Suspect `choose_grid`'s "three
+  onsets before a tuplet is allowed" — not yet re-measured.
 - **Notate does NOT use music21, which the plan names for it.** Everything the
   stage needs is arithmetic, and keeping it arithmetic means key detection and
   spelling run in CI like every other stage. This is a plan deviation on the
@@ -406,6 +499,19 @@ made. Both are kept; neither subsumes the other.
   same track gets separated twice. Copy the one stem across rather than
   re-separating; do not "fix" it by repointing the harness, which orphans
   every separation already in the root cache.
+
+- **`run_eval`'s note cache is fingerprinted, and it must stay that way.**
+  `transcribe_fingerprint` hashes the whole resolved `TranscribeConfig` plus
+  `transcribe.CACHE_VERSION`. Before it, a change to the STAGE was invisible:
+  the piano gap-fill re-transcribed 1 of 9 piano solos and the scorecard said
+  nothing (R15). If you change transcribe's behaviour without changing its
+  config, bump `CACHE_VERSION` — the harness reads it the same way
+  `pipeline._cache_name` does.
+- **The harness scores only tracks that are ON DISK.** The note cache is keyed
+  by name and only ever added to, so renaming eight tracks scored all eight
+  twice and made `wjazz_note_f1` a mean over 32 where the truth was 20 (R14).
+  Orphans stay in the cache file — they cost minutes of CREPE — but never get
+  scored, and the run says how many it ignored.
 
 **Two fitting bugs have now been found in this harness, both of which reported
 a measurement failure as a transcription failure.** Any code that aligns our
