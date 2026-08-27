@@ -364,10 +364,12 @@ def snap_values(
 
     **On our own pipeline it moves nothing.** Over the thirty notations the
     eval harness builds, mean readability goes 0.9941 to 0.9939 and no rhythm,
-    value or F1 number moves at all. The reason is `notated_durations`: it has
-    already replaced 90-93% of durations with the gap to the next onset, and a
-    gap between two grid positions is on the grid. This rule only ever sees
-    the other 7-10%, the note genuinely followed by a rest.
+    value or F1 number moves at all. The reason is `without_overlap`, which
+    truncates every note at the next onset: 93-96% of our notated notes come
+    out filling their gap exactly, and a gap between two grid positions is on
+    the grid. (NOT `notated_durations` -- `legato_fill` ships at 0.0, off, so
+    that function returns early on our own path.) This rule only ever sees the
+    other 4-7%, the note genuinely followed by a rest.
 
     **On a score built from WJazzD's metrical annotation it is decisive**,
     because there no duration inherits a gap -- they are all performed seconds.
@@ -555,6 +557,7 @@ def notated_durations(
     events: list[tuple[int, float, float, int]],
     bars_index,
     legato_fill: float,
+    legato_cap: float = 0.0,
 ) -> list[tuple[int, float, float, int]]:
     """Played lengths → written lengths.
 
@@ -567,15 +570,40 @@ def notated_durations(
 
     The remaining 7-11% are notes genuinely followed by a rest, and they are
     told apart by how much of the gap the player actually filled.
+
+    ## `legato_cap` — the same question asked of the GAP instead of the player
+
+    A ratio asks "did the player hold it?", which is articulation, and a lead
+    sheet does not write articulation. On our own path that question is moot:
+    `legato_fill` ships at 0.0 and `without_overlap` has already truncated
+    every note at the next onset, so the durations arrive grid-to-grid. It
+    becomes the wrong question only where the duration is a careful human's
+    note-off, honest about a player who tongues short.
+
+    Measured on WJazzD's annotation of Dexter Gordon's Cheese Cake: he plays
+    0.52 of a one-beat gap, the ratio test fails at 0.75, and we write an
+    eighth plus an eighth rest where the Jazzomat lead sheet writes a quarter.
+    Over all 456 solos the ratio manufactures 2.07 sub-eighth rests per 100
+    events; a cap of two beats brings that to 1.14 and raises readability
+    0.882 to 0.888, WITHOUT the failure the ratio route has -- dropping the
+    ratio toward zero instead ties a phrase-ending note across four beats of
+    silence into the next phrase.
+
+    So `legato_cap` fills a gap because the gap is short enough to BE a note
+    value, and leaves anything longer as a note followed by a real rest.
+    Default 0.0, which is off. The shipped pipeline passes neither this nor a
+    non-zero `legato_fill`, and all 436 baselines were verified unchanged.
     """
-    if legato_fill <= 0 or len(events) < 2:
+    if len(events) < 2 or (legato_fill <= 0 and legato_cap <= 0):
         return events
     absolute = [bars_index.start_of(bar) + beat for bar, beat, _d, _p in events]
     out = []
     for index, (bar, beat, duration, pitch) in enumerate(events):
         if index + 1 < len(events):
             gap = absolute[index + 1] - absolute[index]
-            if gap > TICK and duration >= legato_fill * gap:
+            within_cap = legato_cap > 0 and gap <= legato_cap + TICK
+            holds = legato_fill > 0 and duration >= legato_fill * gap
+            if gap > TICK and (within_cap or holds):
                 duration = gap
         out.append((bar, beat, duration, pitch))
     return out
@@ -588,6 +616,7 @@ def build(
     transpose: int,
     title: str = "",
     legato_fill: float = 0.0,
+    legato_cap: float = 0.0,
 ) -> Notation:
     """Quantized notes → bars of spelled, tied, rest-filled notation."""
     if not quantized:
@@ -605,7 +634,9 @@ def build(
             first_bar = opening
     last_bar = max(n.bar for n in quantized)
     bars_index = _Bars(sections, first_bar, last_bar + 4)
-    events = notated_durations(without_overlap(quantized, bars_index), bars_index, legato_fill)
+    events = notated_durations(
+        without_overlap(quantized, bars_index), bars_index, legato_fill, legato_cap
+    )
     # Values before gaps. `close_short_gaps` extends a note to the NEXT ONSET,
     # which is already on the grid, so what it produces is grid-aligned by
     # construction and needs no second rounding; doing it the other way round

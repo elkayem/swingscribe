@@ -494,3 +494,49 @@ def test_the_note_before_a_rest_stops_being_a_sliver():
     assert all(n.duration >= 0.25 - 1e-6 for n in written), [n.duration for n in written]
     rests = [n for bar in notation.bars for n in bar.notes if n.is_rest]
     assert all(r.duration >= 0.25 - 1e-6 for r in rests), [r.duration for r in rests]
+
+
+# ── the legato CAP: a lead sheet does not write articulation ───────────────
+# `legato_fill` asks whether the PLAYER held the note, which is articulation.
+# That is the right question where a duration is the gated extent of a CREPE
+# pitch and tends to overrun. It is the wrong one where the duration is a
+# careful human's note-off -- WJazzD's is -- and the player tongues short.
+
+
+def test_a_short_played_note_still_fills_a_short_gap_under_the_cap():
+    """Dexter Gordon's Cheese Cake, bar 2: he plays 0.52 of a one-beat gap.
+    The ratio test fails at 0.75 and writes an eighth plus an eighth rest;
+    the Jazzomat lead sheet writes a quarter."""
+    from swingscribe.stages.notate import build
+
+    notes = [
+        _q(1, 0.0, 0.52, 60),
+        _q(1, 1.0, 0.52, 62),
+        _q(1, 2.0, 1.0, 64),
+    ]
+    ratio_only = build(notes, [], swing=False, transpose=0, legato_fill=0.75)
+    capped = build(notes, [], swing=False, transpose=0, legato_fill=0.75, legato_cap=2.0)
+    assert any(n.is_rest and n.beat < 2.0 for n in ratio_only.bars[0].notes)
+    assert not any(n.is_rest and n.beat < 2.0 for n in capped.bars[0].notes)
+    assert capped.bars[0].notes[0].duration == pytest.approx(1.0)
+
+
+def test_the_cap_leaves_a_phrase_break_as_a_real_rest():
+    """The failure the other route has. Dropping the ratio toward zero fills
+    every gap, which ties a phrase-ending note across four beats of silence
+    into the next phrase. A cap asks about the GAP, so it cannot do that."""
+    from swingscribe.stages.notate import build
+
+    notes = [_q(1, 0.0, 0.5, 60), _q(2, 1.0, 0.5, 62)]
+    capped = build(notes, [], swing=False, transpose=0, legato_fill=0.75, legato_cap=2.0)
+    assert capped.bars[0].notes[0].duration == pytest.approx(0.5)
+    assert any(n.is_rest for n in capped.bars[0].notes)
+
+
+def test_the_cap_is_off_by_default_so_the_pipeline_is_unchanged():
+    from swingscribe.stages.notate import build
+
+    notes = [_q(1, 0.0, 0.52, 60), _q(1, 1.0, 1.0, 62)]
+    assert build(notes, [], swing=False, transpose=0, legato_fill=0.75).bars[0].notes[
+        0
+    ].duration == pytest.approx(0.5)

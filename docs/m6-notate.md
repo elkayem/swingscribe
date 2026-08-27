@@ -318,9 +318,12 @@ listener's 3646 written values are in that set.
 
 **It changes nothing in the shipped pipeline, and that is the finding.** Mean
 readability over the thirty notations goes 0.9941 to 0.9939, and no rhythm,
-value or F1 number moves. `notated_durations` had already replaced 90-93% of
-durations with the gap to the next onset, and a gap between two grid positions
-is on the grid; this rule only ever sees the other 7-10%.
+value or F1 number moves. `without_overlap` truncates every note at the next
+onset, so 93-96% of our notated notes already fill their gap exactly, and a gap
+between two grid positions is on the grid; this rule only ever sees the other
+4-7%. (Not `notated_durations` -- `legato_fill` ships at 0.0 and that function
+returns early on our own path. The distinction matters: someone chasing this
+would otherwise go and read a function that never runs.)
 
 Where it is decisive is a score built from WJazzD's metrical annotation, where
 no duration inherits a gap because they are all performed seconds. Over the 172

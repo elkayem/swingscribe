@@ -192,7 +192,14 @@ def notated_positions(db, melid: int) -> list[tuple[float, int]]:
     return [(position - origin, pitch) for position, pitch in out]
 
 
-def annotation_notation(db, melid: int, legato_fill: float = 0.75):
+# A gap this long or shorter becomes the note's written value; anything
+# longer is a note followed by a real rest. Two beats, because a lead sheet
+# does not write articulation and WJazzD's `duration` is a human's note-off:
+# see `notate.notated_durations`, which measured it on this database.
+LEGATO_CAP = 2.0
+
+
+def annotation_notation(db, melid: int, legato_fill: float = 0.75, legato_cap: float = LEGATO_CAP):
     """One WJazzD solo as a `Notation` -- a score, not a list of onsets.
 
     ## Why this is possible, having once been said not to be
@@ -218,6 +225,13 @@ def annotation_notation(db, melid: int, legato_fill: float = 0.75):
     our `value` against it would be scoring our conventions against themselves.
     That is the honest version of the earlier objection, and it is why
     `score_against_wjazz_notation` still reports rhythm only.
+
+    ## Bar numbers are WJazzD's own
+
+    Not renumbered from 1. The whole point of the file is to be laid beside
+    the Jazzomat lead sheet for the same solo, and a score whose bar 3 is
+    their bar 5 cannot be. WJazzD numbers a pickup 0 or -1 and this keeps
+    that, so bar N here is bar N there.
 
     ODbL: WJazzD is share-alike, so a file written from this is a derivative
     of the database and must stay out of this repository (CLAUDE.md, plan §12).
@@ -255,7 +269,7 @@ def annotation_notation(db, melid: int, legato_fill: float = 0.75):
         played = float(duration or 0.0) / float(beatdur) if beatdur else quarters_per_beat
         quantized.append(
             QuantizedNote(
-                bar=int(bar) - first_bar + 1,
+                bar=int(bar),
                 beat=position,
                 duration_beats=max(played * quarters_per_beat, 1e-3),
                 pitch=int(round(float(pitch))),
@@ -274,7 +288,7 @@ def annotation_notation(db, melid: int, legato_fill: float = 0.75):
         pulses_per_bar=num,
         time_signature=(num, denom),
         anchor=0.0,
-        first_bar=1,
+        first_bar=first_bar,
         origin="user",
     )
     return notate.build(
@@ -284,4 +298,5 @@ def annotation_notation(db, melid: int, legato_fill: float = 0.75):
         transpose=0,
         title=f"{performer} - {title}".strip(" -"),
         legato_fill=legato_fill,
+        legato_cap=legato_cap,
     )

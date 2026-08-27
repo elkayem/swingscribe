@@ -229,3 +229,56 @@ ODbL is share-alike. A score written from this database is a derivative OF the
 database, so `scripts/wjazz_score.py` refuses an `--out` inside the repository
 and these files must never be committed (CLAUDE.md, plan section 12).
 
+## Why our score differs from the Jazzomat PDF: the legato rule, not the data
+
+Reported by the listener on Dexter Gordon's Cheese Cake -- notes we write as an
+eighth are quarter notes on the website's PDF. **The quarter note IS derivable
+from the database.** What differed was a rule.
+
+WJazzD bar 2, first note: pitch 55, played 0.517 of a beat, with a **whole
+beat** to the next onset. `notate.notated_durations` fills a gap only when the
+player held at least `legato_fill` (0.75) of it. 0.517 fails that, so we wrote
+an eighth followed by an eighth rest; the lead sheet writes the quarter.
+
+**A ratio asks "did the player hold it?", which is articulation, and a lead
+sheet does not write articulation.** The 0.75 was measured against OUR
+durations, which are the gated extent of a CREPE pitch and tend to overrun.
+WJazzD's `duration` is a careful human's note-off, honest about a player who
+tongues short -- Dexter's played fraction runs 0.28 to 0.52 against gaps of 0.5
+to 1.0. Applying a hold-ratio to that manufactures a rest after nearly every
+note.
+
+`notate.notated_durations` gained `legato_cap`, which asks the question of the
+GAP instead: a gap short enough to BE a note value becomes one, and anything
+longer stays a note followed by a real rest. Over all 456 solos, at a cap of
+two beats:
+
+                        ratio only    + cap
+    readability            0.8823    0.8884
+    sub-eighth rests        2.07      1.14
+    notes tied              0.158     0.181
+
+The obvious alternative -- dropping the ratio toward zero so every gap fills --
+scores slightly better on paper (0.8960) and is wrong: it ties a phrase-ending
+note across four beats of silence into the next phrase. The cap cannot do that,
+which is the reason to prefer it.
+
+**`legato_cap` defaults to 0.0, which is off.** The shipped pipeline keeps the
+ratio it was measured with and none of its baselines move. Only
+`annotation_notation` turns it on.
+
+### Bar numbers are WJazzD's own
+
+Also reported, implicitly: the scores were renumbered from 1, so our bar 3 was
+WJazzD's bar 1 on Cheese Cake (its annotation starts at bar -1, a pickup). A
+file whose whole purpose is to be laid beside the Jazzomat lead sheet has to
+share its numbering. Fixed -- bar N here is bar N there, pickup bars included.
+
+### What still differs
+
+A note before a LONG gap keeps its played length, snapped. Cheese Cake bar 3
+ends on a pitch 62 held 0.75 of a beat with 4.08 beats to the next onset; we
+write a triplet quarter and rests. A lead sheet would more likely write a plain
+quarter. The cap deliberately does not reach that far, and rounding a
+phrase-ending note to a plain value is a separate rule nobody has measured yet.
+

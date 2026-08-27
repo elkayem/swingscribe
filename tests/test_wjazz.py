@@ -121,3 +121,87 @@ def test_notated_positions_read_the_metrical_annotation():
     assert positions[0] == (0.0, 57)
     assert abs(positions[1][0] - 1.5) < 1e-9
     assert abs(positions[2][0] - 8.8333333) < 1e-6
+
+
+# ── a WJazzD solo as a SCORE ────────────────────────────────────────────────
+# The metrical positions ARE a notation: in a single line the written value of
+# a note is the distance to the next one, less any rest. Nothing is missing --
+# the Jazzomat lead sheets are rendered from these same columns.
+
+
+class _ScoreDb:
+    """Enough of a WJazzD connection for `annotation_notation`."""
+
+    def __init__(self, rows, performer="Someone", title="Some Tune"):
+        self.rows = rows
+        self.info = (performer, title)
+
+    def execute(self, sql, _params):
+        if "solo_info" in sql:
+            return _OneRow(self.info)
+        return iter(self.rows)
+
+
+class _OneRow:
+    def __init__(self, row):
+        self.row = row
+
+    def fetchone(self):
+        return self.row
+
+    def __iter__(self):
+        return iter([self.row])
+
+
+def _row(bar, beat, tatum, division, pitch, played_beats, beatdur=0.5, sig=(4, 4)):
+    # bar, beat, tatum, division, num, denom, beatdur, duration, pitch
+    return (bar, beat, tatum, division, sig[0], sig[1], beatdur, played_beats * beatdur, pitch)
+
+
+def test_a_solo_keeps_wjazzds_own_bar_numbers():
+    """The whole point is to lay it beside the Jazzomat lead sheet for the
+    same solo, and a score whose bar 3 is their bar 5 cannot be. WJazzD
+    numbers a pickup 0 or -1 and that survives."""
+    from swingscribe.wjazz import annotation_notation
+
+    rows = [_row(-1, 4, 1, 1, 60, 1.0), _row(0, 1, 1, 1, 62, 1.0), _row(1, 1, 1, 1, 64, 1.0)]
+    notation = annotation_notation(_ScoreDb(rows), 1)
+    assert [bar.number for bar in notation.bars][:3] == [-1, 0, 1]
+
+
+def test_the_written_value_is_the_distance_to_the_next_note():
+    from swingscribe.wjazz import annotation_notation
+
+    rows = [_row(1, 1, 1, 2, 60, 0.4), _row(1, 2, 1, 1, 62, 0.4), _row(1, 3, 1, 1, 64, 1.0)]
+    notation = annotation_notation(_ScoreDb(rows), 1)
+    written = [n for bar in notation.bars for n in bar.notes if not n.is_rest]
+    # Played 0.4 of a beat with a whole beat to the next onset. The ratio
+    # test fails at 0.75 and would write an eighth plus an eighth rest; the
+    # CAP writes the quarter, because a lead sheet does not write
+    # articulation. This is the Cheese Cake case exactly.
+    assert written[0].duration == pytest.approx(1.0)
+    # No rest anywhere the notes are; the bar's tail is another matter, since
+    # `fill_rests` still has to make the bar add up after the last note.
+    assert not any(n.is_rest and n.beat < 3.0 for bar in notation.bars for n in bar.notes)
+
+
+def test_a_long_gap_is_still_a_rest():
+    from swingscribe.wjazz import annotation_notation
+
+    rows = [_row(1, 1, 1, 1, 60, 0.5), _row(3, 1, 1, 1, 62, 1.0)]
+    notation = annotation_notation(_ScoreDb(rows), 1)
+    assert any(n.is_rest for bar in notation.bars for n in bar.notes)
+
+
+def test_the_title_names_the_performer_and_the_tune():
+    from swingscribe.wjazz import annotation_notation
+
+    rows = [_row(1, 1, 1, 1, 60, 1.0)]
+    notation = annotation_notation(_ScoreDb(rows, "Dexter Gordon", "Cheese Cake"), 1)
+    assert notation.title == "Dexter Gordon - Cheese Cake"
+
+
+def test_no_annotation_is_none_rather_than_an_empty_score():
+    from swingscribe.wjazz import annotation_notation
+
+    assert annotation_notation(_ScoreDb([]), 1) is None

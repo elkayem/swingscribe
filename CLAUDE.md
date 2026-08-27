@@ -308,7 +308,9 @@ things not to re-derive:
 - **`snap_values` changes nothing in the shipped pipeline, and that is the
   finding.** Durations were never snapped to a grid, only onsets -- but
   `notated_durations` already replaces 90-93% of them with the gap to the next
-  onset, which is grid-to-grid. Mean readability 0.9941 -> 0.9939, no other
+  onset -- that is `without_overlap` truncating at the next onset, NOT
+  `notated_durations`, whose `legato_fill` ships at 0.0 and returns early.
+  Either way the durations arrive grid-to-grid. Mean readability 0.9941 -> 0.9939, no other
   number moves. It is decisive only where durations are performed seconds with
   no gap to inherit: a score built from WJazzD's annotation goes 0.788 ->
   0.982. Two variants measured and rejected: taking whichever grid is nearer
@@ -329,6 +331,23 @@ things not to re-derive:
   rhythm only. ODbL is share-alike, so the generated files are derivatives of
   the database and stay out of the repo; the script refuses an `--out` inside
   it.
+- **A hold-RATIO is the wrong question to ask of a human's note-off.**
+  `notated_durations`'s `legato_fill` (0.75) asks whether the player held the
+  note, which is articulation, and a lead sheet does not write articulation.
+  On our own path it is moot (`legato_fill` is 0.0 and `without_overlap`
+  already truncates at the next onset); it is wrong for WJazzD's durations,
+  which are a careful human's note-off.
+  Dexter Gordon plays 0.52 of a one-beat gap on Cheese Cake, so we wrote an
+  eighth plus an eighth rest where the Jazzomat lead sheet writes a quarter.
+  `legato_cap` asks the GAP instead: short enough to BE a note value, so it
+  becomes one. Over 456 solos, readability 0.8823 -> 0.8884 and sub-eighth
+  rests 2.07 -> 1.14. Filling every gap instead scores better (0.8960) and is
+  WRONG -- it ties a phrase-ending note across four beats of silence.
+  **Default 0.0, off**: the pipeline keeps its measured ratio and no baseline
+  moves. Only `annotation_notation` turns it on.
+- **A WJazzD-derived score keeps WJazzD's own bar numbers**, pickup bars at 0
+  or -1 included. Its whole purpose is to be laid beside the Jazzomat lead
+  sheet for the same solo, and renumbering from 1 put our bar 3 at their bar 1.
 - **The GUI says out loud which ensembles consult the piano model.** The
   routing is invisible and expensive -- a piano solo left on `horn-led` gets no
   second opinion and loses notes the model heard perfectly well. `/api/config`

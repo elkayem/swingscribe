@@ -90,9 +90,11 @@ Each of these cost real time. The numbers live in `docs/`; this is the index.
   `close_short_gaps` exists to protect. That +0.041 is D11 arriving from a
   second direction. **Fix `choose_grid`, not the repair pass.**
 - **`snap_values` (added this session) is neutral in the shipped pipeline.**
-  Durations were never snapped to a grid, only onsets — but the legato rule
-  (`notated_durations`) already replaces 90–93% of durations with the gap to
-  the next onset, which is grid-to-grid and therefore already on the grid.
+  Durations were never snapped to a grid, only onsets — but `without_overlap`
+  truncates every note at the next onset, so 93–96% of them already fill their
+  gap exactly, which is grid-to-grid. (Not `notated_durations`: `legato_fill`
+  ships at 0.0, so that function returns early on our own path. Worth knowing
+  before you go and read it.)
   Measured: it moves NOTHING across our own 30 notations. It is decisive on
   scores built from WJazzD's annotation, where durations come from performed
   seconds with no legato inheritance — readability 0.788 → 0.982 over the 172
