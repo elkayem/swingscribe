@@ -179,3 +179,53 @@ WJazzD's own audio is not distributed.
 
 What it does is settle the swing questions, validate the estimator against 359
 human labels, and confirm a hypothesis the plan had only flagged.
+
+## A score CAN be built from this database, and an earlier reading said it could not
+
+The claim was that WJazzD carries a human's onsets and metrical positions but
+not a notated score, "because `melody.duration` is performed seconds and there
+is no column holding a note VALUE". The first half is true. The second half is
+the wrong conclusion, and the Jazzomat project's own PDF lead sheets -- rendered
+from these same columns -- are the standing counter-example.
+
+In a single line the written value of a note is the metrical distance to the
+next one, less any rest. The metrical positions are all here and they are
+exact: `bar`, `beat`, and `tatum` out of that beat's own `division`. Nothing is
+missing.
+
+`wjazz.annotation_notation(db, melid)` builds the `Notation`;
+`scripts/wjazz_score.py` writes it out as MusicXML, which MuseScore opens and
+which the GUI's "Ground truth..." button now accepts alongside `.mscz`/`.mscx`
+(`mscz.parse_any`).
+
+### What it is evidence about, and what it is not
+
+The POSITIONS and the PITCHES are a human's, and they are independent evidence.
+
+The RESTS and the NOTE VALUES are OURS -- `notate.notated_durations`,
+`notate.snap_values`, `notate.MIN_REST` and the tuplet grouping, applied to a
+human's grid. Scoring our `value` against these would be scoring our own
+conventions against themselves.
+
+**That is the honest version of the original objection**, and it is why
+`score_against_wjazz_notation` still reports rhythm only. A ground truth for
+what was played and where it sits in the bar: yes. A ground truth for how it
+should be written: no.
+
+### `division` is per BEAT, and it goes up to 36
+
+    division   1: 15812   2: 58269   3: 29650   4: 58678   5: 4579
+               6: 18661   8: 6957   10: 2663  12: 1231   ... 36: 25
+
+172 of the 456 solos use only divisions this notater can write at all
+(1, 2, 3, 4, 6, 8, 12). The rest contain quintuplet or septuplet onsets, and a
+score built from them carries unwritable slivers however the durations are
+rounded -- which is why measurements of the notater against this set are quoted
+over the 172 as well as over all 456.
+
+### Licence
+
+ODbL is share-alike. A score written from this database is a derivative OF the
+database, so `scripts/wjazz_score.py` refuses an `--out` inside the repository
+and these files must never be committed (CLAUDE.md, plan section 12).
+

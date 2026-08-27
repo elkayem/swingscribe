@@ -21,6 +21,7 @@ importing this module costs nothing in CI (CLAUDE.md).
 """
 
 import re
+from collections import Counter
 
 ONSET_TOLERANCE_S = 0.05
 # Below this share of the reference matched, we have not found the take. A
@@ -189,3 +190,98 @@ def notated_positions(db, melid: int) -> list[tuple[float, int]]:
         return []
     origin = out[0][0]
     return [(position - origin, pitch) for position, pitch in out]
+
+
+def annotation_notation(db, melid: int, legato_fill: float = 0.75):
+    """One WJazzD solo as a `Notation` -- a score, not a list of onsets.
+
+    ## Why this is possible, having once been said not to be
+
+    An earlier reading of this database said a notated score could not be built
+    from it, because `melody.duration` is performed seconds and there is no
+    column holding a note VALUE. The first half is true and the second half is
+    the wrong conclusion. In a single line the written value of a note is the
+    metrical distance to the next one, less any rest -- and the metrical
+    positions are all here, exactly: `bar`, `beat`, and `tatum` out of that
+    beat's own `division`. Nothing is missing. The Jazzomat project's own PDF
+    lead sheets are rendered from these same columns.
+
+    ## What it therefore is, and is not
+
+    The POSITIONS and the PITCHES are a human's, and are independent evidence.
+    The rests and note values are OURS: the gap-to-value rule
+    (`notate.notated_durations`), the rest floor (`notate.MIN_REST`) and the
+    tuplet grouping are the ones this project ships, applied to a human's grid.
+
+    So this is a proper ground truth for *what was played and where it sits in
+    the bar*, and it is NOT independent evidence about note values -- scoring
+    our `value` against it would be scoring our conventions against themselves.
+    That is the honest version of the earlier objection, and it is why
+    `score_against_wjazz_notation` still reports rhythm only.
+
+    ODbL: WJazzD is share-alike, so a file written from this is a derivative
+    of the database and must stay out of this repository (CLAUDE.md, plan §12).
+    """
+    from swingscribe.model import MeterSection, QuantizedNote
+    from swingscribe.stages import notate
+
+    rows = list(
+        db.execute(
+            "select bar, beat, tatum, division, num, denom, beatdur, duration, pitch "
+            "from melody where melid=? order by eventid",
+            (melid,),
+        )
+    )
+    rows = [r for r in rows if r[0] is not None]
+    if not rows:
+        return None
+
+    # The time signature the annotator used. Taken as the majority rather than
+    # from the first row: a pickup bar can be annotated in a different metre,
+    # and one odd row must not set the signature for the whole solo.
+    signatures = Counter((int(r[4] or 4), int(r[5] or 4)) for r in rows)
+    num, denom = signatures.most_common(1)[0][0]
+    quarters_per_beat = 4.0 / denom
+
+    first_bar = min(int(r[0]) for r in rows)
+    quantized = []
+    for bar, beat, tatum, division, _num, _denom, beatdur, duration, pitch in rows:
+        division = max(1, int(division or 1))
+        position = ((int(beat) - 1) + (int(tatum) - 1) / division) * quarters_per_beat
+        # Performed seconds -> beats, using the annotator's own local beat
+        # length. `build` will mostly overwrite this via the legato rule, but
+        # the note genuinely followed by a rest is told apart by how much of
+        # the gap it filled, so a real length has to go in.
+        played = float(duration or 0.0) / float(beatdur) if beatdur else quarters_per_beat
+        quantized.append(
+            QuantizedNote(
+                bar=int(bar) - first_bar + 1,
+                beat=position,
+                duration_beats=max(played * quarters_per_beat, 1e-3),
+                pitch=int(round(float(pitch))),
+                timing_residual=0.0,
+            )
+        )
+
+    performer, title = db.execute(
+        "select performer, title from solo_info where melid=?", (melid,)
+    ).fetchone() or ("", "")
+    # Seconds are meaningless here -- there is no audio in this path and
+    # `build` reads only `time_signature` and `first_bar` off a section.
+    section = MeterSection(
+        start=0.0,
+        end=0.0,
+        pulses_per_bar=num,
+        time_signature=(num, denom),
+        anchor=0.0,
+        first_bar=1,
+        origin="user",
+    )
+    return notate.build(
+        quantized,
+        [section],
+        swing=True,
+        transpose=0,
+        title=f"{performer} - {title}".strip(" -"),
+        legato_fill=legato_fill,
+    )

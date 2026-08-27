@@ -290,3 +290,80 @@ def test_an_unknown_ottava_subtype_is_left_alone(tmp_path):
     """Better to report the written pitch than to invent a shift."""
     body = ottava_start("nonsense") + chord(60)
     assert parse_body(tmp_path, body).pitches == [60]
+
+
+# ── MusicXML in, as well as MuseScore ──────────────────────────────────────
+# The strongest available check is a round trip through our own exporter: what
+# `to_musicxml` writes, `parse_musicxml` must read back as the notes that went
+# in. That covers divisions, dots, tuplets, ties and rests in one assertion,
+# and it is what makes a WJazzD-derived score usable as a ground truth.
+
+
+def _round_trip(quantized, swing=False):
+    from swingscribe.stages.export import to_musicxml
+    from swingscribe.stages.notate import build
+
+    notation = build(quantized, [], swing=swing, transpose=0, title="Round Trip")
+    return notation, to_musicxml(notation)
+
+
+def _q(bar, beat, duration, pitch):
+    from swingscribe.model import QuantizedNote
+
+    return QuantizedNote(
+        bar=bar, beat=beat, duration_beats=duration, pitch=pitch, timing_residual=0.0
+    )
+
+
+def test_our_own_musicxml_reads_back_as_the_notes_that_went_in(tmp_path):
+    from swingscribe import mscz
+
+    notes = [
+        _q(1, 0.0, 0.5, 60),
+        _q(1, 0.5, 0.5, 62),
+        _q(1, 1.0, 1.0, 64),
+        _q(1, 2.0, 2.0, 65),
+        _q(2, 0.0, 0.5, 67),
+        _q(2, 1.5, 0.5, 69),
+    ]
+    _notation, xml = _round_trip(notes)
+    path = tmp_path / "round.musicxml"
+    path.write_text(xml, encoding="utf-8")
+    score = mscz.parse_musicxml(path)
+    assert score.pitches == [60, 62, 64, 65, 67, 69]
+    assert [round(n.position, 3) for n in score.melody] == [0.0, 0.5, 1.0, 2.0, 4.0, 5.5]
+
+
+def test_a_tie_across_a_barline_reads_back_as_one_note(tmp_path):
+    """A tied pair is one note, the same way the MuseScore reader treats it.
+    Two notes here would be a phantom repeat in every alignment."""
+    from swingscribe import mscz
+
+    _notation, xml = _round_trip([_q(1, 3.0, 2.0, 60), _q(2, 1.0, 1.0, 62)])
+    path = tmp_path / "tie.musicxml"
+    path.write_text(xml, encoding="utf-8")
+    score = mscz.parse_musicxml(path)
+    assert score.pitches == [60, 62]
+    assert score.melody[0].duration == pytest.approx(2.0)
+
+
+def test_a_triplet_reads_back_at_its_written_position(tmp_path):
+    from swingscribe import mscz
+
+    third = 1.0 / 3.0
+    notes = [_q(1, i * third, third, 60 + i) for i in range(3)]
+    _notation, xml = _round_trip(notes, swing=True)
+    path = tmp_path / "triplet.musicxml"
+    path.write_text(xml, encoding="utf-8")
+    score = mscz.parse_musicxml(path)
+    assert score.pitches == [60, 61, 62]
+    assert [round(n.position, 2) for n in score.melody] == [0.0, 0.33, 0.67]
+
+
+def test_parse_any_dispatches_on_the_suffix(tmp_path):
+    from swingscribe import mscz
+
+    _notation, xml = _round_trip([_q(1, 0.0, 1.0, 60)])
+    path = tmp_path / "pick.musicxml"
+    path.write_text(xml, encoding="utf-8")
+    assert mscz.parse_any(path).pitches == [60]

@@ -213,7 +213,7 @@ def score_span(
 
     notation = build_notation(document, config, run_config, audio_path, notes, settings)
     try:
-        reference = mscz.parse(score_path)
+        reference = mscz.parse_any(score_path)
     except Exception as exc:
         raise NotReady(f"could not read {score_path.name}: {exc}") from exc
 

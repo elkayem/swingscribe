@@ -52,7 +52,10 @@ from swingscribe.alignment import align, best_transposition
 from swingscribe.cache import StageCache
 from swingscribe.config import Config
 
-SCORE_SUFFIXES = frozenset({".mscz", ".mscx"})
+# MusicXML too: it is what every notation program other than MuseScore
+# writes, what this project exports, and the format a score generated from
+# WJazzD's metrical annotation arrives in (scripts/wjazz_score.py).
+SCORE_SUFFIXES = frozenset({".mscz", ".mscx"}) | mscz.MUSICXML_SUFFIXES
 
 # Prefix sizes for narrowing the transposition search. A full 49-candidate
 # search over ~900 notes each side is minutes of pure Python; the offset is
@@ -174,7 +177,7 @@ def overlay(
     whole-track seconds; [start, end] is the span they were transcribed from,
     which is also the span the score covers — bar 1 of the score is `start`.
     """
-    score = mscz.parse(score_path)
+    score = mscz.parse_any(score_path)
     reference = score.pitches
     estimate = [int(n["pitch"]) for n in notes]
     span = max(1e-6, end - start)

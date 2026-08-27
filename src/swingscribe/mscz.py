@@ -123,6 +123,113 @@ def _duration_of(element: ElementTree.Element, beats_per_bar: float) -> float:
     return beats * (2.0 - 0.5**dots)
 
 
+STEP_SEMITONE = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+
+
+def parse_musicxml(path: str | Path) -> Score:
+    """The same Score, out of a MusicXML file.
+
+    MuseScore is not the only way a transcription arrives. MusicXML is what
+    every other notation program writes, it is what this project EXPORTS, and
+    it is the format a score generated from WJazzD's metrical annotation can
+    be handed to the ground-truth view in (`wjazz.annotation_notation`).
+
+    Voices other than the first are ignored, on the same grounds `melody`
+    takes the top note of a chord: the thing being compared against is a
+    single line, and a second staff voice is not part of it.
+    """
+    root = ElementTree.parse(Path(path)).getroot()
+    title = (root.findtext(".//work/work-title") or Path(path).stem).strip()
+    key_fifths = int(root.findtext(".//attributes/key/fifths") or 0)
+    beats_per_bar = 4.0
+    divisions = 1.0
+    notes: list[ScoreNote] = []
+    melody: list[ScoreNote] = []
+    bars = 0
+
+    part = root.find("part")
+    if part is None:
+        return Score(title, [], [], 0, beats_per_bar, key_fifths)
+
+    cursor = 0.0  # quarter notes since bar 1 beat 1
+    # A tie makes the NEXT note at the same pitch a continuation. Held as an
+    # index so the earlier note can be lengthened in place, exactly as the
+    # MuseScore reader does -- a tied pair is one note, not two.
+    pending: dict[int, int] = {}
+    for measure in part.findall("measure"):
+        bars += 1
+        bar_start = cursor
+        if (value := measure.findtext("attributes/divisions")) is not None:
+            divisions = float(value) or 1.0
+        beats = measure.findtext("attributes/time/beats")
+        beat_type = measure.findtext("attributes/time/beat-type")
+        if beats and beat_type:
+            beats_per_bar = float(beats) * 4.0 / float(beat_type)
+        for element in measure:
+            if element.tag == "backup":
+                cursor -= float(element.findtext("duration") or 0) / divisions
+                continue
+            if element.tag == "forward":
+                cursor += float(element.findtext("duration") or 0) / divisions
+                continue
+            if element.tag != "note":
+                continue
+            length = float(element.findtext("duration") or 0) / divisions
+            chord = element.find("chord") is not None
+            if element.find("rest") is not None:
+                pending.clear()  # a rest breaks any tie
+                cursor += length
+                continue
+            pitch_element = element.find("pitch")
+            if pitch_element is None:
+                cursor += length if not chord else 0.0
+                continue
+            step = pitch_element.findtext("step", "C")
+            octave = int(pitch_element.findtext("octave", "4"))
+            alter = int(float(pitch_element.findtext("alter", "0") or 0))
+            pitch = (octave + 1) * 12 + STEP_SEMITONE.get(step, 0) + alter
+            start = cursor - length if chord else cursor
+            held = pending.get(pitch)
+            if held is not None and element.find('tie[@type="stop"]') is not None:
+                previous = notes[held]
+                notes[held] = ScoreNote(
+                    position=previous.position,
+                    duration=previous.duration + length,
+                    pitch=pitch,
+                    bar=previous.bar,
+                )
+            else:
+                notes.append(ScoreNote(position=start, duration=length, pitch=pitch, bar=bars))
+                held = len(notes) - 1
+            pending = {pitch: held} if element.find('tie[@type="start"]') is not None else {}
+            if not chord:
+                cursor += length
+        cursor = max(cursor, bar_start + beats_per_bar)
+
+    # The top note of every simultaneity, matching the MuseScore reader's
+    # `melody`. Grouped on position rather than on the <chord> tag so a second
+    # voice written with <backup> collapses the same way a chord does.
+    by_position: dict[float, ScoreNote] = {}
+    for note in notes:
+        key = round(note.position, 6)
+        if key not in by_position or note.pitch > by_position[key].pitch:
+            by_position[key] = note
+    melody = [by_position[k] for k in sorted(by_position)]
+    return Score(title, notes, melody, bars, beats_per_bar, key_fifths)
+
+
+# Uncompressed only. .mxl is a zip and would need unpacking; nothing in
+# this project writes one, so claiming it would be claiming untested code.
+MUSICXML_SUFFIXES = frozenset({".musicxml", ".xml"})
+
+
+def parse_any(path: str | Path) -> Score:
+    """Whichever of the two formats this file is."""
+    if Path(path).suffix.lower() in MUSICXML_SUFFIXES:
+        return parse_musicxml(path)
+    return parse(path)
+
+
 def parse(path: str | Path) -> Score:
     """Parse a MuseScore file into monophonic-ordered ScoreNotes.
 
