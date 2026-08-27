@@ -35,6 +35,7 @@ Nothing this reads or writes may be committed except the aggregate numbers.
 """
 
 import argparse
+import hashlib
 import json
 import statistics
 import sys
@@ -69,6 +70,46 @@ def sidecar_name(sidecar_path: Path, sidecar: dict) -> str:
     return name if folder == Path(".") else f"{folder.as_posix()}/{name}"
 
 
+def transcribe_settings(sidecar: dict, step_cost: float, dip_db: float):
+    """The exact TranscribeConfig this sidecar asks for. One definition, used
+    both to fingerprint a cached run and to compute a fresh one, so the two can
+    never drift apart."""
+    from swingscribe.config import Config
+
+    base = Config()
+    low, high = sidecar["region"]
+    # A null `stem` means the listener never chose one, not that there is no
+    # stem: it falls back to the default exactly as `ensemble` does. Without
+    # this it reached the filesystem as "None.wav" and the track was skipped -
+    # which went unnoticed for as long as a cached run kept answering for it.
+    return base.transcribe.model_copy(
+        update={
+            "stem": sidecar.get("stem") or base.transcribe.stem,
+            "region": (low, high),
+            "pitch_step_cost": step_cost,
+            "onset_dip_db": dip_db,
+            "ensemble": sidecar.get("ensemble") or base.transcribe.ensemble,
+        }
+    )
+
+
+def transcribe_fingerprint(sidecar: dict, step_cost: float, dip_db: float) -> str:
+    """A cached run is reusable only if the transcriber would read the same
+    settings AND is the same transcriber. Mirrors pipeline._cache_name: the
+    stage's CACHE_VERSION is folded in, so a behaviour change with no config
+    change still invalidates."""
+    from swingscribe.cache import canonical_json
+    from swingscribe.stages import transcribe
+
+    settings = transcribe_settings(sidecar, step_cost, dip_db)
+    payload = {
+        "version": getattr(transcribe, "CACHE_VERSION", 1),
+        "model": sidecar["model"],
+        "transcribe": settings.model_dump(mode="json"),
+    }
+    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:16]
+
+
 def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> dict:
     """Transcribe every sidecar'd span in benchmark/, reusing what is cached."""
     from swingscribe.config import Config
@@ -77,21 +118,31 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
     from swingscribe.stages.separate import stems_dir
 
     runs = json.loads(cache.read_text(encoding="utf-8")) if cache.is_file() else {}
+    live: set[str] = set()
     for sidecar_path in sorted(BENCH.rglob("*.swingscribe.json")):
         sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
         name = sidecar_name(sidecar_path, sidecar)
         if not (BENCH / name).is_file():
             continue
-        # Re-transcribe when the routing changed. The cache is keyed by decode
-        # settings in its filename, but `ensemble` arrived later and lives per
-        # track — a stale entry here would silently report the old routing's
-        # numbers under the new one.
+        live.add(name)
+        # Re-transcribe when ANYTHING the transcriber reads has changed. The
+        # cache filename carries only the two decode settings the sweep varies,
+        # so for a long time a change to the stage itself -- a new default, a
+        # new step like the piano gap-fill -- silently kept serving notes
+        # computed by the old code. That is exactly the staleness hole the
+        # pipeline's chained keys exist to close (CLAUDE.md), reintroduced in
+        # the harness because this cache is keyed by filename.
+        #
+        # So the fingerprint is the whole resolved TranscribeConfig plus the
+        # stage's CACHE_VERSION, canonicalised the same way the real cache
+        # keys are. An entry without one is pre-fingerprint and re-runs once.
         cached_run = runs.get(name)
-        wanted = sidecar.get("ensemble") or Config().transcribe.ensemble
+        wanted = transcribe_fingerprint(sidecar, step_cost, dip_db)
         if cached_run is not None:
-            if cached_run.get("ensemble", Config().transcribe.ensemble) == wanted:
+            if cached_run.get("fingerprint") == wanted:
                 continue
-            log(f"  {name}: ensemble {wanted!r} differs from cache — re-transcribing")
+            why = "settings" if cached_run.get("fingerprint") else "no fingerprint"
+            log(f"  {name}: {why} differs from cache -- re-transcribing")
             runs.pop(name)
         base = Config()
         config = base.model_copy(
@@ -99,35 +150,28 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
         )
         document = library.ingested_document(BENCH / name, config)
         low, high = sidecar["region"]
+        settings = transcribe_settings(sidecar, step_cost, dip_db)
         stem = (
             stems_dir(config.cache_dir, library.file_digest(document.audio.path), sidecar["model"])
-            / f"{sidecar['stem']}.wav"
+            / f"{settings.stem}.wav"
         )
         if not stem.is_file():
-            log(f"  {name}: no {sidecar['stem']!r} stem for {sidecar['model']} — skipped")
+            log(f"  {name}: no {settings.stem!r} stem for {sidecar['model']} — skipped")
             continue
         # `ensemble` is a per-track human judgement about the recording, so it
         # lives in the sidecar beside the audio like the span does. It routes
         # the piano oracle (M7b): a span with a horn anywhere in it must stay
         # horn-led, because a piano model asked about a saxophone vouches for
         # nothing and rejection would delete the line.
-        ensemble = sidecar.get("ensemble") or base.transcribe.ensemble
-        settings = base.transcribe.model_copy(
-            update={
-                "stem": sidecar["stem"],
-                "region": (low, high),
-                "pitch_step_cost": step_cost,
-                "onset_dip_db": dip_db,
-                "ensemble": ensemble,
-            }
-        )
+        ensemble = settings.ensemble
         started = time.time()
         notes, diagnostics = transcribe.analyze(str(stem), settings)
         log(f"  {name}: {len(notes)} notes in {time.time() - started:.0f}s")
         runs[name] = {
             "model": sidecar["model"],
-            "stem": sidecar["stem"],
+            "stem": settings.stem,
             "ensemble": ensemble,
+            "fingerprint": transcribe_fingerprint(sidecar, step_cost, dip_db),
             "region": [low, high],
             "voiced_fraction": diagnostics.voiced_fraction,
             "notes": [
@@ -141,7 +185,19 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
             ],
         }
         cache.write_text(json.dumps(runs), encoding="utf-8")
-    return runs
+    # Only what is on disk NOW. The cache is keyed by track name and is only
+    # ever added to, so a renamed or deleted track leaves its old entry behind
+    # -- and everything downstream iterates these keys rather than the
+    # sidecars. Renaming eight tracks scored all eight TWICE, once under each
+    # name, and the WJazzD mean was quietly a mean over 32 where the truth was
+    # 21. A deleted track would have gone on being scored forever.
+    #
+    # The stale entries stay in the FILE: they cost minutes of CREPE each and
+    # come straight back if a rename is reverted. They just do not get scored.
+    stale = sorted(set(runs) - live)
+    if stale:
+        log(f"  ignoring {len(stale)} cached run(s) with no track on disk: {', '.join(stale)}")
+    return {name: run for name, run in runs.items() if name in live}
 
 
 GRIDS_CACHE = Path(".benchmark-grids.json")
@@ -319,7 +375,7 @@ def notation_scores(runs: dict, grids: dict) -> dict:
     import score_benchmark
 
     from swingscribe import mscz
-    from swingscribe.benchmark import score_against_notation
+    from swingscribe.benchmark import readability, score_against_notation
 
     by_audio = {audio: mscz_name for audio, mscz_name, *_ in score_benchmark.TUNES.values()}
     out = {}
@@ -338,6 +394,10 @@ def notation_scores(runs: dict, grids: dict) -> dict:
             "n_matched": result["n_matched"],
             "bars": float(len(notation.bars)),
             "key_fifths": float(notation.key_fifths),
+            # Whether the page is writable at all -- a question no comparison
+            # against a reference can see. Folded in here rather than measured
+            # in a pass of its own because the notation is already built.
+            **readability(notation),
         }
     return out
 
@@ -355,7 +415,7 @@ def wjazz_notation_scores(db_path: Path, card_wjazz: dict, runs: dict, grids: di
     """
     import sqlite3
 
-    from swingscribe.benchmark import score_against_wjazz_notation
+    from swingscribe.benchmark import readability, score_against_wjazz_notation
     from swingscribe.wjazz import notated_positions
 
     db = sqlite3.connect(db_path)
@@ -376,16 +436,40 @@ def wjazz_notation_scores(db_path: Path, card_wjazz: dict, runs: dict, grids: di
         notation = notate_run(name, runs[name], grids[name], region=window)
         if notation is None or not notation.bars:
             continue
+        # Readability is a property of OUR page and needs no reference, so it
+        # is recorded even for a solo the alignment could not line up. That is
+        # the point of having it: it is the one number every notation the
+        # harness can build contributes to.
+        out[key] = dict(readability(notation))
         result = score_against_wjazz_notation(notation, notated_positions(db, entry["melid"]))
         if not result["n_matched"]:
             continue
-        out[key] = {
-            "rhythm": round(result["rhythm"], 4),
-            "n_matched": result["n_matched"],
-            "coverage": round(result["coverage"], 4),
-            "trusted": float(bool(result["trusted"])),
-        }
+        out[key].update(
+            {
+                "rhythm": round(result["rhythm"], 4),
+                "n_matched": result["n_matched"],
+                "coverage": round(result["coverage"], 4),
+                "trusted": float(bool(result["trusted"])),
+            }
+        )
     return out
+
+
+def readable_pages(card: dict) -> dict:
+    """Every notation this run built, keyed uniquely, for the readability mean.
+
+    Both notation sections contribute. WJazzD keys carry a performer suffix
+    when one file holds several annotated solos and the hand-scored keys are
+    bare filenames, so nothing collides -- but the two sections DO notate some
+    of the same audio over different regions, which is why this reads them as
+    separate pages rather than deduplicating by track.
+    """
+    pages = {}
+    for section, prefix in (("notation", ""), ("wjazz_notation", "wjazz:")):
+        for name, entry in card.get(section, {}).items():
+            if "readability" in entry:
+                pages[prefix + name] = entry
+    return pages
 
 
 def render(card: dict) -> None:
@@ -438,17 +522,43 @@ def render(card: dict) -> None:
         print("  " + "-" * (len(header) - 2))
         rows = sorted(card["wjazz_notation"].items())
         for name, entry in rows:
+            if "rhythm" not in entry:
+                print(f"  {Path(name).stem[:34]:<34s} {'-':>8s}   (nothing lined up)")
+                continue
             flag = "" if entry["trusted"] else "   (untrusted — too little lined up)"
             print(
                 f"  {Path(name).stem[:34]:<34s} {int(entry['n_matched']):8d} "
                 f"{entry['coverage']:7.3f} {entry['rhythm']:8.3f}{flag}"
             )
-        trusted = [e for _n, e in rows if e["trusted"]]
+        trusted = [e for _n, e in rows if e.get("trusted")]
         if trusted:
             print(
                 f"\n  mean rhythm {statistics.fmean(e['rhythm'] for e in trusted):.3f} "
                 f"over {len(trusted)} solo(s)"
             )
+
+    pages = readable_pages(card)
+    if pages:
+        print("\n== Readability: is the page writable at all? (no reference needed) ==")
+        header = (
+            f"  {'notation':<34s} {'events':>7s} {'rest<8th':>9s} "
+            f"{'note<16th':>10s} {'ties':>6s} {'score':>7s}"
+        )
+        print(header)
+        print("  " + "-" * (len(header) - 2))
+        for name, e in sorted(pages.items(), key=lambda kv: kv[1]["readability"]):
+            print(
+                f"  {Path(name).stem[:34]:<34s} {int(e['events']):7d} "
+                f"{e['short_rests']:9.2f} {e['short_values']:10.2f} "
+                f"{e['tie_rate']:6.3f} {e['readability']:7.4f}"
+            )
+        print(
+            f"\n  mean readability {card['summary']['readability']:.4f} "
+            f"over {int(card['summary']['readability_n'])} notation(s)"
+        )
+        # The target, counted off the ten hand transcriptions in benchmark/:
+        # 6 sub-eighth rests in 487 rests, 13 sub-sixteenth notes in 3646.
+        print("  a human writes 0.995 (benchmark/*.mscz: 6 short rests, 13 short values)")
 
     print("\n== MuseScore: our audio against notated rhythm ==")
     header = f"  {'tune':<30s} {'pitch':>7s} {'chroma':>7s} {'onset':>7s} {'note':>7s}"
@@ -559,6 +669,12 @@ def main() -> None:
             # gap read as agreement between two numbers that were measuring
             # different populations.
             card["summary"]["wjazz_beat_n"] = float(len(beats))
+    pages = readable_pages(card)
+    if pages:
+        card["summary"]["readability"] = round(
+            statistics.fmean(e["readability"] for e in pages.values()), 4
+        )
+        card["summary"]["readability_n"] = float(len(pages))
     if card["mscz"]:
         card["summary"]["mscz_note_f1"] = round(
             statistics.fmean(e["note_f1"] for e in card["mscz"].values()), 4
