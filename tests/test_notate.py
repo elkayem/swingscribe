@@ -15,6 +15,7 @@ from swingscribe.stages.notate import (
     is_notatable,
     spell,
     split_for_meter,
+    split_points,
     triplet_value,
 )
 
@@ -283,10 +284,20 @@ def test_close_short_gaps_fills_a_sub_sixteenth_gap():
     assert out[1] == events[1]
 
 
-def test_close_short_gaps_leaves_a_real_rest_alone():
-    """A sixteenth rest is a rest. The rule is bounded by a note value, not by
-    a ratio — that is the whole difference from legato_fill."""
+def test_a_sixteenth_of_silence_is_a_lay_back_not_a_rest():
+    """The listener wrote ONE sixteenth rest in 504 across ten transcriptions.
+    A player behind the beat leaves a sixteenth of silence before every
+    offbeat, and writing that down records the feel as a rhythm."""
     events = [(1, 0.0, 0.25, 60), (1, 0.5, 0.5, 62)]
+    out = notate.close_short_gaps(events, _FlatBars())
+    assert out[0][2] == pytest.approx(0.5)
+    assert out[1] == events[1]
+
+
+def test_an_eighth_rest_is_a_rest():
+    """The rule is bounded by a note value, not by a ratio - that is the whole
+    difference from legato_fill."""
+    events = [(1, 0.0, 0.5, 60), (1, 1.0, 0.5, 62)]
     assert notate.close_short_gaps(events, _FlatBars()) == events
 
 
@@ -328,3 +339,158 @@ def _q(bar: int, beat: float, duration: float, pitch: int) -> QuantizedNote:
     return QuantizedNote(
         bar=bar, beat=beat, duration_beats=duration, pitch=pitch, timing_residual=0.0
     )
+
+
+# -- triple metre ---------------------------------------------------------
+#
+# Halving is right in duple metre and wrong in triple. A 3/4 bar halved goes
+# 3 -> 1.5 -> 0.75 and never lands on a beat, which used to leave 12 of the 66
+# bars of the benchmark's one 3/4 score short of their time signature, with 14
+# notes of duration zero among them.
+
+
+def test_a_duple_bar_is_halved():
+    assert split_points(0.0, 4.0) == [2.0]
+    assert split_points(0.0, 1.0) == [0.5]
+
+
+def test_a_triple_bar_is_cut_at_its_beats_not_at_its_middle():
+    assert split_points(0.0, 3.0) == [1.0, 2.0]
+
+
+def test_a_dotted_beat_divides_in_three():
+    """Three eighths under a dotted quarter, not two and a half."""
+    assert split_points(0.0, 1.5) == [0.5, 1.0]
+
+
+def test_an_irregular_bar_peels_off_the_largest_whole_value():
+    assert split_points(0.0, 5.0) == [4.0]
+
+
+def test_split_conserves_duration_in_three_four():
+    for start in [i * 0.25 for i in range(12)]:
+        for duration in [i * 0.25 for i in range(1, 13)]:
+            if start + duration > 3.0:
+                continue
+            pieces = split_for_meter(start, duration, 3.0)
+            assert abs(sum(length for _s, length, _t in pieces) - duration) < 1e-9
+            assert abs(pieces[0][0] - start) < 1e-9
+
+
+def test_no_piece_of_a_three_four_bar_is_an_unwritable_sliver():
+    """Every piece must be a real note value (or a legal tuplet). A duration
+    that is not is what reached MusicXML as a 32nd carrying the wrong length,
+    or as a note of length zero."""
+    for start in [i * 0.125 for i in range(24)]:
+        for duration in [i * 0.125 for i in range(1, 25)]:
+            if start + duration > 3.0:
+                continue
+            for _s, length, tuplet in split_for_meter(start, duration, 3.0):
+                assert length > 0.0
+                assert is_notatable(length) or tuplet is not None
+
+
+def test_a_three_four_bar_fills_to_three_beats():
+    notes = [NotatedNote(beat=1.0, duration=0.5, pitch=60, step="C", octave=4)]
+    filled = fill_rests(notes, 3.0)
+    assert abs(sum(n.duration for n in filled) - 3.0) < 1e-9
+    assert all(n.duration > 0.0 for n in filled)
+
+
+def test_a_note_across_the_second_beat_of_a_waltz_is_cut_there():
+    pieces = split_for_meter(0.5, 1.0, 3.0)
+    assert [round(s, 6) for s, _l, _t in pieces] == [0.5, 1.0]
+
+
+# ── written values land on a grid a reader can read ─────────────────────────
+# Quantize snaps ONSETS and nothing ever snapped DURATIONS. The legato rule
+# hid that for the 90% of notes that run into the next one, because the gap
+# they inherit is grid-to-grid; the note before a rest kept its played length
+# to the millisecond and was then shattered into tied slivers.
+
+
+def test_a_played_length_is_written_as_the_nearest_readable_value():
+    from swingscribe.stages.notate import snap_value
+
+    assert snap_value(0.476, None) == 0.5
+    assert snap_value(0.261, None) == 0.25
+    assert snap_value(0.97, None) == 1.0
+
+
+def test_the_grid_comes_from_the_beat_and_not_from_whichever_is_nearer():
+    """A duration has to end on the grid its neighbours START on.
+
+    Offering both grids to every note and taking the nearer one puts a
+    triplet-eighth rest in a beat of sixteenths -- the twelfth-of-a-beat
+    sliver `close_short_gaps` exists to prevent, arriving from the other side.
+    """
+    from swingscribe.stages.notate import TERNARY_VALUES, snap_value, ternary_beats
+
+    assert snap_value(0.34, None, TERNARY_VALUES) == pytest.approx(1 / 3)
+    assert snap_value(0.66, None, TERNARY_VALUES) == pytest.approx(2 / 3)
+    # Beat 0 has onsets on thirds; beat 1 does not.
+    assert ternary_beats([0.0, 1 / 3, 2 / 3, 1.0, 1.5]) == {0}
+
+
+def test_a_tuplet_value_stays_exact_to_the_last_bit():
+    """Not a rounding nicety. A candidate rounded to 0.333333 makes two of
+    them 0.666666, and MuseScore calls a tuplet group that misses a sixth of a
+    beat by 2e-6 a corrupt file."""
+    from swingscribe.stages.notate import TERNARY_VALUES, snap_value
+
+    for k in (1, 2, 3, 4):
+        assert snap_value(k / 3.0, None, TERNARY_VALUES) * 6.0 == pytest.approx(2 * k, abs=1e-12)
+
+
+def test_nothing_is_written_shorter_than_a_sixteenth():
+    """The same judgement as MIN_REST: the listener gets exact timing from the
+    record and wants the page readable."""
+    from swingscribe.stages.notate import snap_value
+
+    assert snap_value(0.03, None) == 0.25
+    assert snap_value(0.12, None) == 0.25
+
+
+def test_a_snapped_value_never_runs_past_the_next_onset():
+    """`without_overlap` has already run, so rounding up past the next note
+    would put two notes sounding at once in a single-line score."""
+    from swingscribe.stages.notate import TERNARY_VALUES, snap_value
+
+    assert snap_value(0.48, 0.4) <= 0.4 + 1e-6
+    # And it rounds DOWN to a readable value rather than keeping the raw gap.
+    assert snap_value(0.48, 0.4) == pytest.approx(0.25)
+    assert snap_value(0.48, 0.4, TERNARY_VALUES) == pytest.approx(1 / 3)
+
+
+def test_a_gap_too_small_for_any_value_keeps_the_gap():
+    from swingscribe.stages.notate import snap_value
+
+    assert snap_value(0.5, 0.05) == pytest.approx(0.05)
+
+
+def test_snapping_leaves_an_already_readable_value_alone():
+    from swingscribe.stages.notate import snap_value
+
+    for value in (0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 4.0):
+        assert snap_value(value, None) == pytest.approx(value)
+
+
+def test_the_note_before_a_rest_stops_being_a_sliver():
+    """The whole defect, end to end.
+
+    An eighth-note line where one note was tongued short: before snapping its
+    0.31 of a beat is split into tied fragments and leaves an unwritable rest.
+    """
+    from swingscribe.model import QuantizedNote
+    from swingscribe.stages.notate import build
+
+    notes = [
+        QuantizedNote(bar=1, beat=0.0, duration_beats=0.5, pitch=60, timing_residual=0.0),
+        QuantizedNote(bar=1, beat=0.5, duration_beats=0.31, pitch=62, timing_residual=0.0),
+        QuantizedNote(bar=1, beat=2.0, duration_beats=0.5, pitch=64, timing_residual=0.0),
+    ]
+    notation = build(notes, [], swing=False, transpose=0)
+    written = [n for bar in notation.bars for n in bar.notes if not n.is_rest]
+    assert all(n.duration >= 0.25 - 1e-6 for n in written), [n.duration for n in written]
+    rests = [n for bar in notation.bars for n in bar.notes if n.is_rest]
+    assert all(r.duration >= 0.25 - 1e-6 for r in rests), [r.duration for r in rests]

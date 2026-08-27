@@ -196,13 +196,56 @@ def split_for_meter(
     return pieces
 
 
+# The note values a metrical unit may be halved down through: powers of two
+# only. A unit whose length is one of these is divided in two; a unit that is
+# three of them is divided in THREE. Dotted values are deliberately absent -
+# 1.5 is a length a note can have, but it is not a unit anything subdivides
+# into.
+BINARY_UNITS = (8.0, 4.0, 2.0, 1.0, 0.5, 0.25, 0.125)
+
+
+def _is_binary_unit(length: float) -> bool:
+    return any(_close(length, v) for v in BINARY_UNITS)
+
+
+def split_points(unit_start: float, unit_end: float) -> list[float]:
+    """Where a metrical unit is cut, in engraving order.
+
+    Halving is right in duple metre and WRONG in triple. A 3/4 bar halved goes
+    3 -> 1.5 -> 0.75 -> 0.375, and not one of those cuts lands on a beat: the
+    recursion below never finds a legal boundary, bottoms out at its "nothing
+    left to divide" guard, and emits slivers. That is not a cosmetic failure.
+    Measured on the one 3/4 score in the benchmark it produced 12 bars that did
+    not add up to their time signature and 14 notes of duration ZERO, which is
+    a MusicXML file no notation program should be asked to open.
+
+    So: a unit that IS a power-of-two value is halved; a unit that is three of
+    them is divided in three; anything else (5/4 and friends) has the largest
+    whole value peeled off the front, which at least leaves both pieces
+    notatable.
+
+    6/8 is not distinguished from 3/4 here - both arrive as three quarter notes
+    and both get cut into three. Grouping 6/8 as two dotted quarters needs the
+    time signature, which this stage is not given.
+    """
+    length = unit_end - unit_start
+    if _is_binary_unit(length):
+        return [unit_start + length / 2.0]
+    if _is_binary_unit(length / 3.0):
+        return [unit_start + length / 3.0, unit_start + 2.0 * length / 3.0]
+    for value in BINARY_UNITS:
+        if value < length - TICK:
+            return [unit_start + value]
+    return [unit_start + length / 2.0]
+
+
 def _subdivide(a: float, b: float, unit_start: float, unit_end: float, out: list) -> None:
     if b - a <= TICK:
         return
     length = b - a
     flush = _close(a, unit_start) or _close(b, unit_end)
-    middle = (unit_start + unit_end) / 2.0
-    crosses = a < middle - TICK and b > middle + TICK
+    points = split_points(unit_start, unit_end)
+    crosses = any(a < p - TICK and b > p + TICK for p in points)
     if is_notatable(length) and (flush or not crosses):
         out.append((a, length, None))
         return
@@ -223,13 +266,25 @@ def _subdivide(a: float, b: float, unit_start: float, unit_end: float, out: list
         # have rather than recursing forever on an unnotatable sliver.
         out.append((a, length, None))
         return
-    if b <= middle + TICK:
-        _subdivide(a, b, unit_start, middle, out)
-    elif a >= middle - TICK:
-        _subdivide(a, b, middle, unit_end, out)
-    else:
-        _subdivide(a, middle, unit_start, middle, out)
-        _subdivide(middle, b, middle, unit_end, out)
+    bounds = [unit_start, *points, unit_end]
+    for lo, hi in zip(bounds, bounds[1:], strict=False):
+        if a >= lo - TICK and b <= hi + TICK:
+            _subdivide(a, b, lo, hi, out)
+            return
+    # Straddles a division: cut at the first one crossed. The head lands inside
+    # the sub-unit ending there; the tail is re-divided against everything still
+    # to come, which is what lets a 3/4 bar's remaining two beats halve normally
+    # once the first beat has been cut off.
+    cut = next((p for p in points if a < p - TICK and b > p + TICK), None)
+    if cut is None:
+        # Not inside any sub-unit and crossing none of them: the span reaches
+        # outside the unit it was handed. Nothing left to divide by, so emit it
+        # rather than raise - a note that cannot be split is still a note.
+        out.append((a, length, None))
+        return
+    head_start = max((lo for lo in bounds if lo <= a + TICK), default=unit_start)
+    _subdivide(a, cut, head_start, cut, out)
+    _subdivide(cut, b, cut, unit_end, out)
 
 
 def fill_rests(notes: list[NotatedNote], bar_length: float) -> list[NotatedNote]:
@@ -249,10 +304,138 @@ def fill_rests(notes: list[NotatedNote], bar_length: float) -> list[NotatedNote]
     return filled
 
 
-# The shortest rest anyone writes in this music. Below a sixteenth, a gap
-# between a note's written end and the next onset is not a rest — see
+# The shortest rest anyone writes in this music. Below an EIGHTH, a gap
+# between a note's written end and the next onset is not a rest - see
 # close_short_gaps.
-MIN_REST = 0.25
+#
+# It was a sixteenth. Counted across the ten hand transcriptions in the
+# benchmark, the listener wrote exactly ONE sixteenth rest in 504 rests and no
+# rest shorter than that; we were writing 9.4 per hundred notes. A player who
+# lays back - Mobley, most of Someday My Prince Will Come - produces a
+# sixteenth of silence before every offbeat, and writing it down records the
+# lay-back as a rhythm instead of as the feel it is.
+#
+# Raising it removed 93% of the sub-eighth rests across the four hand scores
+# the notation harness can pair (260 -> 18) and moved the notated-rhythm score
+# on NONE of them: rhythm compares onset POSITIONS, and closing a gap changes
+# the previous note's duration, not any onset. A readability change with no
+# measured cost, which is the only kind worth making without a benchmark to
+# defend it.
+MIN_REST = 0.5
+
+
+# Note VALUES anyone writes: any number of sixteenths, or any number of
+# triplet eighths. Counted over the ten hand transcriptions, 3629 of the
+# listener's 3646 written values are in this set, and the 17 that are not are
+# thirty-seconds and triplet sixteenths -- 0.5% of the page.
+#
+# The floor is a SIXTEENTH on purpose. It is the same judgement as MIN_REST:
+# the listener plays along to the record for exact timing and wants the page
+# readable, so a value below a sixteenth is written as one.
+# NOT rounded. A candidate of 0.333333 makes two of them 0.666666, and a
+# tuplet group whose pieces must land on sixths of a beat then misses by 2e-6
+# -- which is a corrupt file in MuseScore, not a rounding nicety.
+BINARY_VALUES = [0.25 * k for k in range(1, 65)]
+TERNARY_VALUES = [k / 3.0 for k in range(1, 97)]
+
+
+def snap_values(
+    events: list[tuple[int, float, float, int]],
+    bars_index,
+) -> list[tuple[int, float, float, int]]:
+    """Round each written duration to a value a reader can read.
+
+    ## The defect this fixes
+
+    Quantize snaps ONSETS to a grid and nothing ever snapped DURATIONS. For
+    the 90-93% of notes that run legato into the next one that never showed,
+    because `notated_durations` had already replaced the duration with the gap
+    -- which is grid-to-grid and therefore on the grid. It is the other 7-10%,
+    the note genuinely followed by a rest, that was written to the
+    millisecond: a played length of 0.476 quarter notes went to
+    `split_for_meter` as 0.476, came back as a sixteenth tied to a
+    thirty-second tied to a sliver, and left an unwritable rest behind it.
+
+    That is exactly what the listener reported -- "the dotted 1/32 notes with
+    strange ties" -- and it was never a timing problem. It was a page that
+    wrote a duration nobody asked for to a precision nobody wanted.
+
+    ## Measured, including the part that says this changes nothing here
+
+    **On our own pipeline it moves nothing.** Over the thirty notations the
+    eval harness builds, mean readability goes 0.9941 to 0.9939 and no rhythm,
+    value or F1 number moves at all. The reason is `notated_durations`: it has
+    already replaced 90-93% of durations with the gap to the next onset, and a
+    gap between two grid positions is on the grid. This rule only ever sees
+    the other 7-10%, the note genuinely followed by a rest.
+
+    **On a score built from WJazzD's metrical annotation it is decisive**,
+    because there no duration inherits a gap -- they are all performed seconds.
+    Over the 172 of 456 solos whose onsets sit on subdivisions writable at all:
+
+                             before    after
+        readability           0.788    0.982
+        notes below a 16th   12.8%     0.16%
+        notes tied            0.246    0.119
+
+    Over all 456 it is 0.729 to 0.882; the residue is quintuplet and septuplet
+    ONSETS, unwritable in this notater whatever their duration.
+
+    So it ships as insurance and for `wjazz.annotation_notation`, not as a fix
+    to a defect the shipped pipeline currently has. Said plainly because the
+    opposite claim would have been easy to make and wrong.
+
+    ## The clamp
+
+    A snapped value may never exceed the gap to the next onset. `without_overlap`
+    has already run by this point, so rounding up past the next note would put
+    two notes sounding at once in a single-line score -- and `fill_rests` would
+    then be handed a negative gap.
+    """
+    if not events:
+        return events
+    absolute = [bars_index.start_of(bar) + beat for bar, beat, _d, _p in events]
+    ternary = ternary_beats(absolute)
+    out = []
+    for index, (bar, beat, duration, pitch) in enumerate(events):
+        gap = absolute[index + 1] - absolute[index] if index + 1 < len(events) else None
+        values = TERNARY_VALUES if int(absolute[index] // 1.0) in ternary else BINARY_VALUES
+        out.append((bar, beat, snap_value(duration, gap, values), pitch))
+    return out
+
+
+def ternary_beats(absolute: list[float]) -> set[int]:
+    """Which beats hold onsets on thirds rather than on quarters.
+
+    The grid is a property of the BEAT, chosen by quantize one beat at a time,
+    and a duration has to end on the same one its neighbours start on. Snapping
+    to whichever of the two happens to be nearer is what left a triplet-eighth
+    rest sitting in a beat of sixteenths -- the twelfth-of-a-beat sliver that
+    `close_short_gaps` exists to prevent, arriving from the other direction.
+    """
+    beats: set[int] = set()
+    for position in absolute:
+        fraction = position % 1.0
+        to_third = min(abs(fraction - third) for third in (0.0, 1 / 3, 2 / 3, 1.0))
+        to_quarter = min(abs(fraction - q / 4.0) for q in range(5))
+        if to_third < to_quarter - TICK:
+            beats.add(int(position // 1.0))
+    return beats
+
+
+def snap_value(duration: float, gap: float | None, values: list[float] | None = None) -> float:
+    """One duration to the nearest writable value, never past `gap`.
+
+    NEAREST, and nothing cleverer. Preferring a value whose leftover gap is
+    itself writable -- nothing, or at least a `MIN_REST` -- was tried and is
+    much worse: it pushes the value down to open a real rest, and mean
+    readability over our thirty notations falls 0.9941 to 0.9678 while short
+    rests rise on twenty-eight of them. Measured, and not worth revisiting.
+    """
+    values = BINARY_VALUES if values is None else values
+    if gap is not None:
+        values = [value for value in values if value <= gap + TICK] or [gap]
+    return min(values, key=lambda value: (abs(value - duration), value))
 
 
 def close_short_gaps(
@@ -263,7 +446,7 @@ def close_short_gaps(
     """Extend a note to the next onset when the gap is too short to be a rest.
 
     Quantize snaps ONSETS to the grid it chose for each beat. Durations get no
-    such treatment, so a note's written end can land off that grid — a played
+    such treatment, so a note's written end can land off that grid - a played
     length that reached a sixteenth in a beat whose onsets are thirds, or a
     third in a beat whose onsets are halves. `fill_rests` then writes the
     difference as a rest of a twelfth or a sixth of a beat.
@@ -271,14 +454,27 @@ def close_short_gaps(
     Nobody notates those, and the transcriber has no evidence for them: it
     cannot hear a rest a twelfth of a beat long, only a note that was tongued
     slightly short. Worse, the rest breaks the beat's tuplet group, because
-    the group no longer begins and ends on thirds — which is what MuseScore
+    the group no longer begins and ends on thirds - which is what MuseScore
     reports as a corrupted measure.
 
-    So a gap shorter than a sixteenth goes back to the note that was played.
+    So a gap shorter than `min_rest` goes back to the note that was played.
     This is deliberately much narrower than `legato_fill`, which asks the
-    aesthetic question (do humans write jazz legato?) and measured neutral. This
-    asks whether the rest is *writable at all*, and is bounded by a note value
-    rather than by a ratio.
+    aesthetic question (do humans write jazz legato?) and measured neutral.
+    This asks whether the rest is *writable at all*, and is bounded by a note
+    value rather than by a ratio.
+
+    THE GAP IS CLOSED FROM THE LEFT, and the alternative was measured. Pulling
+    the note AFTER the gap back onto the beat scores better against the ten
+    hand transcriptions - notated rhythm 0.711 -> 0.752 with notated value
+    unchanged, against 0.711 / 0.672 -> 0.628 for extending. It is still wrong
+    to do here: it lands the moved onset on the previous note's off-grid end,
+    which inside a ternary beat is not a third, and the tuplet group it breaks
+    is the corrupted measure this function exists to prevent.
+
+    That +0.041 is not nothing, though, and it says where it belongs. A note
+    sitting a sixteenth late inside a beat the human wrote as two eighths is a
+    grid chosen too fine, and the place to fix that is `choose_grid` with the
+    tempo it is writing at (D11), not a repair pass afterwards.
     """
     if len(events) < 2:
         return events
@@ -410,6 +606,11 @@ def build(
     last_bar = max(n.bar for n in quantized)
     bars_index = _Bars(sections, first_bar, last_bar + 4)
     events = notated_durations(without_overlap(quantized, bars_index), bars_index, legato_fill)
+    # Values before gaps. `close_short_gaps` extends a note to the NEXT ONSET,
+    # which is already on the grid, so what it produces is grid-aligned by
+    # construction and needs no second rounding; doing it the other way round
+    # would round the extension back off the onset and re-open the gap.
+    events = snap_values(events, bars_index)
     # Before splitting, not after: the splitter can only pick a legal tuplet
     # group if the durations it is handed already land on the beat's grid.
     events = close_short_gaps(events, bars_index)
