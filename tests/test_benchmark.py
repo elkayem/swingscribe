@@ -9,6 +9,8 @@ that can slip a beat must not be allowed back in.
 
 import statistics
 
+import pytest
+
 from swingscribe.alignment import align
 from swingscribe.benchmark import anchor_map, solo_shift, window_shift
 
@@ -448,3 +450,117 @@ def test_wjazz_notation_is_empty_without_an_annotation():
 
     notation = _notation_of(_straight_eighths([60, 62]))
     assert score_against_wjazz_notation(notation, [])["n_matched"] == 0.0
+
+
+# ── readability: is the page writable at all? ───────────────────────────────
+# The one measure here that needs no reference. It exists because the listener
+# could name two defects -- a sixteenth rest before a note played behind the
+# beat, and "dotted 1/32 notes with strange ties" -- that NOTHING in
+# `score_notation` could see, and because the repair for the first of them
+# shows up in `value` as a regression with nothing on the other side.
+
+
+def _tied(beat, duration, pitch, tuplet=None):
+    from swingscribe.model import NotatedNote
+
+    return NotatedNote(beat=beat, duration=duration, pitch=pitch, tie_start=True, tuplet=tuplet)
+
+
+def test_a_page_of_eighths_and_eighth_rests_is_perfectly_readable():
+    from swingscribe.benchmark import readability
+
+    notation = _notation(
+        [_bar([_note(0.0, 0.5, 60), _note(0.5, 0.5, 62), _note(1.0, 0.5, 0, rest=True)])]
+    )
+    result = readability(notation)
+    assert result["readability"] == 1.0
+    assert result["short_rests"] == 0.0
+    assert result["short_values"] == 0.0
+    assert result["events"] == 3.0
+
+
+def test_a_sixteenth_rest_costs_readability():
+    from swingscribe.benchmark import readability
+
+    notation = _notation(
+        [_bar([_note(0.0, 0.5, 60), _note(0.5, 0.25, 0, rest=True), _note(0.75, 0.5, 62)])]
+    )
+    result = readability(notation)
+    assert result["short_rests"] == pytest.approx(100.0 / 3.0, abs=0.01)
+    assert result["readability"] == pytest.approx(2.0 / 3.0, abs=0.001)
+
+
+def test_a_thirty_second_note_costs_readability():
+    from swingscribe.benchmark import readability
+
+    notation = _notation([_bar([_note(0.0, 0.125, 60), _note(0.125, 0.5, 62)])])
+    result = readability(notation)
+    assert result["short_values"] == 50.0
+    assert result["readability"] == 0.5
+
+
+def test_a_triplet_eighth_is_read_as_an_eighth_and_costs_nothing():
+    """The one rule that stops ordinary swing notation scoring as unwritable.
+
+    A triplet eighth is STORED as a third of a beat, which is below a
+    sixteenth; it is READ as an eighth with a 3 over it. Counting the stored
+    duration would call 10% of every hand transcription unreadable.
+    """
+    from swingscribe.benchmark import readability
+
+    third = 1.0 / 3.0
+    notation = _notation(
+        [
+            _bar(
+                [
+                    _note(0.0, third, 60),
+                    _note(third, third, 62),
+                    _note(2 * third, third, 64),
+                ]
+            )
+        ]
+    )
+    for note in notation.bars[0].notes:
+        note.tuplet = (3, 2)
+    assert readability(notation)["readability"] == 1.0
+
+
+def test_a_triplet_rest_is_read_as_an_eighth_rest_too():
+    from swingscribe.benchmark import readability
+
+    third = 1.0 / 3.0
+    notation = _notation([_bar([_note(0.0, third, 0, rest=True), _note(third, 2 * third, 60)])])
+    notation.bars[0].notes[0].tuplet = (3, 2)
+    notation.bars[0].notes[1].tuplet = (3, 2)
+    assert readability(notation)["short_rests"] == 0.0
+
+
+def test_ties_are_reported_and_do_not_move_the_score():
+    """Reported next to it, not folded into it.
+
+    A tie is how a legitimately long value crosses a barline. It rises with
+    the two real defects, which makes it a useful witness, but a page is not
+    unreadable for having one.
+    """
+    from swingscribe.benchmark import readability
+
+    notation = _notation([_bar([_tied(0.0, 0.5, 60), _note(0.5, 0.5, 60, tie_stop=True)])])
+    result = readability(notation)
+    assert result["tie_rate"] == 0.5
+    assert result["readability"] == 1.0
+
+
+def test_readability_is_a_rate_so_a_chorus_and_a_solo_compare():
+    from swingscribe.benchmark import readability
+
+    short = _notation([_bar([_note(0.0, 0.125, 60), _note(0.5, 0.5, 62)])])
+    long = _notation([_bar([_note(0.0, 0.125, 60), _note(0.5, 0.5, 62)]) for _ in range(8)])
+    assert readability(short)["readability"] == readability(long)["readability"]
+    assert readability(long)["events"] == 16.0
+
+
+def test_an_empty_notation_scores_zero_rather_than_dividing_by_it():
+    from swingscribe.benchmark import readability
+
+    assert readability(_notation([]))["events"] == 0.0
+    assert readability(_notation([_bar([])]))["readability"] == 0.0

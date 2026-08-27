@@ -320,3 +320,86 @@ def score_against_wjazz_notation(notation, positions: list[tuple[float, int]]) -
         "coverage": coverage,
         "trusted": coverage >= COVERAGE_FLOOR,
     }
+
+
+# What a human actually writes. Counted over the ten hand transcriptions in
+# benchmark/ -- 3646 notes and 487 rests, read straight out of the .mscz XML
+# before ties are merged, so these are SYMBOLS ON A PAGE and not durations:
+#
+#   rests shorter than an eighth        6 of  487   1.2%
+#   note values below a sixteenth      13 of 3646   0.4%
+#   notes tied into the next          82 of 3646   2.2%
+#   eighth notes                     2406 of 3646  66.0%
+#
+# The listener's complaint -- a sixteenth rest before a note played behind the
+# beat, and "dotted 1/32 notes with strange ties" -- is exactly the first two
+# rows, and NOTHING in `score_notation` could see it. `rhythm` asks whether the
+# gap to the next note matches and `value` whether the note value matches; a
+# page can be unreadable and move neither. Worse, `value` actively FIGHTS the
+# repair: absorbing an unwritable rest into the note before it turns an eighth
+# into a dotted eighth, which `value` scores as wrong (and by the count above
+# a dotted eighth is genuinely rare -- 6 in 3646). That regression was real and
+# was reported as the price of the fix, with no number on the other side of the
+# ledger. This is that number.
+#
+# It needs no reference, so it runs over EVERY notation the harness can build
+# -- the thirty-odd WJazzD solos as well as the ten hand-scored ones -- which
+# is the widest measurement in this project.
+WRITABLE_REST = 0.5  # an eighth; see notate.MIN_REST for the same threshold
+WRITABLE_VALUE = 0.25  # a sixteenth
+
+
+def _written_value(note) -> float:
+    """The note value as a reader sees it, undoing any tuplet compression.
+
+    A triplet eighth is stored as a third of a beat but READ as an eighth, and
+    counting it as 0.333 would call ordinary swing notation unwritable.
+    """
+    if note.tuplet:
+        actual, normal = note.tuplet
+        return note.duration * actual / normal if normal else note.duration
+    return note.duration
+
+
+def readability(notation) -> dict[str, float]:
+    """How much of a Notation is written the way a human writes it.
+
+    Deliberately NOT a comparison. Every other number in this module asks
+    whether we agree with a particular human about a particular recording;
+    this one asks whether the page is *writable at all*, which is a property
+    of the page alone.
+
+    - **short_rests** -- rests below an eighth, per 100 events. The listener
+      wrote 6 in 487. A gap this short is a player laying back, not a rest.
+    - **short_values** -- notes written shorter than a sixteenth, per 100
+      notes. These are the "dotted 1/32 notes with strange ties".
+    - **tie_rate** -- notes tied into the next, as a fraction. A value that
+      does not fit one symbol becomes several, so this rises with the two
+      above; the human sits at 0.022.
+    - **readability** -- the fraction of events that are neither. One number
+      to move, anchored at the human's 0.995.
+
+    Rates rather than counts, because a chorus and a whole solo would
+    otherwise not be comparable.
+    """
+    notes = [n for bar in notation.bars for n in bar.notes if not n.is_rest]
+    rests = [n for bar in notation.bars for n in bar.notes if n.is_rest]
+    events = len(notes) + len(rests)
+    if not events:
+        return {
+            "short_rests": 0.0,
+            "short_values": 0.0,
+            "tie_rate": 0.0,
+            "readability": 0.0,
+            "events": 0.0,
+        }
+    short_rests = sum(1 for r in rests if _written_value(r) < WRITABLE_REST - 1e-6)
+    short_values = sum(1 for n in notes if _written_value(n) < WRITABLE_VALUE - 1e-6)
+    tied = sum(1 for n in notes if n.tie_start)
+    return {
+        "short_rests": round(100.0 * short_rests / events, 3),
+        "short_values": round(100.0 * short_values / len(notes), 3) if notes else 0.0,
+        "tie_rate": round(tied / len(notes), 4) if notes else 0.0,
+        "readability": round(1.0 - (short_rests + short_values) / events, 4),
+        "events": float(events),
+    }
