@@ -198,6 +198,33 @@ us (0.64).
 Note that #3's dedicated stems did *not* fix the equivalent on Giant Steps, so
 "better isolation" is not automatically the answer — see #3.
 
+### On piano, a second detector now covers the recall half (M7b)
+
+The same failure with the sign flipped: on a piano the previous note is still
+ringing when the next is struck, CREPE's periodicity collapses at every
+transition, and a note in a fast run survives gating for far fewer frames than
+it was played for. Bar 4 of Sonny Clark's *There Will Never Be Another You* is
+eight straight eighths and we wrote five; all three of the missing notes are in
+the raw f0, killed by the 60 ms duration floor and the 0.5 periodicity gate.
+
+**Loosening those gates does not recover them.** Swept over six cached spans
+with hand transcriptions, every threshold — voicing, minimum note, pitch
+persistence, median filter, a stability rescue, a confidence-weighted short-note
+floor — costs about two false notes per true one, and nothing beats the shipped
+settings on F1. Short true notes and short false notes are not separable by
+anything the monophonic path can see.
+
+`corroborate.fill_gaps` gets them from the polyphonic model instead, merged into
+the single line only where the line has a hole and only at the line's own
+register. Recall 0.680 → 0.744 for precision 0.677 → 0.666 over four piano
+spans; all six piano solos in the benchmark improved on pitch F1 and note F1,
+and every horn was untouched. That closes the recall half of this issue **for
+piano only** — there is no equivalent second opinion for a saxophone, and there
+must not be a piano one (CLAUDE.md).
+
+The precision half — 253 notes on Confirmation that are not in the score — is
+untouched by any of this and remains what melodic-line selection is about.
+
 ### Partly addressed: Viterbi f0 decoding (`transcribe.pitch_step_cost`)
 
 The mechanism was that CREPE was decoded **per frame**, by weighted argmax,

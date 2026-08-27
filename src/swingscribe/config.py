@@ -154,8 +154,24 @@ class TranscribeConfig(BaseModel):
     # OFF by default, and it must stay off for any measurement: the second
     # voice is not part of the transcription and never enters the scored note
     # list. It rides on FrameDiagnostics, which nothing downstream consumes.
-    # The GUI turns it on for its own review screen.
+    #
+    # The GUI no longer turns it on either. Shown as an overlay it is most of
+    # the left hand and the listener could not read it; the same recall is
+    # available inside ONE line through `piano_fill_gaps`, which is what
+    # replaced it as the default answer to "you are missing notes".
     piano_second_voice: bool = False
+    # Merge the oracle's notes into the line wherever the line has a HOLE, at
+    # the line's own register (corroborate.fill_gaps). This is the second
+    # opinion used the way the listener asked for it: one monophonic line, as
+    # complete as we can make it, rather than a second voice to read past.
+    #
+    # ON by default for piano, because the trade goes the listener's way:
+    # measured over four piano solos with hand transcriptions, recall
+    # 0.680 -> 0.744 against precision 0.677 -> 0.666, and all four improved on
+    # recall AND F1. Deleting a note that does not belong is cheap; hearing one
+    # that was never written is not. `uses_piano_oracle` still gates it, so a
+    # horn never sees it.
+    piano_fill_gaps: bool = True
 
     @property
     def uses_piano_oracle(self) -> bool:

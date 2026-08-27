@@ -189,3 +189,110 @@ def second_voice(
         if not np.any(near & (pitches == int(note["pitch"]))):
             out.append(note)
     return out
+
+
+# A note the oracle heard counts as "already ours" if the line has anything at
+# all within this of it. Onset-only, deliberately: the point is to fill HOLES
+# in the line, and a hole is a stretch of time with nothing in it, whatever
+# pitch we would have put there.
+GAP_TOLERANCE = 0.06
+
+# How far from the line's local register an oracle note may sit and still be
+# plausibly the same voice. An octave is loose enough to catch a leap and
+# tight enough to leave the left hand where it is.
+REGISTER_SEMITONES = 12
+
+# Half a second either side is roughly a bar at bebop tempo — enough context to
+# know what register the line is in without averaging across a phrase that
+# moved.
+REGISTER_WINDOW = 1.0
+
+# The oracle's velocity, normalised, as a confidence. Below this its notes are
+# as likely to be pedal ring or a neighbour's overtone as a struck note.
+FILL_CONFIDENCE = 0.45
+
+# Our note durations are the GATED extent of a pitch, not the played length:
+# CREPE's periodicity collapses at each transition, so a note's frames run
+# past where the next note starts. Taking half the claimed duration is what
+# stops a line note from covering the hole immediately after it.
+COVER_FRACTION = 0.5
+
+
+def _velocity_confidence(note: dict[str, Any]) -> float:
+    """The oracle reports velocity, the line reports confidence. One scale."""
+    if "velocity" in note:
+        return float(note["velocity"]) / 127.0
+    return float(note.get("confidence", 0.0))
+
+
+def fill_gaps(
+    notes: list[dict[str, Any]],
+    oracle: list[dict[str, Any]],
+    gap_tolerance: float = GAP_TOLERANCE,
+    register: int = REGISTER_SEMITONES,
+    window: float = REGISTER_WINDOW,
+    min_confidence: float = FILL_CONFIDENCE,
+    cover_fraction: float = COVER_FRACTION,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Notes the oracle heard where our line has a HOLE, merged into the line.
+
+    This is the second opinion used the way the listener asked for it: one
+    monophonic line, as complete as we can make it, rather than a second voice
+    to read past. `second_voice` shows the top two of every simultaneity, which
+    is most of the left hand; this shows only what fills a silence in the line
+    we already have, at the register the line is already in.
+
+    Measured over four piano solos with hand transcriptions, against the
+    monophonic line alone: recall 0.680 -> 0.744 for precision 0.677 -> 0.666.
+    Every one of the four improved on recall AND F1 (docs/m7b-piano.md). That
+    ratio is the point — the listener deletes what does not belong far more
+    cheaply than they can hear a note that was never written.
+
+    Three tests, and each earns its place:
+
+    - a HOLE, not a disagreement. If the line already has a note here we keep
+      ours; correcting a wrong pitch is `snap_octaves`' job, and doing it here
+      would put two notes on one beat in a single-line score.
+    - the line's REGISTER. Without it the left hand walks straight in — this
+      is the same rule that keeps a bass line out of the melody, applied to
+      the same signal.
+    - the oracle's VELOCITY. Its quietest reports are pedal ring and sympathetic
+      resonance; the melody is rarely the softest thing sounding.
+
+    HORNS MUST NEVER REACH THIS. A piano model asked about a saxophone vouches
+    for nothing, so every hole would be filled with nothing, and the register
+    test would then be measuring noise. `TranscribeConfig.uses_piano_oracle`
+    is the gate — see `stages/transcribe.py`.
+    """
+    if not oracle or not notes:
+        return list(notes), {"input": len(notes), "filled": 0, "kept": len(notes)}
+
+    onsets, pitches = _arrays(notes)
+    order = np.argsort(onsets)
+    onsets, pitches = onsets[order], pitches[order]
+    ends = onsets + np.array([float(notes[i].get("duration", 0.0)) for i in order]) * cover_fraction
+
+    filled: list[dict[str, Any]] = []
+    for note in second_voice(notes, oracle):
+        if _velocity_confidence(note) < min_confidence:
+            continue
+        onset = float(note["onset"])
+        if np.min(np.abs(onsets - onset)) < gap_tolerance:
+            continue
+        if np.any((onsets <= onset) & (onset < ends)):
+            continue
+        near = (onsets >= onset - window) & (onsets <= onset + window)
+        if not np.any(near):
+            continue
+        if abs(int(note["pitch"]) - float(np.median(pitches[near]))) > register:
+            continue
+        filled.append(
+            {
+                "onset": onset,
+                "duration": float(note["duration"]),
+                "pitch": int(note["pitch"]),
+                "confidence": _velocity_confidence(note),
+            }
+        )
+    merged = sorted([*notes, *filled], key=lambda n: float(n["onset"]))
+    return merged, {"input": len(notes), "filled": len(filled), "kept": len(merged)}

@@ -3,7 +3,7 @@
 Pure numpy over note dicts, so all of it runs in CI without the ml group.
 """
 
-from swingscribe.corroborate import apply, corroborate, second_voice, snap_octaves
+from swingscribe.corroborate import apply, corroborate, fill_gaps, second_voice, snap_octaves
 
 
 def note(onset: float, pitch: int, duration: float = 0.2) -> dict:
@@ -183,3 +183,90 @@ def test_second_voice_separates_clusters_by_onset():
 
 def test_second_voice_is_empty_without_an_oracle():
     assert second_voice([note(1.0, 60)], []) == []
+
+
+# -- fill_gaps ------------------------------------------------------------
+#
+# The second opinion used the way the listener asked for it: one monophonic
+# line, as complete as we can make it, rather than a second voice to read past.
+
+
+def loud(onset: float, pitch: int, duration: float = 0.1, velocity: int = 90) -> dict:
+    """An oracle note. The oracle reports velocity, not confidence."""
+    return {"onset": onset, "pitch": pitch, "duration": duration, "velocity": velocity}
+
+
+def test_a_note_in_a_hole_in_the_line_is_filled_in():
+    line = [note(0.0, 67, 0.1), note(1.0, 67, 0.1)]
+    merged, stats = fill_gaps(line, [loud(0.0, 67), loud(0.5, 70), loud(1.0, 67)])
+    assert stats["filled"] == 1
+    assert [n["pitch"] for n in merged] == [67, 70, 67]
+    assert merged[1]["onset"] == 0.5
+
+
+def test_a_note_where_the_line_already_has_one_is_not_added():
+    """Correcting a wrong pitch is snap_octaves' job. Two notes on one beat is
+    not a single line."""
+    line = [note(0.0, 67, 0.1)]
+    _merged, stats = fill_gaps(line, [loud(0.02, 72)])
+    assert stats["filled"] == 0
+
+
+def test_the_left_hand_is_left_where_it_is():
+    """Register is what keeps the second opinion from bringing the whole piano."""
+    line = [note(0.0, 72, 0.1), note(1.0, 74, 0.1)]
+    _merged, stats = fill_gaps(line, [loud(0.5, 43)])
+    assert stats["filled"] == 0
+
+
+def test_a_leap_inside_the_register_window_still_gets_in():
+    line = [note(0.0, 72, 0.1), note(1.0, 74, 0.1)]
+    _merged, stats = fill_gaps(line, [loud(0.5, 62)])
+    assert stats["filled"] == 1
+
+
+def test_the_oracles_quietest_notes_are_pedal_ring_not_melody():
+    line = [note(0.0, 67, 0.1), note(1.0, 67, 0.1)]
+    _merged, stats = fill_gaps(line, [loud(0.5, 70, velocity=20)])
+    assert stats["filled"] == 0
+
+
+def test_a_note_still_sounding_is_not_a_hole():
+    line = [note(0.0, 67, duration=1.0)]
+    _merged, stats = fill_gaps(line, [loud(0.4, 70)])
+    assert stats["filled"] == 0
+
+
+def test_only_HALF_a_claimed_duration_counts_as_covered():
+    """Our durations are the GATED extent of a pitch, not the played length:
+    CREPE's periodicity collapses at each transition, so a note's frames run
+    past where the next note starts. Taking the claim at face value would
+    close the hole immediately after every note."""
+    line = [note(0.0, 67, duration=1.0), note(1.2, 67, 0.1)]
+    _merged, stats = fill_gaps(line, [loud(0.7, 70)])
+    assert stats["filled"] == 1
+
+
+def test_an_empty_oracle_fills_nothing_rather_than_erroring():
+    line = [note(0.0, 67)]
+    merged, stats = fill_gaps(line, [])
+    assert merged == line and stats["filled"] == 0
+
+
+def test_an_empty_line_gets_no_line_invented_for_it():
+    """With no line there is no register and no hole - only silence, which is
+    not the same as a transcription."""
+    merged, stats = fill_gaps([], [loud(0.5, 70)])
+    assert merged == [] and stats["filled"] == 0
+
+
+def test_filled_notes_carry_the_oracles_velocity_as_a_confidence():
+    line = [note(0.0, 67, 0.1), note(1.0, 67, 0.1)]
+    merged, _stats = fill_gaps(line, [loud(0.5, 70, velocity=127)])
+    assert merged[1]["confidence"] == 1.0
+
+
+def test_the_merged_line_stays_in_time_order():
+    line = [note(0.0, 67, 0.1), note(1.0, 67, 0.1), note(2.0, 67, 0.1)]
+    merged, _stats = fill_gaps(line, [loud(1.5, 70), loud(0.5, 69)])
+    assert [n["onset"] for n in merged] == sorted(n["onset"] for n in merged)

@@ -373,3 +373,117 @@ there is an overlay to show, drawn outlined rather than filled and underneath
 the line — it must never be mistaken for a note we are claiming was played.
 Deleting an overlay note in the GUI is not wired yet; the erasure index space
 is keyed to `notes`. Export it and delete in the notation editor for now.
+
+
+## The overlay was the wrong shape. Gap-filling is the right one.
+
+The listener's verdict on the second voice, after using it:
+
+> I am finding the polyphonic piano transcriptions less useful. They're too
+> messy and it is difficult visually to see what to keep. [...] stick to a
+> monophonic melody, recording only the top note.
+
+That is not a rejection of the oracle. It is a rejection of *showing* the
+oracle. The evidence for that is one bar.
+
+### One bar, traced to the frame
+
+Bar 4 of Sonny Clark's solo on *There Will Never Be Another You* is eight
+straight eighths at 200 bpm, and the listener counted five in ours where they
+had written eight. The frame trace says where each one went:
+
+| the note | in raw CREPE f0? | why it was lost |
+|---|---|---|
+| Bb4 | yes, 6 frames, periodicity up to 0.83 | survived gating for 4 frames = 40 ms, under `min_note_ms` 60 |
+| Eb4 | yes, 10 frames, pitch rock-steady | periodicity never cleared 0.53 against a threshold of 0.5 |
+| B3 | yes, 5 frames | same, plus the duration floor |
+
+All three are notes CREPE *found* and the segmenter threw away, because on a
+piano the previous note is still ringing when the next is struck and the
+tracker's confidence collapses at every transition.
+
+### Loosening the gates does not work, and the sweep says so
+
+The GUI had already cached raw f0, periodicity and energy for six spans, all
+six with hand transcriptions, so every gating rule could be re-run at zero
+CREPE cost and scored with the time-free pitch aligner. Baseline P 0.715 /
+R 0.762 / F1 0.735. Every knob, one at a time:
+
+| change | precision | recall | F1 |
+|---|---|---|---|
+| `voicing_threshold` 0.5 -> 0.2 | 0.715 -> 0.663 | 0.762 -> 0.786 | 0.735 -> 0.717 |
+| `min_note_ms` 60 -> 25 | 0.715 -> 0.627 | 0.762 -> 0.788 | 0.735 -> 0.694 |
+| `pitch_persist_ms` 60 -> 20 | 0.713 | 0.761 | 0.733 |
+| a stability rescue at a lower floor | 0.664-0.711 | 0.768-0.783 | 0.716-0.736 |
+| a confidence-weighted short-note floor | 0.659-0.708 | 0.767-0.778 | 0.708-0.733 |
+
+**Nothing beats the current settings, and every route to more recall costs
+about two false notes per true one.** The thresholds are not mistuned. Short
+true notes and short false notes are not separable by anything the monophonic
+path can see — including confidence, which was the obvious candidate and does
+not work here either.
+
+### The oracle already heard all three
+
+Every one of the three missing notes is in the polyphonic model's output for
+that bar — Bb4 at 79.518, Eb4 at 79.937, B3 at 80.354 — sitting in the second
+voice, next to D3, F3, C3, C#3 and G3, which are Clark's left hand. **The
+overlay was unreadable for exactly the reason it was useful: it shows the top
+two of every simultaneity, and most simultaneities are left hand.**
+
+So the filter should not be "top two of each cluster". It should be "**where
+is the line missing something?**" — `corroborate.fill_gaps`:
+
+- **a hole, not a disagreement.** If the line already has a note within 60 ms
+  we keep ours. Correcting a wrong pitch is `snap_octaves`' job; doing it here
+  would put two notes on one grid position in a single-line score.
+- **the line's own register**, +/- an octave of the median pitch within a
+  second. Without this the left hand walks straight back in.
+- **the oracle's velocity**, above 0.45 normalised. Its quietest reports are
+  pedal ring and sympathetic resonance; the melody is rarely the softest thing
+  sounding. (Same cue as the melody-selection finding above, used again.)
+- **half a claimed duration counts as covering.** Our durations are the gated
+  extent of a pitch, not the played length, so a note's frames run past where
+  the next one starts. At face value they close the hole immediately after
+  every note.
+
+Measured on four piano spans, line alone against line plus gap-fill:
+
+| span | F1 | recall | notes added |
+|---|---|---|---|
+| Sonny Clark / There Will Never Be Another You | 0.811 -> **0.827** | 0.842 -> **0.907** | +38 |
+| Carl Perkins / For Minors Only | 0.697 -> **0.724** | 0.645 -> **0.710** | +12 |
+| Sonny Clark / Melody For C | 0.707 -> **0.750** | 0.697 -> **0.780** | +70 |
+| Wynton Kelly / Soul Station | 0.490 -> **0.503** | 0.538 -> **0.580** | +24 |
+| **mean** | **0.676 -> 0.701** | **0.680 -> 0.744** | |
+
+All four improve on recall *and* F1. Precision costs 0.011 for 0.064 of
+recall — a 6:1 trade in the direction the listener asked for, against the
+roughly 1:2 that every gate change offered. The parameter surface is flat: F1
+sits between 0.698 and 0.703 across the whole range swept, so this is not a
+knife-edge fit. Lowering the velocity floor to 0.35 buys recall 0.783 at
+precision 0.639 if more is wanted; it is a dial, not a constant.
+
+Three things follow:
+
+- `piano_fill_gaps` is **on by default** for piano, and `uses_piano_oracle`
+  still gates it, so a horn never sees it. The reason a horn must never is
+  unchanged and now has a second edge: a piano model asked about a saxophone
+  vouches for nothing, so *every* hole would look unfillable and the register
+  test would be measuring noise.
+- `piano_second_voice` is **off everywhere**, GUI included. The recall it
+  existed for now arrives inside one line.
+- **The missing-note problem is a piano problem.** On the same sweep the two
+  horn spans read recall 0.917 (Art Pepper) and 0.936 (Hank Mobley), against
+  0.538-0.697 for the four pianos. Nothing here applies to a horn because
+  nothing here is wrong on a horn.
+
+### The routing trap, seen once more
+
+The solo that prompted all of this was transcribed with `ensemble: horn-led`
+because that is what produced a readable monophonic line. It is a piano solo.
+`horn-led` on a pianist skips the oracle entirely — the octave snapping, the
+corroboration, and now the gap-filling. The setting that gives the listener
+what they want is `trio`, and it always was; the overlay was what made `trio`
+unpleasant to use. Check the routing before believing a piano number
+(CLAUDE.md) now cuts both ways.

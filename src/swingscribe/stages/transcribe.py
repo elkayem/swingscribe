@@ -685,6 +685,13 @@ def _consult_piano_oracle(
             f"dropped {stats['input'] - stats['kept']} uncorroborated, "
             f"{stats['kept']} kept"
         )
+    # Corroboration only ever REMOVES; on piano the bigger complaint is what
+    # is missing. Fill the holes from the same second opinion, in the line's
+    # own register, so the answer stays a single monophonic line.
+    if tc.piano_fill_gaps:
+        kept, fill_stats = corroboration.fill_gaps(kept, oracle)
+        if log or fill_stats["filled"]:
+            print(f"transcribe: piano oracle filled {fill_stats['filled']} gap(s) in the line")
     line = [
         NoteEvent(
             onset=n["onset"],
