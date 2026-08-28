@@ -282,3 +282,34 @@ write a triplet quarter and rests. A lead sheet would more likely write a plain
 quarter. The cap deliberately does not reach that far, and rounding a
 phrase-ending note to a plain value is a separate rule nobody has measured yet.
 
+
+## A performer and a tune do not name a solo
+
+Joe Henderson's In 'n Out read as a different piece of music from both the
+audio and `solo198.html`, and the notation was not at fault. The file was the
+wrong solo. WJazzD holds **456 solos under 421 performer/title pairs**:
+Henderson takes two on In 'n Out (melid 198, 18 choruses, and melid 199, 8),
+Sonny Rollins three on Blue Seven, and Coltrane's Body and Soul exists as a
+master and an alternate take. `wjazz_score.py` named files
+`{performer}_{title}` and wrote them in that order, so **35 solos were
+overwritten by the next one along** and nothing said so. The file on disk was
+byte-identical to melid 199.
+
+Two things fix it and one is not a filename:
+
+- Every name now carries its **melid** -- `Joe_Henderson_In_n_Out_solo_198`.
+  That is also the number in the synopsis URL, so a file can be laid beside the
+  page it was rendered from. Written `_solo_198`, not `_solo198`, so the GUI's
+  name matcher splits it into a stopword and a digit and drops both
+  (`gui/ground_truth.py`); the ranking against a track is unchanged.
+  `titleaddon` ("Alternate Take", "1961") joins the stem where it exists,
+  because it is the half of the distinction a human can read.
+- The writer **refuses to write a name twice**, rather than trusting the scheme.
+  The property that matters is over the whole set: a scheme that collides once
+  in 456 still loses a solo in silence.
+
+The measurement path was never affected. `score_wjazz.identify_all` finds a
+solo inside a track **by content** -- `fit_affine` over onsets and pitches --
+and returns every solo it finds, so it never depended on a filename. What was
+affected is the ground-truth score the GUI draws against, which is the one a
+human reads.

@@ -26,6 +26,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 run_eval = pytest.importorskip("run_eval")
 score_benchmark = pytest.importorskip("score_benchmark")
+wjazz_score = pytest.importorskip("wjazz_score")
 
 
 def write_sidecar(folder: Path, audio: str, **extra) -> Path:
@@ -203,3 +204,46 @@ def test_resolving_a_null_stem_does_not_disturb_a_chosen_one():
     sidecar = {"region": [0.0, 10.0], "model": "htdemucs", "stem": "other", "ensemble": "trio"}
     settings = run_eval.transcribe_settings(sidecar, 0.2, 0.0)
     assert settings.stem == "other"
+
+
+def test_two_solos_by_one_player_on_one_tune_get_two_names():
+    """Joe Henderson takes two solos on In 'n Out (melid 198 and 199), and a
+    name built from performer and title alone gave both the same one -- so the
+    second overwrote the first and the file disagreed with both the audio and
+    the Jazzomat page. 456 solos collapse to 421 such names."""
+    first = wjazz_score.score_name("Joe Henderson", "In 'n Out", "", 198)
+    second = wjazz_score.score_name("Joe Henderson", "In 'n Out", "", 199)
+    assert first != second
+    assert first == "Joe_Henderson_In_n_Out_solo_198.musicxml"
+
+
+def test_an_alternate_take_says_so_in_its_name():
+    """`titleaddon` is the human-readable half of the distinction; the melid is
+    the half that guarantees it."""
+    name = wjazz_score.score_name("John Coltrane", "Body and Soul", "Alternate Take", 219)
+    assert "Alternate_Take" in name
+    assert name.endswith("_solo_219.musicxml")
+
+
+def test_the_melid_is_invisible_to_the_gui_name_matcher():
+    """`_solo_198` splits into a stopword and a digit, both of which
+    `gui/ground_truth` drops. `_solo198` would survive as a token that matches
+    no track and dilutes nothing but is still noise in `shared`."""
+    from swingscribe.gui import ground_truth
+
+    stem = wjazz_score.score_name("Joe Henderson", "In 'n Out", "", 198)[: -len(".musicxml")]
+    assert ground_truth._tokens(stem) == ground_truth._tokens("Joe Henderson In n Out")
+
+
+def test_every_wjazzd_name_is_unique_over_the_whole_database():
+    """The property that matters is over the SET, not the pair: a unique-looking
+    scheme that still collides once in 456 loses a solo silently."""
+    rows = [
+        ("Sonny Rollins", "Blue Seven", "", 379),
+        ("Sonny Rollins", "Blue Seven", "", 380),
+        ("Sonny Rollins", "Blue Seven", "", 381),
+        ("Clifford Brown", "I'll Remember April", "Alternate Take 2", 90),
+        ("Clifford Brown", "I'll Remember April", "", 91),
+    ]
+    names = {wjazz_score.score_name(*row) for row in rows}
+    assert len(names) == len(rows)
