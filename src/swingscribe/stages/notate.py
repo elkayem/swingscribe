@@ -75,6 +75,19 @@ TRIPLET_VALUES = tuple(v / TRIPLET_RATIO for v in NOTE_VALUES)
 QUARTER = 1.0  # a beat, in quarter notes — the unit a tuplet may live inside
 TICK = 1e-6  # positions are grid-exact; this only absorbs float noise
 
+# (actual, normal) tuplets this notater can write, tried in this order. 3:2 is
+# the ordinary triplet. 5:4 and 7:4 exist for WJazzD: measured across all 456
+# solos, a beat divided into 5 or 7 equal parts is the entire residue left
+# over after triplets are handled — neither a power-of-two value nor
+# on-thirds, so before this it could only be approximated as a tied chain of
+# binary slivers, which is what produced tied 32nd notes where the Jazzomat
+# lead sheet writes a clean 5-tuplet. Both use "in the time of 4": the written
+# value a quintuplet or septuplet is drawn in is a sixteenth, the value 4
+# unmodified notes would fill the beat with — the same convention engraving
+# software uses, and the reason a beat divided by 5 measures out to exactly a
+# sixteenth's worth times 4/5.
+TUPLET_RATIOS: tuple[tuple[int, int], ...] = ((3, 2), (5, 4), (7, 4))
+
 
 def _close(a: float, b: float) -> bool:
     return abs(a - b) < TICK
@@ -92,9 +105,24 @@ def triplet_value(duration: float) -> float | None:
     return None
 
 
+def tuplet_value(duration: float, ratio: tuple[int, int]) -> float | None:
+    """The note value `duration` is written as inside this (actual, normal)
+    tuplet, if any — the general form of `triplet_value` for any ratio in
+    `TUPLET_RATIOS`."""
+    actual, normal = ratio
+    for value in NOTE_VALUES:
+        if _close(duration, value * normal / actual):
+            return value
+    return None
+
+
+def _on_nths(position: float, unit_start: float, unit_end: float, n: int) -> bool:
+    parts = (position - unit_start) * n / (unit_end - unit_start)
+    return abs(parts - round(parts)) < 1e-4
+
+
 def _on_thirds(position: float, unit_start: float, unit_end: float) -> bool:
-    thirds = (position - unit_start) * 3.0 / (unit_end - unit_start)
-    return abs(thirds - round(thirds)) < 1e-4
+    return _on_nths(position, unit_start, unit_end, 3)
 
 
 def detect_key(notes: list[tuple[int, float]]) -> int:
@@ -253,14 +281,16 @@ def _subdivide(a: float, b: float, unit_start: float, unit_end: float, out: list
     # than that and a triplet figure would be written across a beat boundary,
     # which is unreadable and is not what quantize found either — it chooses
     # the grid per beat.
-    if (
-        unit_end - unit_start <= QUARTER + TICK
-        and triplet_value(length) is not None
-        and _on_thirds(a, unit_start, unit_end)
-        and _on_thirds(b, unit_start, unit_end)
-    ):
-        out.append((a, length, (3, 2)))
-        return
+    if unit_end - unit_start <= QUARTER + TICK:
+        for ratio in TUPLET_RATIOS:
+            actual, _normal = ratio
+            if (
+                tuplet_value(length, ratio) is not None
+                and _on_nths(a, unit_start, unit_end, actual)
+                and _on_nths(b, unit_start, unit_end, actual)
+            ):
+                out.append((a, length, ratio))
+                return
     if unit_end - unit_start <= 0.125 + TICK:
         # Below a thirty-second there is nothing left to divide; emit what we
         # have rather than recursing forever on an unnotatable sliver.
@@ -380,8 +410,14 @@ def snap_values(
         notes below a 16th   12.8%     0.16%
         notes tied            0.246    0.119
 
-    Over all 456 it is 0.729 to 0.882; the residue is quintuplet and septuplet
-    ONSETS, unwritable in this notater whatever their duration.
+    Over all 456 it was 0.729 to 0.882, and the residue was quintuplet and
+    septuplet ONSETS -- unwritable in this notater whatever their duration,
+    because `_subdivide` had no tuplet ratio but 3:2. `TUPLET_RATIOS` closes
+    that: with 5:4 and 7:4 added (and `export.DIVISIONS` raised from 24 to 840
+    so a group of five or seven still sums to an exact beat), mean readability
+    over all 456 rises again, to 0.9455, mean notes-below-a-16th falls to
+    4.6%, and Freddie Hubbard's Maiden Voyage (melid 168, bar 6) writes a
+    quintuplet where it used to write four tied thirty-seconds.
 
     So it ships as insurance and for `wjazz.annotation_notation`, not as a fix
     to a defect the shipped pipeline currently has. Said plainly because the

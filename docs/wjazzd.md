@@ -217,11 +217,23 @@ should be written: no.
     division   1: 15812   2: 58269   3: 29650   4: 58678   5: 4579
                6: 18661   8: 6957   10: 2663  12: 1231   ... 36: 25
 
-172 of the 456 solos use only divisions this notater can write at all
-(1, 2, 3, 4, 6, 8, 12). The rest contain quintuplet or septuplet onsets, and a
-score built from them carries unwritable slivers however the durations are
-rounded -- which is why measurements of the notater against this set are quoted
-over the 172 as well as over all 456.
+172 of the 456 solos used only divisions this notater could write at all
+(1, 2, 3, 4, 6, 8, 12) before `notate.TUPLET_RATIOS` grew a 5:4 and a 7:4
+alongside the ordinary triplet. The rest held quintuplet or septuplet onsets --
+a beat divided into 5 or 7, neither a power-of-two value nor on-thirds -- and a
+score built from them carried unwritable slivers (tied 32nds) however the
+durations were rounded. That is where Freddie Hubbard's Maiden Voyage (melid
+168) bar 6 came from: a 5-tuplet on the Jazzomat PDF, four tied 32nds on ours.
+
+Both ratios write "in the time of 4" -- a sixteenth is the value 4 unmodified
+notes would fill the beat with, so a beat split 5 ways measures out to exactly
+a sixteenth's worth times 4/5, and 7 ways to a sixteenth times 4/7. `notate.py`
+now recognises both, and `export.DIVISIONS` moved from 24 to 840 (the smallest
+number divisible by 8, 3, 5, and 7) so a group of five or seven ticks still
+sums to an exact beat instead of one tick over. Mean readability over all 456
+solos rose from 0.882 to 0.9455 -- most divisions above are still quoted over
+the 172-solo subset as well as over all 456, since a handful of rarer divisions
+(10, 36, ...) are not fully covered by these two ratios.
 
 ### Licence
 

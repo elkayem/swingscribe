@@ -17,6 +17,7 @@ from swingscribe.stages.notate import (
     split_for_meter,
     split_points,
     triplet_value,
+    tuplet_value,
 )
 
 # ── key detection ────────────────────────────────────────────────────────
@@ -134,6 +135,34 @@ def test_a_tuplet_never_straddles_a_beat():
     what quantize found either -- it chooses the grid one beat at a time."""
     for _start, _length, tuplet in split_for_meter(0.5, 1.0 / 3.0, 4.0):
         assert tuplet is None or _start >= 0.0
+
+
+def test_a_fifth_of_a_beat_is_written_as_a_quintuplet():
+    """WJazzD annotates beats divided into 5 (and 7): a division this notater
+    had no tuplet for used to fall through to a tied chain of binary slivers,
+    which is where the tied-32nds bug came from -- see docs on TUPLET_RATIOS."""
+    pieces = split_for_meter(0.0, 1.0 / 5.0, 4.0)
+    assert len(pieces) == 1
+    _start, length, tuplet = pieces[0]
+    assert tuplet == (5, 4)
+    assert abs(length - 1.0 / 5.0) < 1e-9
+    assert abs(tuplet_value(length, (5, 4)) - 0.25) < 1e-9  # written as a 16th
+
+
+def test_a_full_quintuplet_beat_tiles_the_beat_exactly():
+    pieces = []
+    for i in range(5):
+        pieces += split_for_meter(1.0 + i / 5.0, 1.0 / 5.0, 4.0)
+    assert all(t == (5, 4) for _s, _d, t in pieces)
+    assert abs(sum(d for _s, d, _t in pieces) - 1.0) < 1e-9
+
+
+def test_a_seventh_of_a_beat_is_written_as_a_septuplet():
+    pieces = split_for_meter(0.0, 1.0 / 7.0, 4.0)
+    assert len(pieces) == 1
+    _start, length, tuplet = pieces[0]
+    assert tuplet == (7, 4)
+    assert abs(tuplet_value(length, (7, 4)) - 0.25) < 1e-9  # written as a 16th
 
 
 def test_an_unnotatable_length_becomes_tied_symbols():

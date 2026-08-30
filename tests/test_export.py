@@ -16,6 +16,7 @@ from swingscribe.stages.export import (
     note_type,
     to_musicxml,
     transpose_element,
+    tuplet_groups,
 )
 
 
@@ -53,14 +54,27 @@ def test_every_measure_sums_to_its_time_signature():
 
 
 def test_a_triplet_beat_sums_exactly_with_no_rounding():
-    """24 divisions is chosen so a third of a beat is an integer. At 12 or 16
-    it is not, and three of them do not add back up to a beat."""
+    """DIVISIONS is chosen so a third of a beat is an integer. At 12 or 16 it
+    is not, and three of them do not add back up to a beat."""
     third = 1.0 / 3.0
     notes = [note(i * third, third, tuplet=(3, 2)) for i in range(3)]
     notes.append(note(1.0, 3.0))
     root = document(Notation(bars=[bar_of(notes)]))
     durations = [int(n.findtext("duration")) for n in root.find(".//measure").findall("note")]
-    assert durations[:3] == [8, 8, 8]
+    assert durations[:3] == [DIVISIONS // 3] * 3
+    assert sum(durations) == 4 * DIVISIONS
+
+
+def test_a_quintuplet_beat_sums_exactly_with_no_rounding():
+    """DIVISIONS must also be divisible by 5: WJazzD annotates beats divided
+    into 5 (and 7), and a quintuplet whose five pieces do not sum back to a
+    whole beat is the same corrupt-file failure the triplet case guards."""
+    fifth = 1.0 / 5.0
+    notes = [note(i * fifth, fifth, tuplet=(5, 4)) for i in range(5)]
+    notes.append(note(1.0, 3.0))
+    root = document(Notation(bars=[bar_of(notes)]))
+    durations = [int(n.findtext("duration")) for n in root.find(".//measure").findall("note")]
+    assert durations[:5] == [DIVISIONS // 5] * 5
     assert sum(durations) == 4 * DIVISIONS
 
 
@@ -74,6 +88,37 @@ def test_a_triplet_carries_its_time_modification_and_is_written_as_an_eighth():
     modification = first.find("time-modification")
     assert modification.findtext("actual-notes") == "3"
     assert modification.findtext("normal-notes") == "2"
+
+
+def test_a_quintuplet_carries_its_time_modification_and_is_written_as_a_16th():
+    fifth = 1.0 / 5.0
+    root = document(
+        Notation(bars=[bar_of([note(0.0, fifth, tuplet=(5, 4)), note(fifth, 4 - fifth)])])
+    )
+    first = root.find(".//measure").find("note")
+    assert first.findtext("type") == "16th"
+    modification = first.find("time-modification")
+    assert modification.findtext("actual-notes") == "5"
+    assert modification.findtext("normal-notes") == "4"
+
+
+def test_tuplet_groups_split_on_a_change_of_ratio():
+    """A triplet followed directly by a quintuplet in the same beat must be two
+    brackets, not one claiming a ratio that fits neither run."""
+    third = 1.0 / 3.0
+    fifth = 1.0 / 5.0
+    notes = [
+        note(0.0, third, tuplet=(3, 2)),
+        note(third, third, tuplet=(3, 2)),
+        note(2 * third, third, tuplet=(3, 2)),
+        note(1.0, fifth, tuplet=(5, 4)),
+        note(1.0 + fifth, fifth, tuplet=(5, 4)),
+        note(1.0 + 2 * fifth, fifth, tuplet=(5, 4)),
+        note(1.0 + 3 * fifth, fifth, tuplet=(5, 4)),
+        note(1.0 + 4 * fifth, fifth, tuplet=(5, 4)),
+    ]
+    marks = tuplet_groups(notes)
+    assert marks == {0: "start", 2: "stop", 3: "start", 7: "stop"}
 
 
 def test_a_tie_is_written_both_as_sound_and_as_notation():

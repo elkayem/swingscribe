@@ -20,10 +20,15 @@ correct and is covered in accidentals.
 ## Divisions
 
 MusicXML measures duration in integer divisions of a quarter note, so the
-number has to be divisible by everything we can produce: 8 for a thirty-second
-and 3 for a triplet. 24 is the smallest that is both, and it keeps every
-duration we emit an exact integer — no rounding, so a bar that added up in
-`notate` still adds up on the page.
+number has to be divisible by everything we can produce: 8 for a thirty-second,
+3 for a triplet, and — since `TUPLET_RATIOS` grew a 5:4 and a 7:4 — 5 and 7 for
+a quintuplet and a septuplet. 840 is the smallest divisible by all four. Below
+that, a quintuplet's five 16ths round to 5 ticks each on the old 24-division
+grid (24/5 is not an integer) and sum to 25 — one tick over the beat they came
+from, in EVERY quintuplet, which is exactly the kind of bar-does-not-add-up
+file `notate.py` exists to prevent. 840 keeps every duration we emit an exact
+integer — no rounding, so a bar that added up in `notate` still adds up on the
+page.
 """
 
 from pathlib import Path
@@ -31,9 +36,9 @@ from xml.etree import ElementTree
 
 from swingscribe.config import Config
 from swingscribe.model import Document, NotatedNote, Notation
-from swingscribe.stages.notate import QUARTER, TRIPLET_RATIO, spell
+from swingscribe.stages.notate import QUARTER, spell
 
-DIVISIONS = 24  # per quarter note: divisible by 8 (32nds) and by 3 (triplets)
+DIVISIONS = 840  # per quarter note: divisible by 8, 3, 5, 7 (32nds, tuplets)
 
 # Written note value in quarter notes → (MusicXML type, number of dots).
 NOTE_TYPES = {
@@ -81,7 +86,10 @@ def tuplet_groups(notes: list[NotatedNote]) -> dict[int, str]:
     time-modified notes as a measure it has to repair.
 
     A run ends at a beat boundary as well as at the first non-tuplet note: two
-    consecutive triplet beats are two triplets, not one six-note group.
+    consecutive triplet beats are two triplets, not one six-note group. It also
+    ends at a change of ratio — a triplet followed directly by a quintuplet in
+    the same beat is two groups, not one bracket claiming a ratio that fits
+    neither.
     """
     marks: dict[int, str] = {}
     run: list[int] = []
@@ -94,15 +102,17 @@ def tuplet_groups(notes: list[NotatedNote]) -> dict[int, str]:
 
     position = 0.0
     beat = 0
+    ratio: tuple[int, int] | None = None
     for index, note in enumerate(notes):
         if note.tuplet is None:
             close()
         else:
             here = int(position / QUARTER + 1e-9)
-            if run and here != beat:
+            if run and (here != beat or note.tuplet != ratio):
                 close()
             if not run:
                 beat = here
+                ratio = note.tuplet
             run.append(index)
         position += note.duration
     close()
@@ -137,7 +147,14 @@ def _append_note(
         ElementTree.SubElement(element, "tie", {"type": "start"})
 
     ElementTree.SubElement(element, "voice").text = str(note.voice)
-    written = note.duration * (TRIPLET_RATIO if note.tuplet else 1.0)
+    # Written value = sounded duration * actual/normal — 3/2 for the ordinary
+    # triplet, but this must not hardcode that ratio: a quintuplet (5:4) or
+    # septuplet (7:4) note needs its own.
+    if note.tuplet:
+        actual, normal = note.tuplet
+        written = note.duration * actual / normal
+    else:
+        written = note.duration
     kind, dots = note_type(written)
     ElementTree.SubElement(element, "type").text = kind
     for _ in range(dots):
