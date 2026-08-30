@@ -78,6 +78,91 @@ def test_key_changes_with_span_stem_model_and_threshold(tmp_path):
     assert review.review_key(document, thresh, "htdemucs_ft") != key
 
 
+def _a_stem(config, document, model="htdemucs_ft", content=b"first separation"):
+    stem_dir = stems_dir(config.cache_dir, library.stem_digest(document), model)
+    stem_dir.mkdir(parents=True, exist_ok=True)
+    stem_path = stem_dir / "other.wav"
+    stem_path.write_bytes(content)
+    return stem_path
+
+
+def test_key_changes_when_the_stem_file_is_regenerated(tmp_path):
+    """A re-separation must be a cache MISS, not a silent stale HIT.
+
+    Confirmed 2026-08-29: htdemucs_6s is not bit-reproducible across
+    independent runs of the identical audio (two runs produced different
+    `other.wav` bytes, same length). `stem_digest` only hashes the SOURCE
+    audio, so before this the key was unchanged when the stem underneath it
+    changed, and a review computed against the old bytes went on being served.
+    """
+    document = a_document(tmp_path)
+    config = a_config(tmp_path, region=(30.0, 45.0), stem="other")
+
+    stem_path = _a_stem(config, document)
+    before = review.review_key(document, config, "htdemucs_ft")
+
+    stem_path.write_bytes(b"second separation, different bytes")
+    after = review.review_key(document, config, "htdemucs_ft")
+
+    assert before != after
+
+
+def test_key_survives_a_stem_being_copied(tmp_path):
+    """Copying a stem must NOT invalidate the review it belongs to.
+
+    CLAUDE.md's own advice for the two cache directories is to copy the stem
+    across rather than re-separate it. A copy changes mtime while the audio
+    is identical, so keying on mtime would throw away a good review and a
+    minute of CREPE for it — hence the key hashes CONTENT.
+    """
+    import os
+
+    document = a_document(tmp_path)
+    config = a_config(tmp_path, region=(30.0, 45.0), stem="other")
+
+    stem_path = _a_stem(config, document)
+    os.utime(stem_path, (1_700_000_000, 1_700_000_000))
+    before = review.review_key(document, config, "htdemucs_ft")
+
+    stem_path.write_bytes(b"first separation")  # same bytes, new mtime
+    os.utime(stem_path, (1_700_009_999, 1_700_009_999))
+    after = review.review_key(document, config, "htdemucs_ft")
+
+    assert before == after
+
+
+# ── span canonicalisation ───────────────────────────────────────────────────
+
+
+def test_span_config_rounds_the_region_to_the_millisecond(tmp_path):
+    """The rounding the GUI and the batch script must share.
+
+    Measured on Maiden Voyage, an unrounded span moved notated rhythm from
+    0.630 to 0.686 over the identical 489 notes — so a caller that skipped
+    this produced a different page from the one the GUI draws.
+    """
+    config = a_config(tmp_path)
+    spanned = review.span_config(config, "other", 143.9065793868338, 263.9012944633266)
+    assert spanned.transcribe.region == (143.907, 263.901)
+    assert spanned.transcribe.stem == "other"
+    # The overlay is off in every review, and must not depend on the caller.
+    assert spanned.transcribe.piano_second_voice is False
+
+
+def test_span_config_keys_identically_to_the_gui(tmp_path):
+    """A batch tool reaching through span_config lands on the GUI's own key."""
+    document = a_document(tmp_path)
+    config = a_config(tmp_path)
+    _a_stem(config, document)
+
+    theirs = review.span_config(config, "other", 30.0004, 45.0, ensemble="trio")
+    mine = review.span_config(config, "other", 30.0004, 45.0, ensemble="trio")
+    assert review.review_key(document, theirs, "htdemucs_ft") == review.review_key(
+        document, mine, "htdemucs_ft"
+    )
+    assert theirs.transcribe.ensemble == "trio"
+
+
 # ── payload ───────────────────────────────────────────────────────────────
 
 

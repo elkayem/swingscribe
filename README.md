@@ -79,6 +79,79 @@ Separation needs the ML dependency group (`uv sync --group ml`) and downloads
 model weights (~300 MB) on first run. Without a CUDA GPU it runs on CPU —
 expect minutes, not seconds, for a full track.
 
+## Batch-scoring the WJazzD solos
+
+`scripts/wjazz_batch.py` runs the whole GUI workflow over the audio in
+`benchmark/wjazzd/` without a browser — locate the solo, separate, track
+beats, transcribe, export MusicXML, score against the hand transcript — and
+records every result in `benchmark/wjazzd/wjazzd_benchmark_test.xlsx`.
+
+```
+uv sync --group ml --group gui --group batch
+uv run python scripts/wjazz_batch.py --db wjazz/wjazzd.db --all
+```
+
+Run it from the repository root. Pick what to process with `--all`,
+`--limit N` (first N by filename), `--random N`, or `--file NAME` (repeatable).
+Start with one tune — a solo that has never been separated costs minutes of
+CPU, and everything after that is cached.
+
+**Close the spreadsheet in Excel before running.** Excel takes an exclusive
+lock; the script writes after every tune so an interruption never loses
+finished work.
+
+It only touches rows for the solos in *this* run. Every other row is left
+exactly as it was, so you can re-run one tune without disturbing the rest.
+Nothing here may be committed — WJazzD is ODbL and `benchmark/` is gitignored
+in full.
+
+### What the columns mean
+
+The sheet has one row per WJazzD solo (all 456, most blank because there is no
+audio for them here). Beyond the identifying columns and the settings actually
+used (`separation_model`, `ensemble`, the located `solo_start`/`solo_end`),
+there are **two different measures**, and confusing them is the single most
+expensive mistake this project has made:
+
+| column | meaning |
+|---|---|
+| `notes` | how many notes **we** transcribed |
+| `notation_reference` | how many notes are in the **hand transcript** |
+| `pitch_f1`, `pitch_matched`, `pitch_wrong`, `pitch_invented`, `pitch_missed` | the GUI's green ground-truth bar |
+| `notation_rhythm`, `notation_value`, `notation_coverage`, `notation_matched` | the GUI's **Score it** button |
+
+**`pitch_*` asks: did we hear the right notes?** It is time-free and
+pitch-only. Every note we emitted is `matched` (right pitch), `wrong` (a note
+there, wrong pitch) or `invented` (nothing there at all); every note of theirs
+we had nothing for is `missed`. The counts add up both ways —
+`matched + wrong + missed` is their note count, `matched + wrong + invented`
+is ours — which is the check that nothing is being miscounted.
+
+**`notation_*` asks a harder question: are those notes *written* the way a
+human wrote them?** It charges the gap between performed timing and notated
+rhythm, so it matches fewer notes and reads lower than `pitch_f1` — always.
+That is expected, not a regression.
+
+Two warnings about reading these:
+
+- **Never read `notation_rhythm` without `notation_coverage` beside it.**
+  Coverage is how much of the hand transcript ours accounted for (the GUI's
+  "60% lined up"). Below ~0.5 the pairing is not trustworthy: two eighth-note
+  bebop lines agree about most gaps by chance, so a *wrong* pairing can still
+  read 0.58 on rhythm. The `status` column says so when coverage is low.
+- **`notation_value` is the one number to read sceptically.** The hand
+  transcripts here are rendered from WJazzD's metrical annotation, and while
+  the positions and pitches are a human's, the note *values* are our own
+  conventions applied to that human's grid — so it partly scores us against
+  ourselves. `scripts/run_eval.py` omits it deliberately; it is carried here
+  only so a row matches the GUI line exactly.
+
+The numbers are the GUI's own, not a second opinion about them: the script
+calls the same functions the Transcribe, Export and Score buttons call, and
+leaves its transcription in the GUI's cache. Open a scored track afterwards
+and the notes are already there — no Transcribe click, no second CREPE pass —
+and **Score it** reports what is in the spreadsheet.
+
 ## Running the tests
 
 Requires [uv](https://docs.astral.sh/uv/) and Python 3.11.

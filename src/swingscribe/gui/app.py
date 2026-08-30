@@ -29,8 +29,9 @@ from swingscribe.model import NoteEvent
 STATIC_DIR = Path(__file__).parent / "static"
 
 # Decimal places span bounds are rounded to before they reach a cache key.
-# Milliseconds are finer than any boundary a person places by ear.
-SPAN_PRECISION = 3
+# Defined in review.py, beside the key it feeds, so a batch tool can produce
+# the same numbers this app shows without copying the rounding.
+SPAN_PRECISION = review.SPAN_PRECISION
 
 
 class RevalidatingStatic(StaticFiles):
@@ -123,19 +124,17 @@ def create_app(config: Config) -> FastAPI:
         This is the single place the GUI turns a span selection into the exact
         transcribe config whose hash keys the cached review.
 
-        Span bounds are rounded to the millisecond HERE rather than trusted from
+        Span bounds are rounded to the millisecond rather than trusted from
         the caller. The key is a hash of this config, so 60.0637 and "60.064"
         are different spans as far as the cache is concerned — and the job POST
         and the review GET would otherwise disagree in the last decimal place
         and never find each other's work. Canonicalising server-side means no
         client has to get its rounding right.
+
+        The rounding itself lives in `review.span_config`, so a batch tool can
+        reach the same transcribe config this app uses without reimplementing
+        it — see that function for what a second copy of it actually costs.
         """
-        span = SPAN_PRECISION
-        region = (
-            None
-            if start is None and end is None
-            else (round(start or 0.0, span), None if end is None else round(end, span))
-        )
         # `ensemble` rides along from the sidecar, so a GUI transcription of a
         # piano solo consults the same oracle the benchmark does (M7b). It
         # belongs in the key: it changes the notes, so a run with it on must
@@ -145,25 +144,7 @@ def create_app(config: Config) -> FastAPI:
             stored = library.load_settings(track_path, config, track_id).get("ensemble")
             if stored in ENSEMBLES:
                 ensemble = stored
-        # The second-voice overlay is OFF. Shown as a separate voice, the top
-        # two of every simultaneity is mostly left hand, and the listener could
-        # not see what to keep. The recall it was there for now arrives inside
-        # the single line instead (corroborate.fill_gaps, on by default for
-        # piano), which is the shape the listener actually asked for: one
-        # monophonic line, top note, delete what does not belong.
-        second_voice = False
-        return config.model_copy(
-            update={
-                "transcribe": config.transcribe.model_copy(
-                    update={
-                        "stem": stem,
-                        "region": region,
-                        "ensemble": ensemble,
-                        "piano_second_voice": second_voice,
-                    }
-                )
-            }
-        )
+        return review.span_config(config, stem, start, end, ensemble)
 
     def resolve_erasures(
         track_id: str, entry: dict[str, Any], run_config: Config, notes: list[dict[str, Any]]

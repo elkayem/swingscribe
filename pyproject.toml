@@ -62,6 +62,12 @@ gui = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
 ]
+# scripts/wjazz_batch.py's progress spreadsheet. Its own group, same reasoning
+# as ml/gui: plain `uv sync` stays light. Needs ml + gui too (it drives the
+# pipeline and reuses gui/musicxml.py), so: uv sync --group ml --group gui --group batch
+batch = [
+    "openpyxl>=3.1",
+]
 
 [tool.uv]
 # No macOS until something deploys there (M8 at the earliest).

@@ -35,13 +35,103 @@ from swingscribe.model import Document, NoteEvent
 # send at full float precision — three decimals is well under a MIDI cent.
 _ROUND = 3
 
+# Decimal places span bounds are rounded to before they reach a cache key.
+# Milliseconds are finer than any boundary a person places by ear.
+SPAN_PRECISION = 3
+
+
+def span_config(
+    config: Config,
+    stem: str,
+    start: float | None,
+    end: float | None,
+    ensemble: str | None = None,
+) -> Config:
+    """The exact transcribe config a review of this span is computed under.
+
+    THE definition, used by the GUI's endpoints and by any batch tool that
+    wants to produce the same numbers the GUI shows. It lives here rather
+    than inside `create_app` because a second copy of this rounding is not a
+    cosmetic difference: a span rounded to the millisecond crops the audio a
+    couple of hundred samples away from where an unrounded one does, which
+    moves CREPE's 10ms frame lattice against the music and flips notes across
+    quantizer grid boundaries. Measured on Maiden Voyage, the identical 489
+    notes scored notated rhythm 0.686 unrounded against 0.630 rounded -- so a
+    caller that skipped this produced a genuinely different page from the one
+    the GUI draws, with nothing on either side saying why.
+    """
+    region = (
+        None
+        if start is None and end is None
+        else (
+            round(start or 0.0, SPAN_PRECISION),
+            None if end is None else round(end, SPAN_PRECISION),
+        )
+    )
+    updates: dict[str, Any] = {
+        "stem": stem,
+        "region": region,
+        # The second-voice overlay is OFF; see the GUI's review_config.
+        "piano_second_voice": False,
+    }
+    if ensemble is not None:
+        updates["ensemble"] = ensemble
+    return config.model_copy(update={"transcribe": config.transcribe.model_copy(update=updates)})
+
+
+# One content hash per stem file per process. `review_key` is called on
+# endpoints documented as cheap to poll, and these files are ~80MB.
+_STEM_DIGESTS: dict[tuple[str, int, int], str] = {}
+
+
+def stem_file_digest(path: str | Path) -> str:
+    """sha256 of a separated stem's CONTENT, memoized on (path, size, mtime).
+
+    Content rather than (size, mtime) themselves, because CLAUDE.md's own
+    advice is to COPY a stem between cache directories rather than re-separate
+    it: a copy changes mtime while the audio is identical, and keying on mtime
+    would throw away a perfectly good review — and a minute of CREPE — for it.
+    A copy costs one re-hash and yields the same key; a genuine
+    re-separation yields a different one, which is the case that matters.
+    """
+    file = Path(path)
+    stat = file.stat()
+    memo = (str(file), stat.st_size, stat.st_mtime_ns)
+    digest = _STEM_DIGESTS.get(memo)
+    if digest is None:
+        hasher = hashlib.sha256()
+        with file.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                hasher.update(chunk)
+        digest = hasher.hexdigest()[:16]
+        _STEM_DIGESTS[memo] = digest
+    return digest
+
 
 def review_key(document: Document, config: Config, model: str) -> str:
     """Content key for a transcription review: the stem's identity, the model
-    that produced it, and every transcribe setting that would change a note."""
-    stem_digest = library.stem_digest(document)
+    that produced it, every transcribe setting that would change a note, and
+    the STEM FILE's own content.
+
+    That last part is load-bearing, not defensive. Confirmed 2026-08-29:
+    htdemucs_6s separation is NOT bit-reproducible across independent runs of
+    the identical audio on this machine -- two runs produced `other.wav`s
+    that differed from their first sample, same length, different SHA256.
+    transcribe.analyze() itself IS perfectly deterministic given a fixed
+    stem (also confirmed), so once a stem file exists, everyone reading it
+    gets the same notes forever -- but `stem_digest` only hashes the SOURCE
+    audio, never the stem `separate.run` actually produced from it. If that
+    stem is ever regenerated under an unchanged config (a cleared cache, a
+    debugging session pointing separate at a different cache_dir and back),
+    every review key computed against the old bytes still matches, and a
+    stale review keeps being served indistinguishably from a fresh one.
+    Hashing the stem makes a changed stem a cache MISS instead.
+    """
+    source_digest = library.stem_digest(document)
     tc = canonical_json(config.transcribe.model_dump(mode="json"))
-    raw = f"{stem_digest}\x00{model}\x00{tc}"
+    stem_path = library.available_stems(document, config, model).get(config.transcribe.stem)
+    stem_signature = stem_file_digest(stem_path) if stem_path else "unseparated"
+    raw = f"{source_digest}\x00{model}\x00{tc}\x00{stem_signature}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
