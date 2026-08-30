@@ -90,6 +90,24 @@ number "matched" and they are not the same number (see HEADERS):
 `migrate_columns` adds new columns to an existing sheet by name, so widening
 it never costs the rows already scored.
 
+## Standing where the cache expects
+
+This chdirs to the cache's own directory (`--cache-dir`'s parent, i.e. where
+`swingscribe gui` is launched from) before doing anything, and that is not
+cosmetic. `ingest` stores the path of its normalized wav INSIDE the cached
+Document, built from `cache_dir` as given — so a GUI launched from
+`benchmark/` with the default relative `.swingscribe-cache` records
+`.swingscribe-cache\audio\<digest>-44100.wav`, a path that only resolves from
+that directory. The ingest cache KEY covers the audio bytes and the ingest
+config, not `cache_dir`, so this script gets a cache HIT on that Document and
+inherits its relative path. Run from the repo root, `separate` then dies on a
+file that is plainly there — which is what killed a full run 31 files in, on
+the one track that had been opened in the GUI first.
+
+Standing where the GUI stands makes every such path resolve exactly as it
+does for the GUI. Everything this script owns is absolute, so nothing else
+cares where it is run from.
+
 ## Matching the GUI exactly
 
 The number in the spreadsheet must be the number the Score button shows, and
@@ -147,6 +165,7 @@ is actually being run from.
 """
 
 import argparse
+import os
 import re
 import sqlite3
 import sys
@@ -729,20 +748,28 @@ def main() -> None:
     if not (args.limit or args.file or args.random or args.all):
         parser.error("pick one: --limit N, --file NAME (repeatable), --random N, or --all")
 
-    db = sqlite3.connect(args.db)
+    # Run from the directory the CACHE belongs to, which is where the GUI runs
+    # from — see "Standing where the cache expects" in the module docstring.
+    # Everything this script touches is absolute already; `--db` is the one
+    # path a caller gives relative to their own shell, so resolve it first.
+    db_path = args.db.resolve()
+    cache_dir = args.cache_dir.resolve()
+    os.chdir(cache_dir.parent)
+
+    db = sqlite3.connect(db_path)
     files = select_files(args)
     if not files:
         print("Nothing to do — no matching audio in benchmark/wjazzd.")
         return
 
     print(f"Processing {len(files)} file(s): {', '.join(p.name for p in files)}")
-    print(f"Cache: {args.cache_dir}")
+    print(f"Cache: {cache_dir}   (running from {Path.cwd()})")
     wb, ws = load_or_create_sheet(db)
     index = melid_row_index(ws)
 
     for audio_path in files:
         print(f"\n== {audio_path.name} ==")
-        row = process_file(db, audio_path, args.cache_dir)
+        row = process_file(db, audio_path, cache_dir)
         write_row(ws, index, row)
         save_sheet(wb, ws)  # after every file: a crash mid-batch loses nothing already done
         print(f"  -> {row['status'] or 'ok'}")
