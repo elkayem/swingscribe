@@ -306,6 +306,103 @@ def test_available_stems_reads_the_separate_stage_layout(config, tmp_path):
     assert library.available_stems(document, config, "htdemucs_ft") == {}
 
 
+def _stem_document(config, tmp_path, names, model="htdemucs_6s", levels=None, rate=8000):
+    """A Document whose stems dir holds wavs named `names`.
+
+    `levels` writes real audio at those constant amplitudes (needs the ml
+    group's soundfile); without it the stems are opaque bytes, which is all
+    the name-level tests read.
+    """
+    from swingscribe.stages.separate import stems_dir
+
+    wav = make_audio(tmp_path / "cache" / "audio" / "norm.wav", b"normalized")
+    document = Document(
+        audio_path="orig.m4a",
+        sample_rate=44100,
+        audio=AudioRef(path=str(wav), sample_rate=44100, channels=2, duration=12.0),
+    )
+    out = stems_dir(config.cache_dir, library.file_digest(wav), model)
+    out.mkdir(parents=True)
+    for i, name in enumerate(names):
+        if levels is None:
+            (out / f"{name}.wav").write_bytes(b"stem")
+            continue
+        import numpy as np
+        import soundfile
+
+        soundfile.write(
+            out / f"{name}.wav",
+            np.full((rate, 2), levels[i], "float32"),
+            rate,
+            subtype="FLOAT",
+        )
+    return document, out
+
+
+def test_selectable_stems_offers_a_sum_the_separator_never_wrote(config, tmp_path):
+    """Demucs switches an instrument it cannot place BETWEEN stems rather than
+    attenuating it across them, so the stem you picked can go bit-zero mid-solo
+    (Miles' Oleo: 29.8% of the span). The menu therefore offers the sum."""
+    document, _ = _stem_document(config, tmp_path, ("drums", "bass", "other", "vocals"))
+
+    assert "other+vocals" in library.selectable_stems(document, config, "htdemucs_6s")
+    # Offered, never separated — it must not pretend to be one of demucs' own.
+    assert "other+vocals" not in library.available_stems(document, config, "htdemucs_6s")
+
+
+def test_selectable_stems_withholds_a_sum_missing_a_part(config, tmp_path):
+    document, _ = _stem_document(config, tmp_path, ("drums", "bass", "other"))
+
+    assert library.selectable_stems(document, config, "htdemucs_6s") == [
+        "bass",
+        "drums",
+        "other",
+    ]
+    assert library.resolve_stem(document, config, "htdemucs_6s", "other+vocals") is None
+
+
+def test_resolve_stem_leaves_a_separated_stem_alone(config, tmp_path):
+    """A separated stem must resolve to the SAME path `available_stems` gives,
+    or every review key already computed against it silently changes."""
+    document, _ = _stem_document(config, tmp_path, ("other", "vocals"))
+    stems = library.available_stems(document, config, "htdemucs_6s")
+
+    assert library.resolve_stem(document, config, "htdemucs_6s", "other") == stems["other"]
+
+
+def test_resolve_stem_sums_the_parts_sample_for_sample(config, tmp_path):
+    soundfile = pytest.importorskip("soundfile")
+    np = pytest.importorskip("numpy")
+
+    document, out = _stem_document(config, tmp_path, ("other", "vocals"), levels=(0.6, 0.7))
+
+    path = library.resolve_stem(document, config, "htdemucs_6s", "other+vocals")
+    assert path is not None
+    data, rate = soundfile.read(path, dtype="float32", always_2d=True)
+    assert rate == 8000
+    # 0.6 + 0.7, sample for sample — addition, not an averaging mix-down, so
+    # neither source is attenuated by being summed with the other. And it is
+    # held in float: 1.3 would clip to 1.0 in the default 16-bit PCM, taking
+    # the peaks the soloist is loudest in with it.
+    assert np.allclose(data, 1.3)
+    # Written beside the stems it is made of, so clearing the cache clears it.
+    assert pathlib.Path(path).parent == out
+    assert not list(out.glob("*.partial.wav"))
+
+
+def test_resolve_stem_reuses_a_sum_it_already_wrote(config, tmp_path):
+    pytest.importorskip("soundfile")
+
+    document, _ = _stem_document(config, tmp_path, ("other", "vocals"), levels=(0.1, 0.2))
+
+    first = library.resolve_stem(document, config, "htdemucs_6s", "other+vocals")
+    stamp = pathlib.Path(first).stat().st_mtime_ns
+    second = library.resolve_stem(document, config, "htdemucs_6s", "other+vocals")
+
+    assert first == second
+    assert pathlib.Path(second).stat().st_mtime_ns == stamp
+
+
 def test_model_status_reports_readiness_in_config_order(config, tmp_path):
     wav = make_audio(tmp_path / "cache" / "audio" / "norm.wav", b"normalized")
     document = Document(

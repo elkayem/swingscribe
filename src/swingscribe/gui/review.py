@@ -129,7 +129,7 @@ def review_key(document: Document, config: Config, model: str) -> str:
     """
     source_digest = library.stem_digest(document)
     tc = canonical_json(config.transcribe.model_dump(mode="json"))
-    stem_path = library.available_stems(document, config, model).get(config.transcribe.stem)
+    stem_path = library.resolve_stem(document, config, model, config.transcribe.stem)
     stem_signature = stem_file_digest(stem_path) if stem_path else "unseparated"
     raw = f"{source_digest}\x00{model}\x00{tc}\x00{stem_signature}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -205,9 +205,9 @@ def analyze_and_cache(document: Document, config: Config, model: str) -> dict[st
     from swingscribe.stages import transcribe
 
     stem = config.transcribe.stem
-    stem_path = library.available_stems(document, config, model).get(stem)
+    stem_path = library.resolve_stem(document, config, model, stem)
     if stem_path is None:
-        available = ", ".join(sorted(library.available_stems(document, config, model)))
+        available = ", ".join(library.selectable_stems(document, config, model))
         raise ValueError(f"no {stem!r} stem for {model}; available: {available or 'none'}")
 
     notes, diagnostics = transcribe.analyze(stem_path, config.transcribe)

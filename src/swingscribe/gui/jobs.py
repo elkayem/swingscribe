@@ -187,7 +187,7 @@ class JobRunner:
         else:
             stage_list = [("ingest", ingest.run), ("separate", separate.run)]
         document = pipeline.run(job.path, run_config, stages=stage_list)
-        job.stems = sorted(library.available_stems(document, run_config, model))
+        job.stems = library.selectable_stems(document, run_config, model)
         job.message = "beat grid ready" if job.kind == "beats" else "stems ready"
 
     def _run_transcribe(self, job: Job, config: Config, model: str) -> None:

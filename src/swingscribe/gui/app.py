@@ -252,10 +252,10 @@ def create_app(config: Config) -> FastAPI:
         document = entry["document"]
         source = document.audio.path
         if stem is not None and stem != "mix":
-            stems = library.available_stems(document, config, model or config.separate.model)
-            if stem not in stems:
+            resolved = library.resolve_stem(document, config, model or config.separate.model, stem)
+            if resolved is None:
                 raise HTTPException(404, f"no {stem!r} stem for {model}")
-            source = stems[stem]
+            source = resolved
         if start is None and end is None and stem is None:
             return peaks.overview(source, config.cache_dir, track_id)
         return peaks.envelope(source, buckets, start or 0.0, end)
@@ -275,7 +275,7 @@ def create_app(config: Config) -> FastAPI:
             return {"models": library.model_status(document, config)}
         return {
             "model": model,
-            "stems": sorted(library.available_stems(document, config, model)),
+            "stems": library.selectable_stems(document, config, model),
         }
 
     @app.get("/api/tracks/{track_id}/stem")
@@ -299,14 +299,15 @@ def create_app(config: Config) -> FastAPI:
         if stem == "mix":
             source = document.audio.path
         else:
-            stems = library.available_stems(document, config, model)
-            if stem not in stems:
+            resolved = library.resolve_stem(document, config, model, stem)
+            if resolved is None:
+                available = library.selectable_stems(document, config, model)
                 raise HTTPException(
                     404,
                     f"no {stem!r} stem for {model}; separate it first "
-                    f"(available: {', '.join(sorted(stems)) or 'none'})",
+                    f"(available: {', '.join(available) or 'none'})",
                 )
-            source = stems[stem]
+            source = resolved
         try:
             payload = gui_audio.slice_wav(source, start, end, rate)
         except Exception as exc:

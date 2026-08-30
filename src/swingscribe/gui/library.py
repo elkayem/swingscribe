@@ -177,12 +177,103 @@ def available_stems(document: Document, config: Config, model: str) -> dict[str,
     return {p.stem: str(p) for p in sorted(out_dir.glob("*.wav"))}
 
 
+# Stems the separator does not produce, but that a listener can ask for: the
+# SUM of two it does. Demucs assigns each moment of audio to exactly one
+# source, so an instrument it cannot place consistently is not attenuated
+# across the stems — it is switched between them, leaving DIGITAL SILENCE in
+# whichever one it left. On Miles Davis' Oleo (melid 320) the muted trumpet is
+# routed to `vocals` for 29.8% of the solo, and the `other` stem the sidecar
+# names is bit-zero there; the energy gate correctly drops those frames and
+# half the solo never reaches the piano roll. Summing the two puts the horn
+# back in one place: note F1 0.497 -> 0.824, recall 0.366 -> 0.848.
+#
+# It is not a default. Measured over every horn track in benchmark/, Oleo is
+# the only one that needs it — every other reads <=3.8% silence and a
+# vocals/other energy ratio <=0.18 against Oleo's 0.81 — and the sum carries
+# the OTHER stem's bleed with it, so it costs precision wherever the
+# separation was already clean. Offer it; do not select it.
+COMBINED_STEMS = ("other+vocals",)
+
+COMBINED_SEPARATOR = "+"
+
+
+def combinable_stems(stems: dict[str, str]) -> list[str]:
+    """Which COMBINED_STEMS every part of is on disk for this track+model."""
+    return [
+        name
+        for name in COMBINED_STEMS
+        if all(part in stems for part in name.split(COMBINED_SEPARATOR))
+    ]
+
+
+def selectable_stems(document: Document, config: Config, model: str) -> list[str]:
+    """What the stem menu offers: what was separated, plus what can be summed."""
+    stems = available_stems(document, config, model)
+    return sorted(set(stems) | set(combinable_stems(stems)))
+
+
+def resolve_stem(document: Document, config: Config, model: str, stem: str) -> str | None:
+    """Path to `stem`'s audio, summing its parts when it names a combination.
+
+    A separated stem resolves to exactly the path `available_stems` gives, so
+    every cache key computed through here is unchanged for the tracks already
+    reviewed. A combination is written ONCE, beside the stems it is made of and
+    keyed by the same content digest, so it is as safely deletable as they are
+    and `review_key`'s stem hash sees its real bytes rather than a name.
+    """
+    stems = available_stems(document, config, model)
+    if stem in stems:
+        return stems[stem]
+    parts = stem.split(COMBINED_SEPARATOR)
+    if len(parts) < 2 or not all(part in stems for part in parts):
+        return None
+    out = Path(stems[parts[0]]).with_name(f"{stem}.wav")
+    if not out.is_file():
+        _write_stem_sum([stems[part] for part in parts], out)
+    return str(out)
+
+
+def _write_stem_sum(sources: list[str], out: Path) -> None:
+    """Sum several stems sample-for-sample into one wav.
+
+    Demucs' stems are a decomposition of the same timeline at the same rate, so
+    this is addition and nothing else — no resampling, no normalisation. The
+    sum can exceed 1.0 where two sources are loud together; that is left alone
+    because everything downstream reads float samples and rescaling would move
+    the energy gate's reference against the music.
+    """
+    import soundfile
+
+    data = None
+    rate = None
+    for path in sources:
+        block, block_rate = soundfile.read(path, dtype="float32", always_2d=True)
+        if data is None:
+            data, rate = block, block_rate
+            continue
+        if block_rate != rate:
+            raise ValueError(f"{path} is {block_rate} Hz, expected {rate}")
+        length = min(len(data), len(block))
+        data = data[:length] + block[:length]
+    tmp = out.with_suffix(".partial.wav")
+    # FLOAT, not the default 16-bit PCM: two loud sources sum past 1.0, and
+    # PCM would clip exactly the peaks the horn is loudest in.
+    soundfile.write(tmp, data, rate, subtype="FLOAT")
+    tmp.replace(out)  # never leave a half-written stem where a reader can find it
+
+
 def model_status(document: Document, config: Config) -> list[dict[str, Any]]:
     """Per-model separation status for the model picker."""
     status = []
     for model in config.gui.models:
         stems = available_stems(document, config, model)
-        status.append({"model": model, "ready": bool(stems), "stems": sorted(stems)})
+        status.append(
+            {
+                "model": model,
+                "ready": bool(stems),
+                "stems": sorted(set(stems) | set(combinable_stems(stems))),
+            }
+        )
     return status
 
 

@@ -552,7 +552,9 @@ def test_stems_endpoint_lists_one_model(world):
         .get(f"/api/tracks/{track['id']}/stems", params={"model": "htdemucs_ft"})
         .json()
     )
-    assert payload["stems"] == ["bass", "drums", "other", "vocals"]
+    # The four demucs wrote, plus the sum the listener can ask for when the
+    # separator has switched the soloist between two of them (library.py).
+    assert payload["stems"] == ["bass", "drums", "other", "other+vocals", "vocals"]
 
 
 def test_settings_are_written_beside_the_audio(world):
