@@ -189,6 +189,17 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   are WRITTEN the way a human wrote them, through
   `benchmark.score_against_notation` — shared with `run_eval.py`, never
   reimplemented. It reads lower and always will.
+- **A ground-truth note the alignment cannot place is PINNED into the span, not
+  dropped.** Score position is extrapolated off the outermost anchor pair, so a
+  line missing its opening notes puts the score's opening bars *before the span
+  starts* — off the edge of the roll, drawn nowhere. On Oleo that hid 24
+  `missed` notes and made the passage read as empty, which is the worst
+  direction to fail in: `missed` is the class the transcriber owes an
+  explanation for. `score.off_span` counts them and the caveat line says so. A
+  pinned x is not a claim about time (nothing on this view is) — it says the
+  score holds a note the alignment could not place. `overlay_key` carries a
+  `CACHE_VERSION` because it hashes both sides' content, which cannot see a
+  change to placement itself (R17).
 - **Never show that rhythm number without its coverage.** Measured over every
   notation the benchmark can build against every hand score on disk, coverage
   is 0.69-0.74 on a right pairing and 0.16-0.36 on fourteen wrong ones — but
@@ -512,6 +523,18 @@ made. Both are kept; neither subsumes the other.
 - **`ensemble: null` is not `horn-led`, but it behaves like it.** Three of the
   four new piano solos silently skipped the piano oracle that way. Check the
   routing before believing a piano number.
+- **A missing note may mean the soloist LEFT THE STEM.** Demucs assigns each
+  moment to exactly one source, so an instrument it cannot place consistently
+  is not attenuated across stems — it is switched between them, leaving
+  DIGITAL SILENCE behind. Miles' Oleo has the muted trumpet in `vocals` for
+  29.8% of the solo and `other` at bit-zero there; the energy gate correctly
+  dropped it and half the solo vanished with no error anywhere. Before
+  suspecting transcribe, measure the chosen stem's in-span silence — it is
+  seconds of numpy and needs no CREPE. `library.resolve_stem` sums stems on
+  demand (`other+vocals`): note F1 0.497 -> 0.824 there. **Offered, never
+  default** — the sum carries the other stem's bleed, and Oleo is the ONLY
+  track in `benchmark/` that needs it (every other: <=3.8% silence, vocals/other
+  ratio <=0.18, against 29.8% and 0.81). Details in R16.
 - **The GUI and the harness use DIFFERENT cache directories** —
   `benchmark/.swingscribe-cache` (relative to the track) versus
   `./.swingscribe-cache` (relative to the cwd run_eval is invoked from). The

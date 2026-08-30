@@ -222,20 +222,40 @@ def overlay(
     times = [t for _, t in anchors]
 
     # ── place the score horizontally ──────────────────────────────────────
+    # Placement is extrapolated off the outermost anchor pair beyond them, so a
+    # run of unaligned notes at either end can be carried clean OUTSIDE the
+    # span — and the roll only draws the span. Measured on Miles' Oleo while
+    # half the line was missing (R16): the 20 notes of bars 1-7 landed at
+    # 24.2-27.9s against a span starting at 29.7, so twenty "missed" notes were
+    # not drawn at all, and an invisible note is indistinguishable from one the
+    # score does not contain. That is the wrong failure: `missed` is the single
+    # most important class on this view, because it is the one the transcriber
+    # owes an explanation for.
+    #
+    # So a note that lands outside is pinned to the edge it left by, and the
+    # count is reported. A pinned x is NOT a claim about when the note sounds —
+    # nothing on this view is (see the module docstring) — it is a claim that
+    # the score contains a note the alignment could not place.
     reference_notes = []
     drifts = []
+    off_span = 0
     for index, note in enumerate(score.melody):
         x, rate = _place(note.position, positions, times, seconds_per_quarter, start)
         drifts.append(x - (start + note.position * seconds_per_quarter))
+        pinned = min(end, max(start, x))
+        off_span += pinned != x
         reference_notes.append(
             {
-                "x": round(x, 3),
+                "x": round(pinned, 3),
                 "duration": round(note.duration * rate, 3),
                 "pitch": note.pitch - offset,  # concert, to share our pitch axis
                 "written": note.pitch,
                 "bar": note.bar,
                 "cls": ref_class[index],
                 "partner": ref_partner[index],
+                # Drawn at the edge rather than where the tempo map put it, so
+                # the view can say so instead of quietly implying a position.
+                "pinned": pinned != x,
             }
         )
 
@@ -252,6 +272,11 @@ def overlay(
             # How far the alignment had to move the score away from constant
             # tempo — i.e. what a naive placement would have got wrong.
             "drift_s": round(max(drifts) - min(drifts), 2) if drifts else 0.0,
+            # Reference notes the tempo map put outside the span, now pinned to
+            # its edges. A high count means the alignment failed to anchor an
+            # end, which is usually our line missing notes there — not the
+            # score being wrong about them.
+            "off_span": off_span,
         },
         "counts": {
             "matched": aligned.matches,
@@ -274,10 +299,17 @@ def _cache(config: Config) -> StageCache:
     return StageCache(Path(config.cache_dir) / "gui" / "overlays")
 
 
+# Bump when `overlay`'s output changes shape or placement without either side's
+# content changing — neither the review key nor the score digest can see that,
+# and a stored overlay is served verbatim. Bumped to 2 when off-span reference
+# notes started being pinned into the span (R16).
+CACHE_VERSION = 2
+
+
 def overlay_key(review_key: str, score_path: str | Path) -> str:
     """One overlay per (transcription, score file). Both sides are content-
     keyed, so re-notating a bar and re-transcribing the span both miss."""
-    raw = f"{review_key}\x00{score_digest(score_path)}"
+    raw = f"{review_key}\x00{score_digest(score_path)}\x00v{CACHE_VERSION}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 

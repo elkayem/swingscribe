@@ -419,7 +419,100 @@ Hearing the notes and writing them are separate failures, and this is the
 cleanest example yet of the second without the first. It is also the only
 guitar in the set. Unexamined.
 
+### D17 - `fit_affine` can lose to a brute-force offset scan by 10x
+
+Found while diagnosing R16. On Miles' Oleo transcribed from `htdemucs`'s
+`other` stem — a deliberately bad input, the trumpet buried under the piano
+that the 4-source model has nowhere else to put — a plain scan of offsets at
+rate 1.0 finds **81 of 224** reference notes at offset 26.895, and
+`fit_affine` returns offset **71.426** with **8**. `htdemucs_ft`'s `other`
+does the same thing. Both are then rejected by `identify_all` as "wrong take
+or wrong issue" at 3.6%.
+
+The head/tail anchors each search the full overlap range independently
+(`wjazz.py:99-106`), so a noisy estimate lets one of them win at a spurious
+offset; the derived rate is then nonsense and the joint refinement only
+searches ±0.15s around it. It never recovers.
+
+This did not corrupt any shipped number — the affected pairings are *rejected*
+rather than mis-scored, which is the identifier working. But it is the third
+fitting bug in this harness and the failure is silent in the direction that
+matters: a configuration that transcribes BETTER can be reported as
+unidentifiable. A cheap guard would be to keep the rate-1.0 scan's best as a
+floor and take it whenever the anchored fit scores worse.
+
 ## Resolved
+
+### R16 - Demucs switched a soloist between stems, and half a solo went missing
+
+**The `other` stem was bit-zero for 29.8% of Miles Davis' Oleo (melid 320),
+and the GUI drew an empty piano roll over it.** Reported as "no notes at all,
+transcribed or ground truth, from 1.3 to 6.5 seconds".
+
+Demucs assigns each moment to exactly ONE source, so an instrument it cannot
+place consistently is not attenuated across the stems — it is *switched*
+between them, leaving digital silence behind. On this recording the muted
+trumpet is routed to `vocals` for 17 of the solo's 58 seconds. The energy gate
+correctly dropped those frames (RMS 0.000026 against a 0.000971 floor), CREPE's
+confident garbage over the silence was correctly discarded, and the result was
+106 notes where WJazzD annotates 224.
+
+Every layer behaved as designed, which is why nothing reported an error. The
+ground-truth overlay then appeared broken as a *consequence*: with the notes
+gone there was nothing under that region to align a score against.
+
+Measured across every horn track in `benchmark/`, Oleo is alone — every other
+reads <=3.8% silence in-span and a vocals/other energy ratio <=0.18, against
+Oleo's 29.8% and 0.81. So this is one recording's separation failure, not a
+systemic one.
+
+`library.resolve_stem` now materialises the SUM of two stems on demand
+(`other+vocals`), written beside them under the same content digest and offered
+by the stem menu. On this solo:
+
+     stem                    notes   note F1   P       R
+     6s/other (was)            106     0.497   0.774   0.366
+     6s/vocals                 174     0.638   0.730   0.567
+     ft/vocals                 177     0.708   0.802   0.634
+     6s/other+vocals (now)     237     0.824   0.802   0.848
+
+Ground truth: 197 of 224 matched, 14 missed, pitch F1 0.855.
+
+**It is offered, not selected.** The sum carries the other stem's bleed with
+it, so it costs precision wherever the separation was already clean — which is
+everywhere else in the benchmark. A separated stem still resolves to exactly
+the path `available_stems` gives, so no review key already computed moved.
+
+### R17 - A `missed` note placed outside the span was drawn nowhere
+
+Found by asking the right follow-up question about R16: *why did the notated
+score not show those notes as `missed`?* It should have — and the payload did
+contain all 224 of them. They were placed off the edge of the view.
+
+Score position is derived from the alignment, extrapolating off the outermost
+anchor pair beyond them (`ground_truth._place`). With half the line missing the
+aligner anchored nothing in the opening, so bars 1-7 were extrapolated backwards
+and landed at **x = 24.2-27.9s against a span starting at 29.717** — outside the
+region the roll draws. 24 reference notes were affected. Nothing reported it.
+
+An invisible note is indistinguishable from one the score does not contain, and
+`missed` is the single most important class on this view: it is the one the
+transcriber owes an explanation for. So the failure was in the worst possible
+direction — it hid exactly the evidence that would have pointed at R16.
+
+A note landing outside the span is now pinned to the edge it left by and
+counted (`score.off_span`), and the GUI says so beside the drift figure. A
+pinned x is not a claim about time — nothing on this view is — it is a claim
+that the score holds a note the alignment could not place. On the two Oleo
+transcriptions:
+
+     stem                 our notes   off_span   missed   pitch F1
+     other (was)                106         24      127      0.527
+     other+vocals (now)         237          0       14      0.855
+
+`overlay_key` gained a `CACHE_VERSION`, because it hashes both sides' CONTENT
+and neither can see a change to placement itself — a stored overlay would
+otherwise outlive the code that made it.
 
 ### R15 - The notes cache did not know which transcriber wrote it
 

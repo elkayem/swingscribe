@@ -1701,12 +1701,24 @@ function renderGroundTruthBar() {
   // sits at the same x by construction. Saying so on screen is the only thing
   // stopping the picture being read as a timing result.
   caveat.hidden = false;
-  caveat.textContent = `placed by alignment, not by time (${s.drift_s}s off constant tempo)`;
+  // Notes the tempo map put outside the span are pinned to its edges rather
+  // than dropped, but a pile of them at bar 1 is a failed alignment, not a
+  // reading of the music — so it has to be said out loud. Silently drawing
+  // nothing is what made twenty missed notes look like an empty passage.
+  const off = s.off_span || 0;
+  caveat.textContent =
+    `placed by alignment, not by time (${s.drift_s}s off constant tempo)` +
+    (off ? ` · ${off} note${off === 1 ? '' : 's'} pinned to the span edge` : '');
   caveat.title =
     'Every notated note that aligned to one of ours is drawn at that note’s onset, and the ' +
     'rest are interpolated between those anchors. So horizontal agreement is by construction — ' +
     'this view answers pitch, not timing. The figure is how far that placement had to move the ' +
-    'score away from a constant tempo.';
+    'score away from a constant tempo.' +
+    (off
+      ? `\n\n${off} notated note${off === 1 ? '' : 's'} fell outside the span entirely and ` +
+        'are drawn at its edge. That means the alignment could not anchor one end — usually ' +
+        'because our line is missing notes there, not because the score is wrong about them.'
+      : '');
 }
 
 function toggleGroundClass(name) {

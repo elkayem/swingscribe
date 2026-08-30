@@ -148,6 +148,58 @@ def test_constant_tempo_is_the_fallback_when_nothing_anchors(tmp_path):
     assert overlay["score"]["drift_s"] == 0.0
 
 
+# Distinct pitches, so the aligner cannot anchor them ambiguously.
+DISTINCT = [60, 62, 64, 65, 67, 69, 71, 72]
+
+
+def test_notes_placed_outside_the_span_are_pinned_into_it(tmp_path):
+    """A missed note drawn outside the span is drawn NOWHERE, and an invisible
+    note is indistinguishable from one the score does not contain.
+
+    This is R16's second failure: with half our line gone the alignment
+    anchored only the tail, and extrapolating off that pair put the opening
+    bars BEFORE the span started. Twenty 'missed' notes silently vanished and
+    the passage read as empty.
+    """
+    # Only the last three notes survive, and they anchor early in the span —
+    # so extrapolating back off them lands the opening well before `start`.
+    notes = notes_from(DISTINCT[5:], [10.1, 10.6, 11.1])
+    overlay = ground_truth.overlay(write_score(tmp_path, DISTINCT), notes, *SPAN)
+
+    placed = overlay["reference_notes"]
+    assert len(placed) == len(DISTINCT)  # every notated note is still reported
+    # Nothing may be drawn off the edge of the view it is drawn on.
+    assert all(SPAN[0] <= n["x"] <= SPAN[1] for n in placed)
+
+    pinned = [n for n in placed if n["pinned"]]
+    assert overlay["score"]["off_span"] == len(pinned) == 5
+    assert all(n["cls"] == "missed" for n in pinned)
+    assert all(n["x"] == SPAN[0] for n in pinned)  # pinned to the edge they left by
+    # The anchored tail is untouched and still exact.
+    assert [n["x"] for n in placed[5:]] == [10.1, 10.6, 11.1]
+
+
+def test_a_healthy_alignment_pins_nothing(tmp_path):
+    """The pin is a repair for a failed alignment, not a thing that happens."""
+    overlay = ground_truth.overlay(
+        write_score(tmp_path, WRITTEN), notes_from(CONCERT, ONSETS), *SPAN
+    )
+    assert overlay["score"]["off_span"] == 0
+    assert not any(n["pinned"] for n in overlay["reference_notes"])
+
+
+def test_overlay_cache_version_separates_placements(tmp_path):
+    """The overlay key hashes both sides' CONTENT, which cannot see a change to
+    placement itself — so a stored overlay would outlive the code that made it."""
+    score = write_score(tmp_path, WRITTEN)
+    key = ground_truth.overlay_key("review-abc", score)
+    ground_truth.CACHE_VERSION += 1
+    try:
+        assert ground_truth.overlay_key("review-abc", score) != key
+    finally:
+        ground_truth.CACHE_VERSION -= 1
+
+
 def test_place_handles_the_thin_anchor_cases():
     """Zero and one anchor have no slope to interpolate along."""
     assert ground_truth._place(4.0, [], [], 0.5, 10.0) == (12.0, 0.5)
