@@ -115,7 +115,6 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
     from swingscribe.config import Config
     from swingscribe.gui import library
     from swingscribe.stages import transcribe
-    from swingscribe.stages.separate import stems_dir
 
     runs = json.loads(cache.read_text(encoding="utf-8")) if cache.is_file() else {}
     live: set[str] = set()
@@ -151,11 +150,12 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
         document = library.ingested_document(BENCH / name, config)
         low, high = sidecar["region"]
         settings = transcribe_settings(sidecar, step_cost, dip_db)
-        stem = (
-            stems_dir(config.cache_dir, library.file_digest(document.audio.path), sidecar["model"])
-            / f"{settings.stem}.wav"
-        )
-        if not stem.is_file():
+        # Through library.resolve_stem, the same resolver the GUI uses: a
+        # composite like "other+vocals" (Oleo's fix, R16) is summed on demand
+        # beside its parts. Building the path by hand skipped every track the
+        # listener had routed to a composite stem.
+        stem = library.resolve_stem(document, config, sidecar["model"], settings.stem)
+        if stem is None:
             log(f"  {name}: no {settings.stem!r} stem for {sidecar['model']} — skipped")
             continue
         # `ensemble` is a per-track human judgement about the recording, so it
