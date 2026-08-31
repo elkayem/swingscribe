@@ -476,11 +476,15 @@ Results and limits: `docs/m6-notate.md`.
   note's off-grid end, which inside a ternary beat is not a third, so it breaks
   the tuplet group `close_short_gaps` exists to protect. That +0.041 is D11
   arriving from a second direction — fix `choose_grid`, not the repair pass.
-- **The running note value is set by TEMPO, and the notater does not know
-  that.** Over 456 WJazzD solos the median notated interval stays 96-166 ms at
-  every tempo while the value it is written as steps 16th (under 120 bpm) →
-  triplet eighth (120-160) → eighth (over 160). `grid_slack` is a constant and
-  cannot be right across that range (docs/m6-notate.md).
+- **The running note value is set by TEMPO.** Over 456 WJazzD solos the
+  median notated interval stays 96-166 ms at every tempo while the value it
+  is written as steps 16th (under 120 bpm) → triplet eighth (120-160) →
+  eighth (over 160). The slack is a TIME budget now — `grid_slack_s` (0.02
+  SECONDS, the round-trip criterion), converted per beat at that beat's own
+  length — measured: rhythm up at both tempo extremes, tie rate down at
+  speed, pitch untouched (D11 in docs/benchmark-deficiencies.md). Still
+  tempo-blind: the candidate SET (nothing finer than a sixteenth, while
+  under 100 bpm humans put 43.6% of values below it).
 - **We under-write triplets by 4x.** 0.9% of our notes against 4.1% in the hand
   scores and 23.9% of WJazzD's 197k notated intervals; 444 of 456 solos use
   ternary on more than 10% of their notes. Suspect `choose_grid`'s "three
@@ -509,11 +513,13 @@ Results and limits: `docs/m6-notate.md`.
   Two notes on one grid position are one note in a single-line score. Without
   this, coarsening bought notated rhythm by silently deleting 4.8% of the
   notes.
-- **`grid_slack` must NOT be tuned on the notation score.** That score rises
-  monotonically to "write everything as eighth notes", which three bebop
-  solos reward and real sixteenth-note material would not. It is set by
-  quantize's own 20 ms round-trip acceptance instead — the measure of what
-  coarsening costs the performance rather than what it buys the page.
+- **The grid slack must NOT be tuned on the notation score.** That score
+  rises monotonically to "write everything as eighth notes", which three
+  bebop solos reward and real sixteenth-note material would not.
+  `grid_slack_s` is set by quantize's own 20 ms round-trip acceptance
+  instead — the measure of what coarsening costs the performance rather
+  than what it buys the page — and IS that criterion: 0.02 s of mean snap
+  error, converted per beat.
 
 ## Measuring: two benchmarks, and they answer different questions
 

@@ -273,7 +273,7 @@ def quantize_notes(
     straight_bur_ceiling: float = 1.6,
     allow_triplets: bool = True,
     min_onsets_for_tuplet: int = 3,
-    grid_slack: float = 0.05,
+    grid_slack_s: float = 0.02,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -313,8 +313,16 @@ def quantize_notes(
     per_beat: dict[int, list[float]] = {}
     for index, position, _duration, _pitch in warped:
         per_beat.setdefault(index, []).append(position - index)
+    # The slack is a time budget (config.py: it absorbs a player's motor
+    # scatter, which is milliseconds, not beat fractions), so each beat
+    # converts it at its own length. A long ballad beat gets a small slack
+    # in beats and fine grids stay reachable; a burner's beat gets a large
+    # one and the coarse reading wins — which is the direction the 456-solo
+    # tempo staircase says humans notate (D11).
     grids = {
-        index: choose_grid(offsets, candidates, min_onsets_for_tuplet, grid_slack)
+        index: choose_grid(
+            offsets, candidates, min_onsets_for_tuplet, grid_slack_s / _beat_length(beats, index)
+        )
         for index, offsets in per_beat.items()
     }
 
@@ -407,7 +415,7 @@ def run(document: Document, config: Config) -> Document:
         straight_bur_ceiling=qc.straight_bur_ceiling,
         allow_triplets=qc.allow_triplets,
         min_onsets_for_tuplet=qc.min_onsets_for_tuplet,
-        grid_slack=qc.grid_slack,
+        grid_slack_s=qc.grid_slack_s,
     )
 
     by_beat, track = pooled_phase(document.swing, qc.straight_bur_ceiling)

@@ -289,18 +289,27 @@ class QuantizeConfig(BaseModel):
     # notated a swung pair as a triplet on a third of all intervals. 1 or 2
     # restores the pre-M6 behaviour.
     min_onsets_for_tuplet: int = 3
-    # How much worse, in beats of mean snap error, a COARSER grid may be and
-    # still win. Parsimony: reading a sixteenth out of a beat that only shows
-    # an eighth pair is how a swung pair becomes a dotted eighth. 0 keeps the
-    # old least-error rule.
+    # How much worse, in SECONDS of mean snap error, a COARSER grid may be
+    # and still win. Parsimony: reading a sixteenth out of a beat that only
+    # shows an eighth pair is how a swung pair becomes a dotted eighth. 0
+    # keeps the old least-error rule.
     #
-    # 0.05 is not tuned on the notation score, which rises monotonically to
-    # "write everything as eighth notes" and would happily overfit three
-    # bebop solos. It is the largest value that keeps quantize inside its OWN
-    # acceptance criterion — plan §5's 20ms round trip, which measures what
-    # coarsening costs the performance rather than what it buys the page.
-    # At 0.05 the worst tune replays at 18.7ms; at 0.08 it is 21.0ms.
-    grid_slack: float = 0.05
+    # Seconds, not beats, because the scatter this slack absorbs is a
+    # player's motor timing, which is a time quantity — and because a
+    # constant in beats cannot be right across tempos (D11): over 456 WJazzD
+    # solos the median notated interval stays 96-166ms at EVERY tempo while
+    # the value it is written as steps 16th → triplet 8th → 8th as tempo
+    # rises. A per-beat slack of grid_slack_s / beat_period reproduces that
+    # staircase's direction: finer grids reachable at slow tempos, coarser
+    # ones preferred at speed.
+    #
+    # 0.02 is not tuned on the notation score, which rises monotonically to
+    # "write everything as eighth notes" and would happily overfit bebop.
+    # It equals the old 0.05-beat slack at 150 bpm — the benchmark's centre
+    # of mass, where the shipped behaviour was already measured — and it is
+    # plan §5's own 20ms round-trip criterion: the coarsening allowance is
+    # exactly what the round trip is allowed to cost, at every tempo.
+    grid_slack_s: float = 0.02
 
 
 class NotateConfig(BaseModel):

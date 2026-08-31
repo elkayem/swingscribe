@@ -415,3 +415,28 @@ def test_zero_slack_restores_least_snap_error():
 
     assert choose_grid([0.0, 0.52], (2, 4), min_onsets_for_tuplet=3, slack=0.0) == 2
     assert choose_grid([0.0, 0.74], (2, 4), min_onsets_for_tuplet=3, slack=0.0) == 4
+
+
+def test_the_same_figure_is_written_finer_on_a_slow_beat():
+    """D11: the slack is a time budget, so the SAME beat-fraction figure gets
+    a finer grid on a long beat than a short one — the direction of WJazzD's
+    tempo staircase (16ths under 120 bpm, eighths over 160, across 456 solos,
+    while the interval in SECONDS stays put).
+
+    The figure: an offbeat landing at 0.68 of its beat. On a ballad beat
+    (60 bpm, 1s) that placement is ~180ms from the eighth position — a real
+    dotted rhythm, written to the sixteenth grid. On a burner's beat
+    (200 bpm, 300ms) the same fraction is ~54ms of lateness — a played
+    eighth pair, written as one. A constant slack in beats cannot say both.
+    """
+
+    def second_note_beat(bpm):
+        period = 60.0 / bpm
+        beats = [i * period for i in range(6)]
+        onsets = [beats[1], beats[1] + 0.68 * period]
+        quantized, _ = quantize_notes(onsets, [0.05, 0.05], [60, 62], beats, [], [])
+        assert len(quantized) == 2
+        return quantized[1].beat - int(quantized[1].beat)
+
+    assert second_note_beat(60.0) == pytest.approx(0.75)  # sixteenth grid: dotted figure
+    assert second_note_beat(200.0) == pytest.approx(0.5)  # eighth grid: an eighth pair

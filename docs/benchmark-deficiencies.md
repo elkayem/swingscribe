@@ -289,8 +289,31 @@ vary with. It predicts the observed failure directly: the only benchmark score
 that produced thirty-second notes is at a tempo where WJazzD says the running
 value is a sixteenth.
 
-Untried. The measurement is cheap (`scripts` + the db, no audio); the change
-is not, because it moves every notation number.
+**First cut applied 2026-08-31: the slack is a time budget now.**
+`grid_slack` (0.05 beats) became `grid_slack_s` (0.02 SECONDS), converted
+per beat at that beat's own length — equal to the old value at 150 bpm, the
+benchmark's centre of mass, and equal to plan §5's 20ms round-trip criterion
+by construction. Measured over the fixed 12-solo subset (64-266 bpm),
+against the trued-up sheet:
+
+- notated rhythm up at BOTH ends: ballads +0.084 (Don't Blame Me, which
+  also crossed BACK over the coverage floor, 0.475 → 0.550), +0.048, +0.003;
+  fast bebop +0.010 to +0.032 (St Thomas, Oleo, Mr PC). Same-11-tracks mean
+  0.633 → 0.645; one dip, Cheese Cake −0.004.
+- tie rate DOWN precisely where D14's tempo trend predicted: Cheese Cake
+  0.177 → 0.155, Mr PC 0.126 → 0.113, Oleo 0.124 → 0.105. The excess ties
+  at speed really were too-fine grids splitting values.
+- readability flat (0.9934 → 0.9925 mean), pitch F1 identical to 4 decimals
+  (the control: quantize cannot touch hearing).
+- real-audio round trip (replaying the notation, cached reviews): ballads
+  IMPROVE (median 73 → 57ms — the finer grid captures more of what was
+  played), burners pay ≤1ms median / ≤7ms p90. Synthetic acceptance sweep
+  unchanged at 0.00ms.
+
+Still open in D11: the candidate set itself is tempo-blind — `resolution`
+caps the finest grid at a sixteenth, while under 100 bpm humans put 43.6%
+of values BELOW the sixteenth. A ballad may want a 32nd-capable grid
+(divisions 8) offered at all. Not yet tried.
 
 ### D12 - We write triplets at a quarter of the human rate
 
