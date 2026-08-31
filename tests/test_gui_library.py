@@ -431,3 +431,59 @@ def test_gui_config_never_reaches_a_cache_key(config):
     baseline = json.dumps(config.stage_config("separate"), sort_keys=True)
     moved = config.model_copy(update={"gui": config.gui.model_copy(update={"port": 9999})})
     assert json.dumps(moved.stage_config("separate"), sort_keys=True) == baseline
+
+
+def test_stem_dropout_measures_digital_silence_over_the_span(config, tmp_path):
+    """The diagnostic that found R16, and it needs no reference at all: demucs
+    writes true zero where it has moved a source to another stem."""
+    soundfile = pytest.importorskip("soundfile")
+    np = pytest.importorskip("numpy")
+
+    rate = 8000
+    audio = np.full((10 * rate, 2), 0.2, "float32")
+    audio[3 * rate : 6 * rate] = 0.0  # three seconds the source left
+    path = tmp_path / "other.wav"
+    soundfile.write(path, audio, rate, subtype="FLOAT")
+
+    assert library.stem_dropout(path) == pytest.approx(0.3, abs=0.05)
+    # ...and only over the span asked about: the silence is outside this one.
+    assert library.stem_dropout(path, (6.0, 10.0)) == 0.0
+
+
+def test_choose_stem_reaches_for_the_sum_only_when_the_stem_drops_out(config, tmp_path):
+    """`other` going quiet is not a soft horn — it is a horn in another file.
+    But a clean stem must be left alone: the sum carries the partner's bleed."""
+    pytest.importorskip("soundfile")
+    import numpy as np
+    import soundfile
+
+    from swingscribe.stages.separate import stems_dir
+
+    rate = 8000
+    wav = make_audio(tmp_path / "cache" / "audio" / "norm.wav", b"normalized")
+    document = Document(
+        audio_path="orig.m4a",
+        sample_rate=44100,
+        audio=AudioRef(path=str(wav), sample_rate=44100, channels=2, duration=10.0),
+    )
+    out = stems_dir(config.cache_dir, library.file_digest(wav), "htdemucs_6s")
+    out.mkdir(parents=True)
+
+    def write(name, holes):
+        data = np.full((10 * rate, 2), 0.2, "float32")
+        for lo, hi in holes:
+            data[lo * rate : hi * rate] = 0.0
+        soundfile.write(out / f"{name}.wav", data, rate, subtype="FLOAT")
+
+    write("other", [(2, 6)])  # 40% gone — the soloist has left
+    write("vocals", [(0, 2), (6, 10)])  # and is here instead
+    stem, report = library.choose_stem(document, config, "htdemucs_6s", (0.0, 10.0))
+    assert stem == "other+vocals"
+    assert report["other"] > library.DROPOUT_LIMIT
+    assert report["other+vocals"] == 0.0
+
+    # A clean `other` is never traded for the sum.
+    write("other", [])
+    stem, report = library.choose_stem(document, config, "htdemucs_6s", (0.0, 10.0))
+    assert stem == "other"
+    assert "other+vocals" not in report  # not even built — no reason to look

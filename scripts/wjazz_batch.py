@@ -244,6 +244,8 @@ HEADERS = [
     "solo_end",
     "separation_model",
     "ensemble",
+    "stem",
+    "stem_dropout",
     "musicxml_written_at",
     "notes",
     "pitch_f1",
@@ -266,6 +268,8 @@ FIELDS = [
     "solo_end",
     "separation_model",
     "ensemble",
+    "stem",
+    "stem_dropout",
     "musicxml_written_at",
     "notes",
     "pitch_f1",
@@ -369,7 +373,13 @@ def ensure_ground_truth(
     return path
 
 
-def process_file(db: sqlite3.Connection, audio_path: Path, cache_dir: Path, log=print) -> dict:
+def process_file(
+    db: sqlite3.Connection,
+    audio_path: Path,
+    cache_dir: Path,
+    log=print,
+    fresh: bool = False,
+) -> dict:
     """Run the GUI workflow end to end for one wjazzd audio file.
 
     Always returns a dict keyed by FIELDS. On any failure `status` explains
@@ -478,12 +488,28 @@ def process_file(db: sqlite3.Connection, audio_path: Path, cache_dir: Path, log=
     # It also populates the review cache under the GUI's own key, so opening
     # this track shows the notes with no Transcribe click and no second CREPE
     # pass.
-    run_config = review.span_config(base, "other", region[0], region[1], ensemble)
+    # WHICH stem carries the solo is decided here, over the located span, from
+    # the audio alone. Demucs switches a source it cannot place between stems
+    # rather than attenuating it across them, so `other` can be digitally
+    # silent for a third of a solo while the horn plays on in `vocals` — Oleo
+    # transcribed 106 notes against WJazzD's 224 that way, and nothing
+    # reported an error. Reference-free on purpose: choosing by which stem
+    # scores better against the annotation would report a best-of-two as the
+    # transcriber's own number (see library.choose_stem).
+    stem, dropout = library.choose_stem(prepared, base, model, region, preferred="other")
+    row["stem"] = stem
+    row["stem_dropout"] = round(dropout.get("other", 0.0), 3)
+    if stem != "other":
+        log(
+            f"  [{melid}] 'other' is silent for {dropout['other']:.0%} of the span — "
+            f"transcribing {stem} ({dropout[stem]:.0%})"
+        )
+
+    run_config = review.span_config(base, stem, region[0], region[1], ensemble)
     region = run_config.transcribe.region  # rounded; the sidecar must store THIS
     started = time.time()
-    payload = review.cached_review(prepared, run_config, model) or review.analyze_and_cache(
-        prepared, run_config, model
-    )
+    payload = None if fresh else review.cached_review(prepared, run_config, model)
+    payload = payload or review.analyze_and_cache(prepared, run_config, model)
     note_dicts = payload["notes"]
     row["notes"] = len(note_dicts)  # recorded even if scoring later fails
     log(f"  [{melid}] pass 2: {len(note_dicts)} notes in {time.time() - started:.0f}s")
@@ -500,8 +526,12 @@ def process_file(db: sqlite3.Connection, audio_path: Path, cache_dir: Path, log=
         {
             "model": model,
             "ensemble": ensemble,
-            "stem": "other",
+            "stem": stem,
             "region": list(region),
+            # The batch computes a beat grid (prep_stages runs `beats`), so
+            # the track should open showing it. Without this the work is done
+            # and invisible, which reads as "the batch did not make beats".
+            "beats_shown": True,
             "time_signature": time_signature_for(db, melid),
             "transposition": "C",
             "score": str(score_path) if score_path else None,
@@ -735,6 +765,16 @@ def main() -> None:
     parser.add_argument("--random", type=int, default=None, help="N files chosen at random")
     parser.add_argument("--all", action="store_true", help="every audio file in benchmark/wjazzd")
     parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help=(
+            "re-run CREPE instead of reusing a cached review. Separation and the "
+            "beat grid are still reused — they are minutes each and a cached stem "
+            "is bit-identical to the one that made it. Use this after changing "
+            "transcribe's behaviour without changing its config."
+        ),
+    )
+    parser.add_argument(
         "--cache-dir",
         type=Path,
         default=DEFAULT_CACHE_DIR,
@@ -769,7 +809,7 @@ def main() -> None:
 
     for audio_path in files:
         print(f"\n== {audio_path.name} ==")
-        row = process_file(db, audio_path, cache_dir)
+        row = process_file(db, audio_path, cache_dir, fresh=args.fresh)
         write_row(ws, index, row)
         save_sheet(wb, ws)  # after every file: a crash mid-batch loses nothing already done
         print(f"  -> {row['status'] or 'ok'}")

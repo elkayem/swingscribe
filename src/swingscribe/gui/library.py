@@ -233,6 +233,88 @@ def resolve_stem(document: Document, config: Config, model: str, stem: str) -> s
     return str(out)
 
 
+# A stem is "silent" below this RMS. Demucs writes true digital zero where it
+# has moved a source elsewhere, so this only has to clear the noise floor of a
+# stem that IS carrying something quiet.
+SILENT_RMS = 1e-4
+
+# Fraction of a span the chosen stem may go silent for before we stop believing
+# it holds the soloist. Measured over every horn track in benchmark/: Oleo
+# reads 0.298 and every other track <=0.038, so 0.10 sits in a wide gap rather
+# than on a tuned edge. It is deliberately NOT sensitive — this decides whether
+# to consult a second stem at all, not how to transcribe.
+DROPOUT_LIMIT = 0.10
+
+
+def stem_dropout(path: str | Path, region: tuple[float, float] | None = None) -> float:
+    """Fraction of `region` this stem is digitally silent for, by 1-second bins.
+
+    Reference-free and cheap — no CREPE, no model — which is the whole point:
+    it answers "is the soloist even in here?" for a track nobody has annotated.
+    """
+    import numpy as np
+    import soundfile
+
+    info = soundfile.info(str(path))
+    lo = 0.0 if region is None else max(0.0, region[0])
+    hi = info.duration if region is None or region[1] is None else min(info.duration, region[1])
+    if hi - lo < 1.0:
+        return 0.0
+    data, rate = soundfile.read(
+        str(path),
+        dtype="float32",
+        always_2d=True,
+        start=int(lo * info.samplerate),
+        stop=int(hi * info.samplerate),
+    )
+    mono = data.mean(axis=1)
+    bins = max(1, len(mono) // rate)
+    rms = np.sqrt(
+        np.stack([mono[i * rate : (i + 1) * rate] ** 2 for i in range(bins)]).mean(axis=1)
+    )
+    return float((rms < SILENT_RMS).mean())
+
+
+def choose_stem(
+    document: Document,
+    config: Config,
+    model: str,
+    region: tuple[float, float] | None = None,
+    preferred: str = "other",
+) -> tuple[str, dict[str, float]]:
+    """The stem to transcribe, and what the choice was made on.
+
+    Demucs switches a source it cannot place between stems rather than
+    attenuating it across them, so `other` going quiet is not "the horn is
+    soft" — it is "the horn is in a different file". When the preferred stem
+    drops out over a span and summing it with a partner recovers the audio,
+    the sum is the honest choice.
+
+    Reference-free ON PURPOSE. Picking whichever stem scores better against the
+    hand annotation would report a best-of-two as if it were the transcriber's
+    own result, and would not generalise to a track with no annotation at all —
+    which is every track a user brings. This looks only at the audio.
+    """
+    stems = available_stems(document, config, model)
+    report: dict[str, float] = {}
+    if preferred not in stems:
+        return preferred, report
+    report[preferred] = stem_dropout(stems[preferred], region)
+    if report[preferred] <= DROPOUT_LIMIT:
+        return preferred, report
+    for name in combinable_stems(stems):
+        parts = name.split(COMBINED_SEPARATOR)
+        if preferred not in parts:
+            continue
+        merged = resolve_stem(document, config, model, name)
+        if merged is None:
+            continue
+        report[name] = stem_dropout(merged, region)
+        if report[name] < report[preferred]:
+            return name, report
+    return preferred, report
+
+
 def _write_stem_sum(sources: list[str], out: Path) -> None:
     """Sum several stems sample-for-sample into one wav.
 

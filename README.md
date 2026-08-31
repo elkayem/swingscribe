@@ -181,6 +181,27 @@ That downloads GeneralUser GS and the FluidSynth CLI to a directory outside
 the repo and prints where. Without them the soundfont cases skip; the
 additive ones still run.
 
+## Troubleshooting
+
+**Windows Application Control blocks `swingscribe.exe`:** if `uv run
+swingscribe <command>` fails with
+
+```
+error: Failed to spawn: `swingscribe`
+  Caused by: An Application Control policy has blocked this file. (os error 4551)
+```
+
+your machine's Application Control policy is blocking the generated
+`.venv\Scripts\swingscribe.exe` console-script shim, not the code itself.
+Run the module directly instead — `python.exe` isn't blocked, only the stub:
+
+```
+uv run python -m swingscribe.cli gui
+```
+
+Works for every subcommand (`run`, `click`, `audition`, `ab`, `gui`) — just
+swap `gui` for the one you need.
+
 ## License
 
 MIT — see `LICENSE`.

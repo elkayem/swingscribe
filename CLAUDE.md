@@ -81,6 +81,16 @@ of these has broken a tool at least once:
   resampy stub is already a no-op when the real thing imports. It means a new
   dependency that needs numba is no longer disqualified on sight — verify it
   on the machine rather than assuming either way.
+- **Application Control still blocks other things** (checked 2026-08-30): the
+  numba lift above is about numba specifically, not AC in general.
+  `uv run swingscribe <command>` fails with `error: Failed to spawn:
+  swingscribe` / `An Application Control policy has blocked this file (os
+  error 4551)` — AC is blocking the generated `.venv\Scripts\swingscribe.exe`
+  console-script shim, not the underlying code. `python.exe` itself is not
+  blocked, so run the module directly instead:
+  `uv run python -m swingscribe.cli <command>` (e.g. `... gui`). This will
+  likely recur for other packages' console-script shims too; the workaround
+  is the same.
 - Demucs separation on CPU: **`htdemucs` ~2.8 min** per 10-minute track,
   `htdemucs_6s` ~2.7, **`htdemucs_ft` ~11** — the last is a bag of FOUR models
   and that is the whole 4x. It buys nothing measurable (mean note F1 0.759 vs
