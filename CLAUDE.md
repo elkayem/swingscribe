@@ -592,6 +592,11 @@ made. Both are kept; neither subsumes the other.
   default** — the sum carries the other stem's bleed, and Oleo is the ONLY
   track in `benchmark/` that needs it (every other: <=3.8% silence, vocals/other
   ratio <=0.18, against 29.8% and 0.81). Details in R16.
+- **Stems dirs are keyed by the digest of the NORMALIZED wav, not the source
+  file.** `library.file_digest` on the original m4a names track ids and the
+  ingest wav; `stems/<digest>-<model>/` uses `file_digest(document.audio.
+  path)` — the wav ingest wrote. Hashing the source file to find a stems dir
+  finds nothing (it cost a stem-copy script a full dry run of misses).
 - **The GUI and the harness use DIFFERENT cache directories** —
   `benchmark/.swingscribe-cache` (relative to the track) versus
   `./.swingscribe-cache` (relative to the cwd run_eval is invoked from). The

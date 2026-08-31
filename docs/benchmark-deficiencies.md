@@ -600,6 +600,36 @@ to +0.024 (mean +0.003): located-span jitter, not a regression. Not
 re-pinned yet — the pin should happen once, under the new names, with the
 listener told n changed and why.
 
+### D20 - The two GUI measures disagree about which notes exist
+
+Found 2026-08-31 by classifying Confirmation's invented notes: a direct
+`ground_truth.overlay` over the AUDIBLE notes read invented=156 where the
+sheet said 214, and the difference is exactly the listener's erasures.
+`/api/tracks/{id}/notation-score` resolves erasures before scoring (the
+exported page does, so its score must); `/api/tracks/{id}/ground-truth`
+aligns the RAW review notes, so the green bar — and the batch's `pitch_*`
+columns — charge notes the listener already silenced as invented or wrong.
+On Confirmation (60 silenced) that costs ~0.03 of reported pitch F1
+(0.759 shown vs 0.790 audible-only).
+
+Neither convention is obviously wrong: raw measures the TRANSCRIBER alone,
+audible measures the product after human review — but today the sheet
+carries one of each without saying so. The display constraint is real (the
+roll must class every drawn note, silenced included), so the fix is not
+simply to filter the endpoint's input; the counts and the classes would
+need to separate. **A criteria decision for the listener**, and whichever
+way it goes, the one definition lives in the shared scoring code and the
+sheet columns must say what is in force (next-session-prompt's rule).
+
+Separately, the classification itself: Confirmation's invented notes are
+NOT junk — median confidence 0.781 (matched: 0.853, wrong: 0.701), median
+100ms, interleaved between matched notes (median 150ms to the nearest),
+and only 17 of 156 are unisons/octaves of a neighbour. They read as ghost
+notes and passing tones a human deliberately leaves off the page, which is
+a notation-philosophy gap, not a detector fault — and the measured floors
+(duration near-random, confidence 0.65 costing 7% of kept notes) already
+say no threshold removes them cleanly.
+
 ## Resolved
 
 ### R18 - A cached Document named a file that had been renamed away
