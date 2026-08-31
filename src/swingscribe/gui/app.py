@@ -540,6 +540,8 @@ def create_app(config: Config) -> FastAPI:
             )
         except gui_musicxml.NotReady as exc:
             raise HTTPException(409, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(404, f"could not read the audio for this track: {exc}") from exc
         except Exception as exc:
             raise HTTPException(500, f"could not notate the span: {exc}") from exc
 
@@ -586,6 +588,11 @@ def create_app(config: Config) -> FastAPI:
             )
         except gui_musicxml.NotReady as exc:
             raise HTTPException(409, str(exc)) from exc
+        except OSError as exc:
+            # Name the file that is actually missing. Blaming the score for an
+            # unreadable AUDIO path sent a real debugging session after the one
+            # file that was fine (docs/benchmark-deficiencies.md D18).
+            raise HTTPException(404, f"could not read the audio for this track: {exc}") from exc
         except Exception as exc:
             raise HTTPException(422, f"could not score against {score_path.name}: {exc}") from exc
 

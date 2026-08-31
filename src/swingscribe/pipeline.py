@@ -94,7 +94,30 @@ def cached_document(
     for name, stage in stages:
         key = stage_key(key, _cache_name(name, stage), config.stage_config(name))
     payload = cache.get(key)
-    return None if payload is None else Document.model_validate_json(payload)
+    return None if payload is None else _for_path(payload, audio_path)
+
+
+def _for_path(payload: bytes, audio_path: str | Path) -> Document:
+    """A cached Document, re-pointed at the file it was just asked about.
+
+    A cache key is content plus config, never the path (cache.py), and that is
+    the design working: the same bytes under a new name are legitimately the
+    same entry, so renaming a track must not throw away its separation. But the
+    cached PAYLOAD is a whole Document with `audio_path` inside it, so a hit
+    restores whatever path was true the first time those bytes were ingested.
+    That name may since have been renamed away — or, where byte-identical
+    copies are filed under different names, may belong to a different track
+    entirely (docs/benchmark-deficiencies.md D18).
+
+    Every reader downstream takes `audio_path` to mean "the file this Document
+    is about": `beat_times` re-derives a cache key from it (gui/musicxml.py)
+    and `export` takes the part name from it. Neither can be right if the field
+    outlives the name it was stored under, so the caller's path wins. Stamping
+    it invalidates nothing, because the path reaches no key.
+    """
+    document = Document.model_validate_json(payload)
+    document.audio_path = str(audio_path)
+    return document
 
 
 def _cache_name(name: str, stage: Stage) -> str:
@@ -125,7 +148,7 @@ def _run_stages(
             # Report cache hits too: a UI must be able to tell "finished in
             # 20ms because it was cached" from "still thinking".
             progress.report(name, 1.0, "cached", cached=True)
-            doc = Document.model_validate_json(cached)
+            doc = _for_path(cached, audio_path)
         else:
             progress.report(name, 0.0, "started")
             doc = stage(doc, config)

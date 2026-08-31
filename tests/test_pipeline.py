@@ -4,6 +4,8 @@ No real stage logic exists in M0; these tests inject fake stages to prove the
 cache-aware run loop behaves per plan §3.
 """
 
+from pathlib import Path
+
 import pytest
 
 from swingscribe import pipeline
@@ -118,6 +120,39 @@ def test_second_run_hits_cache(tmp_path):
     assert first.stems == {"drums": "drums.wav"}
     assert second.stems == {"drums": "drums.wav"}
     assert calls == ["separate"]  # the second run never re-ran the stage
+
+
+def test_cache_hit_keeps_the_path_it_was_asked_about(tmp_path):
+    """A cached Document must name the file the caller asked for, not the one
+    those bytes were first ingested under.
+
+    Keys are content plus config, so a renamed file — or a byte-identical copy
+    filed under a second name — hits the same entry and used to restore the
+    first name with it. Readers treat `audio_path` as the file the Document is
+    about: `beat_times` re-derives a cache key from it, so a stale name there
+    looked up a track that no longer existed and the GUI's Score button died on
+    a file nobody had opened (docs/benchmark-deficiencies.md D18).
+    """
+
+    def separate(doc, config):
+        return doc.model_copy(update={"stems": {"drums": "drums.wav"}})
+
+    stages = [("separate", separate)]
+    config = make_config(tmp_path)
+    original = write_audio(tmp_path)
+    pipeline.run(original, config, stages=stages)
+
+    # The same bytes under a second name: legitimately the same cache entry.
+    copy = tmp_path / "renamed.audio"
+    copy.write_bytes(Path(original).read_bytes())
+
+    from_cache = pipeline.run(str(copy), config, stages=stages)
+    assert from_cache.audio_path == str(copy)
+    assert from_cache.stems == {"drums": "drums.wav"}  # still a hit, not a re-run
+
+    peeked = pipeline.cached_document(str(copy), config, stages=stages)
+    assert peeked is not None
+    assert peeked.audio_path == str(copy)
 
 
 def test_upstream_config_change_reruns_downstream(tmp_path):

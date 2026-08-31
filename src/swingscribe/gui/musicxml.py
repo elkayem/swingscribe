@@ -55,17 +55,23 @@ def export_path(audio_path: str | Path, region: tuple[float, float | None] | Non
     return source.with_name(f"{source.stem}.{span}.musicxml")
 
 
-def beat_times(document: Document, config: Config) -> list[float]:
-    """The tracked beats for this document, or raise if they are not cached.
+def beat_times(audio_path: str | Path, config: Config) -> list[float]:
+    """The tracked beats for this track, or raise if they are not cached.
 
     Never tracks them: this endpoint must stay as cheap as the review it sits
     beside, and the Beats button already exists to do the work.
+
+    Takes the path rather than reading `document.audio_path`, which is the
+    same fact the caller already holds. The Document's copy is restored from
+    whatever the cache stored (pipeline._for_path); the path passed in is the
+    file the request is actually about, and re-deriving a cache key from
+    anything else looks up a different track.
     """
     from swingscribe import pipeline
     from swingscribe.stages import beats, ingest
 
     cached = pipeline.cached_document(
-        document.audio_path,
+        audio_path,
         config,
         stages=[("ingest", ingest.run), ("beats", beats.run)],
     )
@@ -122,7 +128,7 @@ def build_notation(
     if not notes:
         raise NotReady("nothing to notate - every note in this span is silenced")
 
-    beats = beat_times(document, config)
+    beats = beat_times(audio_path, config)
     region = run_config.transcribe.region or (0.0, None)
     stem = run_config.transcribe.stem
     signature, pulses = meter_from_settings(

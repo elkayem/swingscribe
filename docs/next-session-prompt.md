@@ -5,9 +5,18 @@ Paste this in to start.
 ---
 
 I want to focus this session entirely on **transcript accuracy and
-readability** — making the scores SwingScribe produces look like the hand
-transcriptions in `benchmark/`, without missing notes that are clearly audible
-and without adding ones that are not there.
+readability** — not missing notes that are clearly audible, not adding ones
+that are not there, and writing what is there the way a human writes it.
+
+**Scope: start with `benchmark/wjazzd/`.** The target for this session is
+the WJazzD solos, measured through `scripts/wjazz_batch.py` (below). The
+hand transcriptions elsewhere in `benchmark/` are my own, and they —
+including the piano solos — are the long-term target, but not where this
+session starts. Use them the way the handoff already does — as anchors and
+evidence (the 0.995 readability anchor, the 0.022 tie rate, the 4.1%
+triplet rate) — but do not spend this session optimising the MuseScore
+benchmark numbers directly. When the wjazzd numbers move, confirming via
+`run_eval.py` that the MuseScore measures did not regress is enough.
 
 Before doing anything, read `CLAUDE.md` and then `docs/handoff-accuracy.md`.
 The handoff is the important one: it lists what has already been measured and
@@ -35,6 +44,24 @@ twenty benchmarked solos is under 100 bpm** (D16). Our notated rhythm shows no
 tempo trend, which is not evidence that we are fine at slow tempos — it is
 evidence that the benchmark cannot tell. Adding two or three ballads to
 `benchmark/wjazzd/` makes the existing measures able to fail.
+
+**And one harness bug with its fix already measured — do this early (D19).**
+`fit_affine` clamps the playback-rate it will consider to ±0.6%
+(`wjazz.py:43`), and the benchmark's copy of So What plays 2.26% slower than
+the copy WJazzD annotated (the *Kind of Blue* speed fault). The batch
+therefore reports "wrong file/take" at 10% matched where a free-rate fit
+reads 82–84% — and one speed fault takes out all three So What solos, since
+the same bytes carry Miles', Coltrane's and Cannonball's rows. The control
+is already done: with the rate freed, six known-wrong pairings stay at
+chance (1.5–6.9%), so widening does not manufacture agreement. Widen
+`RATE_LOW`/`RATE_HIGH` to about ±3%, re-run the So What rows, and then
+audit the sheet for the silent half of this bug: any pairing whose fitted
+rate sits AT the clamp boundary (0.994/1.006) may have cleared the 15%
+floor while being scored against a drifting clock, which depresses
+`pitch_*` and shifts the located span with no error anywhere. The sheet
+does not record the fitted rate today — adding a `fit_rate` column makes
+this auditable. `fit_affine` is shared with `score_wjazz.identify_all`, so
+say what `run_eval`'s means do when you make the change.
 
 How to measure:
 

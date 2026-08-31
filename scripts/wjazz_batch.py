@@ -329,28 +329,18 @@ def ground_truth_path(performer: str, title: str, titleaddon: str, melid: int) -
 
 
 def run_pipeline(audio_path: Path, config, stages):
-    """pipeline.run, with the Document's own audio_path forced back to the
-    file we actually asked for.
+    """pipeline.run, kept as a name for what this script means by a run.
 
-    A stage cache key is content+config only, never the path (cache.py) — a
-    cache HIT at any stage restores whatever `audio_path` was true when that
-    exact key was first written, which can be a different filename entirely.
-    Normally harmless (the same bytes are usually opened under the same
-    name), but two files here really are byte-identical copies under
-    different names (Miles_Davis_Dolores_solo_314.m4a and
-    Wayne_Shorter_Dolores_solo_427.m4a — CLAUDE.md), and this machine's
-    cache already held at least one more such collision from unrelated past
-    work. A stale path here would misdirect the cache lookup `beat_times`
-    does inside export_span/score_span (gui/musicxml.py) — it re-reads
-    `document.audio_path`, not the audio_path those functions were called
-    with — and fail on a file that was never opened this run.
+    This used to force `document.audio_path` back to the file we asked for,
+    because a cache hit restored whatever path was true when that key was
+    first written — and the audio here is full of byte-identical copies under
+    different names (docs/benchmark-deficiencies.md D18). `pipeline` now
+    guarantees that itself for every caller, so the correction is gone rather
+    than duplicated: the GUI had the same bug and did not have this wrapper.
     """
     from swingscribe import pipeline
 
-    document = pipeline.run(str(audio_path), config, stages=stages)
-    if document.audio_path != str(audio_path):
-        document = document.model_copy(update={"audio_path": str(audio_path)})
-    return document
+    return pipeline.run(str(audio_path), config, stages=stages)
 
 
 def ensure_ground_truth(
