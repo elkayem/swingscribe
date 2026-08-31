@@ -671,9 +671,22 @@ def sync_table(ws) -> None:
 
 
 def save_sheet(wb, ws) -> None:
-    """The only way this script writes the file — table kept in step."""
+    """The only way this script writes the file — table kept in step.
+
+    A PermissionError here means the spreadsheet is open in Excel, which takes
+    an exclusive lock. That is worth catching by name rather than letting a
+    zipfile traceback out of openpyxl's writer: the cause is not in the stack,
+    and the run may have spent minutes of CREPE before reaching this line.
+    """
     sync_table(ws)
-    wb.save(SHEET_PATH)
+    try:
+        wb.save(SHEET_PATH)
+    except PermissionError as exc:
+        raise SystemExit(
+            f"cannot write {SHEET_PATH.name}: it is open in another program "
+            f"(Excel takes an exclusive lock, and leaves a ~${SHEET_PATH.name} "
+            f"beside it while it holds one).\nClose it and re-run.\n  {SHEET_PATH}"
+        ) from exc
 
 
 def load_or_create_sheet(db: sqlite3.Connection):

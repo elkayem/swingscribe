@@ -35,6 +35,23 @@ Everything runs in one command:
 It exits non-zero when a baseline moves. That is the point. `--pin` rewrites
 them, and CLAUDE.md's rule stands: say what moved and why.
 
+**Newer than this handoff: `scripts/wjazz_batch.py` is now the main vehicle
+for measuring end-to-end performance.** It runs the GUI's whole workflow
+unattended over every audio file in `benchmark/wjazzd/` — separate, locate
+the solo by content, transcribe the located span through the GUI's own
+review path, export MusicXML, score against the reference in
+`../wjazz-scores/` — and writes one row per solo to
+`benchmark/wjazzd/wjazzd_benchmark_test.xlsx`, carrying both the pitch
+measure and the notation measure, prefixed apart. **The GUI workflow is the
+product, and the batch is authoritative because it faithfully runs it** —
+if `run_eval.py` (or anything else) disagrees with the GUI's Score It
+button for the same track, the other harness is the one that is wrong; fix
+it to match the GUI, never the reverse. `run_eval.py` keeps its use as the
+pinned-baseline regression gate. The batch's module docstring is the
+documentation and is worth reading in full — the cache sharing, the
+two-pass solo location, and the GUI-exact rounding are all things that bit
+once already.
+
 ---
 
 ## 2. What has already been measured — do not redo these
@@ -223,6 +240,23 @@ My reading of the material available:
 
 ## 4. Instruments that now exist — use them, do not rebuild them
 
+- **`scripts/wjazz_batch.py`** (added after this handoff was written) — the
+  whole GUI workflow, unattended, over `benchmark/wjazzd/`. The spreadsheet
+  it maintains (`benchmark/wjazzd/wjazzd_benchmark_test.xlsx`, one row per
+  melid, never committed) **may be stale when you arrive** — the
+  `musicxml_written_at` column says when each row was computed. A full
+  `--all` run takes 5+ hours and is an overnight, propose-it-first affair;
+  iterate on a fixed subset (`--file`, repeatable — fixed so deltas stay
+  comparable) and true up the whole sheet only when substantial changes
+  have accumulated. Cached separations and beat grids make subset re-runs
+  cheap; `--fresh` (or bumping `transcribe.CACHE_VERSION`) is required
+  after changing transcribe's behaviour without changing its config, or
+  cached reviews are served back unchanged. The scoring criteria live in
+  exactly ONE place — the shared code the GUI's Score It button calls
+  (`benchmark.score_against_notation`, `gui/ground_truth.py`) — and the
+  batch references it, never a private variant. Revisions are allowed, in
+  that one place, with the spreadsheet columns updated to match, so the
+  sheet always reports the criteria actually in force.
 - **`benchmark.readability(notation)`** — needs no reference, so it runs over
   every notation the harness can build, not only the ten with hand scores.
   Reports `short_rests`, `short_values`, `tie_rate` and a composite. Anchored:
