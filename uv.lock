@@ -1016,11 +1016,11 @@ wheels = [
 
 [[package]]
 name = "setuptools"
-version = "84.0.0"
+version = "81.0.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/6d/44/f5da03a8ef95d369145c5bb53050e7877c9f3d312e128605fd9504829143/setuptools-84.0.0.tar.gz", hash = "sha256:f4695c21257f0d9b537ec2692c941d02ee143b7cc1276941349a546573b2ef73", size = 1168449, upload-time = "2026-08-08T18:27:58.365Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0d/1c/73e719955c59b8e424d015ab450f51c0af856ae46ea2da83eba51cc88de1/setuptools-81.0.0.tar.gz", hash = "sha256:487b53915f52501f0a79ccfd0c02c165ffe06631443a886740b91af4b7a5845a", size = 1198299, upload-time = "2026-02-06T21:10:39.601Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/9c/c510029fc6ef33a6275cd2c5d3cecd6613dfd6aa401d57c54f1c18852ccf/setuptools-84.0.0-py3-none-any.whl", hash = "sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670", size = 818216, upload-time = "2026-08-08T18:27:56.719Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/e3/c164c88b2e5ce7b24d667b9bd83589cf4f3520d97cad01534cd3c4f55fdb/setuptools-81.0.0-py3-none-any.whl", hash = "sha256:fdd925d5c5d9f62e4b74b30d6dd7828ce236fd6ed998a08d81de62ce5a6310d6", size = 1062021, upload-time = "2026-02-06T21:10:37.175Z" },
 ]
 
 [[package]]
@@ -1149,8 +1149,8 @@ ml = [
     { name = "piano-transcription-inference", specifier = ">=0.0.6" },
     { name = "pretty-midi", specifier = ">=0.2.10" },
     { name = "soundfile", specifier = ">=0.12" },
-    { name = "torch", specifier = ">=2.4", index = "https://download.pytorch.org/whl/cpu" },
-    { name = "torchaudio", specifier = ">=2.4", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "torch", specifier = ">=2.4,<2.13", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "torchaudio", specifier = ">=2.4,<2.13", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torchcrepe", specifier = ">=0.0.23" },
 ]
 
@@ -1177,7 +1177,7 @@ wheels = [
 
 [[package]]
 name = "torch"
-version = "2.13.0+cpu"
+version = "2.12.1+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 dependencies = [
     { name = "filelock" },
@@ -1189,11 +1189,11 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-linux_s390x.whl", hash = "sha256:6e9817dbdf5ea76789babd46e457eac5bf14ff566cf85f8addbfdff2d56601ce", upload-time = "2026-07-08T19:27:52Z" },
-    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:84453b69508ec79902f899c5ed9495acb9e2bbe9fda5f1d5d6f19e3c3842e1a7", upload-time = "2026-07-08T19:28:03Z" },
-    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:6746dbcbeb526eb61330b76b41ff1b4eb848951103a892eeb080dfa2b264667b", upload-time = "2026-07-08T19:28:16Z" },
-    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-win_amd64.whl", hash = "sha256:10717d8b3b67c45a4788bf7ffc0bab1ea1e5ebbedd24466be6100102d141fac1", upload-time = "2026-07-08T19:28:27Z" },
-    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-win_arm64.whl", hash = "sha256:2b3d093abd919ad934c43d47e73ba63ceba7cbd7269fc2e9c1e4fc29e8fe45fa", upload-time = "2026-07-08T19:28:33Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.12.1%2Bcpu-cp311-cp311-linux_s390x.whl", hash = "sha256:c6cf299bad55b045abdc0969f298385845c25bc8ace587215e5538d6a73e7712", upload-time = "2026-06-18T01:56:56Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.12.1%2Bcpu-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:6d1b61e53a2c000e1e5cc49fc88aebc665bdf02c63910c243116d395d7cbc164", upload-time = "2026-06-18T01:57:02Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.12.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:04cd8b002c03dd6a246fbb4ae5abf1edd42adf0a9929ad82162c973e5737b5ac", upload-time = "2026-06-18T01:57:09Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.12.1%2Bcpu-cp311-cp311-win_amd64.whl", hash = "sha256:cf9ef28ef8d1a7d56aba206780cbb09e8a643a942f26a2374ab21b9a02b9d9fd", upload-time = "2026-06-18T01:57:15Z" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.12.1%2Bcpu-cp311-cp311-win_arm64.whl", hash = "sha256:9b4f554e5e461545b1b42551e27f97b4fbc58e05f2bad0603120aa929d4562e1", upload-time = "2026-06-18T01:57:19Z" },
 ]
 
 [[package]]

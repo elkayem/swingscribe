@@ -71,16 +71,50 @@ of these has broken a tool at least once:
   `ingest.find_ffmpeg()` locates it there when `shutil.which` finds nothing,
   so the app itself doesn't need PATH fixed — but a shell running the tools
   by hand (this file's other commands, ad hoc scripts) still does.
-- **numba now works here again** (checked 2026-08-25: numba 0.67 / llvmlite
-  0.49 JIT-compile in 0.4s, and librosa 0.11's stft and resample both run).
-  The Application Control block that shaped several decisions has lifted, and
-  librosa has in fact been installed all along as a torchcrepe dependency.
-  This does NOT mean go and add librosa: the numba-free replacements
-  (hand-rolled spectral flux, torchaudio resampling, the weighted_argmax
-  decoder) are measured and working, and `transcribe._import_torchcrepe`'s
-  resampy stub is already a no-op when the real thing imports. It means a new
-  dependency that needs numba is no longer disqualified on sight — verify it
-  on the machine rather than assuming either way.
+- **Smart App Control is ON and enforcing** (`HKLM:\SYSTEM\CurrentControlSet\
+  Control\CI\Policy\VerifiedAndReputablePolicyState = 1`, Microsoft's in-box
+  policy `{0283AC0F-...}`). It judges by Microsoft's REPUTATION graph, not by
+  signature, and it has **no allowlist or exclusion by design** — the only
+  ways out are a version with reputation, or turning SAC off for good (it
+  cannot be re-enabled without a clean Windows install). Blocked files raise
+  **`OSError: [WinError 4551]`**, or `WinError 126` if someone has "fixed" it
+  by renaming the file away — which is worse, because the error stops naming
+  the cause.
+  - Reputation is per-FILE and unrelated to size or signing: torch's 290MB
+    unsigned `torch_cpu.dll` loads fine while its 15KB unsigned `shm.dll`
+    does not. Suspect the newest release first.
+  - **torch is pinned `<2.13` for this reason** (pyproject). Probed every
+    cp311 win_amd64 +cpu wheel: 2.4.0-2.12.1 all load, 2.13.0 alone is
+    blocked. Verified 2.12.1 changes NO measurement — Oleo reads note F1
+    0.497/0.824 on both. Re-probe occasionally; reputation accrues. The probe
+    is a range read of ~1MB per wheel (`zipfile` over an HTTP `Range` reader),
+    not a 600MB download — do that rather than installing to test.
+  - **`swingscribe.exe` is permanently blocked and always will be.** uv/pip
+    generate that console-script stub uniquely per install, so it can never
+    accumulate reputation. **Launch with `.venv\Scripts\python.exe -m
+    swingscribe.cli ...`** — `swingscribe gui` cannot work here.
+- **numba is blocked again** (2026-08-30): `numba/experimental/jitclass/
+  _box.cp311-win_amd64.pyd` raises WinError 4551, so a bare `import
+  torchcrepe` fails — it pulls librosa, which pulls numba. This does NOT
+  break the pipeline: `transcribe._import_torchcrepe` is the shim that exists
+  for exactly this and still imports cleanly. Never "fix" a numba failure by
+  reaching for librosa; the numba-free replacements (hand-rolled spectral
+  flux, torchaudio resampling, the weighted_argmax decoder) are measured and
+  working. A 2026-08-25 note here said the block had lifted — it had, and
+  then it came back, so treat "does Application Control allow X today" as a
+  thing to TEST rather than a fact to remember.
+- **The CA bundle goes stale.** `uv`/Python downloads fail with
+  `CERTIFICATE_VERIFY_FAILED` when the intercepting certs rotate; regenerate
+  `%USERPROFILE%\.windows-ca-bundle.pem` from `Cert:\*\Root` and `Cert:\*\CA`
+  (141 certs as of 2026-08-30). Also: download.pytorch.org returns **403
+  without a browser-ish User-Agent**.
+- **`uv sync` fails on OneDrive-locked `.dist-info` directories** ("failed to
+  remove directory ... Access is denied", os error 5) — and it is NOT only
+  `swingscribe-0.1.0.dist-info`; it moves around (`et_xmlfile`, `openpyxl`,
+  `static_runtime`, `licenses`). Loop: run sync, parse the path out of the
+  error, delete it, retry. Three passes was typical. A partial sync leaves
+  packages UNINSTALLED (openpyxl went missing this way), so re-run until it
+  reports success rather than assuming the first error was cosmetic.
 - **Application Control still blocks other things** (checked 2026-08-30): the
   numba lift above is about numba specifically, not AC in general.
   `uv run swingscribe <command>` fails with `error: Failed to spawn:

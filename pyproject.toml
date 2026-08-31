@@ -26,8 +26,20 @@ dev = [
 # therefore CI — never installs it. Dev machines opt in once:
 #   uv sync --group ml
 ml = [
-    "torch>=2.4",
-    "torchaudio>=2.4",
+    # Upper bound is SMART APP CONTROL, not an API incompatibility. SAC judges
+    # by Microsoft's reputation graph, not by signature: torch 2.13.0's
+    # `torch/lib/shm.dll` is too new to have earned reputation, so Windows
+    # refuses to load it (WinError 4551) — and it is a link-time dependency of
+    # torch_python.dll, so `import torch` dies outright. Nothing else in the
+    # wheel is affected; the 290MB torch_cpu.dll beside it is equally unsigned
+    # and loads fine. SAC has no allowlist by design, so pinning is the only
+    # fix that does not mean turning a security feature off for good.
+    # Probed every cp311 win_amd64 +cpu wheel on download.pytorch.org:
+    # 2.4.0 through 2.12.1 all load, 2.13.0 alone is blocked. Reputation
+    # accrues over time, so retry the bound occasionally — the probe is a
+    # range read of ~1MB per wheel, not a download.
+    "torch>=2.4,<2.13",
+    "torchaudio>=2.4,<2.13",
     "demucs>=4.0",
     "soundfile>=0.12",
     # No madmom, deliberately: we run beat_this with dbn=False (plan §2).
