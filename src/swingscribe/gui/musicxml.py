@@ -164,6 +164,7 @@ def export_span(
     second_voice: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Write the reviewed span to MusicXML and say what was written."""
+    from swingscribe.benchmark import readability
     from swingscribe.stages.export import to_musicxml
 
     notation = build_notation(
@@ -179,6 +180,9 @@ def export_span(
     except OSError as exc:
         raise NotReady(f"could not write beside the audio: {exc}") from exc
 
+    # Reference-free, a property of the page just written (benchmark.py):
+    # reported with the export because this is the moment the page exists.
+    readable = readability(notation)
     return {
         "path": str(path),
         "name": path.name,
@@ -188,6 +192,10 @@ def export_span(
         "swing": notation.swing,
         "transpose": notation.transpose,
         "time_signature": f"{signature[0]}/{signature[1]}",
+        "readability": readable["readability"],
+        "tie_rate": readable["tie_rate"],
+        "short_rests": readable["short_rests"],
+        "short_values": readable["short_values"],
     }
 
 

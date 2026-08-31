@@ -408,6 +408,10 @@ the wrong voice, which is exactly what these numbers look like.
 Untried: a different stem, and whether the `other` stem of `htdemucs_6s` is
 actually holding the horns alone here.
 
+**Overturned by D19.** The "measured rate of 1.004-1.008" that ruled out a
+wrong issue was itself pinned at `fit_affine`'s clamp ceiling; the true rate
+is +2.26% and the notes were right all along, read against a drifting clock.
+
 ### D9 — Metheny's guitar line notates worst of anything measured
 
 `Nothing Personal` (Pat Metheny, 242 bpm) is heard well — WJazzD note F1
@@ -441,7 +445,171 @@ matters: a configuration that transcribes BETTER can be reported as
 unidentifiable. A cheap guard would be to keep the rate-1.0 scan's best as a
 floor and take it whenever the anchored fit scores worse.
 
+### D18 - Twelve groups of benchmark tracks are byte-identical, and identity is content
+
+`benchmark/wjazzd/` holds **12 groups of files that are the same bytes under
+different names**, because one recording carries several annotated solos and
+each gets its own sidecar. Oleo is a group of three:
+
+```
+1f42971d638d5685  John_Coltrane_Oleo_solo_231.m4a
+                  Miles_Davis_Oleo_solo_320.m4a
+                  Red_Garland_Oleo_solo_365.m4a
+```
+
+The others are pairs: Maiden Voyage, Speak No Evil, Orbits, Blues In The
+Closet, Crazy Rhythm, Walkin', In 'n Out, The Sidewinder, Totem Pole, Blue
+Train, Dolores. This is D13 from the other side — there the filename
+under-reports what is inside one file, here several filenames *are* one file.
+
+Everything keyed by content therefore collides, by design and correctly: one
+separation and one beat grid serve all three Oleos, which is the caching
+scheme working. What collides *incorrectly* is anything that means "which
+track is this":
+
+- **`Document.audio_path` used to come back from the cache**, naming whichever
+  file those bytes were first ingested under. Fixed in `pipeline._for_path`;
+  the symptom is written up below.
+- **`library.file_digest` is `sha256(bytes)[:16]`, so all three Oleos share one
+  track id.** `recents.json` holds a single entry for `1f42971d638d5685`, and
+  `resolve()` returns whichever was opened last. Open Coltrane's Oleo and a
+  still-open Miles page resolves to Coltrane's document. **Not fixed** — it
+  needs the path folded into the identity, or a recents index keyed on both.
+  Per-track judgements are safe: `load_settings` prefers the path-based
+  sidecar and all three have one on disk.
+
+The trap is that the loud failure and the silent one look nothing alike. The
+two caches on this machine held both at once for the same audio:
+
+| cache | cached `audio_path` | result |
+|---|---|---|
+| `.swingscribe-cache` | `04 Oleo.m4a` (renamed away) | `FileNotFoundError` |
+| `benchmark/.swingscribe-cache` | `John_Coltrane_Oleo_solo_231.m4a` | proceeds as the wrong soloist |
+
+Prefer the loud one. A benchmark number attributed to the wrong soloist is
+exactly the class of error this document exists to catch.
+
+### D19 - `fit_affine`'s rate clamp (±0.6%) is narrower than a real speed fault
+
+Found 2026-08-31, diagnosing why the batch reported Cannonball's So What
+(melid 48) as "wrong file/take" at 10% matched while the GUI's Score It
+lined up 358 of 445 notes on the same audio. The disagreement is the usual
+one in a new place: Score It aligns time-free (pitch sequence, no clock),
+`fit_affine` is a clock fit — and only the clock fit broke.
+
+The copy of So What in `benchmark/wjazzd/` plays **2.26% slower** than the
+copy WJazzD annotated — the well-known *Kind of Blue* side-1 speed fault
+(ours is the in-tune copy; theirs runs ~39 cents sharp). `fit_affine`'s
+two-anchor machinery derives a rate of 1.02305, within 0.05% of the truth —
+and `wjazz.py:113` clamps it into `[RATE_LOW, RATE_HIGH] = [0.994, 1.006]`.
+Held at +0.6% against a true +2.26%, the reference drifts ~1.7 s across the
+solo, only chance hits survive, and 10% falls under `MIN_MATCH_RATE = 0.15`.
+
+Measured, all on cached transcriptions:
+
+| fit | rate | matched |
+|---|---|---|
+| shipped `fit_affine` (clamped) | 1.0060 (the clamp ceiling) | 46/445 = **10%** |
+| same code, clamp lifted | 1.0224 | 363/445 = **82%** |
+| 2-D scan over the listener's hand-drawn span | 1.02260 | 372/445 = **84%** |
+
+84% is the top of the range this project sees, and the located span
+(317.5-424.8 s) lands within a second of the hand-drawn one (316.6-426.2 s).
+
+**The control is already done.** The same free-rate fit over the sheet's six
+other "wrong file/take" rows (Ornithology 61, Crazy Rhythm 399, Dolores 427,
+Orbits 434, Cherokee 446/447) stays at chance — 1.5-6.9% — so freeing the
+rate does not manufacture agreement; `MIN_MATCH_RATE` keeps doing the actual
+gatekeeping. (The two Cherokees also look badly under-transcribed — 377 and
+280 notes against 679 and 655 reference — which is its own thread.)
+
+This overturns D10 (noted there): all three So What soloists were right
+notes against a drifting clock, not wrong notes — and the same bytes carry
+Miles' and Coltrane's solos (D18), so one speed fault took out three rows.
+
+**The silent half, unmeasured:** a pairing whose true rate sits outside the
+clamp but which still clears the 15% floor gets *scored*, with a drifting
+reference depressing `pitch_*` and misplacing the located span, and no error
+anywhere. Any row whose fitted rate sits AT 0.994 or 1.006 is suspect — the
+clamp boundary is a confession. The sheet does not currently record the
+fitted rate; a `fit_rate` column would make this auditable at a glance.
+
+**Applied 2026-08-30**: `RATE_LOW`/`RATE_HIGH` widened to 0.97/1.03, and
+`_centre` now refines BOTH parameters by least squares over the matched
+pairs — at ±3% the plateau is wide enough in rate that offset-only centring
+left the fit a step or two wide, 33ms of placement error at the ends of a
+60s solo (caught by the new `test_recovers_a_mastering_speed_fault`).
+
+Re-measured on the real audio: So What (48) fits rate 1.02244, 82% matched,
+and scores pitch F1 **0.861** / notation rhythm **0.638 at coverage 0.829**
+where the sheet said "wrong file/take". The batch records `fit_rate` per row
+now, written before the match-rate gate so rejected rows show the rate they
+were rejected at.
+
+**The silent half existed but was benign — measured, not assumed.** An
+audit over every cached pass-1 transcription (free-rate fit, no CREPE)
+found six scored rows outside the old clamp: Donna Lee 55 at 0.9929,
+Embraceable You 56 at 1.0076, Long Ago and Far Away 73 at **0.9887**, Sandu
+94 at 1.0070, JJ's Walkin' 196 at 0.9935, St Thomas 385 at **0.9915**. All
+six re-run with the free rate moved at noise level, in both directions
+(mean rhythm over the six 0.669 → 0.664; pitch F1 within ±0.010). The
+paragraph above predicted depressed `pitch_*`, and that was wrong: both
+scoring measures are TIME-FREE aligners, so the fit's clock only places the
+span — a sub-1% drift moves the span edges by well under the 1s margin.
+The clamp does real damage only when drift pushes the match below the 15%
+floor and the row is not scored at all, which is exactly So What.
+
+Every known-wrong pairing stays below the 15% floor with the clamp wide
+(1.2-4.6%), confirming the control on the full set. Wrong-take fits now
+wander toward the new clamp edges (Cherokee II lands AT 0.97), which is
+expected — a failed fit buys the most chance agreement at maximum drift —
+and harmless, because the floor is what gatekeeps.
+
+**`run_eval` after the change (2026-08-30, full folder trued up):** the
+only summary movements are n going 20 → 21 (So What joins) and the means
+riding it — wjazz note F1 0.8095 → 0.8175, beat F1 0.940 → 0.956. The
+MuseScore means did not move (note F1 0.447 = the pinned 0.4472). No
+same-key per-track value moved at all; the ~670 remaining diff lines are
+rename churn — the pins predate the `_solo_NNN` renaming (last pinned
+e9968c9, 2026-08-27), so every old key reads "gone" and every current key
+"new". Rename-aware, the 13 tracks present under both names moved -0.020
+to +0.024 (mean +0.003): located-span jitter, not a regression. Not
+re-pinned yet — the pin should happen once, under the new names, with the
+listener told n changed and why.
+
 ## Resolved
+
+### R18 - A cached Document named a file that had been renamed away
+
+The GUI's Score button on Miles' Oleo failed with
+
+```
+could not score against Miles_Davis_Oleo_solo_320.musicxml:
+[Errno 2] No such file or directory: '...\benchmark\04 Oleo.m4a'
+```
+
+and the message named the one file that was fine. `04 Oleo.m4a` was this audio
+before it was refiled under WJazzD naming; the ingest entry keyed by its
+content still carried the old path, because a cache key is content plus config
+and the cached payload is a whole `Document` with `audio_path` inside it. A
+hit restored the name along with the data.
+
+`beat_times` then re-derived a cache key from `document.audio_path` rather than
+the path it had been handed (`gui/musicxml.py`), and read a file that no longer
+existed. Export was broken the same way; `stages/export.py` takes its part name
+from the same field, so a pipeline export would have titled the part `04 Oleo`.
+
+**This bug had already been found once and fixed in one caller.**
+`scripts/wjazz_batch.py` carried a `run_pipeline` wrapper whose docstring
+diagnosed it precisely — naming `beat_times` and the byte-identical Dolores
+pair — while the GUI, which had the same bug, had no such wrapper. The fix
+belongs where the invariant is: `pipeline._for_path` stamps the caller's path
+onto every Document loaded from cache, and the wrapper is gone. Stamping
+invalidates nothing, because the path reaches no key — no separation and no
+CREPE was recomputed, and stale entries heal on next read.
+
+The misleading message is fixed too: an unreadable audio path now returns 404
+naming the audio, instead of a 422 blaming the score.
 
 ### R16 - Demucs switched a soloist between stems, and half a solo went missing
 

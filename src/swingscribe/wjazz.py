@@ -2,8 +2,10 @@
 
 WJazzD annotates note onsets in seconds against its own copy of a recording.
 Ours come from the user's copy. Two CD issues of one master can differ in
-where the track starts and, by a few tenths of a percent, in playback speed,
-so before anything can be scored the two have to be put on one clock.
+where the track starts and in playback speed — usually by tenths of a
+percent, but a mastering fault can reach a few percent (Kind of Blue's side
+1 is the famous one, and it is in this benchmark) — so before anything can
+be scored the two have to be put on one clock.
 
 That is two parameters -- offset and rate -- for a whole solo, and it has
 been got wrong twice, which is why it lives here with tests instead of inside
@@ -40,7 +42,14 @@ MIN_MARGIN = 2.5
 # grounds that they could not be told apart. They could: they are both there.
 CONFIDENT_MATCH_RATE = 0.40
 STOPWORDS = frozenset({"the", "a", "an", "of", "on", "solo", "and"})
-RATE_LOW, RATE_HIGH, RATE_STEP = 0.994, 1.006, 0.0005
+# Real speed faults exceed a few tenths of a percent: the benchmark's So What
+# runs 2.26% slower than the copy WJazzD annotated (the Kind of Blue side-1
+# fault), and a clamp of ±0.6% held the fit at its ceiling and reported three
+# right transcriptions as "wrong file/take" at 10% matched. The control that
+# says widening does not manufacture agreement: with the rate freed, six
+# known-wrong pairings stay at chance (1.5-6.9%), so MIN_MATCH_RATE keeps
+# doing the gatekeeping (docs/benchmark-deficiencies.md D19).
+RATE_LOW, RATE_HIGH, RATE_STEP = 0.97, 1.03, 0.0005
 
 
 def title_tokens(name: str) -> set[str]:
@@ -85,9 +94,12 @@ def fit_affine(ref_on, ref_p, est_on, est_p, region):
 
     Instead each end of the solo is located on its own, over the full range of
     offsets that would put the reference anywhere inside our span at all — no
-    seed guess, so nothing to get wrong. A short window is immune to rate
-    error (0.6% over 15 seconds is 90ms, and these anchor on a 50ms
-    criterion), and two located ends give the rate by subtraction. A joint
+    seed guess, so nothing to get wrong. A short window degrades gracefully
+    under rate error rather than failing: the notes near whatever instant the
+    offset happens to pin still hit the 50ms criterion, and there are enough
+    of them in 15 seconds of playing to beat chance (measured at the +2.26%
+    So What fault: both anchors landed and the derived rate was within 0.05%
+    of the truth). Two located ends give the rate by subtraction, and a joint
     refinement then cleans up.
 
     Pitch is part of the criterion throughout: an onset-only fit on a jazz
@@ -127,33 +139,39 @@ def _centre(ref_on, ref_p, est_on, est_p, offset, rate, hits):
     """Move the fit to the middle of the plateau it is sitting on.
 
     Maximizing a count under a hard tolerance is flat-topped: every offset
-    within about a tolerance of the truth matches the same notes, so the
-    search returns an arbitrary member of that set -- in practice the lowest,
-    which lands ~30ms early. That is a third of the 50ms criterion given away
-    for nothing, and it also makes any per-note timing residual read as bias
-    that is really the fit's.
+    and rate within about a tolerance of the truth matches the same notes, so
+    the search returns an arbitrary member of that set -- an offset ~30ms
+    early in practice, and a rate a step or two wide on a long solo, where a
+    rate error spends the tolerance at the ends first. That is a third of the
+    50ms criterion given away for nothing, and it also makes any per-note
+    timing residual read as bias that is really the fit's.
 
-    So the matched pairs get the last word: shift by the median residual, the
-    same robust centring the .mscz benchmark uses (src/swingscribe/benchmark.py),
-    and keep it only if it does not lose matches.
+    So the matched pairs get the last word on BOTH parameters: a least-squares
+    line through their own times, the same "let the inliers refine the fit"
+    move as the .mscz benchmark's centring (src/swingscribe/benchmark.py),
+    kept only while it does not lose matches. Matches are pitch-verified and
+    within the tolerance by construction, so the residuals are bounded and
+    plain least squares is safe.
     """
     import numpy as np
 
-    for _ in range(2):
+    for _ in range(3):
         t = ref_on * rate + offset
         index = np.clip(np.searchsorted(est_on, t), 0, len(est_on) - 1)
-        residuals = []
+        ref_t, est_t = [], []
         for step in (-1, 0, 1):
             j = np.clip(index + step, 0, len(est_on) - 1)
             ok = (np.abs(est_on[j] - t) <= ONSET_TOLERANCE_S) & (est_p[j] == ref_p)
-            residuals.extend((est_on[j] - t)[ok].tolist())
-        if len(residuals) < 10:
+            ref_t.extend(ref_on[ok].tolist())
+            est_t.extend(est_on[j][ok].tolist())
+        if len(ref_t) < 10:
             break
-        moved = offset + float(np.median(residuals))
-        n = int(_matches(ref_on, ref_p, est_on, est_p, moved, rate).sum())
+        slope, intercept = np.polyfit(np.asarray(ref_t), np.asarray(est_t), 1)
+        slope = min(RATE_HIGH, max(RATE_LOW, float(slope)))
+        n = int(_matches(ref_on, ref_p, est_on, est_p, float(intercept), slope).sum())
         if n < hits:
             break
-        offset, hits = moved, n
+        offset, rate, hits = float(intercept), slope, n
     return offset, rate, hits
 
 

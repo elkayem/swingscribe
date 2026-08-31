@@ -242,6 +242,7 @@ HEADERS = [
     "title",
     "solo_start",
     "solo_end",
+    "fit_rate",
     "separation_model",
     "ensemble",
     "stem",
@@ -258,6 +259,8 @@ HEADERS = [
     "notation_coverage",
     "notation_matched",
     "notation_reference",
+    "readability",
+    "tie_rate",
     "status",
 ]
 FIELDS = [
@@ -266,6 +269,7 @@ FIELDS = [
     "title",
     "solo_start",
     "solo_end",
+    "fit_rate",
     "separation_model",
     "ensemble",
     "stem",
@@ -282,6 +286,8 @@ FIELDS = [
     "notation_coverage",
     "notation_matched",
     "notation_reference",
+    "readability",
+    "tie_rate",
     "status",
 ]
 
@@ -453,6 +459,11 @@ def process_file(
 
     offset, rate, hits = wjazz.fit_affine(ref_on, ref_p, est_on, est_p, (0.0, duration))
     match_rate = hits / len(ref_on)
+    # Recorded before the gate, so a rejected row still shows the rate it was
+    # rejected at. A rate sitting AT wjazz.RATE_LOW/RATE_HIGH is a confession:
+    # the true rate is outside the clamp and every number scored against that
+    # drifting clock is suspect (docs/benchmark-deficiencies.md D19).
+    row["fit_rate"] = round(rate, 5)
     if match_rate < MIN_MATCH_RATE:
         row["status"] = (
             f"best fit only matched {match_rate:.0%} of melid {melid}'s notes — wrong file/take?"
@@ -532,11 +543,17 @@ def process_file(
     settings = library.load_settings(str(audio_path), base, library.file_digest(str(audio_path)))
 
     try:
-        export_span(prepared, base, run_config, str(audio_path), note_dicts, settings)
+        exported = export_span(prepared, base, run_config, str(audio_path), note_dicts, settings)
     except NotReady as exc:
         row["status"] = f"export failed: {exc}"
         return row
     row["musicxml_written_at"] = datetime.now().isoformat(timespec="seconds")
+    # Reference-free: a property of the page itself (benchmark.readability),
+    # so it exists for every exported row, hand transcript or not. This is
+    # the number that tracks the listener's actual complaints — a human's
+    # own pages read 0.995 with tie rate 0.022.
+    row["readability"] = exported["readability"]
+    row["tie_rate"] = exported["tie_rate"]
 
     if score_path is None:
         row["status"] = (
@@ -683,7 +700,16 @@ def load_or_create_sheet(db: sqlite3.Connection):
     from openpyxl import Workbook, load_workbook
 
     if SHEET_PATH.is_file():
-        wb = load_workbook(SHEET_PATH)
+        try:
+            wb = load_workbook(SHEET_PATH)
+        except PermissionError as exc:
+            # Same exclusive Excel lock save_sheet names — but here it kills
+            # the run before any work is done, so say so just as plainly
+            # instead of letting a zipfile traceback out of openpyxl's reader.
+            raise SystemExit(
+                f"cannot read {SHEET_PATH.name}: it is open in another program "
+                f"(Excel takes an exclusive lock).\nClose it and re-run.\n  {SHEET_PATH}"
+            ) from exc
         ws = wb.active
         if migrate_columns(ws):
             print(f"  (migrated {SHEET_PATH.name} to {len(HEADERS)} columns; rows kept)")

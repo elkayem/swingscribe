@@ -57,6 +57,20 @@ def test_recovers_a_playback_speed_difference():
     assert hits > 0.9 * len(ref_on)
 
 
+def test_recovers_a_mastering_speed_fault():
+    """Kind of Blue's side 1: the benchmark's So What plays 2.26% slower than
+    the copy WJazzD annotated. A ±0.6% clamp held the fit at its ceiling and
+    reported all three So What soloists as "wrong file/take" at 10% matched
+    (docs/benchmark-deficiencies.md D19). The clamp must be wider than a real
+    fault; test_the_wrong_take_cannot_be_fitted below is what keeps widening
+    it honest."""
+    ref_on, ref_p, est_on, est_p = synth(offset=317.5, rate=1.0226)
+    region = (float(est_on[0]) - 2, float(est_on[-1]) + 2)
+    offset, rate, hits = fit_affine(ref_on, ref_p, est_on, est_p, region)
+    assert worst_placement_error(ref_on, offset, rate, 317.5, 1.0226) < 0.02
+    assert hits > 0.9 * len(ref_on)
+
+
 def test_a_solo_starting_well_after_the_span_begins():
     """The bug of 2026-08-24.
 
