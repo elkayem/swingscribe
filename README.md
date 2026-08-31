@@ -36,8 +36,14 @@ their own stems instead of leaving them mixed into `other`.
 ## The GUI
 
 ```
-uv run swingscribe gui
+uv run python -m swingscribe gui
 ```
+
+(or `.\swingscribe gui` on Windows, which is the same thing. Prefer either to
+`uv run swingscribe`: that spawns a console-script `.exe` generated fresh at
+install time, and Windows Smart App Control refuses to run an unsigned binary
+it has never seen — `os error 4551`. A module entry point is read by an
+interpreter that is already trusted, so it is never blocked.)
 
 Opens the selection and audition app on `127.0.0.1:8420` (plan §13, screens 1-3):
 load a track, drag out the span of one solo on a two-tier waveform, pick the stem

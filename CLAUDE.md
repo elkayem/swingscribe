@@ -95,7 +95,11 @@ of these has broken a tool at least once:
   - **`swingscribe.exe` is permanently blocked and always will be.** uv/pip
     generate that console-script stub uniquely per install, so it can never
     accumulate reputation. **Launch with `.venv\Scripts\python.exe -m
-    swingscribe.cli ...`** — `swingscribe gui` cannot work here.
+    swingscribe ...`, or the `.\swingscribe.cmd` shim beside pyproject** —
+    `uv run swingscribe` and `swingscribe gui` cannot work here, and no pin
+    fixes it. A `.cmd` is a script rather than a PE binary, so no
+    code-integrity policy applies to it; `swingscribe/__main__.py` is what
+    both routes actually reach.
 - **numba is blocked again** (2026-08-30): `numba/experimental/jitclass/
   _box.cp311-win_amd64.pyd` raises WinError 4551, so a bare `import
   torchcrepe` fails — it pulls librosa, which pulls numba. This does NOT

@@ -71,3 +71,24 @@ def test_audition_subcommand_parses():
     args = parse(["audition", "x.mp3", "--stem", "piano", "--start", "5", "-o", "out.wav"])
     assert args.command == "audition"
     assert args.out == "out.wav"
+
+
+def test_python_dash_m_swingscribe_is_a_working_launcher():
+    """`swingscribe.exe` is generated fresh per install, so Smart App Control
+    has never seen it and refuses to spawn it (os error 4551) — and it is
+    rebuilt on every sync, so no version pin fixes that. `python -m
+    swingscribe` is the launcher that works on this machine, and it must keep
+    working. Run in a subprocess because importing `__main__` RUNS the CLI.
+    """
+    import subprocess
+    import sys
+
+    done = subprocess.run(
+        [sys.executable, "-m", "swingscribe", "--version"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "swingscribe" in (done.stdout + done.stderr).lower()
