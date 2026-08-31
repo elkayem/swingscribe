@@ -174,6 +174,8 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
+import batch_sheet
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BENCH_DIR = REPO_ROOT / "benchmark" / "wjazzd"
 # Where `swingscribe gui` has actually been observed running from on this
@@ -610,148 +612,35 @@ def process_file(
 # ── the spreadsheet ──────────────────────────────────────────────────────────
 
 
-def migrate_columns(ws) -> bool:
-    """Bring a sheet written by an older version up to the current columns.
-
-    Rows are rewritten by header NAME, never by position, so a sheet from
-    before `notation_value` and the matched/reference counts existed keeps
-    every number already in it and simply gains blank cells. Returns whether
-    anything moved, so the caller can say so.
-
-    This exists because the columns are expected to grow again: the row is
-    meant to be readable straight against the GUI's Score line, and that line
-    is not finished changing.
-    """
-    header = [cell.value for cell in ws[1]] if ws.max_row else []
-    if header == HEADERS:
-        return False
-    records = [
-        dict(zip(header, values, strict=False))
-        for values in ws.iter_rows(min_row=2, values_only=True)
-    ]
-    ws.delete_rows(1, ws.max_row)
-    ws.append(HEADERS)
-    for record in records:
-        ws.append([record.get(name) if record.get(name) is not None else "" for name in HEADERS])
-    return True
-
-
-def sync_table(ws) -> None:
-    """Keep an Excel Table on the sheet matching the grid underneath it.
-
-    A sheet someone has formatted as a Table in Excel carries a definition
-    listing its columns BY NAME and the exact range it covers, and openpyxl
-    preserves that definition verbatim. Widening the sheet without updating it
-    leaves Excel reading a table whose eleventh column says `status` while the
-    header row says `pitch_matched`, and whose range stops at K while the data
-    runs to T — which is what "We found a problem with some content" means.
-    It cost a repair prompt once; hence this runs on every save, not only on a
-    migration, since `write_row` can also append a row past the table's range.
-
-    The name and the style the user picked are kept; only the columns and the
-    range are rebuilt.
-    """
-    from openpyxl.utils import get_column_letter
-    from openpyxl.worksheet.filters import AutoFilter
-    from openpyxl.worksheet.table import Table, TableColumn
-
-    if not ws.tables:
-        return
-    ref = f"A1:{get_column_letter(len(HEADERS))}{ws.max_row}"
-    # Keys, not .items(): openpyxl's TableList.items() yields (name, ref
-    # STRING) rather than the Table itself, which is a quietly wrong thing to
-    # unpack and reads as if it were a plain dict.
-    for name in list(ws.tables):
-        style = ws.tables[name].tableStyleInfo
-        del ws.tables[name]
-        rebuilt = Table(
-            displayName=name,
-            name=name,
-            ref=ref,
-            autoFilter=AutoFilter(ref=ref),
-            tableColumns=[
-                TableColumn(id=index, name=header) for index, header in enumerate(HEADERS, start=1)
-            ],
-        )
-        rebuilt.tableStyleInfo = style
-        ws.add_table(rebuilt)
+# The machinery lives in batch_sheet.py, shared with benchmark_batch.py —
+# one copy of the migration, Excel-Table sync and lock handling, because
+# every one of those was found the hard way (see that module's docstring).
 
 
 def save_sheet(wb, ws) -> None:
-    """The only way this script writes the file — table kept in step.
-
-    A PermissionError here means the spreadsheet is open in Excel, which takes
-    an exclusive lock. That is worth catching by name rather than letting a
-    zipfile traceback out of openpyxl's writer: the cause is not in the stack,
-    and the run may have spent minutes of CREPE before reaching this line.
-    """
-    sync_table(ws)
-    try:
-        wb.save(SHEET_PATH)
-    except PermissionError as exc:
-        raise SystemExit(
-            f"cannot write {SHEET_PATH.name}: it is open in another program "
-            f"(Excel takes an exclusive lock, and leaves a ~${SHEET_PATH.name} "
-            f"beside it while it holds one).\nClose it and re-run.\n  {SHEET_PATH}"
-        ) from exc
+    batch_sheet.save_sheet(wb, ws, SHEET_PATH, HEADERS)
 
 
 def load_or_create_sheet(db: sqlite3.Connection):
-    from openpyxl import Workbook, load_workbook
-
-    if SHEET_PATH.is_file():
-        try:
-            wb = load_workbook(SHEET_PATH)
-        except PermissionError as exc:
-            # Same exclusive Excel lock save_sheet names — but here it kills
-            # the run before any work is done, so say so just as plainly
-            # instead of letting a zipfile traceback out of openpyxl's reader.
-            raise SystemExit(
-                f"cannot read {SHEET_PATH.name}: it is open in another program "
-                f"(Excel takes an exclusive lock).\nClose it and re-run.\n  {SHEET_PATH}"
-            ) from exc
-        ws = wb.active
-        if migrate_columns(ws):
-            print(f"  (migrated {SHEET_PATH.name} to {len(HEADERS)} columns; rows kept)")
-        # Saved unconditionally: an existing sheet may carry a stale table
-        # definition from an earlier migration that predates sync_table.
-        save_sheet(wb, ws)
-        return wb, ws
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "wjazzd"
-    ws.append(HEADERS)
-    for melid, performer, title in db.execute(
-        "select melid, performer, title from solo_info order by melid"
-    ):
-        ws.append([melid, performer, title] + [""] * (len(HEADERS) - 3))
-    SHEET_PATH.parent.mkdir(parents=True, exist_ok=True)
-    save_sheet(wb, ws)
-    return wb, ws
+    seed = (
+        {"number": melid, "performer": performer, "title": title}
+        for melid, performer, title in db.execute(
+            "select melid, performer, title from solo_info order by melid"
+        )
+    )
+    return batch_sheet.load_or_create_sheet(SHEET_PATH, HEADERS, "wjazzd", seed_rows=seed)
 
 
 def melid_row_index(ws) -> dict[int, int]:
-    """melid -> 1-based worksheet row, from column A (skipping the header)."""
-    index = {}
-    for row in range(2, ws.max_row + 1):
-        value = ws.cell(row=row, column=1).value
-        if value is not None:
-            index[int(value)] = row
-    return index
+    """melid -> 1-based worksheet row. Coerced to int: openpyxl can hand a
+    numeric cell back as int or float depending on how it was written."""
+    return {int(key): row for key, row in batch_sheet.row_index(ws).items()}
 
 
 def write_row(ws, index: dict[int, int], row: dict) -> None:
     """Update exactly this melid's row, leaving every other row untouched."""
     melid = row.get("melid")
-    if not melid:
-        return  # nothing identifiable — the skip reason was already logged
-    target = index.get(int(melid))
-    if target is None:
-        target = ws.max_row + 1
-        index[int(melid)] = target
-    for col, field in enumerate(FIELDS, start=1):
-        ws.cell(row=target, column=col, value=row.get(field, ""))
+    batch_sheet.write_row(ws, index, int(melid) if melid else None, row, FIELDS)
 
 
 # ── file selection & CLI ─────────────────────────────────────────────────────
