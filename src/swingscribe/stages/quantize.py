@@ -168,6 +168,7 @@ def choose_grid(
     candidates: tuple[int, ...],
     min_onsets_for_tuplet: int = 3,
     slack: float = 0.05,
+    raw_offsets: list[float] | None = None,
 ) -> int:
     """Pick the subdivision that the notes in one beat actually fit.
 
@@ -196,6 +197,17 @@ def choose_grid(
     - and among what remains, the COARSEST grid within `slack` of the best
       error wins, rather than the best. Parsimony, and the coarser reading is
       the one a musician writes.
+
+    `raw_offsets`, when given, are the same notes UNWARPED, and the ternary
+    candidate is scored on them instead (D12). The swing warp is a hypothesis
+    about BINARY beats — it maps the swung offbeat to 0.5 — and applying it
+    to a genuine triplet drags the thirds off-lattice before this function
+    ever votes: {0, 1/3, 2/3} warped at φ*=0.6 reads {0, .28, .59}, which
+    loses ternary to sixteenths on pure arithmetic. A performed triplet
+    already sits at thirds in raw time and needs no warp. Each hypothesis is
+    scored under its own timing model; the convention gate stays — two notes
+    still cannot vote a tuplet, because a swung PAIR in raw time also lands
+    near {0, 2/3} and the page writes that as eighths (CLAUDE.md).
     """
     if not offsets:
         return candidates[0]
@@ -206,8 +218,15 @@ def choose_grid(
     ]
     if not allowed:
         allowed = [candidates[0]]
+
+    def for_grid(divisions: int) -> list[float]:
+        if raw_offsets is not None and divisions % 3 == 0:
+            return raw_offsets
+        return offsets
+
     errors = {
-        divisions: sum(abs(snap(offset, divisions)[1]) for offset in offsets) / len(offsets)
+        divisions: sum(abs(snap(offset, divisions)[1]) for offset in for_grid(divisions))
+        / len(offsets)
         for divisions in allowed
     }
     best_error = min(errors.values())
@@ -217,7 +236,7 @@ def choose_grid(
     # hard constraint and not a preference. Without it, buying notated rhythm
     # by coarsening the grid quietly costs notes: 4.8% of All The Things
     # disappeared before this rule existed.
-    separating = [d for d in allowed if _keeps_apart(offsets, d)] or allowed
+    separating = [d for d in allowed if _keeps_apart(for_grid(d), d)] or allowed
     # Coarsest first: a smaller number of divisions is a coarser grid.
     for divisions in sorted(separating):
         if errors[divisions] <= best_error + slack + 1e-12:
@@ -294,7 +313,9 @@ def quantize_notes(
     candidates = tuple(dict.fromkeys(coarse + ([3] if allow_triplets else [])))
 
     # Warp first, then group by beat so the grid choice sees the whole beat.
-    warped: list[tuple[int, float, float, int]] = []  # (index, position, duration, pitch)
+    # The RAW fractional offset rides along: the ternary hypothesis is scored
+    # and snapped in raw time (see choose_grid — the warp is a binary story).
+    warped: list[tuple[int, float, float, int, float]] = []
     for onset, duration, pitch in zip(onsets, durations, pitches, strict=True):
         position = beat_position(onset, beats)
         if position is None:
@@ -308,11 +329,15 @@ def quantize_notes(
         else:
             end_index = int(end)
             warped_end = end_index + warp_phase(end - end_index, by_beat.get(end_index, 0.5))
-        warped.append((index, warped_start, max(0.0, warped_end - warped_start), pitch))
+        warped.append(
+            (index, warped_start, max(0.0, warped_end - warped_start), pitch, position - index)
+        )
 
     per_beat: dict[int, list[float]] = {}
-    for index, position, _duration, _pitch in warped:
+    per_beat_raw: dict[int, list[float]] = {}
+    for index, position, _duration, _pitch, raw in warped:
         per_beat.setdefault(index, []).append(position - index)
+        per_beat_raw.setdefault(index, []).append(raw)
     # The slack is a time budget (config.py: it absorbs a player's motor
     # scatter, which is milliseconds, not beat fractions), so each beat
     # converts it at its own length. A long ballad beat gets a small slack
@@ -321,18 +346,36 @@ def quantize_notes(
     # tempo staircase says humans notate (D11).
     grids = {
         index: choose_grid(
-            offsets, candidates, min_onsets_for_tuplet, grid_slack_s / _beat_length(beats, index)
+            offsets,
+            candidates,
+            min_onsets_for_tuplet,
+            grid_slack_s / _beat_length(beats, index),
+            raw_offsets=per_beat_raw[index],
         )
         for index, offsets in per_beat.items()
     }
 
     out, positions = [], []
-    for index, position, duration, pitch in warped:
+    for index, position, duration, pitch, raw in warped:
         grid = grids.get(index, finest)
-        snapped, residual = snap(position, grid)
+        if grid % 3 == 0:
+            # Ternary: the NOTATION is the raw third (a performed triplet
+            # sits at thirds; no warp applies), but the replay position and
+            # the residual stay in WARPED space, so replay_onsets' unwarp
+            # recovers exactly the raw third with no changes there — and
+            # restore_residual stays exact by construction:
+            # unwarp(warp(k/3) + (warped - warp(k/3))) is the raw position.
+            star = by_beat.get(index, STRAIGHT_PHASE)
+            notated_offset, _ = snap(raw, grid)
+            replay_position = index + warp_phase(notated_offset, star)
+            snapped = index + notated_offset
+            residual = position - replay_position
+            positions.append(replay_position)
+        else:
+            snapped, residual = snap(position, grid)
+            positions.append(snapped)
         length, _ = snap(duration, grid)
         bar, beat = bar_and_beat(snapped, beats, sections)
-        positions.append(snapped)
         out.append(
             QuantizedNote(
                 bar=bar,

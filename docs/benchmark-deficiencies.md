@@ -315,23 +315,53 @@ caps the finest grid at a sixteenth, while under 100 bpm humans put 43.6%
 of values BELOW the sixteenth. A ballad may want a 32nd-capable grid
 (divisions 8) offered at all. Not yet tried.
 
-### D12 - We write triplets at a quarter of the human rate
+### D12 - We write triplets at a quarter of the human rate — MOSTLY RESOLVED, and the frame was wrong
 
-0.9% of our notated notes carry a time modification, against 4.1% in the ten
-hand transcriptions and 23.9% of WJazzD's 197,177 notated intervals. 444 of
-456 WJazzD solos use ternary divisions on more than 10% of their notes, so
-this is not a property of a few tunes.
+**Re-measured 2026-08-31, after D11.** The 0.9% was pre-D11: the current
+exports carry **12.0%** tuplet notes over 66 wjazzd solos (r=0.579 against
+each solo's own annotated ternary rate — the triplets land on the right
+tunes). And the 23.9% target was never ours to hit: splitting WJazzD's
+50,639 ternary-division notes by beat pattern, only **59.8% sit in
+3+-onset beats** (real triplet figures); 20.2% are two onsets at tatums
+{1,3}-of-3 — a swung pair annotated at triplet positions, which OUR
+convention (and the listener's, and the Jazzomat lead sheets') writes as
+two eighths — and the rest are 2-onset/1-onset beats no notation writes as
+a tuplet. Convention-adjusted target ≈ 0.148; we write 0.120. A 1.2x gap,
+not 4x.
 
-Where a human writes a triplet we write sixteenths and a tie, which is the
-same complaint as D11 from the other side. The suspect is `choose_grid`'s rule
-that three onsets must be present before a tuplet is allowed at all - added in
-M6 for a good reason (a warped offbeat lands near 0.6 and wins a triplet grid
-on snap error alone) and never re-measured since the swing warp changed
+**The warp-suppression mechanism was real and is fixed, with a neutral
+outcome.** The swing warp is a hypothesis about BINARY beats; applied to a
+genuine triplet it dragged the thirds off-lattice ({0,1/3,2/3} at BUR 2.5
+reads {0,.23,.47} warped — near-perfect sixteenths). `choose_grid` now
+scores the ternary candidate on RAW offsets, notates true thirds, and
+stores the replay position as warp(k/3) so replay recovers the raw thirds
+exactly and the residual-restore invariant is untouched (two new tests).
+Measured on the subset: rhythm +0.002, tuplet rate flat, pitch identical —
+because D11's larger fast-tempo slack was ALREADY letting ternary win
+within-slack despite the distortion. Kept for correctness, reported as
+neutral.
+
+**What remains points the other way: the BALLADS over-write ternary.**
+Don't Blame Me writes 41.6% tuplets against the annotator's 31%,
+Embraceable You 44.3% against 19% — while the listener's own scores sit at
+4.1% overall. At slow tempo the value set floors at a sixteenth (D11's
+open half), so the triplet grid is the only fine option a busy beat has.
+Offering a finer binary grid (divisions 8) where the beat is long is one
+change that plausibly fixes ballad triplet over-writing, D11's remaining
+readability gap, AND the under-100bpm coverage collapse together.
+
+The original suspect — `choose_grid`'s rule that three onsets must be
+present before a tuplet is allowed — was re-measured by implication and
+STANDS: it is precisely what keeps the 40% of WJazzD's ternary notes that
+are swing-pair annotation from flooding the page. Added in M6 for a good
+reason (a warped offbeat lands near 0.6 and wins a triplet grid
+on snap error alone) and now load-bearing for the convention
 underneath it.
 
 One structural fact that survives and constrains any fix: of 97,499 annotated
 WJazzD beats, **zero** mix binary and ternary notes inside a single beat. The
-per-beat exclusive grid choice is right; only the threshold is wrong.
+per-beat exclusive grid choice is right, and the 2026-08-31 re-measurement
+says the threshold is too.
 
 ### D13 - Two tracks hold three annotated solos, and the filenames say one
 

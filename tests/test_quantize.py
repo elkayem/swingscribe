@@ -417,6 +417,39 @@ def test_zero_slack_restores_least_snap_error():
     assert choose_grid([0.0, 0.74], (2, 4), min_onsets_for_tuplet=3, slack=0.0) == 4
 
 
+def test_a_real_triplet_survives_the_swing_warp():
+    """D12's mechanism: the swing warp is a hypothesis about BINARY beats,
+    and applying it to a genuine triplet drags the thirds off-lattice before
+    choose_grid votes — {0, 1/3, 2/3} warped at BUR 2.5 reads {0, .23, .47},
+    which sixteenths fit almost perfectly. Scored in raw time, where a
+    performed triplet actually sits at thirds, ternary wins — and the
+    notated positions are true thirds, not thirds of warped space."""
+    period = 0.4  # 150 bpm
+    beats = [i * period for i in range(9)]
+    spans = [SwingSpan(start_beat=0, end_beat=8, bur=2.5, confidence=0.95, is_swung=True)]
+    onsets = [beats[2] + f * period for f in (0.0, 1 / 3, 2 / 3)]
+    quantized, positions = quantize_notes(onsets, [0.05] * 3, [60, 62, 64], beats, spans, [])
+    fractions = [q.beat - int(q.beat) for q in quantized]
+    assert fractions == pytest.approx([0.0, 1 / 3, 2 / 3])
+    # And the round trip replays them AT the thirds — the warp does not
+    # reapply to a beat notated ternary.
+    replayed = replay_onsets(quantized, positions, beats, spans)
+    assert replayed == pytest.approx(onsets, abs=1e-9)
+
+
+def test_a_swung_pair_still_cannot_vote_a_tuplet():
+    """The convention gate survives raw-space scoring: a swung offbeat in raw
+    time lands near 2/3 — that is what swing IS — so on arithmetic alone a
+    pair would read ternary. The page writes swung pairs as eighths."""
+    period = 0.4
+    beats = [i * period for i in range(9)]
+    spans = [SwingSpan(start_beat=0, end_beat=8, bur=2.0, confidence=0.95, is_swung=True)]
+    onsets = [beats[2], beats[2] + 0.66 * period]
+    quantized, _ = quantize_notes(onsets, [0.05] * 2, [60, 62], beats, spans, [])
+    fractions = [q.beat - int(q.beat) for q in quantized]
+    assert fractions == pytest.approx([0.0, 0.5])
+
+
 def test_the_same_figure_is_written_finer_on_a_slow_beat():
     """D11: the slack is a time budget, so the SAME beat-fraction figure gets
     a finer grid on a long beat than a short one — the direction of WJazzD's

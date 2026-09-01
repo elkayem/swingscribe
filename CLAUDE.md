@@ -485,10 +485,17 @@ Results and limits: `docs/m6-notate.md`.
   speed, pitch untouched (D11 in docs/benchmark-deficiencies.md). Still
   tempo-blind: the candidate SET (nothing finer than a sixteenth, while
   under 100 bpm humans put 43.6% of values below it).
-- **We under-write triplets by 4x.** 0.9% of our notes against 4.1% in the hand
-  scores and 23.9% of WJazzD's 197k notated intervals; 444 of 456 solos use
-  ternary on more than 10% of their notes. Suspect `choose_grid`'s "three
-  onsets before a tuplet is allowed" — not yet re-measured.
+- **The triplet deficit is mostly gone, and the 4x frame was wrong (D12).**
+  Post-D11 we write 12.0% tuplet notes; only 59.8% of WJazzD's ternary notes
+  are real 3+-onset triplet figures (the rest are swung pairs annotated at
+  triplet positions, which our convention writes as eighths), so the
+  convention-adjusted target is ~14.8%. The ternary candidate is scored on
+  RAW offsets now — the swing warp is a binary hypothesis and dragged real
+  triplets off-lattice — with true thirds notated and replayed (neutral on
+  scores; kept for correctness). "Three onsets before a tuplet" is
+  load-bearing for the convention: it keeps the 40% out. What remains is
+  ballads OVER-writing ternary for want of any binary grid finer than a
+  sixteenth.
 - **Notate does NOT use music21, which the plan names for it.** Everything the
   stage needs is arithmetic, and keeping it arithmetic means key detection and
   spelling run in CI like every other stage. This is a plan deviation on the
