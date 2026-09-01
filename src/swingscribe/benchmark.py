@@ -346,7 +346,15 @@ def score_against_wjazz_notation(notation, positions: list[tuple[float, int]]) -
 # -- the thirty-odd WJazzD solos as well as the ten hand-scored ones -- which
 # is the widest measurement in this project.
 WRITABLE_REST = 0.5  # an eighth; see notate.MIN_REST for the same threshold
-WRITABLE_VALUE = 0.25  # a sixteenth
+# A thirty-second, not a sixteenth. The listener ruled (2026-08-31, on the
+# Parker ballads): a soloist genuinely playing a long line of 32nds is
+# WRITTEN as 32nds — the sixteenth floor was declaring required notation
+# unwritable, and the page was "readable" only because it had silently
+# merged a third of the heard notes away (D16). The original complaint this
+# measure encodes was dotted 32nds and slivers from the 3/4 split bug, not
+# clean 32nd runs. What must never appear instead: 32nds standing in for
+# sixteenths played behind the beat — quantize's evidence gate owns that.
+WRITABLE_VALUE = 0.125
 
 
 def _written_value(note) -> float:

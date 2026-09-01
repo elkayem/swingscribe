@@ -490,13 +490,17 @@ def test_a_sixteenth_rest_costs_readability():
     assert result["readability"] == pytest.approx(2.0 / 3.0, abs=0.001)
 
 
-def test_a_thirty_second_note_costs_readability():
+def test_a_thirty_second_note_is_writable_but_a_sliver_is_not():
+    """OVERTURNED in part (the listener's ballad ruling): a genuine 32nd is
+    legitimate notation — Bird's runs on Don't Blame Me are WRITTEN as 32nds
+    — so it no longer costs readability. Anything below a 32nd is still a
+    sliver no one writes."""
     from swingscribe.benchmark import readability
 
     notation = _notation([_bar([_note(0.0, 0.125, 60), _note(0.125, 0.5, 62)])])
-    result = readability(notation)
-    assert result["short_values"] == 50.0
-    assert result["readability"] == 0.5
+    assert readability(notation)["short_values"] == 0.0
+    sliver = _notation([_bar([_note(0.0, 0.0625, 60), _note(0.0625, 0.5, 62)])])
+    assert readability(sliver)["short_values"] == 50.0
 
 
 def test_a_triplet_eighth_is_read_as_an_eighth_and_costs_nothing():
