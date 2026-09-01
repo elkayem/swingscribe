@@ -721,6 +721,30 @@ a notation-philosophy gap, not a detector fault — and the measured floors
 (duration near-random, confidence 0.65 costing 7% of kept notes) already
 say no threshold removes them cleanly.
 
+### D21 - A sibling-solo copy can name a solo the excerpt does not hold
+
+The 2026-08-31 sibling copies assumed that a second melid on the same
+trackid lives inside the same excerpt. Two do not, and their rows are the
+sheet's two strangest numbers:
+
+- **Kenny Garrett 257** annotates 103s of playing where 256 annotates 85s
+  — the listener's excerpt covers part of 257's window, and the partial
+  overlap scores rhythm 0.277 at coverage 0.602 (the sheet's worst trusted
+  rhythm by 0.13).
+- **John Coltrane 228** is My Favorite Things' SECOND solo section, 723
+  notes against 227's 743, and the excerpt holds the first. Two Coltrane
+  solos on the same E-minor vamp share enough vocabulary that the fit
+  cleared the wrong-take floor at coverage 0.484 — the control's stated
+  assumption (a wrong pairing scores at chance) weakens when both sides
+  are the same performer improvising on the same vamp in the same
+  recording.
+
+Both rows are flagged for the listener's review pile alongside the
+wrong-take files; the durable fix is sourcing the fuller excerpts, or
+deleting the copies. The general lesson for future copies: check the
+sibling's annotated DURATION against the excerpt before assuming
+containment — `select max(onset) from melody` is one line.
+
 ## Resolved
 
 ### R18 - A cached Document named a file that had been renamed away

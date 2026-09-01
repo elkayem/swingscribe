@@ -95,6 +95,12 @@ def transcribe(
     `offset` is added to every onset, so a caller analysing a span can get
     whole-track times back — matching what `stages/transcribe.py` reports.
     Runs at roughly 0.36x realtime on CPU.
+
+    A STANDALONE caller must run `transcribe._import_torchcrepe()` first:
+    the import below pulls librosa, whose resampy dependency carries numba,
+    which Application Control blocks on this machine (CLAUDE.md). Inside the
+    pipeline that shim has always run by the time the oracle is consulted,
+    which is why this import "just works" there and dies in a bare script.
     """
     from piano_transcription_inference import PianoTranscription
 
