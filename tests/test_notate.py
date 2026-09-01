@@ -173,13 +173,22 @@ def test_an_unnotatable_length_becomes_tied_symbols():
     assert all(is_notatable(length) for _s, length, _t in pieces)
 
 
-def test_a_syncopation_across_the_middle_of_the_bar_is_tied():
-    """A quarter starting on the "and" of two straddles the bar's midpoint.
-    Written as one quarter it looks like it starts on a beat; the tie is what
-    keeps the half-bar visible."""
+def test_a_symmetric_syncopation_is_one_symbol():
+    """OVERTURNED (D14): this test used to assert the tie. A quarter on any
+    "and" is centred on the division it crosses — the jazz syncopation every
+    lead sheet writes whole — and the hand transcriptions' tie rate (0.022,
+    against our 0.098 with 58% of ties WITHIN the bar) says the listener
+    writes it whole too. The conservative tie survives where it earns its
+    keep: values NOT centred on what they cross, and triple metre."""
     pieces = split_for_meter(1.5, 1.0, 4.0)
-    assert len(pieces) == 2
-    assert pieces[0][0] == 1.5
+    assert pieces == [(1.5, 1.0, None)]
+
+
+def test_an_uncentred_crossing_still_ties():
+    """A quarter starting on an offbeat sixteenth is not symmetric about
+    anything — written whole it genuinely misleads, so it still splits."""
+    pieces = split_for_meter(1.75, 1.0, 4.0)
+    assert len(pieces) >= 2
     assert sum(length for _s, length, _t in pieces) == 1.0
 
 

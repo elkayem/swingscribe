@@ -386,7 +386,30 @@ at **0.022** (82 tie starts in 3646 notes, counted off the .mscz XML).
 Some of that is legitimate -- a long note crossing a barline has to be tied.
 Some of it is `split_for_meter`'s recursion fragmenting a value that should
 have been one symbol, which is what the listener meant by "strange ties".
-Nobody has separated the two, and the instrument to do it now exists.
+
+**Separated 2026-08-31, and the split is 58/42.** Classifying all 3,496 ties
+across 66 wjazzd exports: 57.8% are WITHIN the bar (the suspect class),
+42.2% cross barlines (mostly obligatory). Two supporting facts: the tie
+rate rises monotonically with tempo (0.049 under 100 bpm to 0.160 over
+280 — too-fine grids split values, and D11 already moved it 0.110 → 0.104),
+and the biggest within-bar source was `_subdivide`'s rule that any value
+crossing a division ties unless flush.
+
+**First fix applied: the symmetric-syncopation allowance.** A plain binary
+value that starts an odd multiple of half its own length into a HALVING
+unit is centred on the division it crosses — a quarter on any "and" — and
+every lead sheet writes it as one symbol. `_symmetric_syncopation` allows
+exactly that; an uncentred crossing (a quarter off an offbeat sixteenth)
+still ties, and triple metre is gated out (a unit dividing in three has no
+symmetric middle; the waltz test still passes). Measured: subset tie rate
+0.0945 → 0.0882 with rhythm, value, readability and pitch unchanged to 3-4
+decimals; against the hand scores, Giant Steps ties 0.095 → 0.077 with
+value +0.003, Confirmation 0.095 → 0.082 with value +0.004, All The Things
+0.117 → 0.106 with rhythm +0.007. The 3/4 tune is untouched by design.
+
+Still open: dotted-value syncopations (the charleston's dotted quarter has
+no single centre, so the plain-binary rule skips it), and the barline class
+nobody has audited. Human target 0.022; we stand at 0.088.
 
 Not folded into the readability composite on purpose: a page is not unreadable
 for having a tie, so it is reported beside the score rather than inside it.

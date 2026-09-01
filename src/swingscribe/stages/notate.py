@@ -267,6 +267,29 @@ def split_points(unit_start: float, unit_end: float) -> list[float]:
     return [unit_start + length / 2.0]
 
 
+def _symmetric_syncopation(a: float, length: float, unit_start: float) -> bool:
+    """May this note straddle a division it is CENTRED on?
+
+    The engraving allowance behind every jazz syncopation: a plain binary
+    value that starts an odd multiple of half its own length into the unit
+    sits symmetrically about the division it crosses — a quarter on any
+    "and", the middle quarter of the charleston figure — and the convention
+    writes it as ONE symbol, no tie. The listener's hand transcriptions do
+    exactly this (their tie rate is 0.022; ours read 0.098 with 58% of the
+    excess WITHIN the bar, D14). A value that is NOT symmetric about what it
+    crosses — a quarter starting on an offbeat sixteenth — still ties, which
+    is the half of the conservative rule actually protecting readability.
+
+    Plain binary values only: a dotted value has no single centre, and a
+    tuplet piece never reaches here.
+    """
+    if not any(_close(length, v) for v in BINARY_UNITS):
+        return False
+    half = length / 2.0
+    steps = (a - unit_start) / half
+    return abs(steps - round(steps)) * half <= TICK and round(steps) % 2 == 1
+
+
 def _subdivide(a: float, b: float, unit_start: float, unit_end: float, out: list) -> None:
     if b - a <= TICK:
         return
@@ -274,7 +297,14 @@ def _subdivide(a: float, b: float, unit_start: float, unit_end: float, out: list
     flush = _close(a, unit_start) or _close(b, unit_end)
     points = split_points(unit_start, unit_end)
     crosses = any(a < p - TICK and b > p + TICK for p in points)
-    if is_notatable(length) and (flush or not crosses):
+    # The syncopation allowance applies only where the metre HALVES — a unit
+    # that divides in three (a 3/4 bar) has no symmetric middle to be centred
+    # on, and hiding a ternary beat is exactly what the conservative rule is
+    # for. len(points) == 1 is "this unit halves".
+    halving = len(points) == 1
+    if is_notatable(length) and (
+        flush or not crosses or (halving and _symmetric_syncopation(a, length, unit_start))
+    ):
         out.append((a, length, None))
         return
     # A tuplet is allowed to live inside one beat and no larger unit. Wider
