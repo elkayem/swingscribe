@@ -344,16 +344,25 @@ def quantize_notes(
     # in beats and fine grids stay reachable; a burner's beat gets a large
     # one and the coarse reading wins — which is the direction the 456-solo
     # tempo staircase says humans notate (D11).
-    grids = {
-        index: choose_grid(
+    grids = {}
+    for index, offsets in per_beat.items():
+        # A beat the finest binary grid cannot keep apart holds a genuine
+        # 32nd run — Bird on a ballad — and merging is silent note LOSS on
+        # the page: Don't Blame Me was writing 327 of 513 heard notes. The
+        # 32nd grid is admitted on exactly that evidence and no other, so a
+        # behind-the-beat sixteenth line (four onsets keep apart on the
+        # sixteenth grid) can never be promoted to 32nds — the listener's
+        # rule, both halves (D16/D11).
+        cands = candidates
+        if not _keeps_apart(offsets, finest):
+            cands = candidates + (finest * 2,)
+        grids[index] = choose_grid(
             offsets,
-            candidates,
+            cands,
             min_onsets_for_tuplet,
             grid_slack_s / _beat_length(beats, index),
             raw_offsets=per_beat_raw[index],
         )
-        for index, offsets in per_beat.items()
-    }
 
     out, positions = [], []
     for index, position, duration, pitch, raw in warped:

@@ -417,6 +417,34 @@ def test_zero_slack_restores_least_snap_error():
     assert choose_grid([0.0, 0.74], (2, 4), min_onsets_for_tuplet=3, slack=0.0) == 4
 
 
+def test_a_32nd_run_is_not_merged_off_the_page():
+    """The listener's ballad rule, half one: when a soloist genuinely plays
+    a run of 32nds — five or more onsets in one beat, which no sixteenth
+    grid can keep apart — they are written as 32nds, not silently merged.
+    Don't Blame Me was losing 186 of 513 heard notes to exactly this."""
+    period = 60.0 / 64.0  # a ballad beat
+    beats = [i * period for i in range(6)]
+    onsets = [beats[2] + k * period / 8 for k in range(8)]  # eight 32nds
+    quantized, _ = quantize_notes(onsets, [0.05] * 8, list(range(60, 68)), beats, [], [])
+    assert len(quantized) == 8
+    fractions = sorted(q.beat - int(q.beat) for q in quantized)
+    assert fractions == pytest.approx([k / 8 for k in range(8)])
+    assert len(set(fractions)) == 8  # every note keeps its own place
+
+
+def test_a_laggy_sixteenth_line_is_never_promoted_to_32nds():
+    """Half two: a soloist playing sixteenths BEHIND the beat must stay on
+    the sixteenth grid — four onsets keep apart there, so the 32nd grid is
+    never even offered, however well it would fit the lag."""
+    period = 60.0 / 64.0
+    beats = [i * period for i in range(6)]
+    lag = 0.06 * period  # noticeably behind, close to a 32nd position
+    onsets = [beats[2] + (k / 4 + 0.0) * period + lag for k in range(4)]
+    quantized, _ = quantize_notes(onsets, [0.05] * 4, [60, 62, 64, 65], beats, [], [])
+    fractions = sorted(q.beat - int(q.beat) for q in quantized)
+    assert fractions == pytest.approx([0.0, 0.25, 0.5, 0.75])
+
+
 def test_a_real_triplet_survives_the_swing_warp():
     """D12's mechanism: the swing warp is a hypothesis about BINARY beats,
     and applying it to a genuine triplet drags the thirds off-lattice before
