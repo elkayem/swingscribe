@@ -218,6 +218,9 @@ MIN_MATCH_RATE = 0.15
 #               emitted is classified against the hand transcript as matched
 #               (right pitch), wrong (a note there, wrong pitch), invented
 #               (nothing there) or missed (theirs, we had nothing).
+#               RAW notes, erasures deliberately NOT applied (D20, the
+#               listener's ruling): silencing a note later must not change
+#               the transcriber's score — the shortcoming already happened.
 #   notation_*  the Score button (benchmark.score_against_notation). Are the
 #               notes we got WRITTEN the way a human wrote them? It charges
 #               the gap between performed timing and notated rhythm, so it

@@ -32,10 +32,13 @@ exactly as the frontend would.
   our own duration conventions applied to a human's grid, so value there
   partly scores us against ourselves. These .mscz files carry the values a
   human chose; disagreement is a genuine finding.
-- **Erasures apply.** The listener has silenced notes on these tracks (the
-  sidecars carry 239 of them as of 2026-08-31), and the endpoints resolve
-  them before exporting or scoring, exactly as the GUI does. The row says
-  how many were silenced.
+- **Erasures apply to the PAGE, not to the pitch measure (D20).** The
+  listener has silenced notes on these tracks (the sidecars carry 239 of
+  them as of 2026-08-31). The export and `notation_*` resolve them — the
+  page the listener keeps applies them, so its score must — while `pitch_*`
+  deliberately scores the RAW transcription, silenced notes included: the
+  listener ruled that silencing a note later must not change the
+  transcriber's score. The row says how many were silenced.
 - **No solo location.** The span in the sidecar is a human judgement,
   hand-drawn by ear. If a sidecar has no span, that is the row's status —
   this script never invents one.

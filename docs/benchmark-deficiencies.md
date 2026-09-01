@@ -653,7 +653,29 @@ to +0.024 (mean +0.003): located-span jitter, not a regression. Not
 re-pinned yet — the pin should happen once, under the new names, with the
 listener told n changed and why.
 
-### D20 - The two GUI measures disagree about which notes exist
+### D20 - The two GUI measures disagree about which notes exist — RESOLVED: both are right, and it is now policy
+
+**The listener ruled 2026-08-31: `pitch_*` scores the RAW transcription,
+erasures deliberately NOT applied.** "I should always get the same score
+regardless if a human came in later and silenced some of the invented
+notes — the transcription included a note that shouldn't have been
+included, and that is a shortcoming in the transcriber." So the
+`/ground-truth` endpoint's behaviour is the criterion, not a bug, and the
+disagreement between the two measures is a DISTINCTION: `pitch_*` judges
+the transcriber's raw output; `notation_*` judges the exported page, which
+applies erasures because the page the listener keeps applies them.
+Anything that "fixes" either endpoint to match the other is reverting a
+decision.
+
+**And a ceiling is on the record.** The listener, on the ghost-note
+finding: any two transcribers write these lines differently — one adds a
+ghost note, one a scoop, one omits it — and the same transcriber differs
+across days; a perfect score against a single reference is not attainable,
+and the penalty for a real-but-unnotated note is accepted. The reference
+itself can also simply be wrong: transcribers make mistakes, so some
+penalties are charged to the software for being right. Both effects bound
+every reference-based number in this project from above, which is one more
+reason the reference-free readability measure exists.
 
 Found 2026-08-31 by classifying Confirmation's invented notes: a direct
 `ground_truth.overlay` over the AUDIBLE notes read invented=156 where the
@@ -665,14 +687,10 @@ columns — charge notes the listener already silenced as invented or wrong.
 On Confirmation (60 silenced) that costs ~0.03 of reported pitch F1
 (0.759 shown vs 0.790 audible-only).
 
-Neither convention is obviously wrong: raw measures the TRANSCRIBER alone,
-audible measures the product after human review — but today the sheet
-carries one of each without saying so. The display constraint is real (the
-roll must class every drawn note, silenced included), so the fix is not
-simply to filter the endpoint's input; the counts and the classes would
-need to separate. **A criteria decision for the listener**, and whichever
-way it goes, the one definition lives in the shared scoring code and the
-sheet columns must say what is in force (next-session-prompt's rule).
+The question was put to the listener and answered above: raw for
+`pitch_*`, audible for `notation_*`, both on purpose. The batch scripts'
+column documentation says so, per next-session-prompt's rule that the
+sheet always reports the criteria in force.
 
 Separately, the classification itself: Confirmation's invented notes are
 NOT junk — median confidence 0.781 (matched: 0.853, wrong: 0.701), median
