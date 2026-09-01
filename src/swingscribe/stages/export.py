@@ -237,6 +237,13 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
             direction_type = ElementTree.SubElement(direction, "direction-type")
             words = ElementTree.SubElement(direction_type, "words", {"font-style": "italic"})
             words.text = "Swing"
+        if index == 0 and notation.double_time:
+            # The listener's condition for double-time pages: the page must
+            # say so, or its values read as twice what was played.
+            direction = ElementTree.SubElement(measure, "direction", {"placement": "above"})
+            direction_type = ElementTree.SubElement(direction, "direction-type")
+            words = ElementTree.SubElement(direction_type, "words", {"font-style": "italic"})
+            words.text = "Notated in double time"
         # Voices are written one after another, each rewound to the barline by
         # a <backup>. MusicXML has no interleaved form: a reader consumes a
         # voice until the duration runs out, so voice 2 must start by undoing

@@ -106,6 +106,7 @@ def notation_for_span(
     pulses_per_bar: int = 4,
     sample_rate: int = 44100,
     second_voice: list[NoteEvent] | None = None,
+    double_time: bool = False,
 ) -> Notation | None:
     """Run swing, quantize and notate over one span. None if it is too short.
 
@@ -125,6 +126,16 @@ def notation_for_span(
     kept = span_beats(beats, region)
     if len(kept) < MIN_BEATS:
         return None
+    if double_time:
+        # Double-time feel (the listener's checkbox): the notated pulse is
+        # twice the tracked one, so each tracked beat is split at its
+        # midpoint and everything downstream — grid choice, values, bars —
+        # follows at the doubled pulse. A performed bar becomes two notated
+        # bars; a ballad's 32nd run becomes ordinary sixteenths. The anchor
+        # is still a valid downbeat instant on the doubled grid.
+        kept = [t for a, b in zip(kept, kept[1:], strict=False) for t in (a, (a + b) / 2.0)] + [
+            kept[-1]
+        ]
 
     base = config or Config()
     run_config = base.model_copy(
@@ -144,6 +155,8 @@ def notation_for_span(
     for stage in (swing.run, quantize.run, notate.run):
         document = stage(document, run_config)
     notation = document.notation
+    if notation is not None and double_time:
+        notation.double_time = True
     if notation is not None and second_voice:
         merge_second_voice(notation, _notate_only(second_voice, document, run_config))
     return notation

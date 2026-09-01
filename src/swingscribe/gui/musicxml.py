@@ -148,6 +148,10 @@ def build_notation(
         second_voice=(
             [NoteEvent(source=stem, **note) for note in second_voice] if second_voice else None
         ),
+        # The listener's double-time checkbox: a per-track judgement like the
+        # time signature, stored in the sidecar, never inferred (the Omnibook
+        # writes these solos as literal 32nds, which stays the default).
+        double_time=bool(settings.get("double_time")),
     )
     if notation is None or not notation.bars:
         raise NotReady("the span is too short to bar out - select at least a couple of bars")

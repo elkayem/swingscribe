@@ -344,6 +344,7 @@ async function loadTrack(track) {
   state.showBeats = remembered.beats_shown ?? true;
   state.snapMode = remembered.snap_mode ?? 'off';
   state.timeSignature = remembered.time_signature ?? null;
+  state.doubleTime = Boolean(remembered.double_time);
   state.anchor = remembered.anchor ?? null;
   state.barsPerChorus = remembered.bars_per_chorus ?? 0;
   state.formStart = remembered.form_start ?? null;
@@ -654,6 +655,10 @@ function applyBeats() {
   snap.disabled = !state.beats;
   snap.textContent = `Snap: ${state.beats ? state.snapMode : 'off'}`;
   snap.classList.toggle('active', Boolean(state.beats) && state.snapMode !== 'off');
+  const doubleTime = $('double-time');
+  doubleTime.disabled = !state.beats;
+  doubleTime.textContent = `2× time: ${state.doubleTime ? 'on' : 'off'}`;
+  doubleTime.classList.toggle('active', Boolean(state.doubleTime));
   updateBars();
 }
 
@@ -1826,6 +1831,7 @@ function settingsPayload() {
     beats_shown: state.showBeats,
     snap_mode: state.snapMode,
     time_signature: state.timeSignature,
+    double_time: state.doubleTime,
     anchor: state.anchor,
     bars_per_chorus: state.barsPerChorus,
     form_start: state.formStart,
@@ -2282,6 +2288,17 @@ $('form-reset').addEventListener('click', async () => {
 $('time-signature').addEventListener('change', async (event) => {
   state.timeSignature = event.target.value;
   await maybeLoadBeats();
+  persist();
+});
+
+$('double-time').addEventListener('click', () => {
+  // A notation choice, not a grid choice: the tracked beats are untouched,
+  // export subdivides them at notation time (notation_for_span), and the
+  // page carries "Notated in double time". Per-track, like the signature.
+  state.doubleTime = !state.doubleTime;
+  const chip = $('double-time');
+  chip.textContent = `2× time: ${state.doubleTime ? 'on' : 'off'}`;
+  chip.classList.toggle('active', state.doubleTime);
   persist();
 });
 

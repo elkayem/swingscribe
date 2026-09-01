@@ -140,6 +140,14 @@ class Notation(BaseModel):
     # Written = sounding + this many semitones. Bb tenor is +14, Eb alto +9.
     transpose: int = 0
     title: str = ""
+    # The page is written at TWICE the performed pulse — a ballad's 32nd runs
+    # as sixteenths, "Notated in double time" at the top. A listener's choice
+    # (sidecar), never inferred: the Omnibook writes these solos as literal
+    # 32nds, so that stays the default. Every notated position and value is
+    # in DOUBLED units when set; scoring against a true-meter reference must
+    # halve them (benchmark.notation_notes), and readability must NOT — the
+    # page is read as written.
+    double_time: bool = False
 
 
 class Document(BaseModel):

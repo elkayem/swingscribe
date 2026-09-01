@@ -63,6 +63,52 @@ def test_a_span_too_short_to_bar_out_returns_none():
     assert notation_for_span("t.wav", notes, beats, short, stem="other") is None
 
 
+# ── double time ─────────────────────────────────────────────────────────────
+
+
+def test_double_time_doubles_the_bars_and_the_values():
+    """The listener's checkbox: the notated pulse is twice the tracked one,
+    so a performed bar becomes two notated bars and a note on every beat —
+    quarters at true meter — is written in halves' worth of doubled units
+    (i.e., the same notes carry twice the notated value). The flag rides on
+    the Notation so export can say 'Notated in double time' and the scorers
+    can halve positions back to true meter."""
+    beats = grid(count=48, start=0.0)
+    region = (0.0, 32 * BEAT)
+    normal = notation_for_span("t.wav", line(beats), beats, region, stem="other")
+    doubled = notation_for_span(
+        "t.wav", line(beats), beats, region, stem="other", double_time=True
+    )
+    assert normal is not None and doubled is not None
+    assert not normal.double_time
+    assert doubled.double_time
+    played_bars = sum(1 for bar in normal.bars if any(not n.is_rest for n in bar.notes))
+    doubled_bars = sum(1 for bar in doubled.bars if any(not n.is_rest for n in bar.notes))
+    assert doubled_bars == 2 * played_bars
+
+
+def test_scoring_halves_a_double_time_page_back_to_true_meter():
+    """A double-timed page scored against a true-meter reference must read
+    the same as the normal page — the scorer, not the reader, undoes the
+    doubling (benchmark.notation_notes)."""
+    from swingscribe.benchmark import notation_notes
+
+    beats = grid(count=48, start=0.0)
+    region = (0.0, 32 * BEAT)
+    normal = notation_for_span("t.wav", line(beats), beats, region, stem="other")
+    doubled = notation_for_span(
+        "t.wav", line(beats), beats, region, stem="other", double_time=True
+    )
+    flat_normal = notation_notes(normal)
+    flat_doubled = notation_notes(doubled)
+    assert [p for p, _d, _pi in flat_doubled] == pytest.approx(
+        [p for p, _d, _pi in flat_normal]
+    )
+    assert [d for _p, d, _pi in flat_doubled] == pytest.approx(
+        [d for _p, d, _pi in flat_normal]
+    )
+
+
 # ── bar numbering ───────────────────────────────────────────────────────────
 
 

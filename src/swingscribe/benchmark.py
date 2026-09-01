@@ -210,10 +210,16 @@ def notation_notes(notation) -> list[tuple[float, float, int]]:
     Rests are dropped: they carry no pitch, so the alignment has nothing to
     match them on, and the gap they occupy is already visible as the interval
     between the notes either side.
+
+    A double-time page is written in DOUBLED units, and the references it is
+    scored against are at true meter — so its positions and values are halved
+    here, once, for every scorer at once. Readability deliberately does not
+    come through this function: the page is read as written.
     """
+    scale = 0.5 if getattr(notation, "double_time", False) else 1.0
     return merge_ties(
         [
-            (start + note.beat, note.duration, note.pitch, note.tie_stop)
+            (scale * (start + note.beat), scale * note.duration, note.pitch, note.tie_stop)
             for start, bar in zip(bar_starts(notation.bars), notation.bars, strict=True)
             for note in bar.notes
             if not note.is_rest
