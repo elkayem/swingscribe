@@ -480,6 +480,24 @@ def process_file(
     region = (max(0.0, solo_start - SOLO_MARGIN_S), min(duration, solo_end + SOLO_MARGIN_S))
     row["solo_start"] = round(solo_start, 3)
     row["solo_end"] = round(solo_end, 3)
+
+    # The downbeat ANCHOR, from the annotator's own bar lines. In the GUI the
+    # listener places it by hand; without one, bar 1's phase is whatever the
+    # located span start happens to be modulo the bar — Don't Blame Me came
+    # out one beat off, every note in the wrong place in its bar, and the
+    # interval-based rhythm measure is immune to a constant shift BY DESIGN,
+    # so nothing scored it. WJazzD marks every note's bar and beat, so any
+    # note the annotator put ON a downbeat, mapped through the fit, IS a
+    # downbeat in our timeline (notation.section_for treats the anchor as a
+    # phase, so any downbeat serves). The one nearest the span start wins.
+    downbeats = [
+        float(onset) * rate + offset
+        for (onset,) in db.execute(
+            "select onset from melody where melid=? and beat=1 and tatum=1 order by onset",
+            (melid,),
+        )
+    ]
+    anchor = min(downbeats, key=lambda t: abs(t - solo_start)) if downbeats else None
     log(
         f"  [{melid}] located at offset {offset:+.2f}s rate {rate:.4f}, matched {match_rate:.0%}"
         f" -> region {region[0]:.1f}-{region[1]:.1f}s"
@@ -539,6 +557,7 @@ def process_file(
             # and invisible, which reads as "the batch did not make beats".
             "beats_shown": True,
             "time_signature": time_signature_for(db, melid),
+            "anchor": anchor,
             "transposition": "C",
             "score": str(score_path) if score_path else None,
             "melid": melid,
