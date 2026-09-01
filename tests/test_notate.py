@@ -192,6 +192,14 @@ def test_an_uncentred_crossing_still_ties():
     assert sum(length for _s, length, _t in pieces) == 1.0
 
 
+def test_a_dotted_quarter_on_a_beat_is_one_symbol():
+    """The other idiomatic syncopation (D14): a dotted quarter starting on
+    its own dot-grid — beat two, or the charleston's and-of-one — is written
+    whole on every chart. Off the dot-grid it still ties."""
+    assert split_for_meter(1.0, 1.5, 4.0) == [(1.0, 1.5, None)]
+    assert len(split_for_meter(0.75, 1.5, 4.0)) >= 2
+
+
 def test_split_always_conserves_duration():
     """Whatever else it does, notation may not lose or invent time."""
     for start in [i * 0.25 for i in range(16)]:

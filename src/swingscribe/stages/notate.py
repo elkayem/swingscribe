@@ -280,14 +280,21 @@ def _symmetric_syncopation(a: float, length: float, unit_start: float) -> bool:
     crosses — a quarter starting on an offbeat sixteenth — still ties, which
     is the half of the conservative rule actually protecting readability.
 
-    Plain binary values only: a dotted value has no single centre, and a
-    tuplet piece never reaches here.
+    Dotted binary values get the same courtesy on a weaker condition: a
+    dotted value has no single centre, but one that starts on a multiple of
+    its own dot-unit (the eighth, for a dotted quarter) is the idiomatic
+    figure — the dotted quarter on beat two — and the page writes it whole.
+    One starting off its dot-grid (an offbeat sixteenth) still ties.
     """
-    if not any(_close(length, v) for v in BINARY_UNITS):
-        return False
-    half = length / 2.0
-    steps = (a - unit_start) / half
-    return abs(steps - round(steps)) * half <= TICK and round(steps) % 2 == 1
+    if any(_close(length, v) for v in BINARY_UNITS):
+        half = length / 2.0
+        steps = (a - unit_start) / half
+        return abs(steps - round(steps)) * half <= TICK and round(steps) % 2 == 1
+    if any(_close(length / 1.5, v) for v in BINARY_UNITS):
+        dot_unit = length / 3.0
+        steps = (a - unit_start) / dot_unit
+        return abs(steps - round(steps)) * dot_unit <= TICK
+    return False
 
 
 def _subdivide(a: float, b: float, unit_start: float, unit_end: float, out: list) -> None:
