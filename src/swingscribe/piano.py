@@ -84,6 +84,52 @@ def to_model_rate(mono: np.ndarray, sample_rate: int) -> np.ndarray:
     return resampled.numpy()
 
 
+def _numba_free() -> None:
+    """Make librosa importable when Application Control blocks numba.
+
+    resampy is stubbed the way transcribe._import_torchcrepe does it, and
+    numba itself gets pass-through decorators when its DLLs will not load:
+    numba only ever OPTIMIZES the librosa code paths the piano model
+    touches, so the un-jitted functions are the same functions, slower.
+    Real modules win whenever they import.
+    """
+    import sys
+    import types
+
+    try:
+        import resampy  # noqa: F401
+    except ImportError:
+
+        def _blocked(*_args, **_kwargs):
+            raise RuntimeError("resampy is unavailable here; resample with torchaudio instead")
+
+        stub = types.ModuleType("resampy")
+        stub.resample = _blocked
+        sys.modules["resampy"] = stub
+    try:
+        import numba  # noqa: F401
+    except ImportError:
+
+        def _passthrough(*args, **kwargs):
+            if len(args) == 1 and callable(args[0]) and not kwargs:
+                return args[0]
+
+            def wrap(function):
+                return function
+
+            return wrap
+
+        stub = types.ModuleType("numba")
+        stub.jit = _passthrough
+        stub.njit = _passthrough
+        stub.vectorize = _passthrough
+        stub.guvectorize = _passthrough
+        stub.stencil = _passthrough
+        stub.prange = range
+        stub.__version__ = "0.0.0-swingscribe-passthrough"
+        sys.modules["numba"] = stub
+
+
 def transcribe(
     mono: np.ndarray,
     sample_rate: int,
@@ -96,12 +142,18 @@ def transcribe(
     whole-track times back — matching what `stages/transcribe.py` reports.
     Runs at roughly 0.36x realtime on CPU.
 
-    A STANDALONE caller must run `transcribe._import_torchcrepe()` first:
-    the import below pulls librosa, whose resampy dependency carries numba,
-    which Application Control blocks on this machine (CLAUDE.md). Inside the
-    pipeline that shim has always run by the time the oracle is consulted,
-    which is why this import "just works" there and dies in a bare script.
+    The import below reaches numba twice on this machine, and Application
+    Control's verdict on numba CHANGES over time (allowed 2026-08-31
+    morning, blocked again by 2026-09-01 — CLAUDE.md: test, never
+    remember). `_numba_free()` installs the same class of shim as
+    transcribe._import_torchcrepe: real modules when they load, pass-through
+    stand-ins when AC refuses them. librosa uses numba only as an optimizing
+    decorator on functions that run fine un-jitted, and torchlibrosa touches
+    only window/pad/mel utilities. Without this, a blocked numba silently
+    costs every fresh piano transcription its oracle ("keeping CREPE" in a
+    log nobody reads).
     """
+    _numba_free()
     from piano_transcription_inference import PianoTranscription
 
     ensure_checkpoint()

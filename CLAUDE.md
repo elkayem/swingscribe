@@ -109,7 +109,13 @@ of these has broken a tool at least once:
   flux, torchaudio resampling, the weighted_argmax decoder) are measured and
   working. A 2026-08-25 note here said the block had lifted — it had, and
   then it came back, so treat "does Application Control allow X today" as a
-  thing to TEST rather than a fact to remember.
+  thing to TEST rather than a fact to remember. The flapping was then
+  CAUGHT IN THE ACT: the piano oracle imported numba cleanly on the morning
+  of 2026-08-31 and was blocked again by 2026-09-01, which would have
+  silently cost every fresh piano transcription its oracle ("keeping CREPE"
+  in a log nobody reads). `piano._numba_free()` now stubs numba with
+  pass-through decorators when the real one will not load — librosa only
+  ever uses it to OPTIMIZE functions that run fine un-jitted.
 - **The CA bundle goes stale.** `uv`/Python downloads fail with
   `CERTIFICATE_VERIFY_FAILED` when the intercepting certs rotate; regenerate
   `%USERPROFILE%\.windows-ca-bundle.pem` from `Cert:\*\Root` and `Cert:\*\CA`
