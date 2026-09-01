@@ -407,9 +407,29 @@ decimals; against the hand scores, Giant Steps ties 0.095 → 0.077 with
 value +0.003, Confirmation 0.095 → 0.082 with value +0.004, All The Things
 0.117 → 0.106 with rhythm +0.007. The 3/4 tune is untouched by design.
 
-Still open: dotted-value syncopations (the charleston's dotted quarter has
-no single centre, so the plain-binary rule skips it), and the barline class
-nobody has audited. Human target 0.022; we stand at 0.088.
+**Second fix applied: the dotted allowance.** A dotted binary value
+starting on a multiple of its own dot-unit — the dotted quarter on beat
+two; the charleston was already whole by flush — is the other figure every
+chart writes untied. Subset ties 0.0882 → 0.0779, all other numbers
+unchanged to four decimals; All The Things reads 0.106 → 0.073 against the
+hand score.
+
+**The barline class was then audited and its fix measured and REJECTED.**
+The hand scores' own 82 ties split 57.3% barline / 42.7% within-bar — the
+same shape as ours at a fifth the rate (their barline rate 0.0125, ours
+0.041). Absorbing a sub-eighth tail that dribbles over a barline into
+silence moved subset ties only 0.078 → 0.077 while readability and one
+hand-score value dipped: the followed-by-silence guard rarely fires
+(gap-filled durations run most barline ties straight into the next onset),
+and a trim that does fire can mint the sub-eighth rest it meant to
+prevent. The surviving barline ties are legato-into-the-next-note, where
+cutting invents a rest the ear never heard. Reverted; the reasoning lives
+beside `close_short_gaps` in notate.build.
+
+Still open: triple metre (Someday holds at 0.178 — the 3/4 gate is
+correct for the symmetric rule, so this needs its own convention), and
+whatever remains of the within-bar class. Human target 0.022; we stand at
+**0.077** (from 0.110 at the start of 2026-08-31).
 
 Not folded into the readability composite on purpose: a page is not unreadable
 for having a tie, so it is reported beside the score rather than inside it.

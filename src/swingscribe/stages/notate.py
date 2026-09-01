@@ -718,6 +718,14 @@ def build(
     # Before splitting, not after: the splitter can only pick a legal tuplet
     # group if the durations it is handed already land on the beat's grid.
     events = close_short_gaps(events, bars_index)
+    # NOT here: absorbing a sub-eighth tail that dribbles across a barline
+    # into silence. Measured 2026-08-31 (D14): ties moved 0.078 → 0.077 on
+    # the subset while readability and one hand-score value dipped — the
+    # "followed by silence" guard rarely fires because gap-filled durations
+    # run most barline ties straight into the next onset, and a trim that
+    # does fire can mint the sub-eighth rest it meant to prevent. The
+    # remaining barline ties are legato-into-the-next-note, where cutting
+    # would invent a rest the ear never heard.
 
     by_bar: dict[int, list[NotatedNote]] = {}
     for bar_number, beat, duration, pitch in events:

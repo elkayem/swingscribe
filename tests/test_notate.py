@@ -200,6 +200,12 @@ def test_a_dotted_quarter_on_a_beat_is_one_symbol():
     assert len(split_for_meter(0.75, 1.5, 4.0)) >= 2
 
 
+# A barline-tail absorption pass (trim a sub-eighth overhang into silence)
+# was implemented, measured, and REJECTED here on 2026-08-31: ties moved
+# 0.078 -> 0.077 while readability and one hand-score value dipped — see the
+# comment beside close_short_gaps in notate.build for why it cannot work.
+
+
 def test_split_always_conserves_duration():
     """Whatever else it does, notation may not lose or invent time."""
     for start in [i * 0.25 for i in range(16)]:
