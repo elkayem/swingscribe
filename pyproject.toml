@@ -80,6 +80,14 @@ gui = [
 batch = [
     "openpyxl>=3.1",
 ]
+# The separator trial (docs/separation-research.md): BS-Roformer / Mel-Band
+# Roformer checkpoints through python-audio-separator. Its own group, never
+# in ml: it brings onnxruntime and its own model zoo, nothing in the
+# pipeline imports it, and Application Control may refuse its DLLs — test.
+# uv sync --group ml --group gui --group batch --group roformer
+roformer = [
+    "audio-separator[cpu]>=0.30",
+]
 
 [tool.uv]
 # No macOS until something deploys there (M8 at the earliest).
