@@ -615,6 +615,17 @@ made. Both are kept; neither subsumes the other.
 - **`ensemble: null` is not `horn-led`, but it behaves like it.** Three of the
   four new piano solos silently skipped the piano oracle that way. Check the
   routing before believing a piano number.
+- **htdemucs_6s files a horn under `guitar` or `vocals` on a fifth of the
+  WJazzD tracks, and BS-Roformer-SW does not** (docs/separation-research.md,
+  2026-09-02). Seven of eleven batch "wrong takes" were the locate pass
+  looking only in `other` (D23); on the same tracks the Roformer put every
+  horn in `other` and read subset mean pitch F1 0.878 → 0.903, the
+  routing-trouble five 0.696 → 0.838 (Dolores 0.660 → 0.913). It is
+  `bsroformer_sw` in the model menu and `--separation-model` in the batch,
+  behind the `roformer` dependency group, at ~9x htdemucs' CPU time — NOT
+  the default until the full sheet and the pianos are measured on it.
+  Summing stems to dodge routing (`other+vocals+guitar+piano`) was measured
+  and is worse everywhere: a loud piano in the sum out-shouts the horn.
 - **A missing note may mean the soloist LEFT THE STEM.** Demucs assigns each
   moment to exactly one source, so an instrument it cannot place consistently
   is not attenuated across stems — it is switched between them, leaving

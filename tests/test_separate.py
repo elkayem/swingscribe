@@ -94,3 +94,74 @@ def test_existing_stems_of_a_model_with_more_sources(tmp_path):
         (out / f"{name}.wav").write_bytes(b"RIFF....")
     six = ["drums", "bass", "other", "vocals", "guitar", "piano"]
     assert existing_stems(out, six) is None
+
+
+def test_roformer_output_names_map_onto_pipeline_stems():
+    from swingscribe.stages.separate import roformer_stem_name
+
+    assert roformer_stem_name("track_(Other)_BS-Roformer-SW.wav") == "other"
+    assert roformer_stem_name("track_(Vocals)_BS-Roformer-SW.wav") == "vocals"
+    assert roformer_stem_name("track_(Piano)_BS-Roformer-SW.wav") == "piano"
+    assert roformer_stem_name("track_(Instrumental)_x.wav") is None  # not a stem we keep
+    assert roformer_stem_name("track.wav") is None
+
+
+def _document_for(tmp_path):
+    from swingscribe.model import AudioRef, Document
+
+    wav = tmp_path / "norm.wav"
+    wav.write_bytes(b"RIFF....")
+    return Document(
+        audio_path="orig.m4a",
+        sample_rate=44100,
+        audio=AudioRef(path=str(wav), sample_rate=44100, channels=2, duration=1.0),
+    )
+
+
+def test_a_roformer_model_reuses_its_stems_without_loading_anything(tmp_path, monkeypatch):
+    """The reuse check for a Roformer model comes from KNOWN_SOURCES, so a
+    complete set on disk is served with no audio-separator (or torch)
+    import at all -- CI has neither."""
+    import hashlib
+
+    from swingscribe.config import Config
+    from swingscribe.stages import separate
+
+    document = _document_for(tmp_path)
+    config = Config(cache_dir=tmp_path / "cache")
+    config = config.model_copy(
+        update={"separate": config.separate.model_copy(update={"model": "bsroformer_sw"})}
+    )
+    digest = hashlib.sha256(Path(document.audio.path).read_bytes()).hexdigest()[:16]
+    out = stems_dir(config.cache_dir, digest, "bsroformer_sw")
+    out.mkdir(parents=True)
+    for name in ("drums", "bass", "other", "vocals", "guitar", "piano"):
+        (out / f"{name}.wav").write_bytes(b"RIFF....")
+
+    def explode(*_args, **_kwargs):
+        raise AssertionError("a complete set must not be re-separated")
+
+    monkeypatch.setattr(separate, "_roformer_separate", explode)
+    result = separate.run(document, config)
+    assert sorted(result.stems) == ["bass", "drums", "guitar", "other", "piano", "vocals"]
+
+
+def test_a_roformer_model_that_drops_a_stem_is_an_error(tmp_path, monkeypatch):
+    from swingscribe.config import Config
+    from swingscribe.stages import separate
+
+    document = _document_for(tmp_path)
+    config = Config(cache_dir=tmp_path / "cache")
+    config = config.model_copy(
+        update={"separate": config.separate.model_copy(update={"model": "bsroformer_sw"})}
+    )
+
+    def five_only(_audio, _checkpoint, out_dir):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            n: str(out_dir / f"{n}.wav") for n in ("drums", "bass", "other", "vocals", "guitar")
+        }
+
+    monkeypatch.setattr(separate, "_roformer_separate", five_only)
+    with pytest.raises(RuntimeError, match="piano"):
+        separate.run(document, config)

@@ -182,9 +182,39 @@ silent. Scored through the batch's own path on the same located span,
 | notation rhythm | 0.615 | 0.615 |
 | coverage | 0.778 | **0.851** |
 
-One track. The subset plus the four split-routing tracks are separating
-now (`scratchpad/roformer_stems.py`, stems under
-`stems/<digest>-bsroformer_sw/`), scored the same way when they land.
+Then the subset and the split-routing tracks, same scoring, same floors,
+each track on the Roformer's `other` stem (which is where it put EVERY
+horn — no track needed `guitar` or `vocals`):
+
+| | htdemucs_6s (located stem) | BS-Roformer-SW (`other`) |
+|---|---|---|
+| **subset, mean pitch F1 (n=12)** | 0.878 | **0.903** |
+| subset, trusted rhythm (n=12) | 0.696 | **0.709** |
+| subset, trusted count | 12 | 12 |
+| **routing-trouble five, mean pitch F1** | 0.696 | **0.838** |
+| routing five, trusted count | 4 | 5 |
+
+Per track on the subset: up on 10 of 12 (Chet Baker 0.862 → 0.969, Suede
+Shoes 0.872 → 0.931, Embraceable You 0.881 → 0.926, St Thomas 0.892 →
+0.926), down on Blue Train (0.880 → 0.866) and Cheese Cake (0.896 →
+0.887). The routing five: Dolores 0.660 → 0.913, Cherokee 0.718 → 0.834,
+Cherokee II 0.700 → 0.791, My Favorite Things 0.601 → 0.776 (coverage
+0.47 → 0.70, trusted now), Ornithology 0.803 → 0.875. The 0.66-0.82
+"ceilings" measured under htdemucs_6s in 0b were htdemucs_6s's ceilings:
+the horn was not smeared by the recording, it was smeared by the
+separator.
+
+The price is CPU: 7-8 minutes per 3 minutes of audio on this machine,
+26 minutes for Blue Train — roughly nine times htdemucs. One-time per
+track, cached like every other stem.
+
+**Reading.** Both halves of the diagnosis moved: routing (every horn in
+`other`) AND bleed (fewer notes on Chet Baker, 161 → 133, at higher F1).
+This is the largest single gain of the project's measurement history and
+it came from a model the plan's "drop a checkpoint in behind the same
+interface" clause anticipated. Not yet a default: the two dips need a
+look, the pianos are unmeasured on it, and the full sheet is a day of
+CPU at this speed.
 
 ### Roformer notes from the first look
 

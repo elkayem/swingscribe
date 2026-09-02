@@ -40,7 +40,69 @@ KNOWN_SOURCES: dict[str, tuple[str, ...]] = {
     "htdemucs": ("drums", "bass", "other", "vocals"),
     "htdemucs_ft": ("drums", "bass", "other", "vocals"),
     "htdemucs_6s": ("drums", "bass", "other", "vocals", "guitar", "piano"),
+    "bsroformer_sw": ("drums", "bass", "other", "vocals", "guitar", "piano"),
 }
+
+# Models served by python-audio-separator (the `roformer` dependency group)
+# rather than demucs: our model name -> the zoo's checkpoint filename. The
+# plan's "a BS-Roformer checkpoint can drop in behind the same interface"
+# clause, cashed in: BS-Roformer-SW routed EVERY benchmark horn to `other`
+# where htdemucs_6s had filed five under guitar/vocals, and read subset mean
+# pitch F1 0.878 -> 0.903 (docs/separation-research.md). It costs ~9x
+# htdemucs' CPU time, which is why it is offered and not the default.
+ROFORMER_MODELS: dict[str, str] = {"bsroformer_sw": "BS-Roformer-SW.ckpt"}
+
+# audio-separator names its outputs "<input>_(Stem)_<model>.wav"; these are
+# the stem labels BS-Roformer-SW writes, mapped onto the names the rest of
+# the pipeline expects (demucs' lower-case set).
+_ROFORMER_STEM_NAMES = {
+    "vocals": "vocals",
+    "drums": "drums",
+    "bass": "bass",
+    "other": "other",
+    "guitar": "guitar",
+    "piano": "piano",
+}
+
+
+def roformer_stem_name(output_path: str | Path) -> str | None:
+    """Our stem name for one audio-separator output file, or None if the
+    parenthesised label is not one this pipeline knows."""
+    import re
+
+    match = re.search(r"\(([^)]+)\)", Path(output_path).name)
+    if not match:
+        return None
+    return _ROFORMER_STEM_NAMES.get(match.group(1).strip().lower())
+
+
+def _roformer_separate(audio_path: Path, checkpoint: str, out_dir: Path) -> dict[str, str]:
+    """Write `checkpoint`'s stems for `audio_path` into `out_dir` as
+    `<stem>.wav`, through python-audio-separator. Heavy import inside: the
+    `roformer` group is optional and CI never installs it."""
+    import shutil
+
+    from audio_separator.separator import Separator
+
+    work = out_dir / "_separating"
+    work.mkdir(parents=True, exist_ok=True)
+    separator = Separator(output_dir=str(work), output_format="WAV", log_level=30)
+    separator.load_model(model_filename=checkpoint)
+    outputs = separator.separate(str(audio_path))
+    stems: dict[str, str] = {}
+    for produced in outputs:
+        path = Path(produced)
+        if not path.is_absolute():
+            path = work / path
+        name = roformer_stem_name(path)
+        if name is None:
+            path.unlink(missing_ok=True)
+            continue
+        target = out_dir / f"{name}.wav"
+        shutil.move(str(path), str(target))
+        stems[name] = str(target)
+    shutil.rmtree(work, ignore_errors=True)
+    return stems
 
 
 def missing_stems(model: str, present: set[str] | dict[str, str]) -> list[str]:
@@ -93,16 +155,35 @@ def _progress_callback():
 
 
 def run(document: Document, config: Config) -> Document:
-    import torch
-    from demucs.api import Separator
-    from demucs.audio import save_audio
-
     if document.audio is None:
         raise ValueError("separate requires ingest to have run first (document.audio is None)")
 
     audio_path = Path(document.audio.path)
     digest = hashlib.sha256(audio_path.read_bytes()).hexdigest()[:16]
     out_dir = stems_dir(config.cache_dir, digest, config.separate.model)
+
+    if config.separate.model in ROFORMER_MODELS:
+        # A Roformer checkpoint knows its sources from KNOWN_SOURCES, so the
+        # reuse check needs no model load — and no torch import either.
+        sources = list(KNOWN_SOURCES[config.separate.model])
+        existing = existing_stems(out_dir, sources)
+        if existing is not None:
+            progress.report("separate", 1.0, "stems already on disk", cached=True)
+            print(f"separate: reusing {len(existing)} stems in {out_dir}")
+            return document.model_copy(update={"stems": existing})
+        checkpoint = ROFORMER_MODELS[config.separate.model]
+        print(f"separate: model={config.separate.model} ({checkpoint}) via audio-separator, cpu")
+        progress.report("separate", 0.05, f"separating with {config.separate.model} (no progress)")
+        stems = _roformer_separate(audio_path, checkpoint, out_dir)
+        missing = [name for name in sources if name not in stems]
+        if missing:
+            raise RuntimeError(f"{checkpoint} did not produce {', '.join(missing)}")
+        progress.report("separate", 1.0, "stems written")
+        return document.model_copy(update={"stems": stems})
+
+    import torch
+    from demucs.api import Separator
+    from demucs.audio import save_audio
 
     device = resolve_device(config.separate.device, torch.cuda.is_available())
     print(f"separate: model={config.separate.model} device={device}")

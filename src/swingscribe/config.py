@@ -43,8 +43,15 @@ class SeparateConfig(BaseModel):
     # cleaner (Walkin' 0.829 against htdemucs's 0.701). It is the wrong
     # choice when the soloist IS the pianist, for exactly the same reason
     # (docs/benchmark-deficiencies.md D3).
+    #
+    # `bsroformer_sw` (BS-Roformer-SW through python-audio-separator, the
+    # `roformer` dependency group) is the six-stem model that, measured
+    # 2026-09-02, put EVERY benchmark horn in `other` and read subset mean
+    # pitch F1 0.878 -> 0.903 against htdemucs_6s on the located stem
+    # (docs/separation-research.md). It costs about nine times htdemucs' CPU
+    # time and has no progress callback, so it is offered, not the default.
     model: str = "htdemucs"
-    device: str = "auto"  # auto | cuda | cpu
+    device: str = "auto"  # auto | cuda | cpu (demucs only; the Roformer runs on cpu)
 
 
 class BeatsConfig(BaseModel):
@@ -392,9 +399,10 @@ class GuiConfig(BaseModel):
     # Where the track picker looks. null = the directory swingscribe was run from.
     library_dir: str | None = None
     # Separation models offered on the audition screen, in menu order — the
-    # fast default first, then the two that are worth waiting for when the
-    # default disappoints. See SeparateConfig for what each one buys.
-    models: list[str] = ["htdemucs", "htdemucs_6s", "htdemucs_ft"]
+    # fast default first, then the ones worth waiting for when the default
+    # disappoints. See SeparateConfig for what each one buys; the last needs
+    # the `roformer` dependency group and takes ~9x as long.
+    models: list[str] = ["htdemucs", "htdemucs_6s", "htdemucs_ft", "bsroformer_sw"]
 
 
 # Sections that are pipeline stages, and therefore feed cache keys. Membership

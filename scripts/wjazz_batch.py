@@ -42,7 +42,10 @@ stem we transcribe down to a twentieth of its notes
 (docs/benchmark-deficiencies.md D3), and NOT `htdemucs_ft`, which costs 4x
 for no measured benefit (config.py SeparateConfig). Everything else gets
 `horn-led` and `htdemucs_6s`, which pulls a comping piano OUT of `other`
-(CLAUDE.md). See `auto_settings`.
+(CLAUDE.md). See `auto_settings`. `--separation-model bsroformer_sw`
+overrides the horn choice with the Roformer (docs/separation-research.md:
+subset mean pitch F1 0.878 -> 0.903, every horn routed to `other`, ~9x the
+CPU time); pianists keep htdemucs either way.
 
 ## The two-pass transcription
 
@@ -390,8 +393,13 @@ def process_file(
     cache_dir: Path,
     log=print,
     fresh: bool = False,
+    separation_model: str | None = None,
 ) -> dict:
     """Run the GUI workflow end to end for one wjazzd audio file.
+
+    `separation_model` overrides `auto_settings`' choice for HORN soloists
+    only (a pianist keeps plain htdemucs, D3) — how the Roformer trial is
+    run through the batch (docs/separation-research.md).
 
     Always returns a dict keyed by FIELDS. On any failure `status` explains
     why and the data columns are left blank rather than raising — one bad
@@ -421,6 +429,8 @@ def process_file(
         return row
 
     ensemble, model = auto_settings(instrument)
+    if separation_model and ensemble == "horn-led":
+        model = separation_model
     row["ensemble"], row["separation_model"] = ensemble, model
 
     from swingscribe import wjazz
@@ -764,6 +774,12 @@ def main() -> None:
             f"places (default: {DEFAULT_CACHE_DIR} — see the module docstring)"
         ),
     )
+    parser.add_argument(
+        "--separation-model",
+        default=None,
+        help="override the separation model for horn soloists (e.g. bsroformer_sw); "
+        "pianists keep htdemucs",
+    )
     args = parser.parse_args()
     if not (args.limit or args.file or args.random or args.all):
         parser.error("pick one: --limit N, --file NAME (repeatable), --random N, or --all")
@@ -789,7 +805,9 @@ def main() -> None:
 
     for audio_path in files:
         print(f"\n== {audio_path.name} ==")
-        row = process_file(db, audio_path, cache_dir, fresh=args.fresh)
+        row = process_file(
+            db, audio_path, cache_dir, fresh=args.fresh, separation_model=args.separation_model
+        )
         write_row(ws, index, row)
         save_sheet(wb, ws)  # after every file: a crash mid-batch loses nothing already done
         print(f"  -> {row['status'] or 'ok'}")
