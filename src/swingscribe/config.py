@@ -123,6 +123,36 @@ class TranscribeConfig(BaseModel):
     # comes back pays the cost twice while a real melodic interval pays once.
     # Scale: 5 bins = 1 semitone, 60 bins = an octave.
     pitch_step_cost: float = 0.2
+    # ── The line's own register and loudness as a bleed rejector ─────────
+    # A single melodic line stays near itself: measured over 23 solos (13
+    # WJazzD, 10 hand-scored), a note more than an octave BELOW the median
+    # pitch of its neighbours within `line_window_s`, or more than
+    # `line_loudness_floor_db` quieter than their median loudness, is bleed
+    # far more often than it is the soloist. htdemucs_6s put Bird's alto in
+    # the `guitar` stem WITH the piano's comping on Ornithology, so the
+    # rejects were inside the lead stem and no cross-stem test could see them
+    # (transcribe.reject_line_outliers). Floors are relative to the line, not
+    # the stem: `silence_floor_db` gates on the stem's LOUDEST frames and
+    # lets a -25 dB comp through between phrases. Measured with the green
+    # bar's own pitch F1: every horn track up (+0.007 to +0.062), mean
+    # WJazzD +0.026, hand-scored +0.016, no track down more than 0.004; the
+    # surface is flat across windows of 1.5-3 s and floors of 10-16. The
+    # loudness floor is applied to HORNS ONLY: a pianist plays soft notes on
+    # purpose and Carl Perkins lost 0.012 to it, while the register floor
+    # removes left-hand notes and lifts every piano solo (+0.010 to +0.033).
+    #
+    # The loudness floor's depth is a precision/recall trade and the table
+    # is on the record: over the 18 horn tracks it removes, at 12 dB, 391
+    # bleed notes and 91 REAL ones (a hand transcriber wrote them — ghosted
+    # notes inside a phrase, Art Pepper lost 7); at 14 dB, 333 and 61; at 16,
+    # 280 and 42. Isolation does not separate the two (bleed sits as close
+    # to other notes as a ghost note does). 14 keeps nearly all of the pitch
+    # gain (+0.024 against +0.026) with no track's F1 down on the table, and
+    # a note 14 dB under its neighbours is not one a listener calls clearly
+    # audible. 0 disables either floor.
+    line_window_s: float = 2.0
+    line_register_floor: float = 12.0  # semitones below the local median pitch
+    line_loudness_floor_db: float = 14.0  # dB below the local median note loudness
     # ── M7b: the polyphonic piano model as a second opinion ──────────────
     # Consult a polyphonic piano model and use it to correct octaves and
     # reject notes it will not vouch for (src/swingscribe/corroborate.py).

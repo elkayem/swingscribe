@@ -347,6 +347,23 @@ things not to re-derive:
 - **The oracle's `velocity` is an unused melody cue.** Loudest-of-cluster beats
   highest-of-cluster on the hard case (Peterson 0.583 -> 0.715 F1). A register
   floor does NOT generalise — `>= 55` helped Giant Steps and hurt Lover.
+- **A note the line itself disowns is bleed: an octave-plus under the local
+  register, or (horns only) 14 dB under the local loudness.** The comping
+  that CREPE picks up between a horn's phrases can sit INSIDE the horn's
+  own stem — on Ornithology the other stems held nothing at those pitches,
+  so no cross-stem test can see it and the piano oracle as a chord witness
+  found nothing either. `transcribe.reject_line_outliers` judges each note
+  against the median pitch and loudness of its neighbours within 2 s.
+  Measured on a 23-track per-note table before shipping and then through
+  the batch: subset mean pitch F1 0.854 → 0.880 with every track up,
+  trusted rhythm 0.694 → 0.701 (D22). The loudness floor is HORN-ONLY: a
+  pianist's soft notes are notes (Carl Perkins −0.012 with it on), while
+  the register floor alone lifts every piano solo because it removes the
+  left hand. `silence_floor_db` cannot do this job — it gates on the stem's
+  loudest frames and lets a −25 dB comp through. The loudness floor's
+  depth is a precision/recall trade with the table in config.py: it takes
+  real ghosted notes too (Art Pepper lost 7 at 12 dB), and no cheap gate
+  separates a ghost note in a phrase from bleed beside one.
 - **Never filter notes by duration.** Measured against 302 erasure labels, a
   0.12s floor removes 41% of erased notes and 28% of KEPT ones — barely better
   than random. Confidence does separate them (AUC 0.830), but at a 0.65 floor

@@ -346,6 +346,67 @@ def fold_octave_outliers(notes: list[NoteEvent], context: int = 2) -> list[NoteE
     return out
 
 
+def note_loudness_db(
+    notes: list[NoteEvent], mono, rate: int, offset: float = 0.0, min_s: float = 0.05
+) -> list[float]:
+    """RMS in dB of the signal under each note. `offset` is what was added to
+    the notes' onsets after cropping, so whole-track notes index a cropped
+    signal correctly. A note shorter than `min_s` reads a `min_s` window so a
+    speck's loudness is the loudness of its attack and not of two samples."""
+    import numpy as np
+
+    out = []
+    for note in notes:
+        start = int((note.onset - offset) * rate)
+        stop = int((note.onset - offset + max(min_s, note.duration)) * rate)
+        segment = mono[max(0, start) : max(0, stop)]
+        rms = float(np.sqrt(np.mean(segment**2))) if len(segment) else 0.0
+        out.append(20.0 * math.log10(rms + 1e-9))
+    return out
+
+
+def reject_line_outliers(
+    notes: list[NoteEvent],
+    loudness_db: list[float] | None,
+    window_s: float,
+    register_floor: float,
+    loudness_floor_db: float,
+) -> list[NoteEvent]:
+    """Drop notes that sit far below the line's OWN neighbourhood.
+
+    Two tests, each against the median of the notes within `window_s` of the
+    note (itself included, so a note alone in its window is always kept):
+
+    - register: more than `register_floor` semitones below the median pitch;
+    - loudness: more than `loudness_floor_db` below the median loudness, when
+      `loudness_db` is given at all — the piano path passes None, because a
+      pianist's soft notes are notes (TranscribeConfig.line_loudness_floor_db).
+
+    Both medians are taken over the UNFILTERED notes in one pass, so what is
+    rejected never moves the reference it was judged against. A floor of 0
+    disables its test. This is not the octave fold above: a folded note was
+    ~12 off and gets moved; a rejected one is further than that, or quiet,
+    and gets dropped.
+    """
+    if not notes or (register_floor <= 0 and (loudness_floor_db <= 0 or loudness_db is None)):
+        return list(notes)
+    onsets = [n.onset for n in notes]
+    keep = []
+    for i, note in enumerate(notes):
+        lo, hi = note.onset - window_s, note.onset + window_s
+        near = [j for j, t in enumerate(onsets) if lo <= t <= hi]
+        if register_floor > 0:
+            median_pitch = statistics.median(notes[j].pitch for j in near)
+            if note.pitch < median_pitch - register_floor:
+                continue
+        if loudness_floor_db > 0 and loudness_db is not None:
+            median_db = statistics.median(loudness_db[j] for j in near)
+            if loudness_db[i] < median_db - loudness_floor_db:
+                continue
+        keep.append(note)
+    return keep
+
+
 # ── Viterbi f0 decoding (open-issue #8) ──────────────────────────────────
 #
 # CREPE emits an independent probability for each of 360 pitch bins per 10ms
@@ -805,6 +866,22 @@ def analyze(
     second_voice: list[dict] = []
     if tc.uses_piano_oracle:
         notes, second_voice = _consult_piano_oracle(mono, rate, tc, region_offset, notes, log=log)
+
+    # Last: what is left that the line itself disowns — an octave under its
+    # neighbours, or (horns only) far quieter than them. After the oracle so
+    # that a snapped octave is judged where it landed, and so that the
+    # measurement (docs/benchmark-deficiencies.md D22) is of the notes the
+    # review actually shows.
+    before = len(notes)
+    notes = reject_line_outliers(
+        notes,
+        None if tc.uses_piano_oracle else note_loudness_db(notes, mono, rate, region_offset),
+        tc.line_window_s,
+        tc.line_register_floor,
+        tc.line_loudness_floor_db,
+    )
+    if log and len(notes) != before:
+        print(f"transcribe: {before - len(notes)} notes rejected as bleed under the line's level")
 
     diagnostics = FrameDiagnostics(
         hop_s=hop_s,

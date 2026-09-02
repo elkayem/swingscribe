@@ -12,6 +12,8 @@ from swingscribe.stages.transcribe import (
     fold_octave_outliers,
     hz_to_midi,
     median_smooth,
+    note_loudness_db,
+    reject_line_outliers,
     segment_notes,
 )
 
@@ -129,6 +131,79 @@ def test_fold_octave_outliers():
 def test_fold_octave_outliers_leaves_genuine_leaps():
     notes = [note(60), note(67), note(60)]  # a fifth is a leap, not an error
     assert [n.pitch for n in fold_octave_outliers(notes)] == [60, 67, 60]
+
+
+def line(*pitches, spacing=0.25):
+    return [note(p, onset=i * spacing) for i, p in enumerate(pitches)]
+
+
+def test_a_note_an_octave_and_more_under_the_line_is_bleed():
+    # A bass note between two phrases of an alto line: 14 semitones under
+    # the local median, and no cross-stem test could see it (D22).
+    notes = line(67, 69, 70, 53, 67, 65)
+    kept = reject_line_outliers(notes, None, 2.0, 12.0, 12.0)
+    assert [n.pitch for n in kept] == [67, 69, 70, 67, 65]
+
+
+def test_a_low_note_within_the_octave_is_the_soloist():
+    notes = line(67, 69, 70, 56, 67, 65)  # 11 under the median: a real dip
+    kept = reject_line_outliers(notes, None, 2.0, 12.0, 12.0)
+    assert [n.pitch for n in kept] == [67, 69, 70, 56, 67, 65]
+
+
+def test_register_is_judged_locally_not_over_the_whole_solo():
+    # A solo that moves down an octave over a minute: nothing in the low
+    # half is under ITS neighbours, so nothing goes.
+    notes = [note(72 - i // 4, onset=i * 0.5) for i in range(96)]
+    assert len(reject_line_outliers(notes, None, 2.0, 12.0, 12.0)) == len(notes)
+
+
+def test_a_note_far_quieter_than_its_neighbours_is_bleed():
+    notes = line(67, 69, 70, 66, 67, 65)
+    loud = [-18.0, -17.0, -19.0, -34.0, -18.0, -17.0]  # -16 dB under the rest
+    kept = reject_line_outliers(notes, loud, 2.0, 12.0, 12.0)
+    assert [n.pitch for n in kept] == [67, 69, 70, 67, 65]
+
+
+def test_the_loudness_floor_is_off_when_no_loudness_is_given():
+    # The piano path passes None: a pianist's soft notes are notes.
+    notes = line(67, 69, 70, 66, 67, 65)
+    assert len(reject_line_outliers(notes, None, 2.0, 12.0, 12.0)) == 6
+
+
+def test_zero_floors_disable_each_test():
+    notes = line(67, 69, 70, 48, 67, 65)
+    loud = [-18.0, -17.0, -19.0, -40.0, -18.0, -17.0]
+    assert len(reject_line_outliers(notes, loud, 2.0, 0.0, 0.0)) == 6
+    assert len(reject_line_outliers(notes, loud, 2.0, 12.0, 0.0)) == 5
+    assert len(reject_line_outliers(notes, loud, 2.0, 0.0, 12.0)) == 5
+
+
+def test_rejection_judges_against_the_unfiltered_neighbourhood():
+    # Two bleed notes in a row: the second is judged against a median that
+    # still includes the first, in one pass -- rejecting does not move the
+    # reference, so the result does not depend on order.
+    notes = line(67, 69, 50, 52, 67, 65)
+    kept = reject_line_outliers(notes, None, 2.0, 12.0, 12.0)
+    assert [n.pitch for n in kept] == [67, 69, 67, 65]
+
+
+def test_a_note_alone_in_its_window_is_kept():
+    notes = [note(67, onset=0.0), note(40, onset=10.0)]
+    assert len(reject_line_outliers(notes, [-18.0, -50.0], 2.0, 12.0, 12.0)) == 2
+
+
+def test_note_loudness_reads_the_signal_under_the_note_in_whole_track_time():
+    import numpy as np
+
+    rate = 1000
+    signal = np.zeros(2000, dtype="float32")
+    signal[500:700] = 0.5  # 0.5-0.7 s of the CROPPED signal
+    # The notes were offset by 10 s back to whole-track time.
+    loud, quiet = note(60, onset=10.5), note(60, onset=11.2)
+    loud_db, quiet_db = note_loudness_db([loud, quiet], signal, rate, offset=10.0)
+    assert loud_db == pytest.approx(20 * np.log10(0.5), abs=0.1)
+    assert quiet_db < -100
 
 
 def test_crop_region_none_is_whole_signal():

@@ -76,9 +76,7 @@ def test_double_time_doubles_the_bars_and_the_values():
     beats = grid(count=48, start=0.0)
     region = (0.0, 32 * BEAT)
     normal = notation_for_span("t.wav", line(beats), beats, region, stem="other")
-    doubled = notation_for_span(
-        "t.wav", line(beats), beats, region, stem="other", double_time=True
-    )
+    doubled = notation_for_span("t.wav", line(beats), beats, region, stem="other", double_time=True)
     assert normal is not None and doubled is not None
     assert not normal.double_time
     assert doubled.double_time
@@ -96,17 +94,11 @@ def test_scoring_halves_a_double_time_page_back_to_true_meter():
     beats = grid(count=48, start=0.0)
     region = (0.0, 32 * BEAT)
     normal = notation_for_span("t.wav", line(beats), beats, region, stem="other")
-    doubled = notation_for_span(
-        "t.wav", line(beats), beats, region, stem="other", double_time=True
-    )
+    doubled = notation_for_span("t.wav", line(beats), beats, region, stem="other", double_time=True)
     flat_normal = notation_notes(normal)
     flat_doubled = notation_notes(doubled)
-    assert [p for p, _d, _pi in flat_doubled] == pytest.approx(
-        [p for p, _d, _pi in flat_normal]
-    )
-    assert [d for _p, d, _pi in flat_doubled] == pytest.approx(
-        [d for _p, d, _pi in flat_normal]
-    )
+    assert [p for p, _d, _pi in flat_doubled] == pytest.approx([p for p, _d, _pi in flat_normal])
+    assert [d for _p, d, _pi in flat_doubled] == pytest.approx([d for _p, d, _pi in flat_normal])
 
 
 # ── bar numbering ───────────────────────────────────────────────────────────

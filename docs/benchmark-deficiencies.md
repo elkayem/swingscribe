@@ -745,6 +745,94 @@ deleting the copies. The general lesson for future copies: check the
 sibling's annotated DURATION against the excerpt before assuming
 containment — `select max(onset) from melody` is one line.
 
+### D22 - Bleed inside the lead stem, rejected by the line's own register and loudness
+
+2026-09-01. Ornithology, transcribed from the `guitar` stem htdemucs_6s put
+Bird in, read pitch F1 0.802 with 34 invented notes. They were piano
+comping — but INSIDE the same stem: at those pitches and times the piano,
+bass and `other` stems held nothing (harmonic-energy ratio 0.000 at the
+median), so no cross-stem test could see them, and the piano oracle used
+as a chord witness separated nothing either (drop-when-≥3-sounding removes
+8 of 34 invented against 26 of 150 matched). What did separate them was
+the line itself: the invented notes sit a median 8.5 semitones below the
+line's local median pitch (p25: 12 below; matched notes' p10 is 7 below)
+and a median 4.5 dB under its local loudness (p25: 9.7 dB; matched p10 is
+4.4 dB). Confidence separates them worse than either.
+
+Measured before anything shipped, over a per-note table of the 12-solo
+subset, Ornithology, and all ten hand scores (23 tracks, labels from a
+50 ms time+pitch match through `fit_affine` for WJazzD and from the
+aligner's path for the hand scores), scored with the green bar's own
+aligner:
+
+| rule | WJazzD ΔF1 (13) | hand ΔF1 (10) | worst track | tracks hurt |
+|---|---|---|---|---|
+| loudness < local median − 12 dB | +0.024 | +0.009 | −0.012 (Carl Perkins, piano) | 1 |
+| pitch < local median − 12 | +0.003 | +0.014 | −0.002 | 0 |
+| either | **+0.026** | **+0.021** | −0.002 | 0 |
+
+The register floor lifts every PIANO solo (+0.019 to +0.033: it removes
+left-hand notes) and the loudness floor hurts one pianist (soft notes are
+notes), so the loudness test is horn-only. The surface is flat over
+windows of 1.5-3 s and floors of 10-16 on both axes
+(`TranscribeConfig.line_*`, `transcribe.reject_line_outliers`).
+
+**Measured at 12 dB / 12 semitones** — through the batch, fresh CREPE,
+against the trued-up sheet. The fixed subset (n=12): mean pitch F1
+**0.854 → 0.880**, every track up (+0.007 Mr PC to +0.055 There Will
+Never Be Another You); trusted rhythm **0.694 → 0.701** over the same
+12, up on 10; trusted count 12 → 12. The ten hand scores: mean pitch F1
+**0.793 → 0.815**, every track up (+0.010 to +0.038); trusted rhythm
+**0.746 → 0.732**, down on 8 of 10, with coverage down on six (Art Pepper
+0.924 → 0.889 the largest); trusted count 10 → 10.
+
+That rhythm/coverage cost is real notes going with the bleed. Art
+Pepper's 15 removed notes were 7 invented, 1 wrong and **7 matched** —
+in-register, so the LOUDNESS floor took them: ghosted notes inside a
+phrase that the hand transcriber wrote. Over all 18 horn tracks the
+loudness floor's take is 391 bleed against 91 real at 12 dB, 333/61 at
+14, 280/42 at 16, 195/15 at 20; an isolation gate (only reject quiet
+notes with a gap on both sides) does not change the ratio, because bleed
+sits as close to other notes as a ghost note does. **14 dB ships**: nearly
+all of the pitch gain (table: WJazzD +0.024 against +0.026), no track's
+F1 down on the table, a third fewer real notes lost. Re-measured through
+the batch at that setting below when the run lands. Costs either way:
+every review key changes (a CREPE pass per track on the next true-up),
+and the real-audio baselines move and need re-pinning.
+
+### D23 - The batch's "wrong take" verdict was a stem-routing verdict
+
+2026-09-01. The listener ear-checked Ornithology (melid 61), which the
+batch had flagged as `best fit only matched 5% — wrong file/take?`, and
+found it 100% the right tune; transcribed by hand in the GUI from the
+`guitar` stem it lines up 152 of 194 notes. It is the right TAKE too: the
+same fit against that review lands at offset +37.12 s, rate 1.0008, 78%
+matched, with the rate clamp opened to ±20% changing nothing.
+
+The batch never looked there. Its locate pass was hard-wired to `other`,
+and htdemucs_6s had filed Bird under `guitar`: in-span RMS 0.123 against
+`other`'s 0.004, with `other` digitally silent for 30.7% of the solo. R16
+described exactly this switching for Oleo's muted trumpet (`vocals`), and
+the fix there — `library.choose_stem` — runs AFTER the solo is located, so
+it could not help a locate that had already failed on the wrong stem.
+
+Whole-file stem energies for every other flagged row say the same thing
+is likely: Marsalis' two Cherokees (446, 447) have `vocals` at 1.6x and 8x
+`other`; Getz's Crazy Rhythm (399) and Coltrane's My Favorite Things (228)
+have `guitar` at 2x and 1.6x; Shorter's Dolores and Orbits (427, 434) have
+`other` a third digital silence whole-file. None of those numbers proves a
+solo is THERE — energy cannot tell quiet bleed from a soloist — which is
+why the locate itself is what has to look.
+
+**Applied**: pass 1 now tries `LOCATE_STEM_ORDER` (`other`, `guitar`,
+`vocals`, `piano`) in that fixed order and takes the FIRST stem in which
+the solo clears `MIN_MATCH_RATE`; pass 2 then prefers that stem. This is
+the one place a reference steers a stem choice, and it is a found/not-found
+gate, never a best-of-N: a later stem matching more cannot displace an
+earlier one that cleared the floor, so no sheet number is the best of
+several tries. The rows above are queued for a re-run; whatever still
+fails after it is a wrong take in the sense the status claims.
+
 ## Resolved
 
 ### R18 - A cached Document named a file that had been renamed away
