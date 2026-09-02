@@ -30,10 +30,15 @@ never change a key.
   the piano model at M7b.
 - Heavy ML deps live in the `ml` dependency group, and the GUI's (fastapi,
   uvicorn) in `gui`. Plain `uv sync` — and therefore CI — installs neither;
-  dev machines run `uv sync --group ml --group gui --group batch`. **Name
-  every group every time**: `uv sync` UNINSTALLS whatever the named groups
-  don't require, so syncing without `--group batch` silently removes openpyxl
-  and `wjazz_batch.py` then dies on `from openpyxl import Workbook`.
+  dev machines run `uv sync --group ml --group gui --group batch --group
+  roformer`. **Name every group every time**: `uv sync` UNINSTALLS whatever
+  the named groups don't require, so syncing without `--group batch`
+  silently removes openpyxl and `wjazz_batch.py` then dies on `from openpyxl
+  import Workbook`. The `roformer` group (2026-09-02) is the separator
+  trial's `audio-separator` (docs/separation-research.md); nothing in the
+  pipeline imports it, and its resolver pulls `rotary-embedding-torch` DOWN
+  to 0.6.5 — beat_this still runs on it (verified), but re-verify beats if
+  either moves.
 - **The GUI frontend has no JS dependencies and no build step** — no Node, no
   npm, no bundler (see docs/gui-design.md for why Gradio and wavesurfer.js
   were both rejected). Keep it that way: `src/swingscribe/gui/static/` is
