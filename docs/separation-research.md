@@ -60,14 +60,37 @@ strongest, and no rescue on the split-routing tracks it was built for:
 a loud piano in the sum out-shouts the horn and the Viterbi f0 decoder
 follows it. Summing stems undoes the separation's one real service.
 
-What it points to instead (**0b, not yet built**): keep the stems apart
-and choose BETWEEN them per moment, not per track. Transcribe each
-candidate stem on its own and merge the note streams by continuity — a
-Viterbi over stems whose cost is the register/loudness break between the
-last note taken and the next, the same machinery as the piano line
-selection (docs/issue8-line-selection.md). Routing errors are
-switch-shaped (Dolores, Orbits, both Cherokees, 228), so a per-moment
-choice can follow the switch where a per-track one cannot.
+What it points to instead (**0b — measured, first cut**): keep the stems
+apart and choose BETWEEN them per moment, not per track. Every candidate
+stem (`other`, `guitar`, `vocals`, `piano`) transcribed over the located
+span; per 1 s bin, a CEILING that takes the stem with the most matched
+notes (reference in hand), and a reference-free CHOOSER that takes the
+stem with the most confidence-weighted note duration, Viterbi over bins
+with a switch penalty (`scratchpad/stem_mosaic.py`). Time+pitch F1 over
+the span:
+
+| melid | best single stem | ceiling (per-second, ref) | chooser v1 (pen 0.5) | switches |
+|---|---|---|---|---|
+| 427 Dolores | guitar 0.633 | 0.700 | **0.687** | 2 |
+| 434 Orbits | guitar 0.749 | 0.772 | 0.747 | 1 |
+| 446 Cherokee | vocals 0.672 | 0.737 | 0.691 | 6 |
+| 447 Cherokee II | vocals 0.631 | 0.688 | 0.647 | 4 |
+| 228 My Favorite Things | other 0.563 | 0.662 | **0.641** | 4 |
+| 61 Ornithology | guitar 0.788 | 0.820 | 0.788 | 0 |
+| 399 Crazy Rhythm | guitar 0.738 | 0.777 | 0.761 | 10 |
+
+Three readings. (1) Switching per second is worth +0.03 to +0.10 even
+with the reference choosing — routing is real but it is not the whole
+gap on these tracks; the ceilings sit at 0.66-0.82, so on Dolores, the
+Cherokees and 228 the horn is SMEARED across stems or lost to the
+separation, not merely misfiled, and that is the separator-quality
+question the Roformer trial asks. (2) The reference-free chooser gets a
+fair share of the ceiling (Dolores +0.054 of 0.067, 228 +0.078 of
+0.099) with 2-4 switches. (3) With NO switching (pen 2.0) the chooser
+picks the right stem on every track by itself — a reference-free stem
+recommendation the GUI could make and the batch could use instead of a
+reference-guided locate order. Not integrated; the Roformer trial comes
+first, because a cleaner separation raises every row of this table.
 
 ### 1. Roformer family (authorised by the listener; after the queue drains)
 
