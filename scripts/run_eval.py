@@ -643,6 +643,8 @@ def compare(card: dict) -> int:
 
 
 def main() -> None:
+    global CACHE_DIR
+
     parser = argparse.ArgumentParser(description="Score everything and print one scorecard.")
     parser.add_argument("--db", type=Path, default=None, help="wjazzd.db; skips WJazzD if absent")
     parser.add_argument(
@@ -661,7 +663,6 @@ def main() -> None:
     )
     args = parser.parse_args()
     if args.cache_dir is not None:
-        global CACHE_DIR
         CACHE_DIR = args.cache_dir.resolve()
 
     cache = notes_cache(args.step_cost, args.dip_db)
