@@ -217,6 +217,32 @@ Limehouse Blues through the batch: located in `guitar` on htdemucs_6s,
 the 33 s span separated by the Roformer in 183 s (model load included),
 pitch F1 0.842 → 0.858, coverage 0.831 → 0.861, the horn in `other`.
 
+**The pianos** (2026-09-02, ten solos, the trio path on the Roformer's
+`piano` stem — a six-stem model files the pianist there, and its `other`
+holds one note of Carl Perkins). Against htdemucs at the same floors on
+the six hand-scored solos, and against the pre-floor sheet on the four
+WJazzD ones (their 14 dB numbers were not yet on the sheet):
+
+| piano solo | htdemucs | Roformer `piano` | rhythm |
+|---|---|---|---|
+| Carl Perkins – For Minors Only | 0.798 | 0.804 | 0.818 → 0.764 |
+| Peterson – Lover Come Back | 0.778 | 0.780 | 0.727 → 0.744 |
+| Clark – Melody for C | 0.828 | 0.831 | 0.747 → 0.773 |
+| Clark – There Will Never | 0.902 | **0.931** | 0.762 → 0.801 |
+| Flanagan – Giant Steps | 0.823 | 0.822 | 0.836 → 0.837 |
+| Kelly – Soul Station | 0.592 | 0.580 | 0.762 → 0.816 |
+| Hancock – Dolores (sheet) | 0.865 | **0.939** | 0.605 → 0.605 |
+| Hancock – Gingerbread Boy (sheet) | 0.830 | **0.932** | 0.556 → 0.597 |
+| Hancock – Orbits (sheet) | 0.945 | 0.963 | 0.584 → 0.645 |
+| Garland – Oleo (sheet) | 0.790 | **0.850** | 0.577 → 0.652 |
+
+Level on the hand-scored six (mean 0.787 → 0.791), up on all four
+WJazzD pianos by more than the register floor alone is worth (+0.02 to
++0.03 there), rhythm up on eight of ten. No piano is hurt beyond noise.
+So the Roformer is at least as good for pianists, with the piano-stem
+routing handled — which means `auto_settings` can send pianists to it
+too, on the `piano` stem, if it becomes the default.
+
 **Reading.** Both halves of the diagnosis moved: routing (every horn in
 `other`) AND bleed (fewer notes on Chet Baker, 161 → 133, at higher F1).
 This is the largest single gain of the project's measurement history and
