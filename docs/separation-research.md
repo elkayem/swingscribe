@@ -165,6 +165,27 @@ LALAL.AI and Moises advertise wind/brass stems. That means uploading the
 recordings, which this project has never done; listed so the option is on
 the record, not recommended.
 
+### Roformer trial — first result (2026-09-02, one track)
+
+The zoo's only non-Demucs multi-stem checkpoint is **BS-Roformer-SW**
+(jarredou), and it is SIX-stem: drums, bass, other, vocals, guitar,
+piano. On Ornithology (181 s) it took 7.5 minutes on this CPU against
+htdemucs' ~0.85 — about nine times slower — and it routed Bird to
+`other` (in-span RMS 0.104; `guitar` 87% digital silence) where
+htdemucs_6s had filed him under `guitar` and left `other` a quarter
+silent. Scored through the batch's own path on the same located span,
+14 dB floors both sides:
+
+| Ornithology 61 | htdemucs_6s (guitar) | BS-Roformer-SW (other) |
+|---|---|---|
+| pitch F1 | 0.803 | **0.875** |
+| notation rhythm | 0.615 | 0.615 |
+| coverage | 0.778 | **0.851** |
+
+One track. The subset plus the four split-routing tracks are separating
+now (`scratchpad/roformer_stems.py`, stems under
+`stems/<digest>-bsroformer_sw/`), scored the same way when they land.
+
 ### Roformer notes from the first look
 
 `audio-separator` installs CPU-only as `pip install "audio-separator[cpu]"`
