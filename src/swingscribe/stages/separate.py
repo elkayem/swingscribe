@@ -19,6 +19,8 @@ importable without the ml dependency group, which CI never installs.
 """
 
 import hashlib
+import json
+import time
 from pathlib import Path
 
 from swingscribe import progress
@@ -37,6 +39,42 @@ Span = tuple[float, float]
 # separator nine times slower than htdemucs (bsroformer_sw) becomes usable
 # on a CPU — a solo is typically a third of its file.
 SPAN_SEPARATOR = "@"
+
+# Beside the stems, a note saying which track they came from. The directory
+# is named by the digest of the NORMALIZED wav, which nothing but a re-hash
+# of that wav can turn back into a title -- so a listing of the cache read as
+# sixty hexadecimal names, and reclaiming disk meant guessing. The marker
+# makes a stems directory self-describing. It is not consulted by the
+# pipeline (content addressing decides reuse, as before) and a directory
+# without one is still a valid separation; it is written on every separation
+# and back-filled the first time an older set is reused.
+SOURCE_MARKER = "_source.json"
+
+
+def write_source_marker(out_dir: Path, document: Document, model: str, span: Span | None) -> Path:
+    """Write SOURCE_MARKER into `out_dir`, naming the track the stems belong to.
+
+    `track_id` is the digest of the SOURCE file's bytes -- the identity the GUI
+    and the recents index use (gui/library.file_digest) -- so the storage view
+    can group a directory under its track without hashing anything. Null when
+    the source has moved since ingest; the name and path are still recorded.
+    """
+    source = Path(document.audio_path)
+    track_id = None
+    if source.is_file():
+        track_id = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
+    record = {
+        "source": str(source),
+        "name": source.name,
+        "track_id": track_id,
+        "model": model,
+        "span": list(span) if span is not None else None,
+        "written_at": time.time(),
+    }
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / SOURCE_MARKER
+    path.write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
+    return path
 
 
 def _span_tag(span: Span) -> str:
@@ -264,6 +302,8 @@ def run(document: Document, config: Config) -> Document:
         progress.report("separate", 1.0, "stems already on disk", cached=True)
         where = Path(next(iter(existing.values()))).parent
         print(f"separate: reusing {len(existing)} stems in {where}")
+        if not (where / SOURCE_MARKER).is_file():
+            write_source_marker(where, document, model, span_of_dir(where))
         return document.model_copy(update={"stems": existing})
 
     def source_audio() -> tuple[Path, tuple[int, int] | None]:
@@ -297,6 +337,7 @@ def run(document: Document, config: Config) -> Document:
         missing = [name for name in sources if name not in stems]
         if missing:
             raise RuntimeError(f"{checkpoint} did not produce {', '.join(missing)}")
+        write_source_marker(out_dir, document, model, span)
         progress.report("separate", 1.0, "stems written")
         return document.model_copy(update={"stems": stems})
 
@@ -329,4 +370,5 @@ def run(document: Document, config: Config) -> Document:
         stems[name] = str(stem_path)
     if placement is not None:
         source.unlink(missing_ok=True)
+    write_source_marker(out_dir, document, model, span)
     return document.model_copy(update={"stems": stems})

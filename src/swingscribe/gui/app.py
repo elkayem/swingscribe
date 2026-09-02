@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from swingscribe.config import ENSEMBLES, TRANSPOSITIONS, Config
 from swingscribe.gui import audio as gui_audio
 from swingscribe.gui import erasures as gui_erasures
-from swingscribe.gui import ground_truth, library, peaks, review
+from swingscribe.gui import ground_truth, library, peaks, review, storage
 from swingscribe.gui import jobs as gui_jobs
 from swingscribe.gui import musicxml as gui_musicxml
 from swingscribe.model import NoteEvent
@@ -108,7 +108,11 @@ def create_app(config: Config) -> FastAPI:
         track_id = library.file_digest(source)
         entry = {"path": str(source.resolve()), "document": document}
         app.state.tracks[track_id] = entry
-        library.remember_open(config, track_id, entry["path"])
+        # The wav digest rides along so the storage view can name this
+        # track's stems directories without hashing the wav again.
+        library.remember_open(
+            config, track_id, entry["path"], stem_digest=library.stem_digest(document)
+        )
         return entry
 
     def review_config(
@@ -744,6 +748,52 @@ def create_app(config: Config) -> FastAPI:
         if job is None:
             raise HTTPException(404, f"unknown job {job_id!r}")
         return job.snapshot()
+
+    # ── storage ─────────────────────────────────────────────────────────────
+    # Thin over gui/storage.py. Each delete answers with the fresh inventory
+    # so the panel re-renders from one round trip.
+
+    def busy() -> set[tuple[str, str]]:
+        return storage.busy_targets(app.state.runner.all())
+
+    @app.get("/api/storage")
+    def get_storage() -> dict[str, Any]:
+        return storage.inventory(config, busy())
+
+    @app.delete("/api/storage/stems/{name}")
+    def delete_storage_stems(name: str) -> dict[str, Any]:
+        try:
+            freed = storage.delete_stems(config, name, busy())
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(404, f"no such stems directory: {name}") from exc
+        except storage.InUseError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(409, f"could not delete {name}: {exc}") from exc
+        return {"freed": freed, **storage.inventory(config, busy())}
+
+    @app.delete("/api/storage/tracks/{track_id}")
+    def delete_storage_track(track_id: str) -> dict[str, Any]:
+        try:
+            result = storage.delete_track(config, track_id, busy())
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except storage.InUseError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(409, f"could not delete: {exc}") from exc
+        # Its ingest wav is gone, so the open record points at nothing;
+        # dropping it makes the next request re-ingest (seconds) via resolve().
+        app.state.tracks.pop(track_id, None)
+        return {
+            "freed": result["freed"],
+            "removed": result["removed"],
+            **storage.inventory(config, busy()),
+        }
 
     # ── remembered settings ────────────────────────────────────────────────────
 

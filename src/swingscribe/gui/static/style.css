@@ -151,6 +151,28 @@ button.restart { font: 12px var(--mono); padding: 8px 10px; }
 .picker-foot input:focus { outline: none; border-color: var(--accent); }
 .picker-error { margin: 0 18px 14px; color: var(--danger); font-size: 13px; }
 
+/* ── cache panel (inside the picker) ──────────────────────────────────────── */
+.storage-head { display: flex; align-items: center; gap: 10px; }
+.storage-head h3 { margin: 0; }
+.storage-list li { flex-direction: column; align-items: stretch; gap: 5px; cursor: default; }
+.storage-list li:hover { background: none; }
+.storage-list li.group { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; padding-bottom: 0; }
+.storage-list .row { display: flex; align-items: baseline; gap: 10px; }
+.storage-list .name.unknown { color: var(--muted); font: 12px var(--mono); }
+.storage-list .items { display: flex; flex-wrap: wrap; gap: 6px; }
+.storage-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 3px 2px 9px; font: 12px var(--mono);
+  border: 1px solid var(--line); border-radius: 5px; background: var(--panel-2);
+}
+.storage-item.audio { opacity: 0.7; padding-right: 9px; }
+.storage-item.busy { border-color: var(--accent); }
+.storage-item .x { padding: 0 6px; font-size: 12px; line-height: 18px; border: none; background: transparent; color: var(--muted); border-radius: 4px; }
+.storage-item .x:hover:not(:disabled) { color: var(--danger); background: transparent; }
+button.armed, .storage-item .x.armed {
+  color: var(--danger); border: 1px solid var(--danger); background: rgba(226, 102, 107, 0.12);
+}
+
 /* ── panels ─────────────────────────────────────────────────────────────── */
 main { padding: 18px; display: flex; flex-direction: column; gap: 18px; }
 .panel {

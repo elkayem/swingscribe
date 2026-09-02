@@ -7,6 +7,7 @@ Commands:
             spending minutes on transcription
   ab        transcription ear test — original left, transcription right
   gui       the local selection/audition app (plan §13, screens 1-3)
+  cache     list what the stage cache holds per track, or delete some of it
 """
 
 import argparse
@@ -147,6 +148,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gui_parser.add_argument("--port", type=int, default=None, help="Port to serve on")
     gui_parser.add_argument("--no-browser", action="store_true", help="Don't open a browser window")
+
+    cache_parser = subparsers.add_parser(
+        "cache",
+        help="List what the stage cache holds for each track (stems, ingested "
+        "wav), or delete some of it to reclaim disk. The GUI has the same "
+        "panel; this reaches a cache the GUI is not pointed at.",
+    )
+    cache_parser.add_argument("action", choices=["ls", "rm"])
+    cache_parser.add_argument(
+        "names",
+        nargs="*",
+        help="For rm: stems directory names exactly as `cache ls` prints them",
+    )
+    cache_parser.add_argument(
+        "--track",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="For rm: delete everything cached for this track id (repeatable). "
+        "The sidecar beside the audio is never touched.",
+    )
+    cache_parser.add_argument(
+        "--cache-dir",
+        default=None,
+        help="Cache to inspect instead of the config's (the eval harness keeps "
+        "its own under benchmark/)",
+    )
+    cache_parser.add_argument(
+        "--config",
+        default=str(DEFAULT_CONFIG_PATH),
+        help="Path to a YAML config file (default: config/default.yaml)",
+    )
     return parser
 
 
@@ -221,6 +254,59 @@ def cmd_gui(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _human_bytes(count: int) -> str:
+    if count >= 1e9:
+        return f"{count / 1e9:.1f} GB"
+    return f"{count / 1e6:.0f} MB"
+
+
+def cmd_cache(config: Config, args: argparse.Namespace) -> int:
+    """`cache ls` / `cache rm`, over gui/storage.py so the GUI and the shell
+    agree about what a track owns."""
+    from swingscribe.gui import storage
+
+    if args.cache_dir:
+        config = config.model_copy(update={"cache_dir": Path(args.cache_dir)})
+
+    if args.action == "ls":
+        listing = storage.inventory(config)
+        print(f"{listing['cache_dir']}: {_human_bytes(listing['total_bytes'])}")
+        for track in listing["tracks"]:
+            print(f"\n{track['name']}  [{track['id']}]  {_human_bytes(track['bytes'])}")
+            for wav in track["audio"]:
+                print(f"    {wav['name']:<44} {_human_bytes(wav['bytes']):>8}  ingested wav")
+            for item in track["stems"]:
+                span = ""
+                if item["span"]:
+                    span = f"  span {item['span'][0]:.1f}-{item['span'][1]:.1f}s"
+                print(f"    {item['name']:<44} {_human_bytes(item['bytes']):>8}{span}")
+        if listing["orphans"]:
+            print(f"\n(no track known)  {_human_bytes(listing['orphan_bytes'])}")
+            for item in listing["orphans"]:
+                print(f"    {item['name']:<44} {_human_bytes(item['bytes']):>8}")
+        return 0
+
+    if not args.names and not args.track:
+        print("swingscribe: cache rm needs stems directory names or --track ids", file=sys.stderr)
+        return 2
+    status = 0
+    for name in args.names:
+        try:
+            freed = storage.delete_stems(config, name)
+            print(f"removed {name}: {_human_bytes(freed)}")
+        except (ValueError, FileNotFoundError, storage.InUseError, OSError) as exc:
+            print(f"swingscribe: {name}: {exc}", file=sys.stderr)
+            status = 1
+    for track_id in args.track:
+        try:
+            result = storage.delete_track(config, track_id)
+            print(f"removed {result['name']}: {_human_bytes(result['freed'])}")
+        except (ValueError, FileNotFoundError, storage.InUseError, OSError) as exc:
+            print(f"swingscribe: {track_id}: {exc}", file=sys.stderr)
+            status = 1
+    return status
+
+
 def cmd_audition(config: Config, args: argparse.Namespace) -> int:
     """Separation only — no beat tracking, no transcription."""
     stages = [("ingest", ingest.run), ("separate", separate.run)]
@@ -280,7 +366,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command not in ("run", "click", "audition", "ab", "gui"):
+    if args.command not in ("run", "click", "audition", "ab", "gui", "cache"):
         parser.print_help()
         return 2
 
@@ -288,6 +374,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "gui":
             return cmd_gui(config, args)
+        if args.command == "cache":
+            return cmd_cache(config, args)
         if args.command == "audition":
             return cmd_audition(config, args)
         document = pipeline.run(args.audio, config)

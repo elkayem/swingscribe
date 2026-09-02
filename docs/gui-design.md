@@ -40,6 +40,34 @@ Nothing in Anytune outputs notation.
 ### 1. Load & navigate
 Waveform overview of the whole track, transport, playhead. Marks rail beneath.
 
+**The cache panel** (2026-09-02) sits under Recent in the picker. It lists what
+the cache holds per track — each stems directory as a chip with its model,
+span and size, the ingested wav beside them — largest track first, with a
+delete on every chip and a "Delete all" per track. Two things set its shape:
+
+- It is a stems manager, not a cache browser. On the dev machine stems were
+  70 GB and ingested wavs 8 GB against ~100 MB of everything else, so the
+  stage-output bins, reviews and peaks are not listed; they are not worth a
+  control.
+- Naming a stems directory is the whole problem. It is keyed by the digest of
+  the NORMALIZED wav; the track, the recents index and the ingest wav are keyed
+  by the digest of the source file, and nothing but a re-hash of the wav joins
+  them. `separate.run` now writes `_source.json` beside every set (and
+  back-fills it on reuse); `remember_open` stores the wav digest when a track
+  is opened; and for directories older than both, `storage.inventory` hashes
+  the wav once and writes the answer into the recents index. What it still
+  cannot name is listed as "No track known", with the digest — still
+  deletable.
+
+Deleting is a second click on the same control (it arms, turns red, says what
+it would free, and disarms after four seconds), never a modal. A directory a
+running separation is writing into is refused (409). Deleting a track removes
+its stems, wav and peaks and NOTHING else: the sidecar beside the audio holds
+the listener's span, downbeat and erasures, and the recents entry is how the
+track is found again. `swingscribe cache ls|rm` is the same module from the
+shell, for the harness's cache under `benchmark/` that the GUI is not pointed
+at.
+
 ### 2. Select the span
 Two-tier waveform: overview with the selection shaded, detail view around the
 playhead for precise edits. A/B set by button while playing, then draggable, with

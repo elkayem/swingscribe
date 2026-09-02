@@ -9,6 +9,7 @@
 import { WaveView } from './waveform.js';
 import { MixEngine, StemEngine } from './engine.js';
 import { CLASSES, PianoRoll } from './review.js';
+import { initStorage } from './storage.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -163,6 +164,16 @@ let browseRoot = null;
    keyboard behaviours. */
 let pickerMode = 'track';
 
+// The cache panel under Recent: per-track stems and wavs, with a delete on
+// each. Lives in storage.js; it only needs the fetch helper, the toast, and
+// a way to refresh the model chips when the open track loses its stems.
+const storagePanel = initStorage({
+  api,
+  toast,
+  currentTrackId: () => state.track?.id ?? null,
+  onChanged: () => refreshModelStatus(),
+});
+
 function openPicker(mode) {
   pickerMode = mode;
   const score = mode === 'score';
@@ -170,6 +181,7 @@ function openPicker(mode) {
   $('picker-recent-title').textContent = score ? 'Beside this track' : 'Recent';
   $('path-input').placeholder = $('path-input').dataset[mode];
   $('path-input').value = '';
+  $('picker-storage').hidden = score;  // a .mscz picker has no cache to manage
   $('picker').hidden = false;
   refreshPicker();
 }
@@ -183,6 +195,7 @@ async function refreshPicker() {
     } else {
       const tracks = await api('/api/tracks');
       renderTrackList($('recent-list'), tracks.recent);
+      storagePanel.refreshIfOpen();
     }
   } catch (error) {
     showPickerError(error.message);

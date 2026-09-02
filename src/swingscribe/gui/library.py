@@ -506,14 +506,33 @@ def _recents_path(config: Config) -> Path:
     return Path(config.cache_dir) / "gui" / "recents.json"
 
 
-def remember_open(
-    config: Config, track_id: str, audio_path: str | Path, when: float | None = None
-) -> None:
-    index = _read_json(_recents_path(config))
-    index[track_id] = {
-        "path": str(audio_path),
-        "opened_at": time.time() if when is None else when,
+def recent_index(config: Config) -> dict[str, dict[str, Any]]:
+    """The raw recents index: track id -> {path, opened_at, stem_digest?}."""
+    return {
+        track_id: record
+        for track_id, record in _read_json(_recents_path(config)).items()
+        if isinstance(record, dict)
     }
+
+
+def remember_open(
+    config: Config,
+    track_id: str,
+    audio_path: str | Path,
+    when: float | None = None,
+    stem_digest: str | None = None,
+) -> None:
+    """Record a track as opened. Fields already in its entry survive: the
+    `stem_digest` (the digest its stems directories are named by, see
+    `stem_digest`) is what lets the storage view name a stems directory
+    without re-hashing a 200 MB wav, so it is kept once learned."""
+    index = _read_json(_recents_path(config))
+    entry = index.get(track_id) if isinstance(index.get(track_id), dict) else {}
+    entry["path"] = str(audio_path)
+    entry["opened_at"] = time.time() if when is None else when
+    if stem_digest:
+        entry["stem_digest"] = stem_digest
+    index[track_id] = entry
     path = _recents_path(config)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")

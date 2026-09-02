@@ -260,3 +260,60 @@ def test_a_roformer_model_that_drops_a_stem_is_an_error(tmp_path, monkeypatch):
     monkeypatch.setattr(separate, "_roformer_separate", five_only)
     with pytest.raises(RuntimeError, match="piano"):
         separate.run(document, config)
+
+
+def test_write_source_marker_names_the_track(tmp_path):
+    """A stems directory is named by the wav digest, which nothing can turn
+    back into a title; the marker beside the stems says which track they
+    are, in the id the GUI uses (the SOURCE file's digest)."""
+    import hashlib
+    import json
+
+    from swingscribe.model import AudioRef, Document
+    from swingscribe.stages.separate import SOURCE_MARKER, write_source_marker
+
+    source = tmp_path / "Take 3.m4a"
+    source.write_bytes(b"source bytes")
+    document = Document(
+        audio_path=str(source),
+        sample_rate=1000,
+        audio=AudioRef(path=str(tmp_path / "norm.wav"), sample_rate=1000, channels=2, duration=1),
+    )
+    out = tmp_path / "stems" / "0123456789abcdef-htdemucs@4000-6000"
+    write_source_marker(out, document, "htdemucs", (4.0, 6.0))
+
+    record = json.loads((out / SOURCE_MARKER).read_text(encoding="utf-8"))
+    assert record["track_id"] == hashlib.sha256(b"source bytes").hexdigest()[:16]
+    assert record["name"] == "Take 3.m4a"
+    assert record["source"] == str(source)
+    assert record["model"] == "htdemucs"
+    assert record["span"] == [4.0, 6.0]
+
+
+def test_reusing_an_older_set_backfills_its_marker(tmp_path, monkeypatch):
+    """Directories separated before the marker existed get one the first
+    time they are reused, so the cache names itself without re-separating."""
+    import hashlib
+
+    from swingscribe.config import Config
+    from swingscribe.stages import separate
+    from swingscribe.stages.separate import SOURCE_MARKER
+
+    document = _document_for(tmp_path)
+    config = Config(cache_dir=tmp_path / "cache")
+    config = config.model_copy(
+        update={"separate": config.separate.model_copy(update={"model": "bsroformer_sw"})}
+    )
+    digest = hashlib.sha256(Path(document.audio.path).read_bytes()).hexdigest()[:16]
+    out = stems_dir(config.cache_dir, digest, "bsroformer_sw")
+    out.mkdir(parents=True)
+    for name in ("drums", "bass", "other", "vocals", "guitar", "piano"):
+        (out / f"{name}.wav").write_bytes(b"RIFF....")
+
+    def explode(*_args, **_kwargs):
+        raise AssertionError("a complete set must not be re-separated")
+
+    monkeypatch.setattr(separate, "_roformer_separate", explode)
+    assert not (out / SOURCE_MARKER).exists()
+    separate.run(document, config)
+    assert (out / SOURCE_MARKER).is_file()

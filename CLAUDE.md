@@ -213,6 +213,17 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   never in the cache dir. The cache is derived data that must stay safely
   deletable; a span and a downbeat are human judgements. Only the disposable
   recents index stays under the cache.
+- **The cache panel (`gui/storage.py`, `swingscribe cache ls|rm`) deletes
+  stems directories and ingest wavs, and nothing else.** Those are 78 of the
+  cache's 78 GB; the bins, reviews and peaks are not worth a control. A
+  stems directory is keyed by the NORMALIZED wav's digest and the track by
+  the source file's, so naming one needs a join: `separate.run` writes
+  `_source.json` beside every set (back-filled on reuse), `remember_open`
+  keeps the wav digest, and older directories cost one hash of the wav,
+  memoised in `gui/wav-digests.json`. Deleting a track's cache never touches
+  the sidecar or the recents entry, and a directory a running separation is
+  writing into is refused. The harness cache under `benchmark/` is a
+  different directory: reach it with `cache ls --cache-dir`.
 - **Erasures ("not the solo") are matched by content, never by index.** Any
   config change renumbers every note, so a stored index would silently silence
   a different one. `gui/erasures.py` matches on (onset, pitch) with exact pitch
