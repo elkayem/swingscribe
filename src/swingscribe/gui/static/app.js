@@ -774,6 +774,20 @@ function renderModels() {
   const button = $('separate-btn');
   button.hidden = Boolean(current?.ready);
   button.textContent = `Separate ${state.selection ? 'selection' : 'track'} with ${state.model ?? ''}`;
+  if (!button.hidden) refreshEstimate();
+}
+
+/* The predicted wait, on the button, before the listener commits to it: a
+   thirty-minute estimate is a reason to pick the faster model instead. */
+async function refreshEstimate() {
+  if (!state.track || !state.model) return;
+  const button = $('separate-btn');
+  try {
+    const data = await api(`/api/tracks/${state.track.id}/estimate?model=${state.model}${spanParams()}`);
+    const minutes = data.seconds / 60;
+    const wait = minutes < 1.5 ? `~${Math.ceil(data.seconds)} s` : `~${Math.ceil(minutes)} min`;
+    button.textContent = `Separate ${state.selection ? 'selection' : 'track'} with ${state.model} (${wait})`;
+  } catch (_error) { /* the button keeps its plain label */ }
 }
 
 async function selectModel(model) {
@@ -1097,16 +1111,32 @@ function watchJob(jobId, onProgress) {
   });
 }
 
+/* "about 4 min left" — from measured progress when the model reports it,
+   from the estimate counting down when it cannot (the Roformer). */
+function remainingText(update) {
+  if (update.remaining == null) return '';
+  const minutes = Math.ceil(update.remaining / 60);
+  const left = update.remaining < 90 ? `${Math.ceil(update.remaining)} s` : `${minutes} min`;
+  return update.fraction >= 0.15 ? `· ~${left} left` : `· ~${left} left (estimate)`;
+}
+
 async function pollJob(jobId) {
+  state.jobId = jobId;
+  $('job-cancel').disabled = false;
   const job = await watchJob(jobId, (update) => {
     $('job-fill').style.width = `${(update.fraction * 100).toFixed(1)}%`;
-    $('job-message').textContent = update.message || update.state;
-    $('job-elapsed').textContent = `${clock(update.elapsed, false)} elapsed`;
+    $('job-message').textContent = update.cancel_requested ? 'cancelling…' : (update.message || update.state);
+    $('job-elapsed').textContent = `${clock(update.elapsed, false)} elapsed ${remainingText(update)}`;
   });
+  state.jobId = null;
   $('separate-btn').disabled = false;
   $('job').hidden = true;
   if (job && job.state === 'error') {
     toast(job.error, true);
+    return;
+  }
+  if (job && job.state === 'cancelled') {
+    toast(`${job.model}: separation cancelled`);
     return;
   }
   if (job) toast(`${job.model}: ${job.stems.length} stems ready`);
@@ -2265,6 +2295,11 @@ $('lead-stem').addEventListener('change', async (event) => {
 });
 
 $('separate-btn').addEventListener('click', startSeparation);
+$('job-cancel').addEventListener('click', async () => {
+  if (!state.jobId) return;
+  $('job-cancel').disabled = true;
+  try { await post(`/api/jobs/${state.jobId}/cancel`, {}); } catch (error) { toast(error.message, true); }
+});
 
 $('transcribe-btn').addEventListener('click', startTranscribe);
 

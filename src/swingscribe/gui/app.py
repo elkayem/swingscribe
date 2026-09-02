@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from swingscribe.config import ENSEMBLES, TRANSPOSITIONS, Config
 from swingscribe.gui import audio as gui_audio
 from swingscribe.gui import erasures as gui_erasures
-from swingscribe.gui import ground_truth, library, peaks, review, storage
+from swingscribe.gui import ground_truth, library, peaks, review, storage, timings
 from swingscribe.gui import jobs as gui_jobs
 from swingscribe.gui import musicxml as gui_musicxml
 from swingscribe.model import NoteEvent
@@ -73,6 +73,17 @@ class StateRequest(BaseModel):
     server change every time the front end remembers one more thing."""
 
     state: dict[str, Any]
+
+
+def separation_audio_seconds(document, config: Config) -> float:
+    """How much audio the separator will be handed: the span plus its margins,
+    clipped to the track, or the whole track."""
+    duration = float(document.audio.duration) if document.audio is not None else 0.0
+    span = config.separate.span
+    if span is None:
+        return duration
+    margin = config.separate.span_margin_s
+    return max(0.0, min(duration, span[1] + margin) - max(0.0, span[0] - margin))
 
 
 def create_app(config: Config) -> FastAPI:
@@ -718,25 +729,64 @@ def create_app(config: Config) -> FastAPI:
             job = app.state.runner.submit(
                 request.path, run_config, request.model, "transcribe", variant
             )
-        elif request.kind == "separate" and request.start is not None and request.end is not None:
-            # Separate the selected span only (SeparateConfig.span): the stems
-            # come back full-length and silent outside it, so nothing else
-            # changes, and a nine-times-slower model becomes a wait of minutes.
-            # Rounded like a review span, so the same selection keys the same
-            # stems; the variant keeps two spans from deduping onto each other.
-            span = (
-                round(request.start, review.SPAN_PRECISION),
-                round(request.end, review.SPAN_PRECISION),
-            )
+        elif request.kind == "separate":
+            # Separate the selected span only when there is one
+            # (SeparateConfig.span): the stems come back full-length and
+            # silent outside it, so nothing else changes, and a nine-times-
+            # slower model becomes a wait of minutes. Rounded like a review
+            # span, so the same selection keys the same stems; the variant
+            # keeps two spans from deduping onto each other.
+            span = None
+            if request.start is not None and request.end is not None:
+                span = (
+                    round(request.start, review.SPAN_PRECISION),
+                    round(request.end, review.SPAN_PRECISION),
+                )
             run_config = config.model_copy(
                 update={"separate": config.separate.model_copy(update={"span": span})}
             )
+            audio_seconds = separation_audio_seconds(entry["document"], run_config)
             job = app.state.runner.submit(
-                request.path, run_config, request.model, "separate", f"{span[0]}-{span[1]}"
+                request.path,
+                run_config,
+                request.model,
+                "separate",
+                f"{span[0]}-{span[1]}" if span else "",
+                estimate_s=timings.estimate(config.cache_dir, request.model, audio_seconds),
+                audio_seconds=audio_seconds,
             )
         else:
             job = app.state.runner.submit(request.path, config, request.model, request.kind)
         return job.snapshot()
+
+    @app.post("/api/jobs/{job_id}/cancel")
+    def cancel_job(job_id: str) -> dict[str, Any]:
+        """Stop a queued or running job. A separation is a child process and
+        dies within a second; its partial stems are never reused (separate.
+        existing_stems is all-or-nothing)."""
+        job = app.state.runner.cancel(job_id)
+        if job is None:
+            raise HTTPException(404, f"unknown job {job_id!r}")
+        return job.snapshot()
+
+    @app.get("/api/tracks/{track_id}/estimate")
+    def get_estimate(
+        track_id: str, model: str, start: float | None = None, end: float | None = None
+    ) -> dict[str, Any]:
+        """Predicted seconds to separate the selection (or the track) with
+        `model` on this machine — what the listener sees before deciding to
+        wait, or to pick the faster model (gui/timings.py)."""
+        entry = resolve(track_id)
+        span = (start, end) if start is not None and end is not None else None
+        run_config = config.model_copy(
+            update={"separate": config.separate.model_copy(update={"span": span})}
+        )
+        audio_seconds = separation_audio_seconds(entry["document"], run_config)
+        return {
+            "model": model,
+            "audio_seconds": round(audio_seconds, 1),
+            "seconds": round(timings.estimate(config.cache_dir, model, audio_seconds), 1),
+        }
 
     @app.get("/api/jobs")
     def get_jobs() -> dict[str, Any]:
