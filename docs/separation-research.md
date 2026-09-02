@@ -33,15 +33,41 @@ A better separator can only help with (2) unless it also names the horn.
 
 ## The queue, in order
 
-### 0. No new dependency: the mix minus drums and bass (queued, running)
+### 0. No new dependency: the mix minus drums and bass — MEASURED, REJECTED
 
 `other+vocals+guitar+piano` summed. The horn is in it wherever Demucs
 filed it, so routing stops being a per-track judgement; the price is
-every melodic stem's bleed, which is what D22 now handles. Measured over
-the fixed 12-solo subset plus Ornithology with the batch's own scoring
-(`scratchpad/composite_run.py`), against the same solos on their
-hand-picked stems. If it reads within noise of the picked stem, it can be
-the batch's default and the GUI's suggestion.
+every melodic stem's bleed, which D22 was hoped to handle. It does not,
+not at this level. Same solos, same scoring, pitch F1 on the sum against
+the located stem (12 dB floors both sides):
+
+| | picked stem | sum | |
+|---|---|---|---|
+| Blue Train 218 | 0.881 | 0.760 | |
+| Mr PC 226 | 0.848 | 0.730 | |
+| There Will Never 74 | 0.937 | 0.829 | |
+| Cheese Cake 121 | 0.898 | 0.815 | |
+| Embraceable You 56 | 0.880 | 0.886 | the one gain |
+| Ornithology 61 | 0.809 | 0.799 | |
+| **subset + 61 mean (13)** | **0.880** | **0.815** | |
+| Dolores 427 (split) | 0.660 | 0.686 | |
+| Cherokee 446 (split) | 0.718 | 0.718 | |
+| Cherokee II 447 (split) | 0.700 | 0.634 | |
+| My Favorite Things 228 (split) | 0.601 | **0.156** | CREPE follows Tyner |
+
+Worse on 12 of 13 well-routed tracks, worst where the pianist is
+strongest, and no rescue on the split-routing tracks it was built for:
+a loud piano in the sum out-shouts the horn and the Viterbi f0 decoder
+follows it. Summing stems undoes the separation's one real service.
+
+What it points to instead (**0b, not yet built**): keep the stems apart
+and choose BETWEEN them per moment, not per track. Transcribe each
+candidate stem on its own and merge the note streams by continuity — a
+Viterbi over stems whose cost is the register/loudness break between the
+last note taken and the next, the same machinery as the piano line
+selection (docs/issue8-line-selection.md). Routing errors are
+switch-shaped (Dolores, Orbits, both Cherokees, 228), so a per-moment
+choice can follow the switch where a per-track one cannot.
 
 ### 1. Roformer family (authorised by the listener; after the queue drains)
 
