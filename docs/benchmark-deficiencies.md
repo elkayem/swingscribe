@@ -732,18 +732,20 @@ sheet's two strangest numbers:
   overlap scores rhythm 0.277 at coverage 0.602 (the sheet's worst trusted
   rhythm by 0.13).
 - **John Coltrane 228** is My Favorite Things' SECOND solo section, 723
-  notes against 227's 743, and the excerpt holds the first. Two Coltrane
-  solos on the same E-minor vamp share enough vocabulary that the fit
-  cleared the wrong-take floor at coverage 0.484 — the control's stated
-  assumption (a wrong pairing scores at chance) weakens when both sides
-  are the same performer improvising on the same vamp in the same
-  recording.
+  notes against 227's 743. This entry first claimed the excerpt held only
+  the first; **that was wrong**. The file is the whole 13.7-minute track,
+  and on 2026-09-01 the batch's locate placed 228 at offset +596.5 s with
+  45% of its notes matched in time and pitch — a wrong pairing scores
+  under 10%. What is true is that it scores badly there: pitch F1 0.601 at
+  coverage 0.472 (rhythm untrusted). `other` cleared the locate gate so
+  `guitar` was never tried, and the whole-file energies (guitar 1.6x
+  `other`) say the soprano is split between them — the composite-stem
+  case (docs/separation-research.md item 0), not a copy error.
 
-Both rows are flagged for the listener's review pile alongside the
-wrong-take files; the durable fix is sourcing the fuller excerpts, or
-deleting the copies. The general lesson for future copies: check the
-sibling's annotated DURATION against the excerpt before assuming
-containment — `select max(onset) from melody` is one line.
+The Garrett row stays as described; the general lesson for future copies
+stands: check the sibling's annotated DURATION against the excerpt before
+assuming containment — `select max(onset) from melody` is one line — and
+then let the LOCATE say where it is before concluding it is not there.
 
 ### D22 - Bleed inside the lead stem, rejected by the line's own register and loudness
 
