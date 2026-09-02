@@ -79,20 +79,54 @@ cleaner stems, no consistent routing gain, 2-4x htdemucs' CPU time.
 ### 2. Query-conditioned separation — the thing a human actually does
 
 The listener can name the instrument. Models that take the instrument as
-a query rather than a fixed label set are the research direction that
-matches that: text-queried separation (AudioSep, 2023, and successors)
-and audio-queried "separate what sounds like this" models. These are
-larger, slower, and mostly evaluated on sound events rather than music,
-so this is research rather than an experiment: find what has weights and
-a CPU path, try "saxophone" / "trumpet" queries on three subset solos,
-and measure the same way. A win here would remove the routing problem
-outright and would also answer "alto or tenor?", which no stem model can.
+a query rather than a fixed label set are the direction that matches
+that. Findings from the first look (2026-09-01, links at the end):
+
+- **Banquet** (Watcharasupat & Lerch, ISMIR 2024; `query-bandit` on
+  GitHub, MIT) is the strongest lead. A band-split separator with ONE
+  decoder, conditioned on a PaSST embedding of a *reference clip of the
+  instrument you want* ("bring your own query"), trained on MoisesDB —
+  whose taxonomy goes beyond four stems and includes wind/reed/brass
+  stems. The paper reports it approaching 6-stem HTDemucs on the four
+  standard stems, beating it on guitar and piano, and extracting "less
+  common stems such as reeds and organs". Weights are on Zenodo
+  (`ev-pre-aug.ckpt` recommended); inference is a CLI
+  (`train.py inference_byoq` with a query wav). GPU is recommended for
+  training batch sizes; single-track CPU inference is untested here and
+  is the first thing to find out. The query being AUDIO is the point: a
+  few seconds of the soloist from the track itself is a query nobody has
+  to label, and "alto or tenor" is answered by which clip you hand it.
+- **AudioSep** (2023, open weights) separates by TEXT query ("saxophone")
+  with a CLAP text encoder over a ResUNet; strong zero-shot on sound
+  events and instruments in its own benchmarks, less evidence on dense
+  jazz mixes. Successors (FlowSep, OmniSep, ZeroSep) exist; none is a
+  drop-in.
+- **MoisesDB** itself (240 tracks, 38 instruments, 11 top-level stems) is
+  what any "wind stem" model gets trained on; Moises' own beyond-4-stem
+  separator is commercial.
+
+Experiment, when the Roformer trial is done: Banquet on three subset
+solos with a query cut from the solo's own first phrase, stems written
+into the cache's `stems/<digest>-banquet/` convention, scored the same
+way. A win here removes routing outright.
 
 ### 3. Instrument-specific stems from commercial services
 
 LALAL.AI and Moises advertise wind/brass stems. That means uploading the
 recordings, which this project has never done; listed so the option is on
 the record, not recommended.
+
+### Roformer notes from the first look
+
+`audio-separator` installs CPU-only as `pip install "audio-separator[cpu]"`
+(MIT; bundles onnxruntime for its MDX models, torch for Roformers, and
+asks for UVR attribution when its default models are used). Its model
+zoo is listed at run time (`audio-separator --list_models`); the README
+names `BS-Roformer-SW` and the `model_bs_roformer_ep_317_sdr_12.9755`
+vocals checkpoint, and ships the same htdemucs bags we already run, so
+one driver can compare everything on identical audio. Which 4-stem
+Roformer checkpoints the zoo carries is read off that list at install
+time, not assumed here.
 
 ## How every candidate gets judged
 
@@ -102,3 +136,13 @@ Same fixed subset (melids 54, 70, 56, 58, 168, 218, 60, 74, 385, 121,
 together (mean pitch F1; mean notation rhythm over trusted rows with its
 n; trusted count), plus the routing measure above. Nothing is promoted to
 a default on fewer than those.
+
+## Sources (first look, 2026-09-01)
+
+- python-audio-separator: https://github.com/nomadkaraoke/python-audio-separator
+  (README, and discussion #133 "which model should I use")
+- Banquet / query-bandit: https://github.com/kwatcharasupat/query-bandit ;
+  paper https://huggingface.co/papers/2406.18747 ; weights
+  https://zenodo.org/records/13694558
+- MoisesDB: https://arxiv.org/pdf/2307.15913
+- AudioSep: https://arxiv.org/html/2308.05037
