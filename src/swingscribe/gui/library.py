@@ -192,7 +192,13 @@ def available_stems(document: Document, config: Config, model: str) -> dict[str,
 # vocals/other energy ratio <=0.18 against Oleo's 0.81 — and the sum carries
 # the OTHER stem's bleed with it, so it costs precision wherever the
 # separation was already clean. Offer it; do not select it.
-COMBINED_STEMS = ("other+vocals",)
+#
+# `other+vocals+guitar+piano` is the mix minus drums and bass: everything
+# Demucs could have filed a horn under, summed. It exists because the routing
+# failures found on 2026-09-01 (D23) were all "the horn is in a stem nobody
+# looked in", and the sum holds the horn wherever it went, at the price of
+# every melodic stem's bleed. Six-stem models only.
+COMBINED_STEMS = ("other+vocals", "other+vocals+guitar+piano")
 
 COMBINED_SEPARATOR = "+"
 
@@ -345,15 +351,29 @@ def _write_stem_sum(sources: list[str], out: Path) -> None:
 
 
 def model_status(document: Document, config: Config) -> list[dict[str, Any]]:
-    """Per-model separation status for the model picker."""
+    """Per-model separation status for the model picker.
+
+    `ready` means the model's FULL set of stems is on disk. A partial set is
+    not ready, and says what it is missing: CLAUDE.md's own advice is to copy
+    ONE stem across between cache directories rather than re-separate, and a
+    directory holding that one stem read as "Separated — other" to the
+    picker, which then hid the Separate button and offered a stem menu of
+    one. Crazy Rhythm's tenor was in `guitar`, and the listener could not
+    get there. The stems that ARE present stay listed, because
+    `resolve_stem` and run_eval legitimately use a lone copied stem.
+    """
+    from swingscribe.stages.separate import missing_stems
+
     status = []
     for model in config.gui.models:
         stems = available_stems(document, config, model)
+        missing = missing_stems(model, stems) if stems else []
         status.append(
             {
                 "model": model,
-                "ready": bool(stems),
+                "ready": bool(stems) and not missing,
                 "stems": sorted(set(stems) | set(combinable_stems(stems))),
+                "missing": missing,
             }
         )
     return status

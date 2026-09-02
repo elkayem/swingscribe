@@ -31,6 +31,24 @@ def stems_dir(cache_dir: str | Path, audio_digest: str, model: str) -> Path:
     return Path(cache_dir) / "stems" / f"{audio_digest}-{model}"
 
 
+# What each model writes, for callers that must judge a stems directory
+# WITHOUT loading the model (the GUI's model picker). `run` itself asks the
+# loaded separator, which is the authority; this table only has to agree with
+# it for the models the GUI offers. A model not listed here is judged by
+# whatever is on disk.
+KNOWN_SOURCES: dict[str, tuple[str, ...]] = {
+    "htdemucs": ("drums", "bass", "other", "vocals"),
+    "htdemucs_ft": ("drums", "bass", "other", "vocals"),
+    "htdemucs_6s": ("drums", "bass", "other", "vocals", "guitar", "piano"),
+}
+
+
+def missing_stems(model: str, present: set[str] | dict[str, str]) -> list[str]:
+    """Stems this model produces that are not on disk. Empty means complete
+    (or an unknown model, which cannot be judged)."""
+    return [name for name in KNOWN_SOURCES.get(model, ()) if name not in present]
+
+
 def existing_stems(out_dir: Path, sources: list[str]) -> dict[str, str] | None:
     """Stems already on disk for this audio+model, or None if any is missing.
 

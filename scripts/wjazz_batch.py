@@ -48,7 +48,11 @@ for no measured benefit (config.py SeparateConfig). Everything else gets
 
 Pass 1 transcribes the WHOLE file to locate the solo (CLAUDE.md: "A WJazzD
 track needs NO span selection... sidecar the full duration and let it
-search"). Pass 2 re-transcribes narrowed to the located span, because
+search"). It looks in `other` first and then, only if the solo cannot be
+located there, in the stems Demucs files a horn under when it cannot decide
+(`LOCATE_STEM_ORDER`) — Ornithology's alto sat in `guitar` and was called a
+wrong take for it (docs/benchmark-deficiencies.md D23). Pass 2
+re-transcribes narrowed to the located span, because
 "Notate only the LOCATED solo, never the whole track" — exporting the wide
 pass would put the head and every other soloist in the score too. Pass 2 is
 cheap: separation and the beat grid are unchanged and served from cache, so
@@ -208,6 +212,12 @@ MIN_MELODY_NOTES = 50
 # Matches wjazz.MIN_MATCH_RATE: below this the fit did not find the solo at
 # all (chance level is 2-7%; a real match is 20%+).
 MIN_MATCH_RATE = 0.15
+# Stems pass 1 looks in, in order, until the solo can be located. `other`
+# first because that is where a horn lands nearly always; the rest are where
+# Demucs files one when it cannot decide (guitar for Bird on Ornithology,
+# vocals for a muted trumpet on Oleo). Deliberately NOT ordered by energy:
+# a fixed order keeps the choice explainable and identical across runs.
+LOCATE_STEM_ORDER = ("other", "guitar", "vocals", "piano")
 
 # TWO measures, deliberately prefixed apart, because they are the two
 # different questions CLAUDE.md calls this project's most expensive confusion
@@ -442,38 +452,66 @@ def process_file(
     duration = prepared.audio.duration
 
     # Pass 1: whole file, so the solo can be located by content.
-    wide = base.model_copy(
-        update={"transcribe": base.transcribe.model_copy(update={"region": (0.0, duration)})}
-    )
-    log(
-        f"  [{melid}] {performer} - {title} ({instrument}): pass 1 — whole file, {model}/{ensemble}"
-    )
-    started = time.time()
-    document = run_pipeline(audio_path, wide, stage_list)
-    notes = document.notes.get("other", [])
-    log(f"  [{melid}] pass 1: {len(notes)} notes in {time.time() - started:.0f}s")
-    if not notes:
-        row["status"] = "transcribed zero notes in the whole file — check separation/ensemble"
-        return row
-
+    #
+    # In WHICH stem is decided by where the solo can be located at all, in a
+    # fixed order, `other` first. Demucs does not always put the horn in
+    # `other`: htdemucs_6s filed Bird's alto under `guitar` on Ornithology
+    # (in-span RMS 0.123 against 0.004, with `other` a third digital
+    # silence), and a locate pass hard-wired to `other` matched 5% and called
+    # the right take a wrong one (docs/benchmark-deficiencies.md D23). This
+    # is the one place a reference may steer a stem choice, and it is a
+    # found/not-found gate rather than a best-of-N: the first stem that
+    # clears MIN_MATCH_RATE wins even if a later one would match more, so
+    # no number on the sheet is the best of several tries.
     import numpy as np
 
-    order = np.argsort([n.onset for n in notes])
-    est_on = np.array([notes[i].onset for i in order])
-    est_p = np.array([notes[i].pitch for i in order])
-
-    offset, rate, hits = wjazz.fit_affine(ref_on, ref_p, est_on, est_p, (0.0, duration))
-    match_rate = hits / len(ref_on)
-    # Recorded before the gate, so a rejected row still shows the rate it was
-    # rejected at. A rate sitting AT wjazz.RATE_LOW/RATE_HIGH is a confession:
-    # the true rate is outside the clamp and every number scored against that
-    # drifting clock is suspect (docs/benchmark-deficiencies.md D19).
-    row["fit_rate"] = round(rate, 5)
-    if match_rate < MIN_MATCH_RATE:
+    available = library.available_stems(prepared, base, model)
+    candidates = [s for s in LOCATE_STEM_ORDER if s in available] or ["other"]
+    tried: list[str] = []
+    located = None
+    for locate_stem in candidates:
+        wide = base.model_copy(
+            update={
+                "transcribe": base.transcribe.model_copy(
+                    update={"stem": locate_stem, "region": (0.0, duration)}
+                )
+            }
+        )
+        log(
+            f"  [{melid}] {performer} - {title} ({instrument}): pass 1 — whole file, "
+            f"{model}/{ensemble}, {locate_stem} stem"
+        )
+        started = time.time()
+        document = run_pipeline(audio_path, wide, stage_list)
+        notes = document.notes.get(locate_stem, [])
+        log(f"  [{melid}] pass 1: {len(notes)} notes in {time.time() - started:.0f}s")
+        tried.append(locate_stem)
+        if not notes:
+            continue
+        order = np.argsort([n.onset for n in notes])
+        est_on = np.array([notes[i].onset for i in order])
+        est_p = np.array([notes[i].pitch for i in order])
+        offset, rate, hits = wjazz.fit_affine(ref_on, ref_p, est_on, est_p, (0.0, duration))
+        match_rate = hits / len(ref_on)
+        # Recorded before the gate, so a rejected row still shows the rate it
+        # was rejected at. A rate sitting AT wjazz.RATE_LOW/RATE_HIGH is a
+        # confession: the true rate is outside the clamp and every number
+        # scored against that drifting clock is suspect (D19).
+        row["fit_rate"] = round(rate, 5)
+        if match_rate >= MIN_MATCH_RATE:
+            located = locate_stem
+            break
+        log(f"  [{melid}] pass 1: {locate_stem} matched {match_rate:.0%} — trying the next stem")
+    if located is None:
         row["status"] = (
-            f"best fit only matched {match_rate:.0%} of melid {melid}'s notes — wrong file/take?"
+            f"best fit only matched {match_rate:.0%} of melid {melid}'s notes in "
+            f"{'/'.join(tried)} — wrong file/take?"
+            if tried and notes
+            else "transcribed zero notes in the whole file — check separation/ensemble"
         )
         return row
+    if located != "other":
+        log(f"  [{melid}] the solo is in the {located} stem, not `other`")
 
     solo_start = float(ref_on[0] * rate + offset)
     solo_end = float(ref_on[-1] * rate + offset)
@@ -520,12 +558,14 @@ def process_file(
     # reported an error. Reference-free on purpose: choosing by which stem
     # scores better against the annotation would report a best-of-two as the
     # transcriber's own number (see library.choose_stem).
-    stem, dropout = library.choose_stem(prepared, base, model, region, preferred="other")
+    # `preferred` is the stem pass 1 located the solo in, so the dropout
+    # test asks about the stem that actually carries the soloist.
+    stem, dropout = library.choose_stem(prepared, base, model, region, preferred=located)
     row["stem"] = stem
-    row["stem_dropout"] = round(dropout.get("other", 0.0), 3)
-    if stem != "other":
+    row["stem_dropout"] = round(dropout.get(located, 0.0), 3)
+    if stem != located:
         log(
-            f"  [{melid}] 'other' is silent for {dropout['other']:.0%} of the span — "
+            f"  [{melid}] '{located}' is silent for {dropout[located]:.0%} of the span — "
             f"transcribing {stem} ({dropout[stem]:.0%})"
         )
 

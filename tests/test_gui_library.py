@@ -414,13 +414,36 @@ def test_model_status_reports_readiness_in_config_order(config, tmp_path):
 
     out = stems_dir(config.cache_dir, library.file_digest(wav), "htdemucs_ft")
     out.mkdir(parents=True)
-    (out / "other.wav").write_bytes(b"stem")
+    for name in ("drums", "bass", "other", "vocals"):
+        (out / f"{name}.wav").write_bytes(b"stem")
 
     status = library.model_status(document, config)
     assert [entry["model"] for entry in status] == config.gui.models
     ready = {entry["model"]: entry["ready"] for entry in status}
-    assert ready["htdemucs_ft"] is True  # the only one with a stem on disk
+    assert ready["htdemucs_ft"] is True  # the only one with its stems on disk
     assert all(v is False for k, v in ready.items() if k != "htdemucs_ft")
+
+
+def test_a_partial_stem_folder_is_not_ready_and_says_what_is_missing(config, tmp_path):
+    """One stem copied across from another cache (CLAUDE.md's own advice)
+    used to read as "Separated", which hid the Separate button and left a
+    stem menu of one -- Crazy Rhythm's tenor was in `guitar` and unreachable."""
+    wav = make_audio(tmp_path / "cache" / "audio" / "norm.wav", b"normalized")
+    document = Document(
+        audio_path="orig.m4a",
+        sample_rate=44100,
+        audio=AudioRef(path=str(wav), sample_rate=44100, channels=2, duration=12.0),
+    )
+    from swingscribe.stages.separate import stems_dir
+
+    out = stems_dir(config.cache_dir, library.file_digest(wav), "htdemucs_6s")
+    out.mkdir(parents=True)
+    (out / "other.wav").write_bytes(b"stem")
+
+    entry = {e["model"]: e for e in library.model_status(document, config)}["htdemucs_6s"]
+    assert entry["ready"] is False
+    assert entry["stems"] == ["other"]  # still listed: resolve_stem may use it
+    assert entry["missing"] == ["drums", "bass", "vocals", "guitar", "piano"]
 
 
 def test_gui_config_never_reaches_a_cache_key(config):

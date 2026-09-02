@@ -749,7 +749,10 @@ function renderModels() {
     button.append(entry.model);
     button.title = entry.ready
       ? `Separated — ${entry.stems.join(', ')}`
-      : 'Not separated yet — 6-13 minutes on CPU';
+      : entry.stems?.length
+        ? `Partial — only ${entry.stems.join(', ')} on disk (missing ${entry.missing.join(', ')}); ` +
+          'Separate to get the rest'
+        : 'Not separated yet — 6-13 minutes on CPU';
     button.addEventListener('click', () => selectModel(entry.model));
     node.appendChild(button);
   }
