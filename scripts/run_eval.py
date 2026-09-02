@@ -44,6 +44,20 @@ from pathlib import Path
 
 BENCH = Path("benchmark")
 BASELINES = Path("tests/regression/real-audio-baselines.json")
+# Which stage cache the stems and ingests are read from. The default is the
+# repo-root cache the GUI shares when launched from here; `--cache-dir
+# benchmark/.swingscribe-cache` reads the batch's, where a span-scoped
+# Roformer separation lands (stages/separate.py). Copying 28 GB of stems
+# between the two so this could keep one default was the alternative.
+CACHE_DIR = Path(".swingscribe-cache")
+
+
+def eval_config():
+    from swingscribe.config import Config
+
+    return Config(cache_dir=CACHE_DIR)
+
+
 # How far a score may move before it is called a change rather than noise.
 # Transcription is deterministic, so this is tight on purpose; it exists for
 # floating-point drift across platforms, not for genuine variation.
@@ -112,7 +126,6 @@ def transcribe_fingerprint(sidecar: dict, step_cost: float, dip_db: float) -> st
 
 def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> dict:
     """Transcribe every sidecar'd span in benchmark/, reusing what is cached."""
-    from swingscribe.config import Config
     from swingscribe.gui import library
     from swingscribe.stages import transcribe
 
@@ -143,13 +156,19 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
             why = "settings" if cached_run.get("fingerprint") else "no fingerprint"
             log(f"  {name}: {why} differs from cache -- re-transcribing")
             runs.pop(name)
-        base = Config()
-        config = base.model_copy(
-            update={"separate": base.separate.model_copy(update={"model": sidecar["model"]})}
-        )
-        document = library.ingested_document(BENCH / name, config)
+        base = eval_config()
         low, high = sidecar["region"]
         settings = transcribe_settings(sidecar, step_cost, dip_db)
+        # The region rides in the config too, so a span-scoped stem set that
+        # covers this solo resolves (library.span_for) — a whole-file set
+        # still answers first.
+        config = base.model_copy(
+            update={
+                "separate": base.separate.model_copy(update={"model": sidecar["model"]}),
+                "transcribe": settings,
+            }
+        )
+        document = library.ingested_document(BENCH / name, config)
         # Through library.resolve_stem, the same resolver the GUI uses: a
         # composite like "other+vocals" (Oleo's fix, R16) is summed on demand
         # beside its parts. Building the path by hand skipped every track the
@@ -214,7 +233,6 @@ def beat_grids(cache: Path = GRIDS_CACHE, log=print) -> dict:
     now -- affordable only because the grid no longer chains from a
     separation (stages/beats.py) and costs seconds.
     """
-    from swingscribe.config import Config
     from swingscribe.gui import library
     from swingscribe.stages import beats
 
@@ -228,7 +246,7 @@ def beat_grids(cache: Path = GRIDS_CACHE, log=print) -> dict:
         name = sidecar_name(sidecar_path, json.loads(sidecar_path.read_text(encoding="utf-8")))
         if name in grids or not (BENCH / name).is_file():
             continue
-        config = Config()
+        config = eval_config()
         document = library.ingested_document(BENCH / name, config)
         started = time.time()
         # No stems on the document: the mix is the source, and handing this
@@ -331,7 +349,6 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
     """
     import json as _json
 
-    from swingscribe.config import Config
     from swingscribe.model import NoteEvent
     from swingscribe.notation import notation_for_span
 
@@ -359,7 +376,7 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
         grid["beats"],
         region or tuple(run["region"]),
         stem=run["stem"],
-        config=Config(),
+        config=eval_config(),
         anchor=sidecar.get("anchor"),
     )
 
@@ -635,7 +652,17 @@ def main() -> None:
     parser.add_argument("--dip-db", type=float, default=0.0)
     parser.add_argument("--pin", action="store_true", help="rewrite the baselines from this run")
     parser.add_argument("--json", type=Path, default=None, help="also write the scorecard here")
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=None,
+        help=f"stage cache to read stems from (default {CACHE_DIR}; the batch's is "
+        "benchmark/.swingscribe-cache)",
+    )
     args = parser.parse_args()
+    if args.cache_dir is not None:
+        global CACHE_DIR
+        CACHE_DIR = args.cache_dir.resolve()
 
     cache = notes_cache(args.step_cost, args.dip_db)
     print(f"== Transcribing (step cost {args.step_cost}, dip {args.dip_db} dB), cache {cache} ==")

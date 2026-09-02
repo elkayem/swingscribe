@@ -45,7 +45,8 @@ for no measured benefit (config.py SeparateConfig). Everything else gets
 (CLAUDE.md). See `auto_settings`. `--separation-model bsroformer_sw`
 overrides the horn choice with the Roformer (docs/separation-research.md:
 subset mean pitch F1 0.878 -> 0.903, every horn routed to `other`, ~9x the
-CPU time); pianists keep htdemucs either way.
+CPU time); a pianist on a six-stem override takes its `piano` stem (level
+on the hand-scored six, up on all four WJazzD pianos).
 
 ## The two-pass transcription
 
@@ -433,7 +434,7 @@ def process_file(
     # every row already has on disk; an override only changes what pass 2
     # transcribes, separated over the located span alone (SeparateConfig.span)
     # — a Roformer over a whole file is nine times htdemucs' minutes.
-    transcribe_model = separation_model if separation_model and ensemble == "horn-led" else model
+    transcribe_model = separation_model or model
     row["ensemble"], row["separation_model"] = ensemble, model
 
     from swingscribe import wjazz
@@ -573,10 +574,14 @@ def process_file(
     # transcriber's own number (see library.choose_stem).
     if transcribe_model != model:
         # Pass 2 on the override model, separated over the located span only.
-        # The Roformer put every measured horn in `other`, so that is where
-        # the chooser starts; `LOCATE_STEM_ORDER` was pass 1's business.
+        # The Roformer put every measured horn in `other` and every pianist
+        # in `piano` (docs/separation-research.md), so that is where the
+        # chooser starts; `LOCATE_STEM_ORDER` was pass 1's business.
         model = transcribe_model
-        located = "other"
+        from swingscribe.stages.separate import KNOWN_SOURCES
+
+        pianist = ensemble != "horn-led" and "piano" in KNOWN_SOURCES.get(model, ())
+        located = "piano" if pianist else "other"
         base = base.model_copy(
             update={"separate": base.separate.model_copy(update={"model": model, "span": region})}
         )
