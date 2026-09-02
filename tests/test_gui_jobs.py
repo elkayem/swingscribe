@@ -11,6 +11,65 @@ from swingscribe.gui import jobs
 from swingscribe.progress import ProgressEvent
 
 
+def test_a_running_separation_can_be_cancelled(tmp_path):
+    """The separation runs in a child process, so cancelling terminates it
+    within a second instead of waiting on a torch call nothing can interrupt.
+    The worker here only idles, so no model and no ml group is involved."""
+    import time
+
+    runner = jobs.JobRunner()
+    runner._worker = jobs._idle_worker
+    job = runner.submit("x.wav", Config(cache_dir=tmp_path), "htdemucs", "separate")
+    deadline = time.time() + 30
+    while job.state == "queued" and time.time() < deadline:
+        time.sleep(0.05)
+    while job.fraction == 0.0 and job.state == "running" and time.time() < deadline:
+        time.sleep(0.05)  # the child has reported once: it is really running
+    assert job.state == "running"
+
+    cancelled = runner.cancel(job.id)
+    assert cancelled is job and job.cancel_requested
+    deadline = time.time() + 15
+    while job.state == "running" and time.time() < deadline:
+        time.sleep(0.05)
+    assert job.state == "cancelled"
+    assert job.snapshot()["state"] == "cancelled"
+    assert job.finished_at is not None
+
+
+def test_a_queued_job_cancelled_before_it_starts_never_runs(tmp_path):
+    runner = jobs.JobRunner()
+    release = threading.Event()
+    runner._run_separation = lambda job, config, model: release.wait(5)
+    try:
+        blocker = runner.submit("a.wav", Config(cache_dir=tmp_path), "htdemucs", "separate")
+        queued = runner.submit("b.wav", Config(cache_dir=tmp_path), "htdemucs", "separate")
+        assert queued.state == "queued"
+        runner.cancel(queued.id)
+    finally:
+        release.set()
+    import time
+
+    deadline = time.time() + 5
+    while queued.state == "queued" and time.time() < deadline:
+        time.sleep(0.02)
+    assert queued.state == "cancelled"
+    assert blocker.state in ("running", "done")
+
+
+def test_remaining_time_prefers_measured_progress_over_the_estimate():
+    job = jobs.Job(id="j", path="x", model="m", kind="separate", estimate_s=100.0)
+    job.state = "running"
+    job.started_at = 1000.0
+    # Early on nothing has reported: the estimate counts down.
+    assert job.remaining_s(now=1010.0) == pytest.approx(90.0)
+    # Once the model reports real progress, extrapolate from it instead.
+    job.fraction = 0.5
+    assert job.remaining_s(now=1040.0) == pytest.approx(40.0)
+    job.state = "done"
+    assert job.remaining_s(now=1050.0) is None
+
+
 def test_submit_rejects_an_unknown_kind(tmp_path):
     runner = jobs.JobRunner()
     runner._run = lambda job, config, model: None
