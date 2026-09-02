@@ -798,9 +798,26 @@ notes with a gap on both sides) does not change the ratio, because bleed
 sits as close to other notes as a ghost note does. **14 dB ships**: nearly
 all of the pitch gain (table: WJazzD +0.024 against +0.026), no track's
 F1 down on the table, a third fewer real notes lost. Re-measured through
-the batch at that setting below when the run lands. Costs either way:
-every review key changes (a CREPE pass per track on the next true-up),
-and the real-audio baselines move and need re-pinning.
+the batch at that setting: **shipped numbers, 14 dB / 12 semitones** —
+subset (n=12) mean pitch F1 **0.854 → 0.878**, trusted rhythm **0.694 →
+0.696** (n=12, up on 8), trusted 12 → 12, coverage held within 0.01 on
+ten; hand scores (n=10) mean pitch F1 **0.793 → 0.814**, every track up,
+trusted rhythm **0.746 → 0.733** (n=10), trusted 10 → 10. Art Pepper is
+the one page that lost coverage (0.924 → 0.896).
+
+The rhythm dip on the hand scores is NOT mostly lost notes, and the
+pianos prove it: they get the register floor only, their coverage is
+unchanged to the third decimal (Melody for C 0.802, Soul Station 0.585,
+Giant Steps 0.810), and their rhythm still drops 0.004-0.015. Same
+matched notes, different positions on the page — removing a left-hand or
+comping note from a beat leaves `choose_grid` fewer onsets and it picks a
+coarser grid, moving the notes that remain. The bleed had been propping
+up the grid choice. That is a quantize question (D11's territory: the
+grid chooser is coarsest-within-slack), not a reason to keep bleed, and
+it is on the record here so nobody reads the rhythm dip as the floors
+removing real notes. Costs either way: every review key changes (a CREPE
+pass per track on the next true-up), and the real-audio baselines move
+and need re-pinning.
 
 ### D23 - The batch's "wrong take" verdict was a stem-routing verdict
 
