@@ -212,7 +212,10 @@ to the selection plus a 3 s margin, separates that, and pads the stems
 back to full length (silent outside), so nothing downstream changes and
 a solo costs a third of the file. The GUI sends the selection with every
 Separate click; the batch keeps its whole-file locate on htdemucs_6s and
-separates the located span alone with `--separation-model`.
+separates the located span alone with `--separation-model`. Verified on
+Limehouse Blues through the batch: located in `guitar` on htdemucs_6s,
+the 33 s span separated by the Roformer in 183 s (model load included),
+pitch F1 0.842 → 0.858, coverage 0.831 → 0.861, the horn in `other`.
 
 **Reading.** Both halves of the diagnosis moved: routing (every horn in
 `other`) AND bleed (fewer notes on Chet Baker, 161 → 133, at higher F1).
