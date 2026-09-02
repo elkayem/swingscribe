@@ -268,14 +268,23 @@ def create_app(config: Config) -> FastAPI:
         return FileResponse(entry["document"].audio.path, media_type="audio/wav")
 
     @app.get("/api/tracks/{track_id}/stems")
-    def get_stems(track_id: str, model: str | None = None) -> dict[str, Any]:
+    def get_stems(
+        track_id: str,
+        model: str | None = None,
+        start: float | None = None,
+        end: float | None = None,
+    ) -> dict[str, Any]:
+        """Stems on disk for this track, for the listener's selection when
+        `start`/`end` are given: a whole-file set answers for any span, and a
+        span-scoped set answers when it covers the selection."""
         entry = resolve(track_id)
         document = entry["document"]
+        span = (start, end) if start is not None and end is not None else None
         if model is None:
-            return {"models": library.model_status(document, config)}
+            return {"models": library.model_status(document, config, span)}
         return {
             "model": model,
-            "stems": library.selectable_stems(document, config, model),
+            "stems": library.selectable_stems(document, config, model, span),
         }
 
     @app.get("/api/tracks/{track_id}/stem")
@@ -704,6 +713,22 @@ def create_app(config: Config) -> FastAPI:
             variant = review.review_key(entry["document"], run_config, request.model)
             job = app.state.runner.submit(
                 request.path, run_config, request.model, "transcribe", variant
+            )
+        elif request.kind == "separate" and request.start is not None and request.end is not None:
+            # Separate the selected span only (SeparateConfig.span): the stems
+            # come back full-length and silent outside it, so nothing else
+            # changes, and a nine-times-slower model becomes a wait of minutes.
+            # Rounded like a review span, so the same selection keys the same
+            # stems; the variant keeps two spans from deduping onto each other.
+            span = (
+                round(request.start, review.SPAN_PRECISION),
+                round(request.end, review.SPAN_PRECISION),
+            )
+            run_config = config.model_copy(
+                update={"separate": config.separate.model_copy(update={"span": span})}
+            )
+            job = app.state.runner.submit(
+                request.path, run_config, request.model, "separate", f"{span[0]}-{span[1]}"
             )
         else:
             job = app.state.runner.submit(request.path, config, request.model, request.kind)

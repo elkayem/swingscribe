@@ -18,6 +18,8 @@ def test_stage_config_is_a_plain_dict():
     assert config.stage_config("separate") == {
         "model": Config().separate.model,
         "device": "auto",
+        "span": None,
+        "span_margin_s": 3.0,
     }
 
 

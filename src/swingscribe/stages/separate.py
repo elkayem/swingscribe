@@ -26,9 +26,102 @@ from swingscribe.config import Config
 from swingscribe.device import resolve_device
 from swingscribe.model import Document
 
+Span = tuple[float, float]
 
-def stems_dir(cache_dir: str | Path, audio_digest: str, model: str) -> Path:
-    return Path(cache_dir) / "stems" / f"{audio_digest}-{model}"
+# A stems directory covering only part of the track is named with its span in
+# milliseconds after the model: `<digest>-<model>@<start_ms>-<end_ms>`. The
+# stems inside are still FULL-LENGTH wavs, digitally silent outside the span,
+# so every consumer keeps the track's own time base and nothing downstream
+# knows the separation was partial. What changes is only the model's work:
+# the listener selects the solo first and separates that, which is where a
+# separator nine times slower than htdemucs (bsroformer_sw) becomes usable
+# on a CPU — a solo is typically a third of its file.
+SPAN_SEPARATOR = "@"
+
+
+def _span_tag(span: Span) -> str:
+    return f"{int(round(span[0] * 1000))}-{int(round(span[1] * 1000))}"
+
+
+def stems_dir(
+    cache_dir: str | Path, audio_digest: str, model: str, span: Span | None = None
+) -> Path:
+    name = f"{audio_digest}-{model}"
+    if span is not None:
+        name += f"{SPAN_SEPARATOR}{_span_tag(span)}"
+    return Path(cache_dir) / "stems" / name
+
+
+def span_of_dir(path: str | Path) -> Span | None:
+    """The span a stems directory covers, or None for a whole-file set."""
+    name = Path(path).name
+    if SPAN_SEPARATOR not in name:
+        return None
+    start_ms, _, end_ms = name.rsplit(SPAN_SEPARATOR, 1)[1].partition("-")
+    try:
+        return int(start_ms) / 1000.0, int(end_ms) / 1000.0
+    except ValueError:
+        return None
+
+
+def covering_dirs(cache_dir: str | Path, audio_digest: str, model: str, span: Span | None):
+    """Stems directories that cover `span`, most general first: the whole-file
+    set, then any span set containing it. With no span, only the whole-file
+    set qualifies — a partial separation must never stand in for the track."""
+    whole = stems_dir(cache_dir, audio_digest, model)
+    out = [whole]
+    if span is None:
+        return out
+    prefix = f"{audio_digest}-{model}{SPAN_SEPARATOR}"
+    parent = Path(cache_dir) / "stems"
+    if parent.is_dir():
+        for candidate in sorted(parent.iterdir()):
+            if not candidate.name.startswith(prefix):
+                continue
+            covered = span_of_dir(candidate)
+            if covered and covered[0] <= span[0] + 1e-3 and covered[1] >= span[1] - 1e-3:
+                out.append(candidate)
+    return out
+
+
+def find_stems(
+    cache_dir: str | Path, audio_digest: str, model: str, span: Span | None, sources: list[str]
+) -> dict[str, str] | None:
+    """A complete set of `sources` covering `span`, or None."""
+    for candidate in covering_dirs(cache_dir, audio_digest, model, span):
+        found = existing_stems(candidate, sources)
+        if found is not None:
+            return found
+    return None
+
+
+def _crop_to_span(audio_path: Path, span: Span, margin_s: float, out_path: Path) -> tuple[int, int]:
+    """Write [span - margin, span + margin] of the track to `out_path`.
+    Returns (offset_samples, total_samples) for padding the result back."""
+    import soundfile
+
+    info = soundfile.info(str(audio_path))
+    rate = info.samplerate
+    start = max(0, int((span[0] - margin_s) * rate))
+    stop = min(info.frames, int((span[1] + margin_s) * rate))
+    data, _ = soundfile.read(
+        str(audio_path), dtype="float32", always_2d=True, start=start, stop=stop
+    )
+    soundfile.write(str(out_path), data, rate, subtype="PCM_16")
+    return start, info.frames
+
+
+def _pad_stem_to_track(stem_path: Path, offset: int, total: int) -> None:
+    """Rewrite a cropped stem as a full-length wav: zeros, then the stem at
+    `offset` samples. The pipeline's time base is the track's, always."""
+    import numpy as np
+    import soundfile
+
+    data, rate = soundfile.read(str(stem_path), dtype="float32", always_2d=True)
+    padded = np.zeros((total, data.shape[1]), dtype="float32")
+    stop = min(total, offset + len(data))
+    padded[offset:stop] = data[: stop - offset]
+    soundfile.write(str(stem_path), padded, rate, subtype="PCM_16")
 
 
 # What each model writes, for callers that must judge a stems directory
@@ -160,21 +253,47 @@ def run(document: Document, config: Config) -> Document:
 
     audio_path = Path(document.audio.path)
     digest = hashlib.sha256(audio_path.read_bytes()).hexdigest()[:16]
-    out_dir = stems_dir(config.cache_dir, digest, config.separate.model)
+    model = config.separate.model
+    span = config.separate.span
+    out_dir = stems_dir(config.cache_dir, digest, model, span)
 
-    if config.separate.model in ROFORMER_MODELS:
+    def reuse(sources: list[str]) -> Document | None:
+        existing = find_stems(config.cache_dir, digest, model, span, sources)
+        if existing is None:
+            return None
+        progress.report("separate", 1.0, "stems already on disk", cached=True)
+        where = Path(next(iter(existing.values()))).parent
+        print(f"separate: reusing {len(existing)} stems in {where}")
+        return document.model_copy(update={"stems": existing})
+
+    def source_audio() -> tuple[Path, tuple[int, int] | None]:
+        """What the model reads: the track, or its span cropped to a temp wav
+        beside the stems, with the (offset, total) that pads the result back."""
+        if span is None:
+            return audio_path, None
+        out_dir.mkdir(parents=True, exist_ok=True)
+        cropped = out_dir / "_span_input.wav"
+        placement = _crop_to_span(audio_path, span, config.separate.span_margin_s, cropped)
+        print(
+            f"separate: span {span[0]:.1f}-{span[1]:.1f}s (+{config.separate.span_margin_s:.0f}s)"
+        )
+        return cropped, placement
+
+    if model in ROFORMER_MODELS:
         # A Roformer checkpoint knows its sources from KNOWN_SOURCES, so the
         # reuse check needs no model load — and no torch import either.
-        sources = list(KNOWN_SOURCES[config.separate.model])
-        existing = existing_stems(out_dir, sources)
-        if existing is not None:
-            progress.report("separate", 1.0, "stems already on disk", cached=True)
-            print(f"separate: reusing {len(existing)} stems in {out_dir}")
-            return document.model_copy(update={"stems": existing})
-        checkpoint = ROFORMER_MODELS[config.separate.model]
-        print(f"separate: model={config.separate.model} ({checkpoint}) via audio-separator, cpu")
-        progress.report("separate", 0.05, f"separating with {config.separate.model} (no progress)")
-        stems = _roformer_separate(audio_path, checkpoint, out_dir)
+        sources = list(KNOWN_SOURCES[model])
+        if (reused := reuse(sources)) is not None:
+            return reused
+        checkpoint = ROFORMER_MODELS[model]
+        print(f"separate: model={model} ({checkpoint}) via audio-separator, cpu")
+        progress.report("separate", 0.05, f"separating with {model} (no progress)")
+        source, placement = source_audio()
+        stems = _roformer_separate(source, checkpoint, out_dir)
+        if placement is not None:
+            for path in stems.values():
+                _pad_stem_to_track(Path(path), *placement)
+            source.unlink(missing_ok=True)
         missing = [name for name in sources if name not in stems]
         if missing:
             raise RuntimeError(f"{checkpoint} did not produce {', '.join(missing)}")
@@ -186,20 +305,18 @@ def run(document: Document, config: Config) -> Document:
     from demucs.audio import save_audio
 
     device = resolve_device(config.separate.device, torch.cuda.is_available())
-    print(f"separate: model={config.separate.model} device={device}")
+    print(f"separate: model={model} device={device}")
 
     # Loading the bag is seconds; separating with it is minutes. So build the
     # separator first either way — it is what knows which stems this model is
     # supposed to produce, and a partially-written directory must not be
     # mistaken for a finished one.
-    separator = Separator(model=config.separate.model, device=device, callback=_progress_callback())
-    existing = existing_stems(out_dir, separator.model.sources)
-    if existing is not None:
-        progress.report("separate", 1.0, "stems already on disk", cached=True)
-        print(f"separate: reusing {len(existing)} stems in {out_dir}")
-        return document.model_copy(update={"stems": existing})
+    separator = Separator(model=model, device=device, callback=_progress_callback())
+    if (reused := reuse(list(separator.model.sources))) is not None:
+        return reused
 
-    _origin, separated = separator.separate_audio_file(str(audio_path))
+    source, placement = source_audio()
+    _origin, separated = separator.separate_audio_file(str(source))
     progress.report("separate", 1.0, "writing stems")
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -207,5 +324,9 @@ def run(document: Document, config: Config) -> Document:
     for name, waveform in separated.items():
         stem_path = out_dir / f"{name}.wav"
         save_audio(waveform, str(stem_path), samplerate=separator.samplerate)
+        if placement is not None:
+            _pad_stem_to_track(stem_path, *placement)
         stems[name] = str(stem_path)
+    if placement is not None:
+        source.unlink(missing_ok=True)
     return document.model_copy(update={"stems": stems})

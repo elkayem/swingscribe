@@ -165,16 +165,60 @@ def stem_digest(document: Document) -> str:
     return file_digest(document.audio.path)
 
 
-def available_stems(document: Document, config: Config, model: str) -> dict[str, str]:
+def span_for(
+    document: Document, config: Config, span: tuple[float, float] | None = None
+) -> tuple[float, float] | None:
+    """The span a caller is working in, for choosing among stem sets: an
+    explicit one, else the separate stage's, else the transcribe region (an
+    open end meaning the track's end). None means the whole track."""
+    if span is not None:
+        return span
+    if config.separate.span is not None:
+        return config.separate.span
+    region = config.transcribe.region
+    if region is None:
+        return None
+    start, end = region
+    if end is None:
+        end = document.audio.duration if document.audio is not None else None
+    return None if end is None else (start, end)
+
+
+def available_stems(
+    document: Document, config: Config, model: str, span: tuple[float, float] | None = None
+) -> dict[str, str]:
     """Stems already on disk for this track+model, without running anything.
 
     This is what lets the audition screen say "htdemucs_ft is ready, htdemucs_6s
     is thirteen minutes away" before you commit to either.
+
+    A whole-file set answers for any span; failing that, a span set that
+    covers the span asked about (`span_for`) answers, complete sets only.
+    The whole-file directory may be partial (one stem copied across from
+    another cache, CLAUDE.md) and is still listed, so `resolve_stem` and
+    run_eval can use the stem that is there.
     """
-    out_dir = stems_dir(config.cache_dir, stem_digest(document), model)
-    if not out_dir.is_dir():
+    from swingscribe.stages.separate import covering_dirs, existing_stems, missing_stems
+
+    digest = stem_digest(document)
+    whole = stems_dir(config.cache_dir, digest, model)
+    if whole.is_dir() and any(whole.glob("*.wav")):
+        return {p.stem: str(p) for p in sorted(whole.glob("*.wav")) if not p.stem.startswith("_")}
+    wanted = span_for(document, config, span)
+    if wanted is None:
         return {}
-    return {p.stem: str(p) for p in sorted(out_dir.glob("*.wav"))}
+    for candidate in covering_dirs(config.cache_dir, digest, model, wanted)[1:]:
+        present = {p.stem for p in candidate.glob("*.wav")}
+        if missing_stems(model, present):
+            continue
+        found = existing_stems(candidate, sorted(present - {"other+vocals"}))
+        if found is not None:
+            return {
+                p.stem: str(p)
+                for p in sorted(candidate.glob("*.wav"))
+                if not p.stem.startswith("_")
+            }
+    return {}
 
 
 # Stems the separator does not produce, but that a listener can ask for: the
@@ -212,9 +256,11 @@ def combinable_stems(stems: dict[str, str]) -> list[str]:
     ]
 
 
-def selectable_stems(document: Document, config: Config, model: str) -> list[str]:
+def selectable_stems(
+    document: Document, config: Config, model: str, span: tuple[float, float] | None = None
+) -> list[str]:
     """What the stem menu offers: what was separated, plus what can be summed."""
-    stems = available_stems(document, config, model)
+    stems = available_stems(document, config, model, span)
     return sorted(set(stems) | set(combinable_stems(stems)))
 
 
@@ -301,7 +347,7 @@ def choose_stem(
     own result, and would not generalise to a track with no annotation at all —
     which is every track a user brings. This looks only at the audio.
     """
-    stems = available_stems(document, config, model)
+    stems = available_stems(document, config, model, region)
     report: dict[str, float] = {}
     if preferred not in stems:
         return preferred, report
@@ -350,8 +396,11 @@ def _write_stem_sum(sources: list[str], out: Path) -> None:
     tmp.replace(out)  # never leave a half-written stem where a reader can find it
 
 
-def model_status(document: Document, config: Config) -> list[dict[str, Any]]:
-    """Per-model separation status for the model picker.
+def model_status(
+    document: Document, config: Config, span: tuple[float, float] | None = None
+) -> list[dict[str, Any]]:
+    """Per-model separation status for the model picker, for `span` (the
+    listener's selection) or the whole track.
 
     `ready` means the model's FULL set of stems is on disk. A partial set is
     not ready, and says what it is missing: CLAUDE.md's own advice is to copy
@@ -362,18 +411,21 @@ def model_status(document: Document, config: Config) -> list[dict[str, Any]]:
     get there. The stems that ARE present stay listed, because
     `resolve_stem` and run_eval legitimately use a lone copied stem.
     """
-    from swingscribe.stages.separate import missing_stems
+    from swingscribe.stages.separate import missing_stems, span_of_dir
 
     status = []
     for model in config.gui.models:
-        stems = available_stems(document, config, model)
+        stems = available_stems(document, config, model, span)
         missing = missing_stems(model, stems) if stems else []
+        covered = span_of_dir(Path(next(iter(stems.values()))).parent) if stems else None
         status.append(
             {
                 "model": model,
                 "ready": bool(stems) and not missing,
                 "stems": sorted(set(stems) | set(combinable_stems(stems))),
                 "missing": missing,
+                # The span the ready set covers, or null for the whole track.
+                "span": list(covered) if covered else None,
             }
         )
     return status

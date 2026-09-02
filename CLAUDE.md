@@ -626,6 +626,16 @@ made. Both are kept; neither subsumes the other.
   the default until the full sheet and the pianos are measured on it.
   Summing stems to dodge routing (`other+vocals+guitar+piano`) was measured
   and is worse everywhere: a loud piano in the sum out-shouts the horn.
+- **Separation can be scoped to the selected span** (`SeparateConfig.span`,
+  2026-09-02) — the listener selects the solo, then separates. The stems
+  written are FULL-LENGTH wavs, silent outside the span, in a directory
+  named `<digest>-<model>@<start_ms>-<end_ms>`, so every consumer keeps the
+  track's time base and only the model's work shrinks (a solo is ~a third
+  of its file; that is what makes the 9x-slower Roformer a wait of minutes).
+  A whole-file set answers for any span; a span set answers only for a
+  selection it covers (`library.available_stems`, `separate.covering_dirs`).
+  The batch keeps pass 1 (whole-file locate) on htdemucs_6s and separates
+  only the located span with `--separation-model`.
 - **A missing note may mean the soloist LEFT THE STEM.** Demucs assigns each
   moment to exactly one source, so an instrument it cannot place consistently
   is not attenuated across stems — it is switched between them, leaving

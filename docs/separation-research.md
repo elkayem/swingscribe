@@ -206,7 +206,13 @@ separator.
 
 The price is CPU: 7-8 minutes per 3 minutes of audio on this machine,
 26 minutes for Blue Train — roughly nine times htdemucs. One-time per
-track, cached like every other stem.
+track, cached like every other stem. **The listener's answer (2026-09-02):
+separate only the selected span.** `SeparateConfig.span` crops the track
+to the selection plus a 3 s margin, separates that, and pads the stems
+back to full length (silent outside), so nothing downstream changes and
+a solo costs a third of the file. The GUI sends the selection with every
+Separate click; the batch keeps its whole-file locate on htdemucs_6s and
+separates the located span alone with `--separation-model`.
 
 **Reading.** Both halves of the diagnosis moved: routing (every horn in
 `other`) AND bleed (fewer notes on Chet Baker, 161 → 133, at higher F1).

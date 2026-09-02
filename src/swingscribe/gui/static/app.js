@@ -405,6 +405,7 @@ function updateSelection(a, b, done) {
   if (done) {
     persist();
     scheduleAuditionReload();
+    refreshModelStatus();  // a span-scoped separation may or may not cover the new span
   }
 }
 
@@ -748,7 +749,7 @@ function renderModels() {
     button.innerHTML = `<span class="dot${entry.ready ? ' ready' : ''}"></span>`;
     button.append(entry.model);
     button.title = entry.ready
-      ? `Separated — ${entry.stems.join(', ')}`
+      ? `Separated${entry.span ? ` (${clock(entry.span[0])}–${clock(entry.span[1])} only)` : ''} — ${entry.stems.join(', ')}`
       : entry.stems?.length
         ? `Partial — only ${entry.stems.join(', ')} on disk (missing ${entry.missing.join(', ')}); ` +
           'Separate to get the rest'
@@ -759,7 +760,7 @@ function renderModels() {
   const current = models.find((m) => m.model === state.model);
   const button = $('separate-btn');
   button.hidden = Boolean(current?.ready);
-  button.textContent = `Separate with ${state.model ?? ''}`;
+  button.textContent = `Separate ${state.selection ? 'selection' : 'track'} with ${state.model ?? ''}`;
 }
 
 async function selectModel(model) {
@@ -775,7 +776,7 @@ async function selectModel(model) {
 
 async function refreshStemList() {
   if (!state.track || !state.model) return;
-  const data = await api(`/api/tracks/${state.track.id}/stems?model=${state.model}`);
+  const data = await api(`/api/tracks/${state.track.id}/stems?model=${state.model}${spanParams()}`);
   state.stems = data.stems ?? [];
   const select = $('lead-stem');
   select.innerHTML = '';
@@ -797,6 +798,7 @@ async function refreshStemList() {
 
 async function refreshAudition() {
   if (!state.track || !state.model) return;
+  await refreshModelStatus();
   await refreshStemList();
   const ready = state.stems.length > 0;
   $('audition').hidden = !ready;
@@ -1007,10 +1009,28 @@ function applyAbMode() {
 
 // ── separation jobs ─────────────────────────────────────────────────────────
 
+/* The span the stems must cover: the selection when there is one. Sent with
+   every stems query and with the Separate job, so a slow model separates the
+   solo rather than the record (SeparateConfig.span). */
+function spanParams() {
+  if (!state.selection) return '';
+  return `&start=${state.selection.a}&end=${state.selection.b}`;
+}
+
+async function refreshModelStatus() {
+  if (!state.track) return;
+  try {
+    const data = await api(`/api/tracks/${state.track.id}/stems?${spanParams().slice(1)}`);
+    if (data.models) { state.track.models = data.models; renderModels(); }
+  } catch (_error) { /* the picker keeps what it had */ }
+}
+
 async function startSeparation() {
   if (!state.track || !state.model) return;
   try {
-    const job = await post('/api/jobs', { path: state.track.path, model: state.model });
+    const body = { path: state.track.path, model: state.model };
+    if (state.selection) { body.start = state.selection.a; body.end = state.selection.b; }
+    const job = await post('/api/jobs', body);
     $('separate-btn').disabled = true;
     $('job').hidden = false;
     pollJob(job.id);

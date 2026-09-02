@@ -96,6 +96,101 @@ def test_existing_stems_of_a_model_with_more_sources(tmp_path):
     assert existing_stems(out, six) is None
 
 
+def test_a_span_names_its_own_stems_dir_in_milliseconds(tmp_path):
+    from swingscribe.stages.separate import span_of_dir
+
+    whole = stems_dir(tmp_path, "d1", "htdemucs")
+    part = stems_dir(tmp_path, "d1", "htdemucs", (38.4, 75.1))
+    assert part != whole
+    assert part.name == "d1-htdemucs@38400-75100"
+    assert span_of_dir(part) == (38.4, 75.1)
+    assert span_of_dir(whole) is None
+
+
+def test_covering_dirs_prefers_the_whole_file_then_any_containing_span(tmp_path):
+    from swingscribe.stages.separate import covering_dirs
+
+    whole = stems_dir(tmp_path, "d1", "m")
+    wide = stems_dir(tmp_path, "d1", "m", (30.0, 80.0))
+    narrow = stems_dir(tmp_path, "d1", "m", (40.0, 50.0))
+    elsewhere = stems_dir(tmp_path, "d1", "m", (100.0, 120.0))
+    for d in (wide, narrow, elsewhere):
+        d.mkdir(parents=True)
+    found = covering_dirs(tmp_path, "d1", "m", (38.4, 75.1))
+    assert found[0] == whole  # first even though it does not exist yet
+    assert wide in found
+    assert narrow not in found and elsewhere not in found
+    assert covering_dirs(tmp_path, "d1", "m", None) == [whole]  # no span: whole file only
+
+
+def test_a_span_separation_writes_full_length_stems_silent_outside(tmp_path, monkeypatch):
+    """The model sees only the span (plus margin); the stems it produces are
+    padded back to the track's length so every consumer keeps the track's
+    time base. Exercised through the Roformer path with a fake backend."""
+    import hashlib
+
+    np = pytest.importorskip("numpy")
+    soundfile = pytest.importorskip("soundfile")
+    from swingscribe.config import Config
+    from swingscribe.model import AudioRef, Document
+    from swingscribe.stages import separate
+
+    rate = 1000
+    track = tmp_path / "norm.wav"
+    signal = np.ones((10 * rate, 2), dtype="float32") * 0.5  # a 10 s track
+    soundfile.write(str(track), signal, rate, subtype="PCM_16")
+    document = Document(
+        audio_path="orig.m4a",
+        sample_rate=rate,
+        audio=AudioRef(path=str(track), sample_rate=rate, channels=2, duration=10.0),
+    )
+    config = Config(cache_dir=tmp_path / "cache")
+    config = config.model_copy(
+        update={
+            "separate": config.separate.model_copy(
+                update={"model": "bsroformer_sw", "span": (4.0, 6.0), "span_margin_s": 1.0}
+            )
+        }
+    )
+    seen = {}
+
+    def fake_backend(audio_path, _checkpoint, out_dir):
+        data, r = soundfile.read(str(audio_path), dtype="float32", always_2d=True)
+        seen["frames"] = len(data)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stems = {}
+        for name in ("drums", "bass", "other", "vocals", "guitar", "piano"):
+            p = out_dir / f"{name}.wav"
+            soundfile.write(str(p), data, r, subtype="PCM_16")
+            stems[name] = str(p)
+        return stems
+
+    monkeypatch.setattr(separate, "_roformer_separate", fake_backend)
+    result = separate.run(document, config)
+
+    assert seen["frames"] == 4 * rate  # 3-7 s: the span plus a second either side
+    other, r = soundfile.read(result.stems["other"], dtype="float32", always_2d=True)
+    assert len(other) == 10 * rate  # padded back to the whole track
+    assert abs(other[: 3 * rate]).max() == 0.0 and abs(other[7 * rate :]).max() == 0.0
+    assert abs(other[4 * rate : 6 * rate]).min() > 0.4
+    digest = hashlib.sha256(track.read_bytes()).hexdigest()[:16]
+    assert Path(result.stems["other"]).parent == stems_dir(
+        config.cache_dir, digest, "bsroformer_sw", (4.0, 6.0)
+    )
+    assert not (Path(result.stems["other"]).parent / "_span_input.wav").exists()
+
+    # A second run over a NARROWER span is served by the set already on disk.
+    monkeypatch.setattr(
+        separate,
+        "_roformer_separate",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("re-separated")),
+    )
+    narrower = config.model_copy(
+        update={"separate": config.separate.model_copy(update={"span": (4.5, 5.5)})}
+    )
+    assert separate.run(document, narrower).stems == result.stems
+
+
 def test_roformer_output_names_map_onto_pipeline_stems():
     from swingscribe.stages.separate import roformer_stem_name
 

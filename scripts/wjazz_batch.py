@@ -429,8 +429,11 @@ def process_file(
         return row
 
     ensemble, model = auto_settings(instrument)
-    if separation_model and ensemble == "horn-led":
-        model = separation_model
+    # Pass 1 (whole-file locate) always runs on the fast model's stems, which
+    # every row already has on disk; an override only changes what pass 2
+    # transcribes, separated over the located span alone (SeparateConfig.span)
+    # — a Roformer over a whole file is nine times htdemucs' minutes.
+    transcribe_model = separation_model if separation_model and ensemble == "horn-led" else model
     row["ensemble"], row["separation_model"] = ensemble, model
 
     from swingscribe import wjazz
@@ -568,6 +571,23 @@ def process_file(
     # reported an error. Reference-free on purpose: choosing by which stem
     # scores better against the annotation would report a best-of-two as the
     # transcriber's own number (see library.choose_stem).
+    if transcribe_model != model:
+        # Pass 2 on the override model, separated over the located span only.
+        # The Roformer put every measured horn in `other`, so that is where
+        # the chooser starts; `LOCATE_STEM_ORDER` was pass 1's business.
+        model = transcribe_model
+        located = "other"
+        base = base.model_copy(
+            update={"separate": base.separate.model_copy(update={"model": model, "span": region})}
+        )
+        started = time.time()
+        prepared = run_pipeline(audio_path, base, prep_stages)
+        elapsed = time.time() - started
+        log(
+            f"  [{melid}] separated {region[0]:.1f}-{region[1]:.1f}s with {model} in {elapsed:.0f}s"
+        )
+        row["separation_model"] = model
+
     # `preferred` is the stem pass 1 located the solo in, so the dropout
     # test asks about the stem that actually carries the soloist.
     stem, dropout = library.choose_stem(prepared, base, model, region, preferred=located)

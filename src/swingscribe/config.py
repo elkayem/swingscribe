@@ -52,6 +52,15 @@ class SeparateConfig(BaseModel):
     # time and has no progress callback, so it is offered, not the default.
     model: str = "htdemucs"
     device: str = "auto"  # auto | cuda | cpu (demucs only; the Roformer runs on cpu)
+    # Separate only this [start, end] of the track (seconds), plus
+    # `span_margin_s` either side for the model's context. The stems written
+    # are still full-length wavs, silent outside the span, so nothing
+    # downstream changes — only the separator's work does. null separates the
+    # whole file, and a whole-file set on disk serves any span. This is what
+    # makes a separator nine times slower than htdemucs usable on a CPU: the
+    # listener selects the solo first and separates that (stages/separate.py).
+    span: tuple[float, float] | None = None
+    span_margin_s: float = 3.0
 
 
 class BeatsConfig(BaseModel):

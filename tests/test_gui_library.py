@@ -424,6 +424,43 @@ def test_model_status_reports_readiness_in_config_order(config, tmp_path):
     assert all(v is False for k, v in ready.items() if k != "htdemucs_ft")
 
 
+def test_a_span_scoped_set_answers_for_a_selection_it_covers(config, tmp_path):
+    """The listener separated 30-80 s only. Asking about 38-75 s finds it;
+    asking about the whole track, or a span it does not cover, does not."""
+    wav = make_audio(tmp_path / "cache" / "audio" / "norm.wav", b"normalized")
+    document = Document(
+        audio_path="orig.m4a",
+        sample_rate=44100,
+        audio=AudioRef(path=str(wav), sample_rate=44100, channels=2, duration=200.0),
+    )
+    from swingscribe.stages.separate import stems_dir
+
+    out = stems_dir(config.cache_dir, library.file_digest(wav), "bsroformer_sw", (30.0, 80.0))
+    out.mkdir(parents=True)
+    for name in ("drums", "bass", "other", "vocals", "guitar", "piano"):
+        (out / f"{name}.wav").write_bytes(b"stem")
+
+    assert library.available_stems(document, config, "bsroformer_sw") == {}
+    assert "other" in library.available_stems(document, config, "bsroformer_sw", (38.4, 75.1))
+    assert library.available_stems(document, config, "bsroformer_sw", (100.0, 120.0)) == {}
+    # The transcribe region stands in for an explicit span, an open end meaning the track's end.
+    scoped = config.model_copy(
+        update={"transcribe": config.transcribe.model_copy(update={"region": (40.0, 70.0)})}
+    )
+    assert "other" in library.available_stems(document, scoped, "bsroformer_sw")
+    to_end = config.model_copy(
+        update={"transcribe": config.transcribe.model_copy(update={"region": (40.0, None)})}
+    )
+    assert library.available_stems(document, to_end, "bsroformer_sw") == {}
+
+    status = {e["model"]: e for e in library.model_status(document, config, (38.4, 75.1))}
+    assert status["bsroformer_sw"]["ready"] is True
+    assert status["bsroformer_sw"]["span"] == [30.0, 80.0]
+    assert {e["model"]: e for e in library.model_status(document, config)}["bsroformer_sw"][
+        "ready"
+    ] is False
+
+
 def test_a_partial_stem_folder_is_not_ready_and_says_what_is_missing(config, tmp_path):
     """One stem copied across from another cache (CLAUDE.md's own advice)
     used to read as "Separated", which hid the Separate button and left a
