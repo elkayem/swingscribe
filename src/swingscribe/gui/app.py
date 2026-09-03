@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from swingscribe.config import ENSEMBLES, TRANSPOSITIONS, Config
+from swingscribe.config import ENSEMBLES, LINES, TRANSPOSITIONS, Config
 from swingscribe.gui import audio as gui_audio
 from swingscribe.gui import erasures as gui_erasures
 from swingscribe.gui import ground_truth, library, peaks, review, storage, timings
@@ -65,6 +65,9 @@ class JobRequest(BaseModel):
     stem: str | None = None
     start: float | None = None
     end: float | None = None
+    # For a pianist: "crepe" (default) or "oracle", the line picked from the
+    # piano model's full output (issue #8). Ignored for a horn.
+    line: str | None = None
 
 
 class StateRequest(BaseModel):
@@ -132,6 +135,7 @@ def create_app(config: Config) -> FastAPI:
         end: float | None,
         track_path: str | None = None,
         track_id: str | None = None,
+        line: str | None = None,
     ) -> Config:
         """Base config with the review span and lead stem folded into transcribe.
 
@@ -159,7 +163,9 @@ def create_app(config: Config) -> FastAPI:
             stored = library.load_settings(track_path, config, track_id).get("ensemble")
             if stored in ENSEMBLES:
                 ensemble = stored
-        return review.span_config(config, stem, start, end, ensemble)
+        if line is not None and line not in LINES:
+            raise HTTPException(400, f"unknown line {line!r}; one of {', '.join(LINES)}")
+        return review.span_config(config, stem, start, end, ensemble, line)
 
     def resolve_erasures(
         track_id: str, entry: dict[str, Any], run_config: Config, notes: list[dict[str, Any]]
@@ -215,6 +221,10 @@ def create_app(config: Config) -> FastAPI:
                 for name in ENSEMBLES
                 if config.transcribe.model_copy(update={"ensemble": name}).uses_piano_oracle
             ],
+            # Which detector supplies a pianist's line (issue #8); the menu
+            # is built from the constant the validator accepts.
+            "lines": list(LINES),
+            "default_line": config.transcribe.piano_line,
             "transpositions": list(TRANSPOSITIONS),
             "default_transposition": config.notate.transposition,
             "library_dir": str(library.library_dir(config)),
@@ -467,6 +477,7 @@ def create_app(config: Config) -> FastAPI:
         stem: str,
         start: float | None = None,
         end: float | None = None,
+        line: str | None = None,
     ) -> dict[str, Any]:
         """The cached transcription review for this span, or ready:false.
 
@@ -476,7 +487,7 @@ def create_app(config: Config) -> FastAPI:
         this endpoint is the only thing that serves them.
         """
         entry = resolve(track_id)
-        run_config = review_config(stem, start, end, entry["path"], track_id)
+        run_config = review_config(stem, start, end, entry["path"], track_id, line)
         payload = review.cached_review(entry["document"], run_config, model)
         if payload is None:
             return {"ready": False}
@@ -491,6 +502,7 @@ def create_app(config: Config) -> FastAPI:
         start: float = 0.0,
         end: float | None = None,
         rate: float = 1.0,
+        line: str | None = None,
     ) -> Response:
         """The synthesized transcription for the span, as a wav.
 
@@ -501,7 +513,7 @@ def create_app(config: Config) -> FastAPI:
         """
         entry = resolve(track_id)
         document = entry["document"]
-        run_config = review_config(stem, start, end, entry["path"], track_id)
+        run_config = review_config(stem, start, end, entry["path"], track_id, line)
         payload = review.cached_review(document, run_config, model)
         if payload is None:
             raise HTTPException(404, "not transcribed yet")
@@ -533,6 +545,7 @@ def create_app(config: Config) -> FastAPI:
         stem: str,
         start: float | None = None,
         end: float | None = None,
+        line: str | None = None,
     ) -> dict[str, Any]:
         """Write the reviewed span to MusicXML beside the audio.
 
@@ -543,7 +556,7 @@ def create_app(config: Config) -> FastAPI:
         telling you which of the earlier buttons you still owe it.
         """
         entry = resolve(track_id)
-        run_config = review_config(stem, start, end, entry["path"], track_id)
+        run_config = review_config(stem, start, end, entry["path"], track_id, line)
         payload = review.cached_review(entry["document"], run_config, model)
         if payload is None:
             raise HTTPException(409, "transcribe the span first")
@@ -577,6 +590,7 @@ def create_app(config: Config) -> FastAPI:
         score: str,
         start: float | None = None,
         end: float | None = None,
+        line: str | None = None,
     ) -> dict[str, Any]:
         """How this span's NOTATION compares to a hand transcription's.
 
@@ -593,7 +607,7 @@ def create_app(config: Config) -> FastAPI:
         if not ground_truth.is_score(score_path):
             raise HTTPException(400, f"not a MuseScore file: {score_path.name}")
 
-        run_config = review_config(stem, start, end, entry["path"], track_id)
+        run_config = review_config(stem, start, end, entry["path"], track_id, line)
         payload = review.cached_review(entry["document"], run_config, model)
         if payload is None:
             raise HTTPException(409, "transcribe the span first")
@@ -670,6 +684,7 @@ def create_app(config: Config) -> FastAPI:
         score: str,
         start: float | None = None,
         end: float | None = None,
+        line: str | None = None,
     ) -> dict[str, Any]:
         """A notated score aligned against this span's transcription.
 
@@ -686,7 +701,7 @@ def create_app(config: Config) -> FastAPI:
         if not ground_truth.is_score(score_path):
             raise HTTPException(400, f"not a MuseScore file: {score_path.name}")
 
-        run_config = review_config(stem, start, end, entry["path"], track_id)
+        run_config = review_config(stem, start, end, entry["path"], track_id, line)
         payload = review.cached_review(document, run_config, model)
         if payload is None:
             raise HTTPException(404, "transcribe the span first")
@@ -722,6 +737,7 @@ def create_app(config: Config) -> FastAPI:
                 request.end,
                 entry["path"],
                 library.file_digest(entry["path"]),
+                request.line,
             )
             # variant keys the job (and its cache) to this exact span+stem+config,
             # so two spans never dedupe onto each other.

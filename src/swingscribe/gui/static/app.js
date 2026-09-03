@@ -58,6 +58,7 @@ const state = {
   formStart: null,          // seconds; where the tune's form begins (bar 1)
   click: false,             // mix a metronome onto the audition
   ensemble: null,           // horn-led | trio | solo-piano; null = server default
+  line: null,               // crepe | oracle: which detector supplies a pianist's line
   transposition: null,      // the exported part's key; null = server default
   exported: null,           // {path, bars, notes, ...} from the last export
   exportedAt: null,         // what the tree looked like when it was written
@@ -364,6 +365,7 @@ async function loadTrack(track) {
   state.click = remembered.click ?? false;
   state.scorePath = remembered.score ?? null;
   state.ensemble = remembered.ensemble ?? null;
+  state.line = remembered.line ?? null;
   state.transposition = remembered.transposition ?? null;
   state.exported = null;
   state.exportedAt = null;
@@ -1161,12 +1163,16 @@ async function pollJob(jobId) {
 
 function reviewParams(extra) {
   const { a, b } = state.selection;
-  return new URLSearchParams(Object.assign({
+  const params = {
     model: state.model,
     stem: state.leadStem,
     start: a.toFixed(3),
     end: b.toFixed(3),
-  }, extra || {}));
+  };
+  // The line choice is part of the review's identity for a pianist (it
+  // changes every note); left out for the default so the key stays as it was.
+  if (state.line) params.line = state.line;
+  return new URLSearchParams(Object.assign(params, extra || {}));
 }
 
 /* The review belongs to one span+stem. When either changes the old notes are
@@ -1226,7 +1232,7 @@ async function startTranscribe() {
     const { a, b } = state.selection;
     const job = await post('/api/jobs', {
       path: state.track.path, model: state.model, kind: 'transcribe',
-      stem: state.leadStem, start: a, end: b,
+      stem: state.leadStem, start: a, end: b, line: state.line || undefined,
     });
     const finished = await watchJob(job.id, (update) => {
       $('review-job-fill').style.width = `${(update.fraction * 100).toFixed(1)}%`;
@@ -1593,6 +1599,9 @@ function erasureList() {
         reason: 'not-solo',
         stem: state.leadStem,
         model: state.model,
+        // Which detector's line the judgement was made on: an erasure is a
+        // label, and a label that cannot describe its example is worth less.
+        line: state.line || 'crepe',
       });
     }
   }
@@ -1908,6 +1917,7 @@ function settingsPayload() {
     click: state.click,
     score: state.scorePath,
     ensemble: state.ensemble,
+    line: state.line,
     transposition: state.transposition,
     erasures: erasureList(),
   };
@@ -1979,8 +1989,28 @@ async function loadChoices() {
   // Asked of the server, never listed here: the UI must not be the second
   // place the routing is written down.
   pianoOracleEnsembles = choices.piano_oracle_ensembles ?? [];
+  fillLineSelect(choices.lines ?? [], choices.default_line ?? 'crepe');
   fillSelect($('transpose-select'), choices.transpositions ?? [], choices.default_transposition ?? 'C');
   renderChoices();
+}
+
+/* The two takes of a pianist's line, named for what does the hearing. Values
+   come from the server (config.LINES); only the labels live here. */
+const LINE_LABELS = {
+  crepe: 'CREPE, checked by piano model',
+  oracle: 'Piano model, melody picked',
+};
+
+function fillLineSelect(values, fallback) {
+  const node = $('line-select');
+  node.innerHTML = '';
+  for (const value of values) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = LINE_LABELS[value] ?? value;
+    node.appendChild(option);
+  }
+  node.dataset.fallback = fallback;
 }
 
 /* Say out loud what the ensemble choice routes to.
@@ -2002,9 +2032,21 @@ function renderEnsembleHint() {
 function renderChoices() {
   const ensemble = $('ensemble-select');
   const transpose = $('transpose-select');
+  const line = $('line-select');
   if (ensemble.options.length) ensemble.value = state.ensemble ?? ensemble.dataset.fallback;
   if (transpose.options.length) transpose.value = state.transposition ?? transpose.dataset.fallback;
+  if (line.options.length) line.value = state.line ?? line.dataset.fallback;
   renderEnsembleHint();
+  renderLinePicker();
+}
+
+/* The line picker only means something for a pianist — a horn's review
+   ignores it — so it only exists on screen then: a control that is
+   permanently inert teaches people to ignore the row it sits in. */
+function renderLinePicker() {
+  const pianist = pianoOracleEnsembles.includes($('ensemble-select').value);
+  $('line-label').hidden = !pianist;
+  $('line-select').hidden = !pianist;
 }
 
 /* ── export ─────────────────────────────────────────────────────────────────
@@ -2181,11 +2223,23 @@ $('transpose-select').addEventListener('change', (event) => {
 $('ensemble-select').addEventListener('change', async (event) => {
   state.ensemble = event.target.value;
   renderEnsembleHint();
+  renderLinePicker();
   await persistNow();  // review_config reads this back off the sidecar
   // This one DOES change the notes: a trio consults the polyphonic piano model
   // and a horn never does (M7b). So the span needs transcribing again.
   invalidateReview();
   toast('Ensemble changed — transcribe the span again');
+});
+
+$('line-select').addEventListener('change', async (event) => {
+  state.line = event.target.value;
+  persist();
+  // A different detector supplies the notes, so the review on screen
+  // describes the other take; drop back to the button. A take already
+  // transcribed comes straight back from the cache.
+  invalidateReview();
+  await refreshReviewPanel();
+  if (!state.review) toast('Line changed — transcribe the span for this take');
 });
 
 $('r-restart').addEventListener('click', () => {

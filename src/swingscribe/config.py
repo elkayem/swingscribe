@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Literal, get_args
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, model_serializer
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Repo-root default; fine for development checkouts, which is all M0 supports.
@@ -24,6 +24,9 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "default.
 Ensemble = Literal["horn-led", "trio", "solo-piano"]
 Transposition = Literal["C", "Eb", "Bb", "Bb-tenor"]
 ENSEMBLES: tuple[str, ...] = get_args(Ensemble)
+# Which detector supplies a pianist's line (TranscribeConfig.piano_line). The
+# GUI's menu is built from this, never hand-copied.
+LINES: tuple[str, ...] = ("crepe", "oracle")
 TRANSPOSITIONS: tuple[str, ...] = get_args(Transposition)
 
 
@@ -223,6 +226,42 @@ class TranscribeConfig(BaseModel):
     # that was never written is not. `uses_piano_oracle` still gates it, so a
     # horn never sees it.
     piano_fill_gaps: bool = True
+    # ── issue #8: which detector supplies the LINE for a pianist ─────────
+    # "crepe": the monophonic line, corrected and filled by the piano model
+    # (everything above). "oracle": the line is PICKED from the piano model's
+    # full polyphonic output by `line_selection.pick_line` — one note per
+    # simultaneity, chosen as a sequence by loudness rank and register
+    # continuity, with silence allowed between phrases. Measured over the ten
+    # piano spans with references: mean pitch F1 0.8017 -> 0.8655, better or
+    # equal on 9 of 10 (docs/issue8-line-selection.md). Only the pitch
+    # question is measured; notation and WJazzD audio scores are not, which
+    # is why "crepe" is still the default and the GUI offers "oracle" as a
+    # second take to compare by ear. Meaningless for a horn: it is read only
+    # where `uses_piano_oracle` is true.
+    piano_line: Literal["crepe", "oracle"] = "crepe"  # one of LINES
+    # The picker's two weights, in velocity-rank units. A semitone of leap
+    # costs about two percentile points of loudness; a note must beat silence
+    # by ten. The surface is smooth (0.83-0.87 across continuity <= 0.05).
+    piano_line_continuity: float = 0.02
+    piano_line_skip_margin: float = 0.10
+
+    @model_serializer(mode="wrap")
+    def _key_stable_dump(self, handler):
+        """Leave the line-selection fields OUT of the dump while the line is
+        CREPE's, so the default keys exactly as it did before they existed.
+
+        Every transcribe cache key — the pipeline's stage key, the GUI's
+        review key, run_eval's note fingerprint — is a hash of this dump. A
+        new field with a default would otherwise turn every cached CREPE pass
+        into a miss for a change that alters no note: hours of the batch and
+        every review the listener has open. The oracle line dumps its fields
+        and keys differently, as it must.
+        """
+        data = handler(self)
+        if data.get("piano_line") == "crepe":
+            for name in ("piano_line", "piano_line_continuity", "piano_line_skip_margin"):
+                data.pop(name, None)
+        return data
 
     @property
     def uses_piano_oracle(self) -> bool:

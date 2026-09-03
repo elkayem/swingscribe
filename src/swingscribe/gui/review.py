@@ -46,6 +46,7 @@ def span_config(
     start: float | None,
     end: float | None,
     ensemble: str | None = None,
+    line: str | None = None,
 ) -> Config:
     """The exact transcribe config a review of this span is computed under.
 
@@ -76,6 +77,11 @@ def span_config(
     }
     if ensemble is not None:
         updates["ensemble"] = ensemble
+    # Which detector supplies a pianist's line (issue #8). Part of the key
+    # because it changes every note; a horn's review ignores it, and the
+    # default leaves the key exactly as it was (TranscribeConfig's serializer).
+    if line is not None:
+        updates["piano_line"] = line
     return config.model_copy(update={"transcribe": config.transcribe.model_copy(update=updates)})
 
 

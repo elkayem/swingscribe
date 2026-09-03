@@ -729,3 +729,92 @@ def test_the_second_voice_is_opt_in_and_never_joins_the_line(monkeypatch):
     assert [n.pitch for n in line] == [72]  # the line is untouched
     assert [n["pitch"] for n in extra] == [64]  # the second of the top two
     assert 48 not in [n["pitch"] for n in extra]  # the third is not offered
+
+
+# ── issue #8: the line picked from the piano model ────────────────────────
+
+
+def test_the_oracle_line_replaces_crepe_when_asked_for(monkeypatch):
+    """`piano_line = "oracle"`: the line is PICKED from the model's full
+    output — loudest, register-continuous, one per simultaneity — and
+    CREPE's notes are set aside, not merged."""
+    from swingscribe import piano
+    from swingscribe.stages import transcribe as stage
+
+    monkeypatch.setattr(
+        piano,
+        "transcribe",
+        lambda *a, **k: [
+            {"onset": 1.0, "duration": 0.2, "pitch": 72, "velocity": 100},
+            {"onset": 1.0, "duration": 0.2, "pitch": 48, "velocity": 60},
+            {"onset": 1.5, "duration": 0.2, "pitch": 74, "velocity": 90},
+            {"onset": 1.5, "duration": 0.2, "pitch": 50, "velocity": 40},
+        ],
+    )
+    crepe = [NoteEvent(onset=1.0, duration=0.2, pitch=48, confidence=0.9, source="other:crepe")]
+    tc = TranscribeConfig(ensemble="trio", piano_line="oracle")
+    line, extra = stage._consult_piano_oracle(None, 44100, tc, 0.0, crepe)
+
+    assert [n.pitch for n in line] == [72, 74]
+    assert {n.source for n in line} == {"other:piano"}
+    assert extra == []
+
+
+def test_the_oracle_line_needs_no_crepe_notes_to_start_from(monkeypatch):
+    """The CREPE path returns early on an empty line because there is nothing
+    to correct; the oracle line has its own notes and must not."""
+    from swingscribe import piano
+    from swingscribe.stages import transcribe as stage
+
+    monkeypatch.setattr(
+        piano,
+        "transcribe",
+        lambda *a, **k: [
+            {"onset": 1.0, "duration": 0.2, "pitch": 72, "velocity": 100},
+            {"onset": 1.5, "duration": 0.2, "pitch": 74, "velocity": 90},
+            {"onset": 2.0, "duration": 0.2, "pitch": 40, "velocity": 30},
+        ],
+    )
+    tc = TranscribeConfig(ensemble="trio", piano_line="oracle")
+    line, _ = stage._consult_piano_oracle(None, 44100, tc, 0.0, [])
+    assert [n.pitch for n in line] == [72, 74]  # the quiet low note is skipped
+
+
+def test_an_unavailable_oracle_falls_back_to_crepe_for_the_oracle_line(monkeypatch):
+    """A missing checkpoint must not turn a working transcription into no
+    transcription, whichever line was asked for."""
+    from swingscribe import piano
+    from swingscribe.stages import transcribe as stage
+
+    def explode(*a, **k):
+        raise RuntimeError("no checkpoint")
+
+    monkeypatch.setattr(piano, "transcribe", explode)
+    crepe = [NoteEvent(onset=1.0, duration=0.2, pitch=60, confidence=0.9, source="other:crepe")]
+    tc = TranscribeConfig(ensemble="trio", piano_line="oracle")
+    assert stage._consult_piano_oracle(None, 44100, tc, 0.0, crepe) == (crepe, [])
+
+
+def test_the_crepe_line_keys_exactly_as_before_the_line_fields_existed():
+    """Every transcribe cache key is a hash of this dump. The default line
+    leaves the new fields out, so no cached CREPE pass — the batch's hours,
+    the listener's open reviews — becomes a miss for a change that alters no
+    note. The oracle line dumps them and keys differently, as it must."""
+    crepe = TranscribeConfig(ensemble="trio").model_dump(mode="json")
+    assert "piano_line" not in crepe
+    assert "piano_line_continuity" not in crepe
+
+    oracle = TranscribeConfig(ensemble="trio", piano_line="oracle").model_dump(mode="json")
+    assert oracle["piano_line"] == "oracle"
+    assert oracle["piano_line_continuity"] == 0.02
+    assert {k: v for k, v in oracle.items() if not k.startswith("piano_line")} == crepe
+
+
+def test_the_line_fields_survive_a_round_trip_through_config():
+    from swingscribe.config import Config
+
+    config = Config(transcribe={"ensemble": "trio", "piano_line": "oracle"})
+    assert config.stage_config("transcribe")["piano_line"] == "oracle"
+    assert Config.model_validate(config.model_dump()).transcribe.piano_line == "oracle"
+    assert Config().stage_config("transcribe").get("piano_line") is None
+    assert Config().transcribe.piano_line == "crepe"

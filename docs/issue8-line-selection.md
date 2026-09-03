@@ -74,14 +74,34 @@ WORST track (+0.078; neighbouring grid points lift the minimum further, to
 - The oracle notes' DURATIONS are the model's own; the shipped line's
   duration conventions (without_overlap etc.) would still apply downstream.
 
-## Not integrated — the listener decides the shape
+## Integrated as a second take (2026-09-02)
 
-Options, not yet chosen: (a) dp line replaces the CREPE line for
-`uses_piano_oracle` ensembles, with CREPE demoted to the corroborating
-second opinion (the exact inverse of today's roles); (b) dp line offered in
-the GUI as an alternative take beside the CREPE line; (c) keep shipping
-CREPE and use the dp line only to SHADE review-screen confidence. M7b's
-history says the oracle-as-primary failed on PICKING, and picking is what
-just improved — but (a) changes every piano default and the erasure-label
-covenant (302 labels were judged against CREPE lines) needs an explicit
-migration story first.
+The picker ships as `swingscribe.line_selection` behind
+`TranscribeConfig.piano_line`: `"crepe"` (the default, unchanged) or
+`"oracle"`, the line above. The GUI's review screen offers the choice as a
+**Line** picker for pianist ensembles only, so the listener can transcribe
+the same span both ways and compare them by ear, with every downstream
+control — erasures, the green bar, the Score button, export — working on
+whichever take is on screen. That is shape (b); shape (a) is the same code
+with the default flipped, and it waits on what the comparison finds and on
+the two unmeasured questions: notation scores and WJazzD's audio measure.
+
+What the `"oracle"` take applies: `pick_line` alone. CREPE's notes are set
+aside rather than demoted to a second opinion, and the register floor
+(`reject_line_outliers`) is skipped, because neither combination was
+measured — the 0.8655 is the picker by itself. `scripts/line_selection.py`
+imports the shipped picker, so the instrument and the product cannot drift.
+
+The default keys exactly as it did before the field existed
+(`TranscribeConfig`'s serializer leaves the line fields out of the dump for
+`"crepe"`), so no cached review or batch note-cache became a miss for a
+change that alters no note. The oracle take keys differently, as it must.
+
+An erasure now records which line it was judged on (`line` in the sidecar
+record). Erasures made on the CREPE line will mostly fail to match the
+oracle take — the onsets are the model's own — and are reported as
+unmatched, never dropped (gui/erasures.py).
+
+Shape (c), shading review confidence, was not built: the picked note's
+confidence IS its loudness rank, so the shading comes for free on the
+oracle take.

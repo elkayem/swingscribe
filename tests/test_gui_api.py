@@ -1052,3 +1052,112 @@ def test_a_payload_without_a_second_voice_still_has_the_key(tmp_path):
 
     payload = review._payload([], Diag())
     assert payload["second_voice"] == []
+
+
+def test_the_line_choice_reaches_the_transcribe_config_and_its_key(world, monkeypatch):
+    """`line=oracle` asks for the line picked from the piano model (issue
+    #8). It changes every note, so it must reach the config the review is
+    keyed on — and the default must key exactly as it did before the choice
+    existed, or every open review becomes a miss."""
+    from swingscribe.gui import review
+
+    track = open_track(world)
+    world["client"].post(f"/api/tracks/{track['id']}/state", json={"state": {"ensemble": "trio"}})
+    seen = []
+
+    def capture(document, config, model):
+        seen.append((config.transcribe.piano_line, review.review_key(document, config, model)))
+        return None
+
+    monkeypatch.setattr(review, "cached_review", capture)
+    base = {"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0}
+    world["client"].get(f"/api/tracks/{track['id']}/review", params=base)
+    world["client"].get(f"/api/tracks/{track['id']}/review", params={**base, "line": "crepe"})
+    world["client"].get(f"/api/tracks/{track['id']}/review", params={**base, "line": "oracle"})
+
+    assert [line for line, _ in seen] == ["crepe", "crepe", "oracle"]
+    assert seen[0][1] == seen[1][1]  # naming the default is the default
+    assert seen[2][1] != seen[0][1]  # the other take is another review
+
+
+def test_an_unknown_line_is_refused(world):
+    track = open_track(world)
+    response = world["client"].get(
+        f"/api/tracks/{track['id']}/review",
+        params={"model": "htdemucs_ft", "stem": "other", "line": "theremin"},
+    )
+    assert response.status_code == 400
+    assert "crepe" in response.json()["detail"]
+
+
+def test_the_config_offers_the_line_choices(world):
+    from swingscribe.config import LINES
+
+    payload = world["client"].get("/api/config").json()
+    assert payload["lines"] == list(LINES)
+    assert payload["default_line"] == "crepe"
+
+
+def test_a_transcribe_job_carries_the_line_choice(world, monkeypatch):
+    """The job and the review GET must agree on the key, or the job's work
+    is never found: a job run for the oracle line answers a review asked
+    for the oracle line, and not the one asked for CREPE's."""
+    from dataclasses import dataclass
+
+    from swingscribe.model import NoteEvent
+
+    @dataclass
+    class Diag:
+        hop_s: float = 0.01
+        start: float = 1.0
+        f0_midi: list = None
+        periodicity: list = None
+        energy_ok: list = None
+        pitch: list = None
+        onsets: list = None
+
+        @property
+        def voiced_fraction(self):
+            return 1.0
+
+    seen = {}
+
+    def analyze(stem_path, tc):
+        seen["line"] = tc.piano_line
+        notes = [NoteEvent(onset=1.2, duration=0.2, pitch=64, confidence=0.8, source="other")]
+        return notes, Diag(
+            f0_midi=[64.0], periodicity=[0.9], energy_ok=[True], pitch=[64.0], onsets=[]
+        )
+
+    monkeypatch.setattr("swingscribe.stages.transcribe.analyze", analyze)
+    track = open_track(world)
+    world["client"].post(f"/api/tracks/{track['id']}/state", json={"state": {"ensemble": "trio"}})
+    response = world["client"].post(
+        "/api/jobs",
+        json={
+            "path": str(world["source"]),
+            "model": "htdemucs_ft",
+            "kind": "transcribe",
+            "stem": "other",
+            "start": 1.0,
+            "end": 3.0,
+            "line": "oracle",
+        },
+    )
+    assert response.status_code == 200, response.text
+    job_id = response.json()["id"]
+    for _ in range(200):
+        state = world["client"].get(f"/api/jobs/{job_id}").json()
+        if state["state"] in ("done", "error"):
+            break
+        time.sleep(0.02)
+    assert state["state"] == "done", state.get("error")
+    assert seen["line"] == "oracle"
+
+    base = {"model": "htdemucs_ft", "stem": "other", "start": "1.000", "end": "3.000"}
+    asked = world["client"].get(
+        f"/api/tracks/{track['id']}/review", params={**base, "line": "oracle"}
+    )
+    other = world["client"].get(f"/api/tracks/{track['id']}/review", params=base)
+    assert asked.json()["ready"] is True
+    assert other.json()["ready"] is False

@@ -709,9 +709,9 @@ def _consult_piano_oracle(
     turn a working transcription into no transcription.
     """
     from swingscribe import corroborate as corroboration
-    from swingscribe import piano
+    from swingscribe import line_selection, piano
 
-    if not notes:
+    if not notes and tc.piano_line != "oracle":
         return notes, []
     try:
         import torch
@@ -720,6 +720,7 @@ def _consult_piano_oracle(
         # map_location and fails there with a message about storage tags that
         # says nothing about the real problem.
         device = resolve_device(tc.device, torch.cuda.is_available())
+        progress.report("transcribe", 0.8, "consulting the piano model")
         oracle = piano.transcribe(mono, rate, device=device, offset=region_offset)
     except Exception as exc:  # noqa: BLE001 — see docstring
         print(f"transcribe: piano oracle unavailable ({type(exc).__name__}: {exc}); keeping CREPE")
@@ -727,6 +728,31 @@ def _consult_piano_oracle(
     if not oracle:
         print("transcribe: piano oracle found no notes; keeping CREPE")
         return notes, []
+
+    if tc.piano_line == "oracle":
+        # Issue #8: the line is PICKED from the model's full output rather
+        # than corrected out of CREPE's. Nothing else is applied to it — the
+        # 0.8655 was measured on the picker alone — and CREPE's line is
+        # discarded rather than demoted to a second opinion, because that
+        # combination is unmeasured. The register floor in `analyze` is
+        # skipped for the same reason.
+        picked = line_selection.pick_line(
+            oracle, tc.piano_line_continuity, tc.piano_line_skip_margin
+        )
+        print(
+            f"transcribe: piano oracle heard {len(oracle)} notes; "
+            f"picked a line of {len(picked)} (CREPE's {len(notes)} set aside)"
+        )
+        return [
+            NoteEvent(
+                onset=n["onset"],
+                duration=n["duration"],
+                pitch=n["pitch"],
+                confidence=n["confidence"],
+                source=f"{tc.stem}:piano",
+            )
+            for n in picked
+        ], []
 
     as_dicts = [
         {"onset": n.onset, "duration": n.duration, "pitch": n.pitch, "confidence": n.confidence}
@@ -873,13 +899,14 @@ def analyze(
     # measurement (docs/benchmark-deficiencies.md D22) is of the notes the
     # review actually shows.
     before = len(notes)
-    notes = reject_line_outliers(
-        notes,
-        None if tc.uses_piano_oracle else note_loudness_db(notes, mono, rate, region_offset),
-        tc.line_window_s,
-        tc.line_register_floor,
-        tc.line_loudness_floor_db,
-    )
+    if not (tc.uses_piano_oracle and tc.piano_line == "oracle"):
+        notes = reject_line_outliers(
+            notes,
+            None if tc.uses_piano_oracle else note_loudness_db(notes, mono, rate, region_offset),
+            tc.line_window_s,
+            tc.line_register_floor,
+            tc.line_loudness_floor_db,
+        )
     if log and len(notes) != before:
         print(f"transcribe: {before - len(notes)} notes rejected as bleed under the line's level")
 

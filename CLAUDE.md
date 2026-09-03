@@ -363,6 +363,19 @@ things not to re-derive:
 - **The oracle's `velocity` is an unused melody cue.** Loudest-of-cluster beats
   highest-of-cluster on the hard case (Peterson 0.583 -> 0.715 F1). A register
   floor does NOT generalise — `>= 55` helped Giant Steps and hurt Lover.
+- **Picking the line as a SEQUENCE from the oracle's full output beats
+  CREPE's line on 9 of 10 piano spans** (mean pitch F1 0.802 -> 0.866,
+  docs/issue8-line-selection.md): velocity as a within-track percentile
+  rank, a leap-capped register-continuity cost, and a skip state so comping
+  emits nothing. It ships as `line_selection.pick_line` behind
+  `TranscribeConfig.piano_line = "oracle"`, offered in the GUI as a second
+  take (the **Line** picker, pianists only) beside the CREPE line — NOT the
+  default, because only the pitch question is measured. The default dumps
+  WITHOUT the line fields (a `model_serializer` on `TranscribeConfig`) so
+  every existing cache key survived; do not "simplify" that away, it is
+  hours of CREPE across two caches. The oracle take applies the picker
+  alone — no CREPE corroboration, no register floor — because that is what
+  was measured.
 - **A note the line itself disowns is bleed: an octave-plus under the local
   register, or (horns only) 14 dB under the local loudness.** The comping
   that CREPE picks up between a horn's phrases can sit INSIDE the horn's

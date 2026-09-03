@@ -4,8 +4,10 @@
     uv run python scripts/line_selection.py             # score strategies
 
 Results and the method's writeup: docs/issue8-line-selection.md. This is a
-MEASUREMENT instrument — nothing here feeds the pipeline; integration is a
-decision the listener has not made yet (see the doc's final section).
+MEASUREMENT instrument. The picker it measured now ships as
+`swingscribe.line_selection` behind `TranscribeConfig.piano_line = "oracle"`,
+offered in the GUI as a second take beside the CREPE line; this script
+imports it from there so the two cannot drift apart.
 
 The oracle's full polyphonic output per piano span is extracted once into
 `benchmark/.swingscribe-cache/oracle-notes/` (derived data, safely
@@ -23,7 +25,6 @@ track, so selection remains the entire gap.
 """
 
 import argparse
-import bisect
 import json
 import os
 import sys
@@ -36,9 +37,7 @@ ORACLE_DIR = BENCH_DIR / ".swingscribe-cache" / "oracle-notes"
 
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-CLUSTER_GAP_S = 0.05
 HEAD = 220  # transposition search head, mirroring gui/ground_truth
-LEAP_CAP = 12.0
 
 
 # The piano spans with references: the six hand-scored tracks and the four
@@ -102,69 +101,18 @@ def extract(tracks: list[Path]) -> None:
         print(f"{audio.stem}: {len(notes)} oracle notes in {time.time() - started:.0f}s")
 
 
-def normalize_velocities(notes: list[dict]) -> list[dict]:
-    """Velocity as a within-track percentile rank. Absolute MIDI velocities
-    do not transfer between recordings — the model's loudness scale rides
-    the mix — and normalizing them is the single biggest finding in the
-    doc: after it, EVERY sequence variant beat the shipped mean."""
-    ordered = sorted(n["velocity"] for n in notes)
-    out = []
-    for n in notes:
-        rank = bisect.bisect_left(ordered, n["velocity"]) / max(1, len(ordered) - 1)
-        out.append({**n, "velocity": min(1.0, rank)})
-    return out
-
-
-def clusters_of(notes: list[dict]) -> list[list[dict]]:
-    ordered = sorted(notes, key=lambda n: n["onset"])
-    out: list[list[dict]] = []
-    for note in ordered:
-        if out and note["onset"] - out[-1][0]["onset"] <= CLUSTER_GAP_S:
-            out[-1].append(note)
-        else:
-            out.append([note])
-    return out
+# The picker itself lives in the package now (`swingscribe.line_selection`),
+# so the shipped code and this instrument cannot drift apart; the names are
+# re-exported here so the strategies below read as they did when measured.
+from swingscribe.line_selection import (  # noqa: E402
+    clusters_of,
+    normalize_velocities,
+    pick_from_clusters,
+)
 
 
 def pick_dp(clusters, w_continuity=0.02, skip_margin=0.10, beam=8):
-    """The sequence view: Viterbi with emission = velocity rank, transition
-    = leap-capped register continuity from the last EMITTED note, and a
-    skip option per cluster. An emission is a layer where the backtracked
-    state changes; a skip carries the state through."""
-    if not clusters:
-        return []
-    layers: list[dict] = [{None: (0.0, None)}]
-    for k, cluster in enumerate(clusters):
-        previous = layers[-1]
-        layer: dict = {}
-        for state, (score, _prev) in previous.items():
-            keep = layer.get(state)
-            if keep is None or score > keep[0]:
-                layer[state] = (score, state)
-        for i, note in enumerate(cluster):
-            emit = note["velocity"] - skip_margin
-            best_score, best_prev = None, None
-            for state, (score, _prev) in previous.items():
-                if state is None:
-                    candidate = score + emit
-                else:
-                    pk, pi = state
-                    leap = abs(note["pitch"] - clusters[pk][pi]["pitch"])
-                    candidate = score + emit - w_continuity * min(leap, LEAP_CAP)
-                if best_score is None or candidate > best_score:
-                    best_score, best_prev = candidate, state
-            layer[(k, i)] = (best_score, best_prev)
-        layers.append(dict(sorted(layer.items(), key=lambda kv: -kv[1][0])[:beam]))
-    state = max(layers[-1], key=lambda s: layers[-1][s][0])
-    picks = []
-    for level in range(len(layers) - 1, 0, -1):
-        _score, prev = layers[level][state]
-        if state is not None and state != prev:
-            k, i = state
-            picks.append(clusters[k][i])
-        state = prev
-    picks.reverse()
-    return picks
+    return pick_from_clusters(clusters, w_continuity, skip_margin, beam)
 
 
 def score_line(reference: list[int], candidate: list[dict]) -> dict:
