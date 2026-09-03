@@ -46,11 +46,16 @@ class SeparateConfig(BaseModel):
     #
     # `bsroformer_sw` (BS-Roformer-SW through python-audio-separator, the
     # `roformer` dependency group) is the six-stem model that, measured
-    # 2026-09-02, put EVERY benchmark horn in `other` and read subset mean
-    # pitch F1 0.878 -> 0.903 against htdemucs_6s on the located stem
-    # (docs/separation-research.md). It costs about nine times htdemucs' CPU
-    # time and has no progress callback, so it is offered, not the default.
-    model: str = "htdemucs"
+    # 2026-09-02, put EVERY benchmark horn in `other` and every pianist in
+    # `piano`, and re-ran the whole sheet at WJazzD note F1 0.790 -> 0.858
+    # paired over 61 solos (docs/separation-research.md). It is the DEFAULT
+    # since then, on the listener's condition that it prove demonstrably
+    # better. It costs about nine times htdemucs' CPU time and has no
+    # progress callback; what makes that livable is `span` below — the GUI
+    # separates the selected solo, not the record — and the estimate the
+    # Separate button shows. `swingscribe run` over a whole file pays the
+    # full nine times; pick htdemucs there when speed matters.
+    model: str = "bsroformer_sw"
     device: str = "auto"  # auto | cuda | cpu (demucs only; the Roformer runs on cpu)
     # Separate only this [start, end] of the track (seconds), plus
     # `span_margin_s` either side for the model's context. The stems written
@@ -408,10 +413,10 @@ class GuiConfig(BaseModel):
     # Where the track picker looks. null = the directory swingscribe was run from.
     library_dir: str | None = None
     # Separation models offered on the audition screen, in menu order — the
-    # fast default first, then the ones worth waiting for when the default
-    # disappoints. See SeparateConfig for what each one buys; the last needs
-    # the `roformer` dependency group and takes ~9x as long.
-    models: list[str] = ["htdemucs", "htdemucs_6s", "htdemucs_ft", "bsroformer_sw"]
+    # default first (the Roformer, needing the `roformer` dependency group),
+    # then the demucs bags, which are ~9x faster and the choice when speed
+    # matters more than the last few points. See SeparateConfig.
+    models: list[str] = ["bsroformer_sw", "htdemucs", "htdemucs_6s", "htdemucs_ft"]
 
 
 # Sections that are pipeline stages, and therefore feed cache keys. Membership

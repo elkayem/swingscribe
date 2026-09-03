@@ -12,8 +12,8 @@ separate:
   # htdemucs_ft is a bag of FOUR models and takes 4x as long for no measured
   # gain (0.759 vs 0.752 mean note F1 over 9 benchmark solos). htdemucs_6s is
   # worth picking by hand for a horn solo over a pianist. See config.py.
-  model: htdemucs           # or bsroformer_sw: BS-Roformer-SW via the `roformer` group,
-                            # ~9x slower and measurably better on horns (docs/separation-research.md)
+  model: bsroformer_sw      # BS-Roformer-SW via the `roformer` group: the default since 2026-09-02
+                            # (WJazzD note F1 0.790 -> 0.858); htdemucs is ~9x faster when speed matters
   device: auto              # auto | cuda | cpu; auto picks cuda when available (demucs only)
   span: null                # [start, end] seconds to separate instead of the whole file; the
                             # GUI sets it from the selection, the batch from the located solo
@@ -80,4 +80,4 @@ gui:
   port: 8420
   open_browser: true
   library_dir: null         # where the track picker looks; null = current directory
-  models: [htdemucs, htdemucs_6s, htdemucs_ft, bsroformer_sw]   # menu order, fast first
+  models: [bsroformer_sw, htdemucs, htdemucs_6s, htdemucs_ft]   # menu order, default first

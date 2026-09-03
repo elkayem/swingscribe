@@ -36,17 +36,17 @@ correctly-scoped exports of the same audio.
 
 ## Ensemble and separation model, chosen from WJazzD's own `instrument` field
 
-A piano soloist gets `trio` (the piano oracle) and plain `htdemucs` — NOT
-`htdemucs_6s`, which routes piano into its own stem and starves the `other`
-stem we transcribe down to a twentieth of its notes
-(docs/benchmark-deficiencies.md D3), and NOT `htdemucs_ft`, which costs 4x
-for no measured benefit (config.py SeparateConfig). Everything else gets
-`horn-led` and `htdemucs_6s`, which pulls a comping piano OUT of `other`
-(CLAUDE.md). See `auto_settings`. `--separation-model bsroformer_sw`
-overrides the horn choice with the Roformer (docs/separation-research.md:
-subset mean pitch F1 0.878 -> 0.903, every horn routed to `other`, ~9x the
-CPU time); a pianist on a six-stem override takes its `piano` stem (level
-on the hand-scored six, up on all four WJazzD pianos).
+Two models per row. The LOCATE model (`auto_settings`) is what pass 1's
+whole-file stems come from: a piano soloist gets `trio` (the piano oracle)
+and plain `htdemucs` — NOT `htdemucs_6s`, which routes piano into its own
+stem and starves the `other` stem down to a twentieth of its notes
+(docs/benchmark-deficiencies.md D3) — and everyone else gets `horn-led` and
+`htdemucs_6s`. The TRANSCRIBE model (`DEFAULT_TRANSCRIBE_MODEL`, or
+`--separation-model`) is what pass 2 reads, separated over the located span
+only: BS-Roformer-SW since 2026-09-02 (docs/separation-research.md — the
+sheet at WJazzD note F1 0.790 -> 0.858, every horn in `other`, every
+pianist in `piano`, ~9x the CPU per second of audio, on a third of the
+audio). `--separation-model htdemucs_6s` reproduces the pre-Roformer sheet.
 
 ## The two-pass transcription
 
@@ -329,6 +329,16 @@ def auto_settings(instrument: str) -> tuple[str, str]:
     return "horn-led", "htdemucs_6s"
 
 
+# What pass 2 transcribes from when `--separation-model` is not given: the
+# project default separator (config.py SeparateConfig), separated over the
+# located span only. `auto_settings` above names the LOCATE model, whose
+# whole-file stems every row already has; a Roformer over a whole file
+# would be nine times htdemucs' minutes for a pass whose only job is to find
+# the solo. Pass `--separation-model htdemucs_6s` to reproduce the pre-
+# Roformer sheet.
+DEFAULT_TRANSCRIBE_MODEL = "bsroformer_sw"
+
+
 def melody_rows(db: sqlite3.Connection, melid: int):
     import numpy as np
 
@@ -434,7 +444,7 @@ def process_file(
     # every row already has on disk; an override only changes what pass 2
     # transcribes, separated over the located span alone (SeparateConfig.span)
     # — a Roformer over a whole file is nine times htdemucs' minutes.
-    transcribe_model = separation_model or model
+    transcribe_model = separation_model or DEFAULT_TRANSCRIBE_MODEL
     row["ensemble"], row["separation_model"] = ensemble, model
 
     from swingscribe import wjazz
@@ -802,8 +812,8 @@ def main() -> None:
     parser.add_argument(
         "--separation-model",
         default=None,
-        help="override the separation model for horn soloists (e.g. bsroformer_sw); "
-        "pianists keep htdemucs",
+        help=f"the model pass 2 transcribes from (default {DEFAULT_TRANSCRIBE_MODEL}; "
+        "htdemucs_6s reproduces the pre-Roformer sheet)",
     )
     args = parser.parse_args()
     if not (args.limit or args.file or args.random or args.all):

@@ -814,9 +814,13 @@ async function refreshStemList() {
     select.appendChild(option);
   }
   if (!state.stems.includes(state.leadStem)) {
-    // "other" is where a horn lands in a 4-stem split, and it is the config
-    // default, so it is the right guess when nothing is remembered.
-    state.leadStem = state.stems.includes('other') ? 'other' : state.stems[0] ?? null;
+    // "other" is where a horn lands, in a 4-stem split and in the Roformer's
+    // six; a pianist's line lives in `piano` when the model writes one
+    // (BS-Roformer-SW, htdemucs_6s). The right guess when nothing is
+    // remembered follows the ensemble the listener chose.
+    const pianist = pianoOracleEnsembles.includes(state.ensemble);
+    state.leadStem = pianist && state.stems.includes('piano') ? 'piano'
+      : state.stems.includes('other') ? 'other' : state.stems[0] ?? null;
   }
   select.value = state.leadStem ?? '';
   $('legend-stem').textContent = state.leadStem ?? 'lead stem';

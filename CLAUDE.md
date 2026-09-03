@@ -637,10 +637,15 @@ made. Both are kept; neither subsumes the other.
   2026-09-02). Seven of eleven batch "wrong takes" were the locate pass
   looking only in `other` (D23); on the same tracks the Roformer put every
   horn in `other` and read subset mean pitch F1 0.878 → 0.903, the
-  routing-trouble five 0.696 → 0.838 (Dolores 0.660 → 0.913). It is
-  `bsroformer_sw` in the model menu and `--separation-model` in the batch,
-  behind the `roformer` dependency group, at ~9x htdemucs' CPU time — NOT
-  the default until the full sheet and the pianos are measured on it.
+  routing-trouble five 0.696 → 0.838 (Dolores 0.660 → 0.913). Measured on
+  the full sheet (WJazzD note F1 0.790 → 0.858 paired over 61 solos) and
+  on the pianists (level to up, on its `piano` stem), it is **the default
+  separator** since 2026-09-02 — `bsroformer_sw`, behind the `roformer`
+  dependency group, ~9x htdemucs' CPU per second of audio, made livable by
+  span-scoped separation and the estimate on the Separate button. htdemucs
+  stays in the menu for when speed matters. The batch still LOCATES on
+  htdemucs_6s whole-file stems and transcribes from the Roformer over the
+  located span; a pianist reads `piano`, a horn `other`.
   Summing stems to dodge routing (`other+vocals+guitar+piano`) was measured
   and is worse everywhere: a loud piano in the sum out-shouts the horn.
 - **Separation can be scoped to the selected span** (`SeparateConfig.span`,

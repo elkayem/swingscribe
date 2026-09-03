@@ -40,12 +40,14 @@ def test_yaml_overrides_defaults(tmp_path):
     assert config.separate.model == Config().separate.model
 
 
-def test_the_default_separation_model_is_the_fast_one():
-    """Not a preference — a measurement. `htdemucs_ft` is a bag of four models
-    and takes 4x as long; over the nine benchmark solos that used it, plain
-    `htdemucs` scored mean note F1 0.759 against its 0.752, better on eight of
-    nine. Paying 4x for that is not a trade anyone would choose knowingly."""
-    assert Config().separate.model == "htdemucs"
+def test_the_default_separation_model_is_the_measured_best():
+    """Not a preference — a measurement, and the listener's stated condition:
+    the Roformer became the default on 2026-09-02 when the whole sheet re-ran
+    at WJazzD note F1 0.790 -> 0.858 paired over 61 solos, with every horn in
+    `other` and every pianist in `piano` (docs/separation-research.md). It is
+    ~9x htdemucs' CPU time, made livable by span-scoped separation; htdemucs
+    stays in the menu for when speed matters."""
+    assert Config().separate.model == "bsroformer_sw"
 
 
 def test_every_offered_model_is_selectable_and_the_default_is_offered():
