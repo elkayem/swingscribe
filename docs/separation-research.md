@@ -263,6 +263,38 @@ one driver can compare everything on identical audio. Which 4-stem
 Roformer checkpoints the zoo carries is read off that list at install
 time, not assumed here.
 
+## The sheet on the Roformer (2026-09-02)
+
+The listener's call: both models offered, the sheet re-run with the
+Roformer for every row (horns on `other`, pianists on `piano`), pass 1
+still locating on htdemucs_6s whole-file stems and pass 2 separating the
+located span only. 74 rows, every one scored and trusted, against the
+previous trued-up sheet (htdemucs_6s, before the line floors):
+
+| wjazzd sheet | before (n=65) | now (n=74) |
+|---|---|---|
+| mean pitch F1 | 0.823 | **0.884** |
+| trusted rhythm | 0.614 (n=62) | **0.625** (n=74) |
+| coverage | 0.839 | 0.857 |
+| readability | 0.989 | 0.991 |
+| tie rate | 0.095 | 0.102 |
+
+And the evaluation harness, paired over the tracks both runs hold (the
+audio-against-audio measure, `run_eval.py --cache-dir
+benchmark/.swingscribe-cache`): WJazzD note F1 **0.790 → 0.858** over 61
+paired solos (precision 0.794 → 0.877, recall 0.788 → 0.837), onset F1
+0.841 → 0.902, beat F1 level (0.921 → 0.918 over 44); the hand-scored
+ten: pitch F1 0.785 → 0.808, notation rhythm 0.720 → 0.704 (the grid
+chooser reacting to fewer bleed notes, D22), value 0.667 → 0.656. Summary
+lines: WJazzD note F1 0.793 → 0.855 (n 63 → 73), MuseScore note F1 0.447
+→ 0.456 (n=10). Baselines re-pinned from this run.
+
+The lowest row on the sheet is now 0.767 (My Favorite Things, first
+solo). Rows worth a look: Getz's Blues In The Closet located at only 23%
+on `other` (his tenor lives in `guitar` on htdemucs_6s and 23% clears the
+locate gate), and Pat Metheny, a guitarist, was routed to `other` like a
+horn — the batch's `auto_settings` knows only pianists and everyone else.
+
 ## How every candidate gets judged
 
 Same fixed subset (melids 54, 70, 56, 58, 168, 218, 60, 74, 385, 121,
