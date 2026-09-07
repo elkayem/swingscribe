@@ -203,7 +203,94 @@ every configuration alike (section 6).
   net 0.0035 of F1 over the horns, and half of that is not paired-robust.
   Under-segmentation stays the largest class; it is not the cheapest.
 
-## 4. Where the first analysis should change
+## 3b. The next experiments, measured (later the same day)
+
+Section 5 named three experiments. All three were run from the caches, no
+CREPE, after the instrument changes in section 4 landed; every configuration
+is classified with frame evidence only, against the re-pinned classes.
+
+### 3b.1 The segmenter's other knobs (68 horns)
+
+The same re-segmentation path as section 3, now with the median filter
+re-applied to the gated raw f0 the cache holds, and the onset corroboration
+recomputed from the stem (raw spectral flux and harmonic energy exactly as
+`analyze` does). Control: the recomputed corroborated onset set equals the
+cached one on 63 of 68 solos, the notes on 27 (the rest differ by a note or
+by sub-2 ms onsets), and the control's mean F1 is 0.8522 against the pinned
+horn 0.8521. Corroboration keeps 16,850 of 29,699 raw ticks.
+
+| configuration | mean F1 | Δ | se | up / down | P | R | absorbed | squeezed | merged | neighbour | too_short | fragment_nb | split_sustain | between_notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| A control (60 / 60, median 50, dip 0) | 0.8522 | | | | 0.860 | 0.827 | 798 | 932 | 616 | 949 | 339 | 604 | 452 | 280 |
+| B persistence 40, floor 60 | 0.8549 | +0.0028 | 0.0011 | 42 / 25 | 0.861 | 0.835 | 252 | 1,010 | 465 | 820 | 778 | 645 | 576 | 278 |
+| H median filter 30 | 0.8504 | −0.0018 | 0.0005 | 14 / 41 | 0.860 | 0.824 | 867 | 938 | 624 | 957 | 331 | 575 | 458 | 272 |
+| I median 30 + persistence 40 | 0.8542 | +0.0020 | 0.0012 | 39 / 29 | 0.861 | 0.833 | 268 | 1,019 | 473 | 812 | 768 | 629 | 579 | 271 |
+| J onset dip 3 dB | 0.8459 | −0.0063 | 0.0011 | 18 / 48 | 0.863 | 0.813 | 830 | 920 | 1,085 | 934 | 330 | 593 | 307 | 255 |
+| K onset dip 6 dB | 0.8424 | −0.0097 | 0.0014 | 14 / 52 | 0.863 | 0.806 | 840 | 917 | 1,290 | 926 | 331 | 588 | 285 | 252 |
+| L persistence 40 + dip 3 | 0.8488 | −0.0034 | 0.0017 | 28 / 40 | 0.863 | 0.821 | 271 | 1,003 | 918 | 807 | 769 | 635 | 445 | 253 |
+
+- **Persistence 40 with the floor kept holds up on a second, independent
+  path**: +0.0028 (paired t 2.5), 42 solos up against 25. `absorbed` proper
+  falls from 798 to 252 — the run-through IS the persistence rule — while
+  `squeezed` barely moves (932 → 1,010): a note with no room is not helped
+  by splitting sooner. `too_short` more than doubles (339 → 778) because
+  the freed excursions are shorter than the floor and are dropped, which is
+  misses changing class, not false notes; `split_sustain` +124 is the cost.
+- **The 30 ms median filter is refuted** as a fix for `neighbour`: 949 →
+  957, mean F1 −0.0018, 14 solos up and 41 down. Section 4.2 of the first
+  document proposed it; it should not be tried again.
+- **The onset dip test is refuted in taxonomy terms, three to one.** Dip 3 dB
+  saves 145 `split_sustain` and costs 469 `merged`; dip 6 dB saves 167 and
+  costs 674. Recall falls 0.827 → 0.813. D2 said this about one held note in
+  All The Things; this says it over 68 solos. The two classes are the two
+  sides of one threshold, and the threshold is on the right side.
+
+### 3b.2 The pianists through the line picker (n = 4)
+
+`line_selection.pick_line` over the cached piano-model output, scored and
+classified like the shipped line:
+
+| solo | shipped line F1 | picker F1 | picker, matched median dt | picker shifted by its median |
+|---|---|---|---|---|
+| Hancock, Dolores | 0.9301 | 0.9319 | −21 ms | 0.9468 |
+| Hancock, Gingerbread Boy | 0.9139 | 0.9087 | −16 ms | 0.9321 |
+| Hancock, Orbits | 0.9412 | 0.8654 | −24 ms | 0.9234 |
+| Garland, Oleo | 0.7942 | 0.7332 | −23 ms | 0.8098 |
+| mean | 0.8948 | 0.8598 | | 0.9030 |
+
+As it stands the picker LOSES to the shipped line on WJazzD (0.860 against
+0.895) — and the classes say why: `timing_early` 12 → 100, `absorbed` +
+`squeezed` 222 → 27. The picker has the notes; **the piano model's onsets
+lead the annotator's by 16-24 ms on every solo** (IQR 15-23 ms), against
+−9 to 0 ms for CREPE's line, and a 50 ms tolerance turns that lead into a
+hundred timing errors. `docs/issue8-line-selection.md` measured the picker
+with a time-free pitch alignment, which cannot see this. A CONSTANT
+correction, not fitted per solo:
+
+| shift added to the picker's onsets | 0 | +10 ms | +15 ms | +20 ms | +25 ms | +30 ms |
+|---|---|---|---|---|---|---|
+| mean F1 (4) | 0.8598 | 0.8863 | 0.8966 | 0.9002 | 0.9049 | 0.9032 |
+| solos above the shipped line | 1 | 2 | 2 | 3 | 3 | 3 |
+
+At +20 to +30 ms the picker beats the shipped line's 0.8948 on the mean and
+on three of the four solos (Orbits stays under, 0.923 against 0.941). Four
+solos of fast trio piano; but the lead is the same sign and size on all
+four, and it is a property of the model's onset regression, so it will hold
+wherever the picker is used. The shipped default path also inherits it:
+`corroborate.fill_gaps` copies oracle notes with their onsets into the line.
+
+## 4. Where the first analysis should change — applied
+
+Every item below was applied the same day; the classifier, the script, the
+tests (71) and `tests/regression/taxonomy-baseline.json` were re-pinned.
+**The baseline moved by redefinition, not by any change to the
+transcriber**: mean F1 0.8549, 7,707 errors and the 0.1451 deficit are
+unchanged; the old `absorbed` 2,461 is now `absorbed` 948 + `squeezed`
+1,018, and its 496 slack cases (plus 42 of `merged`'s) went to the frame
+classes (`too_short` 112 → 345, `tracked_other` 52 → 189, `dropped` 45 →
+160, `not_picked` 4 → 22, `dropped_register` 26 → 43, `tracked_octave` 3 →
+17, `unvoiced` 5 → 8). `docs/error-taxonomy.md` carries the re-pinned
+tables. D25 records the onset detector's recall.
 
 1. **Split the "held note re-attacked" mechanism** into onset-cut
    (`split_sustain`, 67% on a tick) and pitch-cut (`fragment_*`, ≤ 18%)
@@ -242,19 +329,41 @@ every configuration alike (section 6).
    at the frame resolution and not recoverable by a threshold. The
    document's 1,501 target overstates the reachable set by about 200.
 
-## 5. Recommended next experiments, in order
+## 5. What the measurements leave to decide
 
-1. The re-segmentation sweep in section 3, extended to the two things it
-   could not vary here: `median_filter_ms` (30 against 50, the document's
-   own suggestion for `neighbour`) and a persistence that scales with the
-   local inter-onset interval rather than the solo's tempo.
-2. `corroborate_onsets` with `onset_dip_db` on, scored through the taxonomy
-   with `split_sustain` and `merged` watched together: the tick data says
-   the two classes are the two sides of that one threshold.
-3. The pianists' `absorbed` through the picker (`line_selection.pick_line`
-   already exists): 196 of 249 are in the oracle's output. n is 4; the
-   hand-scored pianos in the MuseScore set are the control.
-4. Nothing on the timing classes until the notater needs it: three quarters
+The three experiments named here at first writing are done (3b). Two
+changes to the transcriber are now measured well enough to ship, and both
+carry the same cost: any change to `transcribe`'s behaviour re-fingerprints
+`run_eval`'s note cache and re-runs CREPE over every solo it touches (hours
+on this machine, CLAUDE.md). Neither has been shipped; that is the
+listener's call.
+
+1. **`pitch_persist_ms` 60 → 40, `min_note_ms` kept at 60.** Horns +0.0027
+   to +0.0028 mean note F1 on two independent re-segmentation paths (41-42
+   solos up, 25 down, paired t 2.5), precision unchanged. Cost:
+   `split_sustain` +119 to +124 and a `too_short` class that doubles (misses
+   renamed, not new errors). Not measured on the pianists or on the
+   MuseScore notation scores, which a re-pin would show. Small, real, cheap
+   to write — a one-line default with the CACHE_VERSION bump — and
+   expensive to re-measure.
+2. **A constant +20 to +25 ms on the piano model's onsets.** The model leads
+   WJazzD's annotators by 16-24 ms on all four pianists. Applied in
+   `line_selection.pick_line` alone it costs nothing in the harness (the
+   oracle take is not what `run_eval` caches) and lifts the picker from
+   0.860 to 0.900-0.905 on the four, above the shipped line's 0.895 on
+   three of them; applied where the default path copies oracle notes
+   (`corroborate.fill_gaps`) it touches the default pianist output and
+   re-transcribes. The hand-scored pianos in the MuseScore set are the
+   control that n = 4 needs, and their measure is time-free, so the
+   correction has to be judged on WJazzD.
+3. **Do not try again**: a 30 ms median filter (`neighbour` unmoved, F1
+   −0.0018) and the onset dip test at 3 or 6 dB (three `merged` for every
+   `split_sustain` saved).
+4. **Still open**: a cue that separates a 30-50 ms pitch excursion that is a
+   note from one that is vibrato — the largest class needs it and no
+   threshold supplies it; and whether the raw spectral-flux set holds the
+   half of the onsets the corroborated one misses (D25).
+5. Nothing on the timing classes until the notater needs it: three quarters
    are placement, but at 60-70 ms on a 50 ms tolerance the benchmark is
    measuring the tail of a 21 ms IQR, and quantize's grid slack is 20 ms.
 

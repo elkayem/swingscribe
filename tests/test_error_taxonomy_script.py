@@ -75,3 +75,46 @@ def test_a_class_that_vanished_is_reported(tmp_path, monkeypatch, capsys):
 def test_no_baseline_is_not_a_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(error_taxonomy, "BASELINE", tmp_path / "missing.json")
     assert error_taxonomy.compare(aggregate({"merged": 1})) == 0
+
+
+def test_a_mover_is_judged_solo_by_solo_when_the_pin_carries_per_solo_counts(
+    tmp_path, monkeypatch, capsys
+):
+    """Sample sd says `gated` +5 on a class of 2 is beyond noise; the paired
+    test says the same because every solo moved up. A class that moved in
+    one solo only is inside paired noise however far it moved."""
+    pinned = aggregate({"merged": 4, "gated": 2})
+    pinned["solos"] = {
+        f"s{i}": {
+            "family": "horn",
+            "note_f1": 0.8,
+            "counts": {"merged": 1, "gated": 1 if i < 2 else 0},
+        }
+        for i in range(4)
+    }
+    pin = tmp_path / "baseline.json"
+    pin.write_text(
+        json.dumps(
+            {
+                "flat": error_taxonomy.flatten(pinned),
+                "noise": pinned["noise"],
+                "solos": pinned["solos"],
+            }
+        )
+    )
+    monkeypatch.setattr(error_taxonomy, "BASELINE", pin)
+    now = aggregate({"merged": 9, "gated": 6})
+    now["solos"] = {
+        f"s{i}": {
+            "family": "horn",
+            "note_f1": 0.8,
+            "counts": {"merged": 1 if i else 6, "gated": (1 if i < 2 else 0) + 1},
+        }
+        for i in range(4)
+    }
+    assert error_taxonomy.compare(now) == 1
+    out = capsys.readouterr().out
+    gated_line = next(line for line in out.splitlines() if "count/gated" in line)
+    merged_line = next(line for line in out.splitlines() if "count/merged" in line)
+    assert "paired: beyond 2 se" in gated_line and "up 4 / down 0 of 4" in gated_line
+    assert "paired: inside noise" in merged_line and "up 1 / down 0 of 4" in merged_line

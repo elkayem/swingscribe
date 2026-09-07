@@ -31,6 +31,18 @@ frame trace, no piano model output) are skipped, never guessed — the
 class like the others and is counted; the taxonomy is not finished while it
 is more than a tenth of the errors.
 
+## The second reading (docs/error-taxonomy-review.md)
+
+Three things changed after an independent analysis of the first table. A
+missed onset that falls AFTER our note-off is not covered (no slack for
+misses): it sits in a gap the frame rules can read. An other-pitch coverer
+that ends within 60 ms of the missed onset is `squeezed`, not `absorbed` —
+the note had no room, which is a boundary problem, where `absorbed` proper is
+a note we ran straight through. And every pair carries the alignment's local
+residual (`align_resid`), read off the matched notes, so a timing pair the fit
+explains can be told from one the transcriber placed. `paired_delta_noise` is
+the guard's paired test, beside `bootstrap_noise`'s sample test.
+
 ## What this is not
 
 It does not re-score anything. `mir_eval.transcription.match_notes` with the
@@ -130,7 +142,16 @@ RULES: list[tuple[str, str, str]] = [
         "merged",
         "a note of ours at the SAME pitch covers the onset: re-articulation heard as one note",
     ),
-    ("miss", "absorbed", "a note of ours at ANOTHER pitch covers the onset: tracked through it"),
+    (
+        "miss",
+        "absorbed",
+        "a note of ours at ANOTHER pitch covers the onset and runs on 60 ms or more past it",
+    ),
+    (
+        "miss",
+        "squeezed",
+        "a note of ours at ANOTHER pitch covers the onset and ends within 60 ms: no room for it",
+    ),
     (
         "miss",
         "not_picked",
@@ -306,13 +327,38 @@ def pair_unmatched(
 # ── rule helpers ──────────────────────────────────────────────────────────
 
 
-def _covers(note: dict, t: float) -> bool:
-    """Does `note`'s span hold the instant `t`, its own onset excluded?"""
-    return note["onset"] + ONSET_TOLERANCE_S < t <= note["onset"] + note["duration"] + COVER_SLACK_S
+def _covers(note: dict, t: float, slack: float = COVER_SLACK_S) -> bool:
+    """Does `note`'s span hold the instant `t`, its own onset excluded?
+
+    `slack` extends the span past the note-off. A false positive a hair after
+    a reference note-off is still "inside" it (the release); a MISSED onset a
+    hair after our note-off is not covered by anything — there is a gap
+    there, and the frame rules are the ones that can say what was in it —
+    so `classify_miss` passes 0 (docs/error-taxonomy-review.md, 2.3).
+    """
+    return note["onset"] + ONSET_TOLERANCE_S < t <= note["onset"] + note["duration"] + slack
 
 
-def _covering(notes: list[dict], t: float, skip: int | None = None) -> list[int]:
-    return [k for k, n in enumerate(notes) if k != skip and _covers(n, t)]
+def _covering(
+    notes: list[dict], t: float, skip: int | None = None, slack: float = COVER_SLACK_S
+) -> list[int]:
+    return [k for k, n in enumerate(notes) if k != skip and _covers(n, t, slack)]
+
+
+def alignment_residual(
+    matched: list[tuple[float, float]], t: float, window: float = LINE_WINDOW_S * 1.5
+) -> float:
+    """The fit's local residual at `t`: the median onset offset (ours minus
+    theirs) of the MATCHED notes within `window` seconds, falling back to the
+    solo's median when fewer than five are near. A timing pair whose offset
+    is explained by this is the alignment's error, not the transcriber's; the
+    pair keeps its class and carries the number (`align_resid`)."""
+    if not matched:
+        return 0.0
+    near = [d for on, d in matched if abs(on - t) <= window]
+    if len(near) < 5:
+        near = [d for _, d in matched]
+    return statistics.median(near)
 
 
 def _octave(dpitch: int) -> bool:
@@ -432,18 +478,31 @@ def classify_miss(
     def row(cls, rule, est_index=None):
         return ErrorRow("miss", cls, rule, ref_index, est_index, facts)
 
-    covering = _covering(estimate, t)
+    # No slack for a miss: an onset past our note-off sits in a gap between
+    # two of our notes, which the frame rules below can read.
+    covering = _covering(estimate, t, slack=0.0)
     if covering:
         # Prefer a same-pitch coverer if there is one; report the pitch of
         # whichever explains the miss.
         same = [k for k in covering if int(estimate[k]["pitch"]) == pitch]
         k = same[0] if same else covering[0]
-        facts["covered_by_pitch"] = int(estimate[k]["pitch"])
+        coverer = estimate[k]
+        remaining = coverer["onset"] + coverer["duration"] - t
+        facts["covered_by_pitch"] = int(coverer["pitch"])
         facts["covered_by_index"] = k
-        facts["covering_dpitch"] = int(estimate[k]["pitch"]) - pitch
+        facts["covered_by_onset"] = round(coverer["onset"], 3)
+        facts["covering_dpitch"] = int(coverer["pitch"]) - pitch
+        facts["coverer_remaining"] = round(remaining, 3)
         if same:
             return row("merged", "same-pitch note of ours covers the onset", k)
-        return row("absorbed", "other-pitch note of ours covers the onset", k)
+        # How much of our note is left after the missed onset separates two
+        # mechanisms with one name: a note we ran straight through (the pitch
+        # never persisted long enough to split it) against a note that sat
+        # under the last few frames of ours, its own onset lost where our
+        # boundary landed (docs/error-taxonomy-review.md, 2.3).
+        if remaining >= MIN_NOTE_S:
+            return row("absorbed", "other-pitch note of ours runs 60 ms or more past the onset", k)
+        return row("squeezed", "other-pitch note of ours ends within 60 ms of the onset", k)
 
     if heard:
         return row("not_picked", "piano model has this pitch within 100 ms")
@@ -631,12 +690,20 @@ def classify_solo(
     paired_ref = {i for i, _ in pairs}
     paired_est = {j for _, j in pairs}
     bodies: dict[int, int] = {}
+    # The fit's residual, read off the hits: what a timing pair's offset
+    # looks like once the alignment's own local error is taken out.
+    residual_base = sorted(
+        (reference[i]["onset"], estimate[j]["onset"] - reference[i]["onset"]) for i, j in matched
+    )
     for i, j in pairs:
         row = classify_pair(reference[i], estimate[j], estimate)
         row.ref_index, row.est_index = i, j
         row.evidence.update(
             _frame_facts(evidence.frames(*_ref_window(reference[i])), int(reference[i]["pitch"]))
         )
+        resid = alignment_residual(residual_base, reference[i]["onset"])
+        row.evidence["align_resid"] = round(resid, 3)
+        row.evidence["dt_residual"] = round(row.evidence["dt"] - resid, 3)
         if row.cls == "attack_transient":
             bodies[row.evidence["body_index"]] = i
         rows.append(row)
@@ -718,6 +785,42 @@ def bootstrap_noise(
         }
         for cls in classes
     }
+
+
+def paired_delta_noise(
+    before: dict[str, dict[str, int]],
+    after: dict[str, dict[str, int]],
+    resamples: int = 1000,
+    seed: int = 0,
+) -> dict[str, dict[str, float]]:
+    """How a class MOVED, judged solo by solo.
+
+    `before` and `after` are per-solo class counts keyed by solo name; only
+    solos present in both are compared. For each class: the total change, the
+    bootstrap standard error of that total over resamples of the per-solo
+    deltas (the paired test `bootstrap_noise` is not — that one says how big a
+    class would be on a different set of solos, this one says whether a change
+    moved it), and how many solos moved each way. A fix that trims a class by
+    a tenth in every solo is far beyond its paired se while sitting well
+    inside `count_sd`, and the guard has to be able to tell the two apart
+    (docs/error-taxonomy-review.md, 4.5)."""
+    names = sorted(set(before) & set(after))
+    if not names:
+        return {}
+    classes = sorted({cls for n in names for cls in (*before[n], *after[n])})
+    rng = random.Random(seed)
+    out: dict[str, dict[str, float]] = {}
+    for cls in classes:
+        deltas = [after[n].get(cls, 0) - before[n].get(cls, 0) for n in names]
+        sums = [sum(deltas[rng.randrange(len(deltas))] for _ in deltas) for _ in range(resamples)]
+        out[cls] = {
+            "delta": sum(deltas),
+            "se": statistics.pstdev(sums),
+            "up": sum(1 for d in deltas if d > 0),
+            "down": sum(1 for d in deltas if d < 0),
+            "n_solos": len(names),
+        }
+    return out
 
 
 def compare_counts(

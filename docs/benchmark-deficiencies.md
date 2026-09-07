@@ -887,6 +887,34 @@ highest-of-cluster loses to loudest-of-cluster on the Peterson (0.583 vs
 margin is the thing to measure; the existing sweep script and cached oracle
 notes make it a CPU-minutes experiment with no CREPE.
 
+### D25 - The corroborated onset detector marks half of the real onsets
+
+Found by the second reading of the error taxonomy
+(docs/error-taxonomy-review.md, 2.2), measured over the 72 WJazzD solos with
+a frame trace in the review cache. A corroborated onset tick
+(`FrameDiagnostics.onsets`, the set `segment_notes` may cut on) lies within
+30 ms of **13,383 of 27,067 matched reference onsets (49.4%)**; the false
+rate, read at a point 75% through matched notes at least 300 ms long, is
+105 of 2,001 (5.2%). At 2.5 ticks per second the detector is not noisy, it
+is quiet.
+
+What it bounds. `merged` (673 same-pitch re-articulations heard as one
+note) has a tick under 5% of its onsets — the control's rate — and a
+same-pitch repeat can only be split on a tick, so the class is the
+detector's recall, not a threshold. `split_sustain` (453) is the other
+side: 67% of those cuts sit ON a tick, so the detector found an attack
+inside a note the annotator wrote as one. The two classes are the two sides
+of `corroborate_onsets`' threshold (`onset_rise_db`, `onset_dip_db`), and a
+change there must be scored with both watched. The pitch-cut classes
+(`fragment_neighbour` 11%, `body_late` 7%) are NOT the detector's: they are
+`_pitch_change_points`.
+
+What would move: recall on `merged` directly (up to 0.0097 of F1 if every
+one were split, which the annotation convention will not allow), at the
+cost of `split_sustain`. Open: whether the raw spectral-flux set, before
+corroboration, holds the missing half — the cache keeps only the
+corroborated ticks, so that needs the stem, not CREPE.
+
 ## Resolved
 
 ### R20 - Grace notes in the hand scores were counted as time

@@ -24,6 +24,7 @@ from swingscribe.taxonomy import (
     compare_counts,
     f1_deficit,
     family_of,
+    paired_delta_noise,
 )
 
 
@@ -557,3 +558,89 @@ def test_a_covered_miss_names_whether_its_coverer_was_matched():
     absorbed = next(r for r in solo.rows if r.cls == "absorbed")
     assert absorbed.evidence["covered_by_matched"] is True
     assert absorbed.evidence["covered_by_duration"] == pytest.approx(0.3)
+
+
+# ── the second reading: squeezed, no slack for misses, the alignment residual ──
+
+
+def test_miss_squeezed_when_the_other_pitch_coverer_ends_within_sixty_ms():
+    ref = [note(5.0, 60, 0.06)]
+    est = [note(4.8, 65, 0.24)]  # ends at 5.04: 40 ms after the missed onset
+    row = classify_miss(0, ref, est, Evidence(), "horn")
+    assert row.cls == "squeezed"
+    assert row.evidence["coverer_remaining"] == pytest.approx(0.04)
+    assert row.evidence["covered_by_onset"] == pytest.approx(4.8)
+
+
+def test_miss_absorbed_needs_sixty_ms_of_coverer_after_the_onset():
+    ref = [note(5.0, 60, 0.06)]
+    est = [note(4.8, 65, 0.27)]  # ends at 5.07: 70 ms past the missed onset
+    assert classify_miss(0, ref, est, Evidence(), "horn").cls == "absorbed"
+
+
+def test_a_missed_onset_after_our_note_off_is_not_covered():
+    """The 50 ms cover slack applies to false positives (a release just past
+    a reference note-off), never to misses: an onset past OUR note-off is in a
+    gap, and the frame rules read the gap. With no frames it is unclassified,
+    not absorbed."""
+    ref = [note(5.0, 60, 0.06)]
+    est = [note(4.8, 65, 0.19)]  # ends at 4.99, 10 ms before the missed onset
+    row = classify_miss(0, ref, est, Evidence(), "horn")
+    assert row.cls == "unclassified"
+    assert "covered_by_index" not in row.evidence
+
+
+def test_a_merged_miss_also_needs_the_onset_inside_our_note():
+    ref = [note(5.0, 60, 0.06)]
+    est = [note(4.8, 60, 0.19)]
+    assert classify_miss(0, ref, est, Evidence(), "horn").cls != "merged"
+
+
+def test_alignment_residual_is_the_local_median_offset_of_the_matched_notes():
+    from swingscribe.taxonomy import alignment_residual
+
+    matched = [(t, 0.02) for t in range(0, 11)] + [(t, -0.03) for t in range(20, 30)]
+    assert alignment_residual(matched, 5.0) == pytest.approx(0.02)
+    assert alignment_residual(matched, 25.0) == pytest.approx(-0.03)
+    # fewer than five matches nearby: the solo's median
+    assert alignment_residual(matched, 100.0) == pytest.approx(0.02)
+    assert alignment_residual([], 1.0) == 0.0
+
+
+def test_pairs_carry_the_alignment_residual_read_off_the_hits():
+    _needs_full_match()
+    from swingscribe.taxonomy import classify_solo
+
+    # Six matched notes all 30 ms late, then a same-pitch pair 70 ms late:
+    # 40 ms of it is placement once the residual is out.
+    reference = [note(float(t), 60 + t, 0.2) for t in range(6)] + [note(10.0, 70, 0.2)]
+    estimate = [note(float(t) + 0.03, 60 + t, 0.2) for t in range(6)] + [note(10.07, 70, 0.2)]
+    solo = classify_solo(reference, estimate)
+    pair = next(r for r in solo.rows if r.population == "pair")
+    assert pair.cls == "timing_late"
+    assert pair.evidence["align_resid"] == pytest.approx(0.03, abs=1e-3)
+    assert pair.evidence["dt_residual"] == pytest.approx(0.04, abs=1e-3)
+
+
+def test_paired_delta_noise_sees_a_uniform_change_the_sample_sd_cannot():
+    """Ten solos with `absorbed` 100 +/- a lot; a fix trims every one by 10.
+    The change is inside bootstrap_noise's 2 sd (the sample scale) and far
+    beyond the paired se (every solo moved the same way)."""
+    before = {f"s{i}": {"absorbed": 100 + 40 * (i % 2)} for i in range(10)}
+    after = {name: {"absorbed": c["absorbed"] - 10} for name, c in before.items()}
+    sample = bootstrap_noise(list(before.values()), resamples=300)["absorbed"]["count_sd"]
+    paired = paired_delta_noise(before, after, resamples=300)["absorbed"]
+    assert paired["delta"] == -100
+    assert paired["up"] == 0 and paired["down"] == 10 and paired["n_solos"] == 10
+    assert paired["se"] == 0.0  # every delta identical: no paired noise at all
+    assert abs(paired["delta"]) < 2 * sample  # and yet inside the sample scale
+
+
+def test_paired_delta_noise_compares_only_solos_present_in_both():
+    before = {"a": {"merged": 3}, "b": {"merged": 5}, "gone": {"merged": 9}}
+    after = {"a": {"merged": 1}, "b": {"merged": 6}, "new": {"merged": 4}}
+    out = paired_delta_noise(before, after, resamples=50)
+    assert out["merged"]["n_solos"] == 2
+    assert out["merged"]["delta"] == -1
+    assert out["merged"]["up"] == 1 and out["merged"]["down"] == 1
+    assert paired_delta_noise({}, after) == {}

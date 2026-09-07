@@ -5,6 +5,16 @@
 where the other 0.1451 goes, and what it said the first time it was run.
 Nothing in the transcriber was changed to produce it.
 
+**Second reading, same day.** `docs/error-taxonomy-review.md` is an
+independent analysis of this document's raw table. Three of its findings
+changed the instrument and the baseline was re-pinned (2026-09-07, later):
+a missed onset past our note-off is no longer "covered" (the frame rules
+read the gap), an other-pitch coverer that ends within 60 ms of the missed
+onset is `squeezed` rather than `absorbed`, and every pair carries the
+alignment's local residual. Mean F1, the error count and the deficit are
+unchanged; what moved is how the 2,461 old `absorbed` rows are named, and
+every number below is the re-pinned one.
+
 Reproduce:
 
     .venv\Scripts\python.exe scripts/error_taxonomy.py --db wjazz/wjazzd.db
@@ -77,8 +87,9 @@ to horn / piano / guitar / other; tempo bands are WJazzD's own `tempoclass`
 
 The first rule that fires wins (`swingscribe.taxonomy.RULES`, one test per
 rule in `tests/test_taxonomy.py`). "Covers" means the onset falls inside a
-note's span, more than 50 ms after its onset and no more than 50 ms after
-its note-off.
+note's span, more than 50 ms after its onset; for a false positive the span
+extends 50 ms past the reference note-off (a release), for a miss it ends
+at OUR note-off — an onset past it sits in a gap the frame rules can read.
 
 | population | class | fires when |
 |---|---|---|
@@ -90,7 +101,8 @@ its note-off.
 | pair | other_pitch | onsets within 50 ms, any other pitch |
 | pair | loose | pitch differs and onsets 50-150 ms apart |
 | miss | merged | a note of ours at the same pitch covers the onset |
-| miss | absorbed | a note of ours at another pitch covers the onset |
+| miss | absorbed | a note of ours at another pitch covers the onset and runs on ≥ 60 ms past it |
+| miss | squeezed | a note of ours at another pitch covers the onset and ends within 60 ms of it |
 | miss | not_picked | pianist; the polyphonic model has this pitch within 100 ms |
 | miss | left_stem | chosen stem digitally silent under the note (R16) |
 | miss | gated | no frame under the note is both energetic and voiced |
@@ -132,68 +144,86 @@ of the count over 1,000 resamples of the 73 solos (section 6).
 
 | class | n | share | cumulative | F1 cost | of the deficit | sd |
 |---|---|---|---|---|---|---|
-| absorbed | 2,461 | 31.9% | 31.9% | 0.0342 | 23.6% | 263 |
-| neighbour | 964 | 12.5% | 44.4% | 0.0272 | 18.7% | 98 |
-| merged | 673 | 8.7% | 53.2% | 0.0097 | 6.7% | 69 |
-| fragment_neighbour | 585 | 7.6% | 60.8% | 0.0094 | 6.5% | 56 |
-| split_sustain | 453 | 5.9% | 66.6% | 0.0075 | 5.1% | 58 |
-| timing_late | 357 | 4.6% | 71.3% | 0.0110 | 7.6% | 46 |
-| timing_early | 300 | 3.9% | 75.2% | 0.0094 | 6.5% | 40 |
-| between_notes | 266 | 3.5% | 78.6% | 0.0036 | 2.5% | 50 |
-| attack_transient | 224 | 2.9% | 81.5% | 0.0064 | 4.4% | 46 |
-| loose | 207 | 2.7% | 84.2% | 0.0062 | 4.3% | 22 |
-| fragment_other | 194 | 2.5% | 86.7% | 0.0024 | 1.7% | 46 |
-| other_pitch | 194 | 2.5% | 89.2% | 0.0052 | 3.6% | 29 |
-| body_late | 186 | 2.4% | 91.7% | 0.0027 | 1.9% | 42 |
-| octave | 141 | 1.8% | 93.5% | 0.0031 | 2.1% | 45 |
-| too_short | 112 | 1.5% | 94.9% | 0.0015 | 1.0% | 26 |
-| between_phrases | 105 | 1.4% | 96.3% | 0.0013 | 0.9% | 31 |
-| bleed_cross_stem | 102 | 1.3% | 97.6% | 0.0015 | 1.0% | 17 |
-| tracked_other | 52 | 0.7% | 98.3% | 0.0009 | 0.6% | 10 |
-| dropped | 45 | 0.6% | 98.9% | 0.0008 | 0.6% | 7 |
-| bleed_register | 27 | 0.4% | 99.2% | 0.0002 | 0.1% | 13 |
-| dropped_register | 26 | 0.3% | 99.6% | 0.0003 | 0.2% | 7 |
-| fragment_octave | 18 | 0.2% | 99.8% | 0.0002 | 0.1% | 9 |
-| unvoiced | 5 | 0.1% | 99.9% | 0.0001 | | 3 |
-| not_picked | 4 | 0.1% | 99.9% | 0.0001 | | 3 |
-| tracked_octave | 3 | | | 0.0001 | | 2 |
-| gated | 3 | | | | | 2 |
+| squeezed | 1,018 | 13.2% | 13.2% | 0.0143 | 9.8% | 104 |
+| neighbour | 964 | 12.5% | 25.7% | 0.0272 | 18.7% | 98 |
+| absorbed | 948 | 12.3% | 38.0% | 0.0133 | 9.1% | 115 |
+| merged | 631 | 8.2% | 46.2% | 0.0091 | 6.3% | 64 |
+| fragment_neighbour | 585 | 7.6% | 53.8% | 0.0094 | 6.5% | 56 |
+| split_sustain | 453 | 5.9% | 59.7% | 0.0075 | 5.1% | 58 |
+| timing_late | 357 | 4.6% | 64.3% | 0.0110 | 7.6% | 46 |
+| too_short | 345 | 4.5% | 68.8% | 0.0047 | 3.2% | 72 |
+| timing_early | 300 | 3.9% | 72.7% | 0.0094 | 6.5% | 40 |
+| between_notes | 266 | 3.5% | 76.1% | 0.0036 | 2.5% | 50 |
+| attack_transient | 224 | 2.9% | 79.0% | 0.0064 | 4.4% | 46 |
+| loose | 207 | 2.7% | 81.7% | 0.0062 | 4.3% | 22 |
+| fragment_other | 194 | 2.5% | 84.2% | 0.0024 | 1.6% | 46 |
+| other_pitch | 194 | 2.5% | 86.8% | 0.0052 | 3.6% | 29 |
+| tracked_other | 189 | 2.5% | 89.2% | 0.0027 | 1.8% | 27 |
+| body_late | 186 | 2.4% | 91.6% | 0.0027 | 1.9% | 42 |
+| dropped | 160 | 2.1% | 93.7% | 0.0026 | 1.8% | 17 |
+| octave | 141 | 1.8% | 95.5% | 0.0031 | 2.1% | 45 |
+| between_phrases | 105 | 1.4% | 96.9% | 0.0013 | 0.9% | 31 |
+| bleed_cross_stem | 102 | 1.3% | 98.2% | 0.0015 | 1.0% | 17 |
+| dropped_register | 43 | 0.6% | 98.8% | 0.0005 | 0.4% | 10 |
+| bleed_register | 27 | 0.4% | 99.1% | 0.0002 | 0.1% | 13 |
+| not_picked | 22 | 0.3% | 99.4% | 0.0003 | 0.2% | 13 |
+| fragment_octave | 18 | 0.2% | 99.6% | 0.0002 | 0.1% | 9 |
+| tracked_octave | 17 | 0.2% | 99.9% | 0.0003 | 0.2% | 8 |
+| unvoiced | 8 | 0.1% | 100.0% | 0.0001 | 0.1% | 4 |
+| gated | 3 | | | 0.0001 | | 2 |
 | left_stem | 0 | | | | | |
 
-These are the final counts (`tests/regression/taxonomy-baseline.json`,
-pinned 2026-09-07). `tracked_other` is 51 horn rows and 1 piano row.
+These are the re-pinned counts (`tests/regression/taxonomy-baseline.json`,
+2026-09-07, after the second reading). Against the first pin the old
+`absorbed` (2,461) became `absorbed` 948 + `squeezed` 1,018, and its 496
+slack cases — plus 42 of `merged`'s — went where the frame rules put them:
+`too_short` 112 → 345, `tracked_other` 52 → 189, `dropped` 45 → 160,
+`not_picked` 4 → 22, `dropped_register` 26 → 43, `tracked_octave` 3 → 17,
+`unvoiced` 5 → 8. `tracked_other` is 171 horn, 11 piano and 7 guitar rows.
 
 Grouped by mechanism, which is how the fixes divide:
 
 | mechanism | classes | n | share | F1 cost | of the deficit |
 |---|---|---|---|---|---|
-| under-segmentation of fast notes | absorbed, merged | 3,134 | 40.7% | 0.0440 | 30.3% |
+| under-segmentation: a fast note run straight through | absorbed | 948 | 12.3% | 0.0133 | 9.1% |
+| under-segmentation: a fast note with no boundary of its own | squeezed | 1,018 | 13.2% | 0.0143 | 9.8% |
+| a same-pitch repeat heard as one note | merged | 631 | 8.2% | 0.0091 | 6.3% |
 | wrong pitch on a short note | neighbour, other_pitch, loose | 1,365 | 17.7% | 0.0386 | 26.6% |
 | onset just outside tolerance | timing_late, timing_early | 657 | 8.5% | 0.0204 | 14.1% |
-| a held note re-attacked | split_sustain, fragment_* | 1,250 | 16.2% | 0.0194 | 13.4% |
+| a held note cut on a DETECTED ONSET | split_sustain | 453 | 5.9% | 0.0075 | 5.1% |
+| a held note cut on a PITCH EXCURSION | fragment_neighbour, fragment_other, fragment_octave | 797 | 10.3% | 0.0120 | 8.2% |
 | an attack split off at its own pitch | attack_transient, body_late | 410 | 5.3% | 0.0091 | 6.3% |
 | extra notes outside the line | between_*, bleed_* | 500 | 6.5% | 0.0066 | 4.5% |
-| gates and tracking | too_short, dropped*, unvoiced, gated, tracked_*, left_stem, not_picked | 249 | 3.2% | 0.0039 | 2.7% |
+| the gap between two of our notes (gates and tracking) | too_short, dropped*, unvoiced, gated, tracked_*, left_stem, not_picked | 787 | 10.2% | 0.0112 | 7.7% |
 | octave | octave | 141 | 1.8% | 0.0031 | 2.1% |
+
+The re-attacked held note is two rows because the second reading found two
+mechanisms under one name: 67% of `split_sustain` cuts sit on a corroborated
+onset tick (the detector made them; the fix is `corroborate_onsets`, and it
+competes with `merged`), while 89% of `fragment_neighbour` cuts sit on none
+(`_pitch_change_points` made them; the fix is the persistence rule, and it
+competes with `absorbed`). Under-segmentation is two rows for the same
+reason: the geometry is different (4.1), even if the threshold is the same.
 
 ### 3.1 By family
 
 **Horns (68 solos, 7,291 errors, mean note F1 0.8521; pooled precision
-0.860, recall 0.827).** The overall table is the horn table: absorbed 2,192
-(30.1%), neighbour 949 (13.0%), merged 656 (9.0%), fragment_neighbour 570
-(7.8%), split_sustain 452 (6.2%), timing_late 326, timing_early 286,
-between_notes 248, attack_transient 221, loose 204, other_pitch 191,
-fragment_other 186, body_late 184, octave 141, too_short 109,
-between_phrases 103, bleed_cross_stem 100, tracked_other 49, dropped 44,
-bleed_register 27, dropped_register 26, fragment_octave 17, unvoiced 4,
-tracked_octave 3, gated 2. Under-segmentation is 28.9% of the horn deficit,
-wrong pitch on a short note 27.5%, timing 13.8%, re-attacked held notes
-13.8%.
+0.860, recall 0.827).** The overall table is the horn table: neighbour 949
+(13.0%), squeezed 935 (12.8%), absorbed 798 (10.9%), merged 616 (8.4%),
+fragment_neighbour 570 (7.8%), split_sustain 452 (6.2%), too_short 339,
+timing_late 326, timing_early 286, between_notes 248, attack_transient 221,
+loose 204, other_pitch 191, fragment_other 186, body_late 184, tracked_other
+171, dropped 159, octave 141, between_phrases 103, bleed_cross_stem 100,
+dropped_register 41, bleed_register 27, fragment_octave 17, tracked_octave
+15, unvoiced 4, gated 2. Under-segmentation (absorbed + squeezed) is 17.6%
+of the horn deficit, wrong pitch on a short note 27.5%, timing 13.8%, the
+two held-note mechanisms 5.4% and 8.6%, the gap classes 7.4%.
 
 **Pianists (4 solos, 335 errors, mean note F1 0.8948; pooled precision
-0.963, recall 0.853).** `absorbed` alone is 249 of 335 (74.3%) and 63.8% of
-the piano deficit; timing 42 (12.5%, 22.0% of the deficit); everything else
-is single digits. Only 16 of the 335 are false positives — the second
+0.963, recall 0.853).** `absorbed` 148 and `squeezed` 74 are 222 of 335 (66%) and
+54.5% of the piano deficit; timing 42 (12.5%, 22.0% of the deficit);
+`not_picked` 22 (the slack cases the model heard); everything else is
+single digits. Only 16 of the 335 are false positives — the second
 opinion (M7b) has bought the precision it was built for, and what is left
 is recall. **n is 4** (Hancock ×3 at 265-286 bpm, Garland at 265), all
 transcribed from the Roformer's `piano` stem with the oracle consulted, and
@@ -209,19 +239,25 @@ completeness, not read.
 
 | tempo class | solos | mean F1 | errors | three largest |
 |---|---|---|---|---|
-| SLOW (< 80) | 3 | 0.9047 | 187 | absorbed 52, timing_early 24, merged 20 |
-| MEDIUM (112-140) | 17 | 0.8387 | 1,723 | absorbed 341, neighbour 216, fragment_neighbour 163 |
-| MEDIUM UP (140-180) | 22 | 0.8441 | 2,409 | absorbed 854, neighbour 250, merged 233 |
-| UP (≥ 180) | 31 | 0.8668 | 3,388 | absorbed 1,214, neighbour 488, merged 285 |
+| SLOW (< 80) | 3 | 0.9047 | 187 | squeezed 26, timing_early 24, split_sustain 20 |
+| MEDIUM (112-140) | 17 | 0.8387 | 1,723 | neighbour 216, fragment_neighbour 163, squeezed 152 |
+| MEDIUM UP (140-180) | 22 | 0.8441 | 2,409 | squeezed 365, absorbed 277, neighbour 250 |
+| UP (≥ 180) | 31 | 0.8668 | 3,388 | absorbed 538, neighbour 488, squeezed 475 |
 
-`absorbed` leads in every band. At MEDIUM the held-note classes
+Under-segmentation (absorbed + squeezed together) leads in every band, and
+`absorbed` proper — the run-through — grows with tempo while `squeezed`
+holds its share. At MEDIUM the held-note classes
 (fragment_neighbour, split_sustain, timing) take a larger share — longer
 notes, more chance to cut one — and at UP the short-note classes dominate.
 No MEDIUM SLOW solo is in the set.
 
 ## 4. The three largest classes, what a fix would move, and what it puts at risk
 
-### 4.1 `absorbed` — 2,461 (31.9%, 0.0342 of F1, 23.6% of the deficit)
+### 4.1 `absorbed` + `squeezed` — 1,966 (25.5%, 0.0276 of F1, 18.9% of the deficit)
+
+Written first about the single class `absorbed` (2,461 at the first pin);
+the numbers in this subsection's "What it is" and "What the frames say" are
+that population's, and the split that followed is at the end.
 
 **What it is.** A reference note whose onset falls inside a note of ours at
 another pitch. The reference notes are short and fast: median duration
@@ -255,10 +291,27 @@ Boy, 36-44% on the Cherokees, In 'n Out and Maiden Voyage. Its bootstrap sd
 (263, 11% of the count) is the largest of any class for this reason; a fix
 should be measured per solo, not on the mean.
 
-**What a fix would move.** The 1,362 short-run cases plus the 139
-filter cases are the target: 1,501 misses, 0.021 of F1 on the mean if all
-recovered (the reference's own 58 ms notes will not all become 60 ms notes
-of ours, so the realistic ceiling is lower). The candidate change is a
+**The split (second reading).** How much of our note is left after the
+missed onset: in 496 of 2,461 (20%) our note had already ENDED (the onset
+sat in the 50 ms cover slack — not covered at all now, and filed by the
+frame rules); in 1,017 (41%) fewer than 60 ms of ours remained
+(`squeezed`); in 948 (39%) our note ran on for 60 ms or more (`absorbed`
+proper). The reference note is 53 ms long in the first two groups and 67 ms
+in the third. Three fifths of the old class is therefore a boundary that
+landed late on a note with no room, not a note tracked through.
+
+**What a fix would move.** The document first named 1,501 misses (the
+short-run and filter buckets) as the target, 0.021 of F1. The second reading
+measured it (`docs/error-taxonomy-review.md`, section 3): re-segmenting the
+cached traces over 67 horns, a 50 ms persistence and floor cut the old class
+by a third in 66 of 67 solos and moved mean F1 by +0.0035 with 35 solos up
+and 32 down — the freed excursions land in `fragment_neighbour` and
+`between_notes` almost one for one. A threshold cannot separate the two
+populations because they are one population. The one configuration that is
+not a precision/recall trade is persistence 40 ms with the 60 ms floor kept
+(+0.0027, 41 up / 25 down, paired t 2.5), and it is small. The reachable set
+is also smaller than 1,501: 214 of the short-run cases are one or two frames,
+at the trace's resolution. The candidate change is a
 split threshold that scales with the local inter-onset interval — the same
 "the constant does not know the tempo" finding as D11, one stage earlier —
 rather than a lower constant: CLAUDE.md records that lowering
@@ -310,7 +363,12 @@ tracks the comping between notes.
 150 ms. Late: median 66 ms, p75 78 ms, p90 99 ms, on notes 169 ms long at
 the median. Early: median −62 ms, p25 −74 ms, on notes 118 ms long. Three
 quarters of both sit within 80 ms; the class is a cliff at the tolerance,
-not a tail of badly placed onsets. Late notes are the longer ones — a soft
+not a tail of badly placed onsets. **167 of the 657 (25%) sit inside the
+tolerance once the fit's local residual is taken out** (`align_resid`, the
+median offset of the matched notes within 3 s): that quarter is the
+alignment's, the rest is placement. The matched notes' own offsets have an
+inter-quartile range of 21 ms and 10.3% of them sit more than 30 ms off, so
+the 50 ms edge cuts through the tail of the same distribution. Late notes are the longer ones — a soft
 attack whose harmonic rise `corroborate_onsets` accepts a frame or two in —
 and early notes shorter.
 
@@ -333,8 +391,13 @@ drops.
   way through theirs at the median (p25 59-62%), 3-5 dB quieter than the
   matched notes around it, on reference notes 220-480 ms long — the decay
   and vibrato of a held note read as a new one, and `fragment_other` at
-  position 1.06 is the release after note-off. D2's finding stands: the
-  dip test that fixes these costs `merged` more than it saves.
+  position 1.06 is the release after note-off. **Two mechanisms** (second
+  reading, 2.2): `split_sustain` sits on a corroborated onset tick in 301 of
+  449 — the detector cut it — while `fragment_neighbour` does in 61 of 564
+  and `body_late` in 13 of 183 — the persistence rule cut those. D2's
+  finding stands for the first: the dip test that fixes it costs `merged`
+  more than it saves, and D25 records the detector's 49% recall that bounds
+  `merged` (33 of 646 sit on a tick, the control's rate).
 - **Attack transients** (224 + 186): a 90 ms note a step *under* the
   reference (−1 in 114, −2 in 45, +1 in 38, −12 in 9) followed 105 ms later
   by the body at the right pitch. A scoop, split off. One mechanism, two
@@ -348,8 +411,10 @@ drops.
 
 ### 4.5 The pianists
 
-`absorbed` is 249 of the 4 pianists' 335 errors, and the polyphonic model
-**heard 196 of those 249 (79%)** at the exact pitch within 100 ms. The
+`absorbed` + `squeezed` are 222 of the 4 pianists' 335 errors (148 + 74;
+249 under the first pin's single class), and the polyphonic model **heard
+204 of the 264 piano misses (77%)** at the exact pitch within 100 ms — 196
+of the old 249, and the 22 now filed `not_picked` are the slack cases. The
 line did not take them because a note of ours was already sounding there:
 `corroborate.fill_gaps` fills *holes*, by design, and these are not holes.
 That is D24 / issue #8 from the miss side — the recall the picker is
@@ -383,10 +448,20 @@ apart.
 - **The octave class is 1.8%** (141; 119 of them an octave *low*), not the
   headline it is on the hand-scored pianos (D4), because
   `fold_octave_outliers` and `snap_octaves` already handle it here.
-- **`not_picked` is 4**, not because the model rarely hears what we miss
-  (it hears 79% of the piano misses) but because those misses are covered
-  by a note of ours and `absorbed` fires first. Both readings are in the
-  table (`oracle_heard` on every piano miss).
+- **`not_picked` is 22** (4 at the first pin), not because the model
+  rarely hears what we miss (it hears 77% of the piano misses) but because
+  those misses are covered by a note of ours and `absorbed`/`squeezed` fire
+  first. Both readings are in the table (`oracle_heard` on every piano
+  miss).
+- **Confidence does not separate the false positives.** Median
+  `est_confidence` is 0.849 over the 1,936 false positives and 0.850 over
+  the 2,387 pairs. CLAUDE.md's AUC 0.830 was measured on the listener's
+  erasures, which are bleed; here the false positives are the line's own
+  fragments and specks, and the cue does not see them.
+- **The corroborated onset detector marks half of the real onsets** (D25):
+  a tick within 30 ms of 13,383 of 27,067 matched reference onsets, at a
+  5.2% false rate. `merged` is bounded by that recall; `split_sustain` is
+  its other side.
 - **The largest class is not a gate, a threshold or a stem: it is note
   length.** The shipped split thresholds (60 ms) sit at the length of 11%
   of the reference notes, and the measured "loosening the gates buys two
@@ -413,6 +488,19 @@ distribution is roughly the 95% band of "this class's size if the
 benchmark had been drawn differently"; a change that moves a class less
 than that would not be expected to hold on another set of solos.
 
+**The paired test (second reading).** `count_sd` answers "how big would
+this class be on a different set of solos", not "did this change move it":
+a fix that trimmed `absorbed` by a tenth in every solo (about 95 notes now,
+246 at the first pin) would sit inside 2 sd while being many standard
+errors of the per-solo mean. So the pin also carries every solo's class
+counts (aggregates, so they ship), and `compare` judges each mover twice:
+against `count_sd`, and against the bootstrap standard error of the sum of
+per-solo deltas over the solos both runs hold (`taxonomy.paired_delta_noise`),
+printing `paired: beyond 2 se` or `inside noise` with the count of solos up
+and down. A class that moved in one solo only reads as inside paired noise
+however far it moved; a class that moved the same way in every solo reads
+as beyond it however small the total.
+
 The scale it sets is not uniform: `absorbed`'s sd is 263 (11% of its
 count) because it concentrates in a few fast solos, `neighbour`'s 98
 (10%), while `dropped` (45) has sd 7 and `unvoiced` (5) sd 3. A fix that
@@ -433,15 +521,20 @@ rule text, and re-drawing with another `--seed` gives a fresh sample.
 
 ## 8. Open questions
 
-1. **Is `absorbed`'s 10-50 ms bucket recoverable at all?** The reference
-   notes are 58 ms long at the median. A segmenter can split on a 30 ms
-   excursion, but whether the 50 ms onset tolerance then matches the
-   result depends on where the split lands. The experiment is a
-   re-segmentation of the cached frame traces (no CREPE) scored through
-   this taxonomy, with `fragment_*` watched.
+1. **Is `absorbed`'s 10-50 ms bucket recoverable at all?** ANSWERED by the
+   second reading (`docs/error-taxonomy-review.md`, section 3): mostly not
+   by a threshold. Re-segmenting the cached traces over 67 horns, every
+   shorter constant trades the class for `fragment_neighbour` and
+   `between_notes` about one for one; persistence 40 ms with the 60 ms
+   floor kept is the one non-trade at +0.0027 mean F1. What remains open is
+   a cue that separates a short excursion that is a note from one that is
+   vibrato — the corroborated onset detector is not it (a tick under 19% of
+   the old class).
 2. **Is `neighbour` a decode problem or a CREPE resolution problem?** The
-   raw f0 was at the reference pitch 17% of the time. A median-filter
-   sweep answers the first half without CREPE; the step-cost half needs it.
+   raw f0 was at the reference pitch 17% of the time. The median-filter
+   half is ANSWERED (`docs/error-taxonomy-review.md`, 3b.1): a 30 ms filter
+   leaves `neighbour` at 957 against 949 and costs 0.0018 of F1 over 68
+   horns. What remains is the step-cost half, which needs CREPE.
 3. **The 466 `absorbed` cases where the tracker never reached the pitch**
    and the 52 `tracked_other`: are these the comping (a piano voice under
    the horn's note) or the horn itself? The cross-stem energy test only ran
@@ -450,8 +543,8 @@ rule text, and re-drawing with another `--seed` gives a fresh sample.
    ms. Whether the notater cares about 30 ms is a quantize question (grid
    slack is 20 ms); the benchmark's tolerance is plan §6's and stays.
 5. **The pairing's pitch preference** changes 103 pairs. Neither reading is
-   wrong; the table carries both. A second analysis should say which it
-   used.
+   wrong; the table carries both. The second analysis used the same-pitch
+   reading throughout and did not re-cut the 103.
 6. **Piano n = 4.** Nothing in section 4.5 should be acted on without the
    hand-scored pianos in the same instrument, which need the MuseScore
    references placed in time — a different harness, deliberately not
@@ -468,9 +561,12 @@ rule text, and re-drawing with another `--seed` gives a fresh sample.
    weight; the Pareto counts it once.
 3. **Pairing window 150 ms, same-pitch preference 50 ms.** Three times the
    match tolerance; the alternative is reported (103 pairs).
-4. **"Covers" allows 50 ms after our note-off.** Our durations are the
-   gated extent of a pitch and overrun (CLAUDE.md); a reference onset in
-   that slack is still under our note.
+4. **"Covers" allows 50 ms after a REFERENCE note-off for a false positive
+   (a release), and nothing after OUR note-off for a miss.** The first pin
+   allowed the slack for misses too, on the argument that our durations
+   overrun; the second reading found 496 misses sitting in it — a gap
+   between two of our notes, which the frame rules describe better — and
+   the rule was changed and re-pinned.
 5. **Frame evidence is the review cache's, read by key.** Another session
    changed `review.cached_review` on 2026-09-07 to refuse a pianist's
    payload that lacks a candidate pool; this script reads the payload by

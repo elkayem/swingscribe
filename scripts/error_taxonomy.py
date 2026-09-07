@@ -65,6 +65,12 @@ One row per error. Columns, in order:
                     misses: the note of ours covering the onset - its pitch,
                     pitch minus the reference pitch, whether mir_eval matched
                     it to some other reference note, and its duration
+    covered_by_onset, coverer_remaining
+                    that note's onset, and how much of it is left after the
+                    missed onset (>= 0.06 s is `absorbed`, less is `squeezed`)
+    align_resid, dt_residual
+                    pairs: the fit's local residual (median onset offset of the
+                    matched notes within 3 s) and dt with it taken out
     inside_ref_pitch, inside_ref_onset, inside_ref_duration
                     fps: the reference note sounding at our onset
     body_dt         attack_transient pairs: the body note's onset minus the
@@ -145,10 +151,14 @@ COLUMNS = [
     "est_loud_rel_db",
     "dt",
     "dpitch",
+    "align_resid",
+    "dt_residual",
     "covered_by_pitch",
     "covering_dpitch",
     "covered_by_matched",
     "covered_by_duration",
+    "covered_by_onset",
+    "coverer_remaining",
     "inside_ref_pitch",
     "inside_ref_onset",
     "inside_ref_duration",
@@ -539,6 +549,23 @@ def table_rows(name, solo, info, family, reference, estimate, errors, evidence):
 # ── aggregation, printing, pinning ────────────────────────────────────────
 
 
+def timing_residual_of(results):
+    """Of the timing pairs, how many the alignment's own local residual
+    explains: dt inside the tolerance once `align_resid` is taken out."""
+    timing = [
+        row
+        for r in results
+        for row in r["errors"].rows
+        if row.cls in ("timing_late", "timing_early")
+    ]
+    explained = sum(
+        1
+        for row in timing
+        if abs(row.evidence.get("dt_residual", 1.0)) <= taxonomy.ONSET_TOLERANCE_S
+    )
+    return {"pairs": len(timing), "explained_by_residual": explained}
+
+
 def aggregate(results, resamples=1000, seed=0):
     def counts_of(subset):
         merged = {}
@@ -586,6 +613,7 @@ def aggregate(results, resamples=1000, seed=0):
             for cls, sd in taxonomy.bootstrap_noise(per_solo, resamples, seed).items()
         },
         "pairs_alternative_differ": sum(r["errors"].pairs_alternative_differ for r in results),
+        "timing_residual": timing_residual_of(results),
         "solos": {
             r["name"]: {
                 "melid": r["melid"],
@@ -640,6 +668,12 @@ def render(agg):
     )
     unclassified = agg["overall"]["counts"].get("unclassified", 0)
     print(f"Unclassified: {unclassified} of {agg['overall']['n_errors']} errors.")
+    tr = agg.get("timing_residual")
+    if tr and tr["pairs"]:
+        print(
+            f"Timing: {tr['explained_by_residual']} of {tr['pairs']} timing pairs sit inside the "
+            f"tolerance once the fit's local residual is taken out (alignment, not placement)."
+        )
 
 
 def flatten(agg):
@@ -654,6 +688,24 @@ def flatten(agg):
     flat["n_solos"] = agg["overall"]["n_solos"]
     flat["n_errors"] = agg["overall"]["n_errors"]
     return flat
+
+
+def paired_by_family(pinned_solos, current_solos):
+    """`taxonomy.paired_delta_noise` over all solos and per family, from the
+    per-solo counts both the pin and this run carry; {} when either lacks them."""
+    if not pinned_solos or not current_solos:
+        return {}
+    before = {name: s["counts"] for name, s in pinned_solos.items()}
+    after = {name: s["counts"] for name, s in current_solos.items()}
+    out = {"all": taxonomy.paired_delta_noise(before, after)}
+    families = {s.get("family") for s in current_solos.values()} - {None}
+    for family in families:
+        names = {n for n, s in current_solos.items() if s.get("family") == family}
+        out[family] = taxonomy.paired_delta_noise(
+            {n: c for n, c in before.items() if n in names},
+            {n: c for n, c in after.items() if n in names},
+        )
+    return out
 
 
 def compare(agg):
@@ -681,10 +733,26 @@ def compare(agg):
         print(f"\n== Taxonomy baseline: all {len(current)} counts unchanged ==")
         return 0
     print("\n== Taxonomy baseline: CHANGED ==")
+    # The paired reading: per-solo deltas over the solos both runs hold.
+    # `count_sd` says how big a class would be on another set of solos; the
+    # paired se says whether THIS change moved it (docs/error-taxonomy-review.md).
+    paired = paired_by_family(pinned.get("solos"), agg.get("solos"))
     for key, was, now in moved:
         cls = key.rsplit("/", 1)[-1]
         sd = noise.get(cls, {}).get("count_sd", 0.0)
         flag = "  beyond 2 sd" if abs(now - was) > 2 * sd else ""
+        scope = (
+            "all"
+            if key.startswith("count/")
+            else key.split("/")[1]
+            if key.startswith("family/")
+            else None
+        )
+        stats = paired.get(scope, {}).get(cls) if scope else None
+        if stats:
+            verdict = "beyond 2 se" if abs(stats["delta"]) > 2 * stats["se"] else "inside noise"
+            up, down, n = stats["up"], stats["down"], stats["n_solos"]
+            flag += f"  paired: {verdict} (se {stats['se']:.1f}, up {up} / down {down} of {n})"
         print(f"  {key:<40s} {was:6d} -> {now:6d}  ({now - was:+d}, sd {sd:.1f}){flag}")
     for key in vanished:
         print(f"  {key:<40s} {pinned['flat'][key]:6d} -> gone")
@@ -731,6 +799,8 @@ def write_spotcheck(results, path, n, seed):
                 k: r[k]
                 for k in (
                     "covered_by_pitch",
+                    "coverer_remaining",
+                    "align_resid",
                     "inside_ref_pitch",
                     "max_periodicity",
                     "energetic_frac",
@@ -812,6 +882,13 @@ def main():
             "tempo": agg["tempo"],
             "noise": agg["noise"],
             "pairs_alternative_differ": agg["pairs_alternative_differ"],
+            "timing_residual": agg.get("timing_residual"),
+            # Per-solo CLASS COUNTS, not notes: aggregates, so they can ship.
+            # They are what the paired test in `compare` reads.
+            "solos": {
+                name: {"family": s["family"], "note_f1": s["note_f1"], "counts": s["counts"]}
+                for name, s in agg["solos"].items()
+            },
             "flat": flatten(agg),
         }
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
