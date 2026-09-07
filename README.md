@@ -53,6 +53,9 @@ cached and runs the missing one as a background job with real progress. The
 audition screen mixes every stem sample-locked, so switching between the isolated
 stem and the original mix mid-phrase compares the same instant.
 
+There is a **[user guide](src/swingscribe/gui/guide/user-guide.md)** for the
+GUI; the Help button in the app's top bar opens the same guide in a new tab.
+
 It also draws the bar grid over the waveform — bar lines, bar numbers, chorus
 markers, and snap-to-bar for placing loop points — so you can see whether the
 grid the transcription will quantize against actually matches the tune before

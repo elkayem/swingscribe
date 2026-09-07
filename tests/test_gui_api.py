@@ -68,6 +68,20 @@ def test_index_and_static_are_served(world):
     assert client.get("/static/style.css").status_code == 200
 
 
+def test_help_opens_the_user_guide(world):
+    """The Help button opens /guide/ in a new tab: the page that renders the
+    Markdown guide, and the guide itself beside it. Both are served from the
+    package, so a wheel install has them too."""
+    client = world["client"]
+    assert 'href="/guide/"' in client.get("/").text
+    page = client.get("/guide/")
+    assert page.status_code == 200, page.text
+    assert "user-guide.md" in page.text
+    guide = client.get("/guide/user-guide.md")
+    assert guide.status_code == 200
+    assert "# SwingScribe" in guide.text
+
+
 def test_stylesheet_makes_the_hidden_attribute_win(world):
     """The UI shows and hides panels with the `hidden` attribute, but the
     browser's `[hidden] { display: none }` is a user-agent rule that any author

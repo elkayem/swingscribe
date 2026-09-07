@@ -130,6 +130,7 @@ const overview = new WaveView($('wave-overview'), {
 
 const detail = new WaveView($('wave-detail'), {
   selectable: true,
+  dragPans: true,   // only the A/B handles change the selection here
   onSeek: (t) => seekTo(t),
   onSelect: (a, b, done) => updateSelection(a, b, done),
   onWindow: () => onDetailWindowChanged(),
@@ -140,16 +141,23 @@ const detail = new WaveView($('wave-detail'), {
 });
 
 const stemWave = new WaveView($('wave-stem'), {
+  dragPans: true,
+  onWindow: () => renderAuditionRange(),
   onSeek: (t) => {
     if (!state.selection) return;
+    activate('stem');
     stemEngine.seek((t - state.selection.a) / state.stemRate);
-    state.active = 'stem';
   },
 });
 
 const pianoRoll = new PianoRoll($('pianoroll'), $('lane-f0'), $('lane-gate'), {
-  onSelect: (note, index) => renderInspector(note, index),
-  onSelectReference: (index) => renderReferenceInspector(index),
+  // Inspecting a note sounds it too, as the Edit tool does: the question a
+  // click asks — is this the note that was played? — is answered by ear.
+  onSelect: (note, index) => { renderInspector(note, index); sound(note); },
+  onSelectReference: (index) => {
+    renderReferenceInspector(index);
+    sound(state.ground?.reference_notes[index]);
+  },
   onSeek: (t) => seekReviewTo(t),
   onView: (view, spanWidth) => renderRollRange(view, spanWidth),
   onToggleSilence: (index) => toggleSilence(index),
@@ -352,9 +360,12 @@ async function loadTrack(track) {
 
   const remembered = track.state ?? {};
   const region = remembered.region;
+  // A track opened for the first time starts with the whole of it selected —
+  // the listener narrows the span to the solo from there, and nothing they
+  // have not chosen yet is hidden off the edge of the Detail view.
   state.selection = Array.isArray(region) && region.length === 2 && region[1] > region[0]
     ? { a: region[0], b: Math.min(region[1], track.duration) }
-    : { a: 0, b: Math.min(30, track.duration) };
+    : { a: 0, b: track.duration };
   state.model = remembered.model ?? track.models.find((m) => m.ready)?.model
     ?? track.models[0]?.model;
   state.leadStem = remembered.stem ?? null;
@@ -504,14 +515,26 @@ function seekTo(t) {
   detail.setPlayhead(t);
 }
 
+/* Make one section's transport the live one and silence the other two.
+   Three engines share the speakers, so a play button that pauses only one of
+   the others lets the review's rendering keep sounding under the original
+   mix — which is what "play in section 1 played the isolated stem" was. */
+function activate(which) {
+  state.active = which;
+  if (which !== 'mix') mix.engine?.pause();
+  if (which !== 'stem') stemEngine.pause();
+  if (which !== 'review') reviewEngine.pause();
+}
+
 function togglePlay() {
   if (state.active === 'review' && reviewEngine.duration) {
+    activate('review');
     reviewEngine.toggle();
   } else if (state.active === 'stem' && stemEngine.duration) {
+    activate('stem');
     stemEngine.toggle();
   } else {
-    state.active = 'mix';
-    stemEngine.pause();
+    activate('mix');
     mix.engine?.toggle();
   }
   refreshPlayButtons();
@@ -939,7 +962,7 @@ async function loadAudition() {
   if (!state.mixer.size) seedMixerFromAbMode();
   stemEngine.reset(a, state.stemRate);
   renderMixer();
-  $('audition-range').textContent = `${clock(a, false)}–${clock(b, false)} · ${(b - a).toFixed(1)}s`;
+  renderAuditionRange();
   $('a-time-total').textContent = clock(b - a, false);
 
   // The original mix and the lead stem always load, so the A/B switch is
@@ -966,6 +989,18 @@ async function loadAudition() {
   invalidateReview();
 }
 
+/* The span, and the slice of it on screen when the stem view is zoomed in. */
+function renderAuditionRange() {
+  if (!state.selection) return;
+  const { a, b } = state.selection;
+  const span = `${clock(a, false)}–${clock(b, false)} · ${(b - a).toFixed(1)}s`;
+  const { start, end } = stemWave.win;
+  const zoomed = end - start < (b - a) - 0.01;
+  $('audition-range').textContent = zoomed
+    ? `${span} · showing ${clock(start, false)}–${clock(end, false)}`
+    : span;
+}
+
 async function drawStemOverlay(token) {
   const { a, b } = state.selection;
   const base = `/api/tracks/${state.track.id}/peaks?start=${a}&end=${b}&buckets=2000`;
@@ -975,7 +1010,11 @@ async function drawStemOverlay(token) {
       api(`${base}&stem=${encodeURIComponent(state.leadStem)}&model=${state.model}`),
     ]);
     if (token !== state.auditionToken) return;
+    // The view zooms and pans inside the span and no further: outside it the
+    // stem is not on screen, and the peaks fetched cover only the span.
+    stemWave.setBounds(a, b);
     stemWave.setWindow(a, b, { silent: true });
+    renderAuditionRange();
     stemWave.setPeaks(mixPeaks);
     stemWave.setOverlay(leadPeaks);
   } catch (error) {
@@ -1180,7 +1219,10 @@ function watchJob(jobId, onProgress) {
         return;
       }
       onProgress(job);
-      if (job.state === 'done' || job.state === 'error') {
+      // Cancelled is terminal too. Leaving it out kept the poll running for
+      // ever on a job that had already stopped, with the chip stuck on
+      // "cancelling…" and the Separate button disabled until a reload.
+      if (job.state === 'done' || job.state === 'error' || job.state === 'cancelled') {
         clearInterval(timer);
         resolve(job);
       }
@@ -1399,9 +1441,7 @@ function seekReviewTo(t) {
   pianoRoll.setPlayhead(clamped);
   $('r-time-now').textContent = clock(clamped - a);
   if (!reviewEngine.duration) return;  // marker still moves before the audio lands
-  state.active = 'review';
-  mix.engine?.pause();
-  stemEngine.pause();
+  activate('review');
   reviewEngine.seek((clamped - a) / state.reviewRate);
   refreshPlayButtons();
 }
@@ -1472,7 +1512,9 @@ function renderInspector(note, index) {
     `<div class="inspector-head">` +
     `<span class="pitch">${midiName(note.pitch)} <span class="muted">(${note.pitch})</span></span>` +
     `<span class="timing">${clock(note.onset)} · ${(note.duration * 1000).toFixed(0)}ms · conf ${note.confidence.toFixed(2)}</span>` +
+    playButtonHtml() +
     `</div><div class="inspector-why"></div><div class="inspector-note"></div>`;
+  bindPlayButton(body, note);
   const why = body.querySelector('.inspector-why');
   const chip = (text, kind) => {
     const el = document.createElement('span');
@@ -1627,6 +1669,16 @@ function toggleSilence(index) {
   else state.silenced.add(index);
   sound(state.review?.notes[index]);
   afterEdit();
+}
+
+/* The inspector's "hear it again" — the same tone the click played, for a
+   note of ours or of the hand transcription alike. */
+function playButtonHtml() {
+  return '<button class="chip inspector-play" type="button" title="Sound this pitch again">♪ Play</button>';
+}
+
+function bindPlayButton(body, note) {
+  body.querySelector('.inspector-play')?.addEventListener('click', () => sound(note));
 }
 
 /* The Edit tool sounds the note it just touched: a plain tone at its pitch,
@@ -1971,7 +2023,9 @@ function renderReferenceInspector(index) {
     `<div class="inspector-head">` +
     `<span class="pitch">${midiName(note.pitch)} <span class="muted">(${note.pitch})</span>${written}</span>` +
     `<span class="timing">notated · bar ${note.bar} · ~${clock(note.x)}</span>` +
+    playButtonHtml() +
     `</div><div class="inspector-why"></div><div class="inspector-note"></div>`;
+  bindPlayButton(body, note);
   const why = body.querySelector('.inspector-why');
   const chip = (text, kind) => {
     const el = document.createElement('span');
@@ -2388,11 +2442,14 @@ $('line-select').addEventListener('change', async (event) => {
 
 $('r-restart').addEventListener('click', () => {
   if (!reviewEngine.duration) return;
-  state.active = 'review';
-  mix.engine?.pause();
-  stemEngine.pause();
-  restartFromA();
-  refreshPlayButtons();
+  activate('review');
+  restartFromStart();
+});
+
+$('a-restart').addEventListener('click', () => {
+  if (!stemEngine.duration) return;
+  activate('stem');
+  restartFromStart();
 });
 
 /* Zoom about the playhead when it is on screen — that is what you are looking
@@ -2405,6 +2462,18 @@ for (const button of document.querySelectorAll('[data-roll-zoom]')) {
   });
 }
 $('roll-fit').addEventListener('click', () => pianoRoll.fit());
+
+$('stem-fit').addEventListener('click', () => {
+  if (state.selection) stemWave.setWindow(state.selection.a, state.selection.b);
+});
+for (const button of document.querySelectorAll('[data-stem-zoom]')) {
+  button.addEventListener('click', () => {
+    const factor = button.dataset.stemZoom === 'in' ? 0.6 : 1.7;
+    const centre = (stemWave.win.start + stemWave.win.end) / 2;
+    const span = stemWave.span * factor;
+    stemWave.setWindow(centre - span / 2, centre + span / 2);
+  });
+}
 
 for (const button of $('tool-group').querySelectorAll('button')) {
   button.addEventListener('click', () => setTool(button.dataset.tool));
@@ -2425,10 +2494,9 @@ $('browse-path').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') browseTo(event.target.value.trim());
 });
 
-$('play').addEventListener('click', () => { state.active = 'mix'; togglePlay(); });
+$('play').addEventListener('click', () => { activate('mix'); togglePlay(); });
 $('a-play').addEventListener('click', () => {
-  state.active = 'stem';
-  mix.engine?.pause();
+  activate('stem');
   stemEngine.toggle();
   refreshPlayButtons();
 });
@@ -2506,9 +2574,7 @@ $('job-cancel').addEventListener('click', async () => {
 $('transcribe-btn').addEventListener('click', startTranscribe);
 
 $('r-play').addEventListener('click', () => {
-  state.active = 'review';
-  mix.engine?.pause();
-  stemEngine.pause();
+  activate('review');
   reviewEngine.toggle();
   refreshPlayButtons();
 });
@@ -2550,7 +2616,7 @@ $('snap-toggle').addEventListener('click', () => {
   persist();
 });
 
-$('restart').addEventListener('click', () => restartFromA());
+$('restart').addEventListener('click', () => { activate('mix'); restartFromStart(); });
 
 $('form-reset').addEventListener('click', async () => {
   state.formStart = null;
@@ -2671,7 +2737,7 @@ document.addEventListener('keydown', (event) => {
       break;
     case 'enter':
       event.preventDefault();
-      restartFromA();
+      restartFromStart();
       break;
     case '[':
       nudge(state.focusEdge, shift ? -0.01 : -0.1);
@@ -2692,10 +2758,14 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
-/* Back to A and play. The transport plays from the playhead, which is what you
-   want while hunting for a boundary — but once the span is set, "again from the
-   top" is the gesture you reach for over and over. */
-function restartFromA() {
+/* Back to the start and play. The transport plays from the playhead, which
+   is what you want while hunting for a boundary — but once the span is set,
+   "again from the top" is the gesture you reach for over and over. Each
+   section has its own start: the review and the stem are rendered over the
+   span, so theirs is A; the mix's is A while Loop A/B confines playback to
+   the selection, and the top of the track when it is off — the whole point
+   of switching it off is to listen around the span without moving it. */
+function restartFromStart() {
   if (!state.selection) return;
   if (state.active === 'review' && reviewEngine.duration) {
     reviewEngine.seek(0);
@@ -2706,7 +2776,7 @@ function restartFromA() {
     stemEngine.seek(0);
     if (!stemEngine.playing) stemEngine.play(0);
   } else {
-    seekTo(state.selection.a);
+    seekTo(state.loop ? state.selection.a : 0);
     mix.engine?.play();
   }
   refreshPlayButtons();

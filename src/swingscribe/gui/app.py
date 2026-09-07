@@ -27,6 +27,9 @@ from swingscribe.gui import musicxml as gui_musicxml
 from swingscribe.model import NoteEvent
 
 STATIC_DIR = Path(__file__).parent / "static"
+# The user guide: a Markdown file and the page that renders it, opened in a
+# new tab by the Help button. Kept in the package so a wheel install serves it.
+GUIDE_DIR = Path(__file__).parent / "guide"
 
 # Decimal places span bounds are rounded to before they reach a cache key.
 # Defined in review.py, beside the key it feeds, so a batch tool can produce
@@ -200,6 +203,8 @@ def create_app(config: Config) -> FastAPI:
         )
 
     app.mount("/static", RevalidatingStatic(directory=STATIC_DIR), name="static")
+    # html=True serves guide/index.html at /guide/ itself.
+    app.mount("/guide", RevalidatingStatic(directory=GUIDE_DIR, html=True), name="guide")
 
     # ── library ─────────────────────────────────────────────────────────────
 

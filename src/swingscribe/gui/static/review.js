@@ -87,9 +87,10 @@ export class PianoRoll {
       el.addEventListener('pointermove', (e) => this._onPointerMove(e));
       el.addEventListener('pointerup', (e) => this._onPointerUp(e, el));
       el.addEventListener('pointercancel', () => { this._drag = null; });
-      // Plain wheel is left to the page: this canvas sits partway down a
-      // scrolling document, and stealing the scroll to pan a 220px strip is
-      // worse than not having the gesture. Modified wheel zooms.
+      // The same gestures as the waveforms: wheel zooms about the pointer,
+      // shift-wheel (or a trackpad's sideways swipe) pans. The roll takes the
+      // wheel for itself, so the page does not scroll while the pointer is
+      // over it — the price of one rule that holds on every view.
       el.addEventListener('wheel', (e) => this._onWheel(e, el), { passive: false });
     }
     this._observer = new ResizeObserver(() => this.draw());
@@ -364,10 +365,61 @@ export class PianoRoll {
       ctx.fillStyle = isChorus ? chorusColor : downColor;
       ctx.fillRect(x - 0.5, 0, isChorus ? 1.5 : 1, h);
       ctx.globalAlpha = 1;
-      if (number >= 1) {
+    }
+  }
+
+  /* The beat strip along the roll's bottom edge, drawn the way the waveforms
+     draw theirs (waveform.js _drawBeats) so the grid reads the same on every
+     view: a tick per beat, a stub for a beat the repair pass inferred, a dot
+     and a number at each bar, a larger gold dot at a chorus start. Bars
+     before bar 1 are faint and unnumbered. Density-guarded the same way. */
+  _drawBeatStrip(ctx, w, h) {
+    const grid = this.beats;
+    if (!grid) return;
+    const beats = grid.beats || [];
+    if (beats.length < 2) return;
+    const beatColor = this._css('--beat', '#5f6c8c');
+    const downColor = this._css('--downbeat', '#9fb4ff');
+    const chorusColor = this._css('--chorus', '#ffd479');
+    const chorus = new Set(grid.chorus_bars || []);
+    const barSet = new Map(grid.bars.map(([t, n]) => [t, n]));
+    const pxPerSec = w / Math.max(1e-6, this.viewWidth);
+    const beatPx = pxPerSec * ((beats[beats.length - 1] - beats[0]) / (beats.length - 1));
+    const barPx = beatPx * (grid.pulses_per_bar || 4);
+    const visible = (t) => t >= this.view.a && t <= this.view.b;
+
+    if (beatPx >= 5) {
+      for (let i = 0; i < beats.length; i++) {
+        const t = beats[i];
+        if (!visible(t) || barSet.has(t)) continue;
+        const x = this.timeToX(t, w) - 0.5;
+        ctx.fillStyle = beatColor;
+        if (grid.implied && grid.implied[i]) {
+          ctx.globalAlpha = 0.55;
+          ctx.fillRect(x, h - 6, 1, 2);
+          ctx.globalAlpha = 1;
+        } else {
+          ctx.fillRect(x, h - 8, 1, 6);
+        }
+      }
+    }
+
+    if (barPx >= 4) {
+      const labelled = barPx >= 44;
+      ctx.font = '9px ui-monospace, Menlo, Consolas, monospace';
+      ctx.textAlign = 'left';
+      for (const [t, number] of barSet) {
+        if (!visible(t)) continue;
+        const x = this.timeToX(t, w);
+        const isChorus = chorus.has(t);
+        const preForm = number < 1;
         ctx.fillStyle = isChorus ? chorusColor : downColor;
-        ctx.font = '9px ui-monospace, Menlo, Consolas, monospace';
-        ctx.fillText(String(number), x + 3, 10);
+        ctx.globalAlpha = preForm ? 0.4 : 1;
+        ctx.beginPath();
+        ctx.arc(x, h - 7, isChorus ? 4 : 3, 0, 2 * Math.PI);
+        ctx.fill();
+        if (labelled && !preForm) ctx.fillText(String(number), x + 6, h - 4);
+        ctx.globalAlpha = 1;
       }
     }
   }
@@ -510,6 +562,7 @@ export class PianoRoll {
     });
 
     this._drawGroundTruth(ctx, w, h, noteH);
+    this._drawBeatStrip(ctx, w, h);
     this._drawBand(ctx);
     this._drawPlayhead(ctx, w, h);
   }
@@ -773,11 +826,17 @@ export class PianoRoll {
   }
 
   _onWheel(event, el) {
-    if (!event.ctrlKey && !event.metaKey && !event.shiftKey) return;
     event.preventDefault();
+    if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+      const amount = (event.shiftKey ? event.deltaY : event.deltaX) * 0.0015 * this.viewWidth;
+      this.setWindow(this.view.a + amount, this.view.a + amount + this.viewWidth);
+      return;
+    }
     const rect = el.getBoundingClientRect();
     const at = this.xToTime(event.clientX - rect.left, rect.width);
-    this.zoomBy(event.deltaY > 0 ? 1.2 : 1 / 1.2, at);
+    // Same curve as the waveforms', so a notch of the wheel means the same
+    // thing on every view.
+    this.zoomBy(Math.exp(event.deltaY * 0.0015), at);
   }
 
   _select(event) {

@@ -83,6 +83,20 @@ button {
 button:hover:not(:disabled) { background: #252939; border-color: #39405a; }
 button:disabled { opacity: 0.4; cursor: default; }
 button.ghost { background: transparent; }
+/* A link dressed as a button: the Help link opens the guide in a new tab,
+   which is a navigation and so an anchor, but it sits among buttons. */
+a.button-link {
+  font: inherit; color: var(--text); text-decoration: none;
+  background: transparent; border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 6px 12px; line-height: 1.15;
+  transition: background 90ms, border-color 90ms;
+}
+a.button-link:hover { background: #252939; border-color: #39405a; }
+.gesture-hint { font-size: 11px; margin-left: 6px; text-transform: none; letter-spacing: normal; white-space: nowrap; }
+/* In a narrow window the label row has no room for it; the tooltips on the
+   zoom chips say the same thing. */
+@media (max-width: 1100px) { .gesture-hint { display: none; } }
+.handle-word { color: var(--accent); font-weight: 600; }
 button.chip { padding: 3px 9px; font-size: 12px; border-radius: 5px; }
 button.chip.active, button.toggle.active {
   background: var(--accent-dim); border-color: var(--accent); color: var(--accent);
@@ -208,7 +222,9 @@ main { padding: 18px; display: flex; flex-direction: column; gap: 18px; }
   touch-action: none; user-select: none;
 }
 .wave.overview { height: 84px; cursor: crosshair; }
-.wave.detail { height: 150px; cursor: crosshair; }
+/* Grab, not crosshair: on the detail view a drag pans; only the handles select. */
+.wave.detail { height: 150px; cursor: grab; }
+.wave.detail:active { cursor: grabbing; }
 .wave.stemwave { height: 120px; cursor: pointer; }
 .wave canvas { display: block; width: 100%; height: 100%; }
 
@@ -486,6 +502,7 @@ select {
 .inspector-head { display: flex; align-items: baseline; gap: 12px; }
 .inspector-head .pitch { font: 16px var(--mono); color: var(--lead); }
 .inspector-head .timing { font: 12px var(--mono); color: var(--muted); }
+.inspector-head .inspector-play { margin-left: auto; }
 .inspector-why { display: flex; flex-wrap: wrap; gap: 8px; }
 .why-chip {
   font: 11.5px var(--mono); padding: 3px 8px; border-radius: 5px;

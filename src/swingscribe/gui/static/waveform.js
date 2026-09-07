@@ -27,6 +27,11 @@ export class WaveView {
    *   onBeatClick(t)        – a beat marker was clicked: make it the downbeat
    *   onFormClick(t)        – shift-click on a marker: the form starts here
    *   onWindowDrag(start,w) – the overview's window box was slid
+   *   dragPans              – a drag that is not on an A/B handle pans the
+   *                           window instead of drawing or moving the
+   *                           selection (needs onWindow). The Detail view:
+   *                           only its handles may change the selection, so a
+   *                           stray drag there cannot undo a placed span.
    */
   constructor(el, opts = {}) {
     this.el = el;
@@ -441,10 +446,20 @@ export class WaveView {
     const rect = this.el.getBoundingClientRect();
     const startX = event.clientX - rect.left;
     const startTime = this.xToTime(startX);
-    const pan = event.shiftKey && this.opts.onWindow;
+    const hit = this._hitHandle(startX);
+    const onEdge = hit === 'a' || hit === 'b';
+    // Shift-drag pans anywhere the view can pan; with `dragPans` so does a
+    // plain drag off the handles.
+    const pan = Boolean(this.opts.onWindow) && (event.shiftKey || (this.opts.dragPans && !onEdge));
     const slide = !pan && this._hitWindowBox(startX);
-    const grabbed = pan || slide ? null : this._hitHandle(startX);
+    const grabbed = pan || slide ? null : hit;
     const windowAtStart = this.windowBox ? { ...this.windowBox } : null;
+    // Seconds per pixel at the moment the drag began. A pan must measure its
+    // delta against this, not against the window it has already moved:
+    // re-reading the pointer's time from the shifted window fed the previous
+    // step back into the next one, so the view lurched half-way and jittered.
+    const secondsPerPx = this.span / Math.max(1, rect.width);
+    const spanAtStart = this.span;
 
     if ((grabbed === 'a' || grabbed === 'b') && this.opts.onEdgeFocus) {
       this.opts.onEdgeFocus(grabbed);
@@ -471,8 +486,8 @@ export class WaveView {
       const now = this.xToTime(x);
 
       if (pan) {
-        const delta = now - startTime;
-        this.setWindow(winStart - delta, winStart - delta + this.span);
+        const start = winStart - (x - startX) * secondsPerPx;
+        this.setWindow(start, start + spanAtStart);
         return;
       }
       if (slide) {

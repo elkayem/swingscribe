@@ -12,6 +12,7 @@
   <div class="brand">SwingScribe</div>
   <div class="track-title" id="track-title">No track loaded</div>
   <button class="ghost" id="open-picker">Open track…</button>
+  <a class="ghost button-link" id="help-link" href="/guide/" target="_blank" rel="noopener" title="The user guide, in a new tab">Help</a>
 </header>
 
 <!-- ── Screen 1: load & navigate ─────────────────────────────────────────── -->
@@ -59,7 +60,7 @@
   <section class="panel" id="panel-select">
     <div class="panel-head">
       <h2><span class="step">1</span> Select the span</h2>
-      <div class="panel-note">Drag on the overview to select. Tap <kbd>A</kbd> / <kbd>B</kbd> while it plays. <kbd>D</kbd> sets the downbeat at the playhead, <kbd>F</kbd> starts the form (bar 1) there. Or click a beat dot / shift-click for the form. Drag the overview box to slide.</div>
+      <div class="panel-note">Drag on the overview to select. On the detail view, drag the <span class="handle-word">A</span>/<span class="handle-word">B</span> handles to move an edge, or tap <kbd>A</kbd> / <kbd>B</kbd> while it plays; clicking elsewhere only moves the playhead. <kbd>D</kbd> sets the downbeat at the playhead, <kbd>F</kbd> starts the form (bar 1) there. Or click a beat dot / shift-click for the form.</div>
     </div>
 
     <div class="wave-block">
@@ -70,6 +71,7 @@
     <div class="wave-block">
       <div class="wave-label">
         Detail <span class="muted" id="detail-range"></span>
+        <span class="muted gesture-hint">scroll to zoom · shift-scroll or drag to pan</span>
         <span class="spacer"></span>
         <span class="muted beats-info" id="beats-info" hidden></span>
         <button class="chip" id="beats-toggle" title="Show the bar grid transcription will quantize against">Beats</button>
@@ -96,9 +98,9 @@
 
     <div class="transport">
       <button class="play" id="play" title="Play / pause (Space)">▶</button>
-      <button class="restart" id="restart" title="Play from A, the start of the selection (Enter)">⇤ A</button>
+      <button class="restart" id="restart" title="Play from the start — of the selection while Loop A/B is on, of the track otherwise (Enter)">⇤ Start</button>
       <div class="time"><span id="time-now">0:00.00</span><span class="sep">/</span><span id="time-total">0:00</span></div>
-      <button class="toggle" id="loop" title="Loop the selection (L)">Loop</button>
+      <button class="toggle" id="loop" title="Play only the A/B selection, looped. Off, the whole track plays freely — listen around the span without moving it (L)">Loop A/B</button>
       <div class="rate-group" id="mix-rate">
         <button class="chip" data-rate="1">1×</button>
         <button class="chip" data-rate="0.75">¾×</button>
@@ -152,7 +154,13 @@
 
     <div class="audition" id="audition" hidden>
       <div class="wave-block">
-        <div class="wave-label">Isolated stem over the span <span class="muted" id="audition-range"></span></div>
+        <div class="wave-label">Isolated stem over the span <span class="muted" id="audition-range"></span>
+          <span class="muted gesture-hint">scroll to zoom · shift-scroll or drag to pan</span>
+          <span class="spacer"></span>
+          <button class="chip" id="stem-fit" title="Show the whole span">Fit</button>
+          <button class="chip" data-stem-zoom="in" title="Zoom in">+</button>
+          <button class="chip" data-stem-zoom="out" title="Zoom out">−</button>
+        </div>
         <div class="wave stemwave" id="wave-stem"></div>
         <div class="wave-legend">
           <span class="key mix"></span> original mix
@@ -162,6 +170,7 @@
 
       <div class="ab-row">
         <button class="play" id="a-play" title="Play / pause (Space)">▶</button>
+        <button class="restart" id="a-restart" title="Play from the start of the span (Enter)">⇤ Start</button>
         <div class="time"><span id="a-time-now">0:00.00</span><span class="sep">/</span><span id="a-time-total">0:00</span></div>
         <div class="ab-toggle" id="ab-toggle">
           <button data-ab="stem" class="active">Isolated</button>
@@ -191,7 +200,7 @@
   <section class="panel" id="panel-review" hidden>
     <div class="panel-head">
       <h2><span class="step">3</span> Transcribe &amp; review</h2>
-      <div class="panel-note">Click a note to see the frames that produced it — the f0 there, and whether periodicity, energy, or an onset shaped it. Clicking also moves the playhead, so you can hear what you are looking at. Drag to pan, <kbd>ctrl</kbd>/<kbd>shift</kbd> + scroll or <kbd>+</kbd>/<kbd>−</kbd> to zoom, <kbd>Enter</kbd> to start over.</div>
+      <div class="panel-note">Click a note to see the frames that produced it — the f0 there, and whether periodicity, energy, or an onset shaped it. Clicking also moves the playhead and sounds the note's pitch, so you can hear what you are looking at; a note of the hand transcription answers the same way. Scroll to zoom, shift-scroll or drag to pan, <kbd>+</kbd>/<kbd>−</kbd> to zoom, <kbd>Enter</kbd> to start over.</div>
     </div>
 
     <div class="review-bar">
@@ -224,11 +233,12 @@
       <div class="pianoroll-wrap">
         <div class="wave-label">
           Piano roll over the bar grid <span class="muted" id="review-hint"></span>
+          <span class="muted gesture-hint">scroll to zoom · shift-scroll or drag to pan</span>
           <span class="spacer"></span>
           <span class="muted roll-range" id="roll-range" hidden></span>
           <button class="chip" id="roll-fit" title="Show the whole span">Fit</button>
-          <button class="chip" data-roll-zoom="in" title="Zoom in (or ctrl/shift + scroll). Drag to pan.">+</button>
-          <button class="chip" data-roll-zoom="out" title="Zoom out (or ctrl/shift + scroll)">−</button>
+          <button class="chip" data-roll-zoom="in" title="Zoom in (or scroll). Drag or shift-scroll to pan.">+</button>
+          <button class="chip" data-roll-zoom="out" title="Zoom out (or scroll)">−</button>
         </div>
         <div class="roll-legend" id="roll-legend"></div>
         <div class="pianoroll" id="pianoroll"></div>
@@ -246,7 +256,7 @@
 
         <div class="edit-bar" id="edit-bar">
           <div class="tool-group" id="tool-group">
-            <button class="chip active" data-tool="inspect" title="Click places the playhead and inspects a note; drag pans (E)">Inspect</button>
+            <button class="chip active" data-tool="inspect" title="Click places the playhead, inspects a note and sounds its pitch; drag pans (E)">Inspect</button>
             <button class="chip" data-tool="erase" title="Click a note to silence it, or a magenta piano-model note to add it and hear it; drag a box to silence a run, alt-drag to restore one; shift-drag pans (E)">Edit</button>
           </div>
           <button class="chip" id="second-voice-toggle" hidden

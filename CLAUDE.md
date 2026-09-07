@@ -251,6 +251,18 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   listener switches a note on. The `chord` fields on NoteEvent, QuantizedNote
   and NotatedNote are additive with defaults — no cached artifact or key
   moved.
+- **One gesture rule on every view (2026-09-07): scroll zooms, shift-scroll
+  or drag pans.** On the Detail waveform only the A/B handles (and Set A/B,
+  the nudges) change the selection — a drag elsewhere pans, a click seeks —
+  because a stray drag used to redraw the span. The Overview keeps
+  drag-to-select. `WaveView({dragPans})` is the switch; the stem view in
+  panel 2 has it too, bounded to the span. The piano roll takes the plain
+  wheel now (it used to leave it to the page).
+- **The user guide lives in the package at `gui/guide/`** — `user-guide.md`
+  is the single source (rendered on GitHub, linked from the README) and
+  `index.html` renders it client-side with a small Markdown subset, served
+  at `/guide/` behind the Help button. Write the guide within that subset;
+  no Markdown library, no build step.
 - Bar lines are derived by counting beats from an anchor. The beat tracker's
   detected downbeat layer is noise (open-issue #5) and must not be drawn or
   trusted; only its pulse layer is reliable.
