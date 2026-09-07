@@ -105,3 +105,24 @@ unmatched, never dropped (gui/erasures.py).
 Shape (c), shading review confidence, was not built: the picked note's
 confidence IS its loudness rank, so the shading comes for free on the
 oracle take.
+
+## The onset lead (2026-09-07)
+
+The second reading of the error taxonomy (`docs/error-taxonomy-review.md`,
+3b.2) scored the picker against WJazzD's onsets rather than the time-free
+pitch alignment above, and it LOST to the shipped line on all four pianists
+(mean note F1 0.860 against 0.895) — not on pitch but on time. The model's
+matched onsets sit 16-24 ms early on every solo (median per solo; CREPE's
+line on the same stems reads 0 to -9 ms), and the benchmark's 50 ms
+tolerance turned that lead into a hundred timing errors.
+
+`pick_line` now moves every picked onset late by `ONSET_SHIFT_S` (20 ms, the
+measured median lead; `TranscribeConfig.piano_line_onset_shift_ms`). With a
+constant +20 ms the picker reads 0.900 on the four and beats the shipped
+line on three of them; +25 ms reads 0.905 and was not taken, being tuned on
+four solos. The field dumps only for the oracle take, like the other line
+fields, so no default-path key moved; the oracle take keys differently and
+a cached oracle review is recomputed once. `corroborate.fill_gaps` copies
+oracle onsets into the DEFAULT piano line unshifted; that is the part left
+for the next bundled re-transcription, because it would re-fingerprint the
+note cache.

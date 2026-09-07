@@ -244,6 +244,14 @@ class TranscribeConfig(BaseModel):
     # by ten. The surface is smooth (0.83-0.87 across continuity <= 0.05).
     piano_line_continuity: float = 0.02
     piano_line_skip_margin: float = 0.10
+    # The piano model's onsets LEAD a human annotator's: 16-24 ms early on
+    # every WJazzD pianist (median over matched notes; CREPE's line on the
+    # same stems reads 0 to -9 ms). Against a 50 ms tolerance that lead
+    # turned twelve timing errors into a hundred and put the picker under
+    # the CREPE line it had beaten on pitch. Added to every picked onset;
+    # 20 ms is the measured median lead, not the F1-optimal value
+    # (docs/error-taxonomy-review.md, 3b.2).
+    piano_line_onset_shift_ms: float = 20.0
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
@@ -259,7 +267,12 @@ class TranscribeConfig(BaseModel):
         """
         data = handler(self)
         if data.get("piano_line") == "crepe":
-            for name in ("piano_line", "piano_line_continuity", "piano_line_skip_margin"):
+            for name in (
+                "piano_line",
+                "piano_line_continuity",
+                "piano_line_skip_margin",
+                "piano_line_onset_shift_ms",
+            ):
                 data.pop(name, None)
         return data
 

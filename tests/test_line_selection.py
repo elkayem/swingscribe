@@ -127,3 +127,21 @@ def test_a_note_ranked_at_the_floor_is_silence():
     reaches, recorded here so the behaviour is deliberate, not a surprise."""
     assert pick_line([note(1.0, 72, 90)]) == []
     assert pick_line([note(1.0, 60, 90), note(1.01, 64, 90)]) == []
+
+
+# ── the onset lead ────────────────────────────────────────────────────────
+
+
+def test_picked_onsets_are_moved_late_by_the_models_measured_lead():
+    """The piano model's onsets lead a human annotator's by about 20 ms on
+    every WJazzD pianist (docs/error-taxonomy-review.md, 3b.2). The picker
+    hands its notes on with that lead taken out, so a benchmark with a 50 ms
+    tolerance scores the pitch it chose rather than the model's clock."""
+    from swingscribe.line_selection import ONSET_SHIFT_S
+
+    oracle = [note(1.0, 72, 100), note(1.0, 48, 60), note(1.5, 74, 90), note(1.5, 50, 40)]
+    line = pick_line(oracle)
+    assert [n["onset"] for n in line] == [1.0 + ONSET_SHIFT_S, 1.5 + ONSET_SHIFT_S]
+    assert ONSET_SHIFT_S == 0.020
+    # the shift is a parameter, so a caller can measure without it
+    assert [n["onset"] for n in pick_line(oracle, onset_shift=0.0)] == [1.0, 1.5]

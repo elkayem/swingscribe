@@ -743,7 +743,10 @@ def _consult_piano_oracle(
         # combination is unmeasured. The register floor in `analyze` is
         # skipped for the same reason.
         picked = line_selection.pick_line(
-            oracle, tc.piano_line_continuity, tc.piano_line_skip_margin
+            oracle,
+            tc.piano_line_continuity,
+            tc.piano_line_skip_margin,
+            onset_shift=tc.piano_line_onset_shift_ms / 1000.0,
         )
         print(
             f"transcribe: piano oracle heard {len(oracle)} notes; "

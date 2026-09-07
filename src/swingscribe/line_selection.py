@@ -46,6 +46,15 @@ CONTINUITY = 0.02
 
 # How much a note's rank must exceed silence before it is emitted.
 SKIP_MARGIN = 0.10
+# The piano model's onsets lead a human annotator's. Measured over the four
+# WJazzD pianists the model's matched onsets sit 16-24 ms EARLY (median per
+# solo; CREPE's line on the same stems reads 0 to -9 ms), and against the
+# benchmark's 50 ms tolerance that lead alone turned the picker's twelve
+# timing errors into a hundred and put it under the CREPE line it had beaten
+# on pitch (0.860 against 0.895 mean note F1). Every picked onset is moved
+# late by this much: the measured median lead, not the F1-optimal shift
+# (docs/error-taxonomy-review.md, 3b.2). Seconds.
+ONSET_SHIFT_S = 0.020
 
 # States carried between clusters. Eight was enough on every track measured;
 # the exact Viterbi is quadratic in cluster size for no measured gain.
@@ -139,13 +148,15 @@ def pick_line(
     continuity: float = CONTINUITY,
     skip_margin: float = SKIP_MARGIN,
     gap_s: float = CLUSTER_GAP_S,
+    onset_shift: float = ONSET_SHIFT_S,
 ) -> list[dict[str, Any]]:
     """The melody chosen from the piano model's full output.
 
     Returns note dicts with `onset`, `duration`, `pitch` and `confidence` —
-    the model's own onset and duration, and the velocity RANK as the
-    confidence, so the review screen shades a picked note by how loud it was
-    within this performance, the same cue the picker used.
+    the model's onset moved late by `onset_shift` (see ONSET_SHIFT_S), its
+    duration, and the velocity RANK as the confidence, so the review screen
+    shades a picked note by how loud it was within this performance, the
+    same cue the picker used.
     """
     if not oracle:
         return []
@@ -153,7 +164,7 @@ def pick_line(
     picks = pick_from_clusters(clusters_of(ranked, gap_s), continuity, skip_margin)
     return [
         {
-            "onset": float(n["onset"]),
+            "onset": float(n["onset"]) + onset_shift,
             "duration": float(n["duration"]),
             "pitch": int(n["pitch"]),
             "confidence": round(float(n["velocity"]), 4),
