@@ -65,3 +65,8 @@ wjazz/
 wjazzd.db
 esac.db
 *.wjazz.json
+
+# The error taxonomy's per-note classified table (scripts/error_taxonomy.py):
+# a note list derived from commercial recordings, so only the aggregate in
+# tests/regression/taxonomy-baseline.json ships (plan §12).
+.benchmark-taxonomy-*
