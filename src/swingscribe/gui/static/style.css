@@ -416,6 +416,27 @@ select {
   font: 11px var(--mono); color: var(--accent);
 }
 .pianoroll canvas { display: block; width: 100%; }
+/* What the colours on the roll mean, said once above it. Rebuilt whenever
+   what is drawn changes: the hand-transcription classes join it while a score
+   is loaded, the piano model's pool while a pianist's review is up. */
+.roll-legend {
+  display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+  padding: 5px 8px; margin-bottom: 4px;
+  font: 11.5px var(--mono); color: var(--muted);
+}
+.roll-legend span.item { display: inline-flex; align-items: center; gap: 6px; }
+.roll-legend span.item.off { opacity: 0.4; }
+.roll-legend .key {
+  display: inline-block; width: 16px; height: 8px; border-radius: 1px;
+  background: var(--key, var(--lead)); position: relative;
+}
+.roll-legend .key.outline { background: transparent; border: 1px solid var(--key); }
+.roll-legend .key.wash { background: color-mix(in srgb, var(--key) 25%, transparent); border: 1px solid var(--key); }
+.roll-legend .key.struck::after {
+  content: ''; position: absolute; left: -2px; right: -2px; top: 50%;
+  border-top: 1px solid var(--text);
+}
+.roll-legend .key.bar { width: 2px; height: 12px; border-radius: 0; }
 .lanes { display: flex; flex-direction: column; }
 .lane {
   position: relative; width: 100%;
@@ -477,8 +498,12 @@ select {
 /* The piano second-voice overlay. A hue of its own, distinct from --lead and
    from every ground-truth class colour: it is neither the line nor a verdict
    on the line, it is a suggestion the listener accepts by leaving it alone. */
-:root { --second-voice: #7a6fc4; --candidate: #6d7390; --added: #4f9e3f; }
-@media (prefers-color-scheme: dark) { :root { --second-voice: #a99cf0; --candidate: #b9bfd6; --added: #9fd66a; } }
+:root { --second-voice: #7a6fc4; --candidate: #d86ccf; --added: #4f9e3f; }
+@media (prefers-color-scheme: dark) { :root { --second-voice: #a99cf0; --candidate: #ee86e2; --added: #9fd66a; } }
+/* The candidate pool was first drawn in a grey a shade off the roll's own
+   background, at a quarter alpha: the listener could not find it. It is
+   magenta now -- the one hue nothing else on the roll uses -- and solid
+   enough to see at any velocity, with the line still drawn on top. */
 #second-voice-toggle.active {
   border-color: var(--second-voice);
   color: var(--second-voice);

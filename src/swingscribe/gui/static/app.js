@@ -10,6 +10,7 @@ import { WaveView } from './waveform.js';
 import { MixEngine, StemEngine } from './engine.js';
 import { CLASSES, PianoRoll } from './review.js';
 import { initStorage } from './storage.js';
+import { playPitch } from './tone.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -659,6 +660,7 @@ function applyBeats() {
   $('beats-toggle').classList.toggle('active', Boolean(grid));
   refreshClicks();
   if (state.review) pianoRoll.setData({ a: state.selection.a, b: state.selection.b }, state.review, grid);
+  renderRollLegend();
 
   const menu = $('time-signature');
   if (state.beats && !menu.options.length) {
@@ -713,6 +715,65 @@ function renderSecondVoiceToggle(payload) {
   chip.hidden = count === 0;
   chip.classList.toggle('active', state.showSecond);
   chip.textContent = state.showSecond ? `piano model · ${count}` : 'piano model';
+  renderRollLegend();
+}
+
+/* What each colour on the roll means, above it. Built from what is actually
+   drawn right now, so it never names a colour that is not on screen: the
+   hand-transcription classes appear with a score, the piano model's pool
+   with a pianist's review, and an entry dims when its layer is switched off
+   rather than vanishing, so the toggle's effect can be read off the legend. */
+function renderRollLegend() {
+  const legend = $('roll-legend');
+  legend.innerHTML = '';
+  if (!state.review) {
+    legend.hidden = true;
+    return;
+  }
+  legend.hidden = false;
+  const item = (label, variable, shape = '', off = false, title = '') => {
+    const span = document.createElement('span');
+    span.className = `item${off ? ' off' : ''}`;
+    if (title) span.title = title;
+    const key = document.createElement('span');
+    key.className = `key ${shape}`.trim();
+    key.style.setProperty('--key', `var(${variable})`);
+    span.appendChild(key);
+    span.appendChild(document.createTextNode(label));
+    legend.appendChild(span);
+  };
+
+  if (state.ground) {
+    const on = (name) => state.gtClasses.includes(name);
+    item('matched', '--gt-matched', '', !on('matched'),
+      "Our note, wearing the hand transcription's outline");
+    item('wrong note', '--gt-wrong', 'outline', !on('wrong'),
+      'The written note, outlined at the height it should have been; a stalk joins it to ours');
+    item('invented', '--gt-invented', '', !on('invented'),
+      'A note of ours the hand transcription does not have');
+    item('missed', '--gt-missed', 'wash', !on('missed'),
+      'A written note with nothing of ours under it');
+  } else {
+    item('transcribed line', '--lead', '', false, 'The notes we heard; fainter means less confident');
+  }
+  item('selected', '--accent');
+  item('silenced', '--lead', 'struck', false,
+    'Marked "not the solo" with the Edit tool; stays drawn, struck through');
+
+  const candidates = (state.review.candidates || []).length;
+  const second = (state.review.second_voice || []).length;
+  if (candidates) {
+    item('piano model heard', '--candidate', '', !state.showSecond,
+      'Every note the piano model heard that the line left out; brighter is louder. Edit tool: click to add it');
+    item('added to page', '--added', '', false,
+      'A piano-model note switched on: it sounds in the ear test and is written, as a chord if it strikes with a line note');
+  }
+  if (second) item('second voice', '--second-voice', 'outline', !state.showSecond);
+
+  if (state.beats && state.showBeats) {
+    item('bar line', '--downbeat', 'bar');
+    if ((state.beats.chorus_bars || []).length) item('chorus start', '--chorus', 'bar');
+  }
 }
 
 function toggleSecondVoice() {
@@ -1564,7 +1625,21 @@ function toggleSilence(index) {
   pushHistory();
   if (state.silenced.has(index)) state.silenced.delete(index);
   else state.silenced.add(index);
+  sound(state.review?.notes[index]);
   afterEdit();
+}
+
+/* The Edit tool sounds the note it just touched: a plain tone at its pitch,
+   which is the question the click is asking -- is this the note that was
+   played? The recording is a click away on the playhead; a chord of four at
+   speed does not say which of them is the F sharp, and a tone does. */
+function sound(note) {
+  if (!note) return;
+  try {
+    playPitch(note.pitch, note.duration);
+  } catch {
+    /* no audio output on this machine; the edit still happened */
+  }
 }
 
 /* The other sign of the same edit: a note the piano model heard that the
@@ -1574,6 +1649,7 @@ function toggleAdd(index) {
   pushHistory();
   if (state.added.has(index)) state.added.delete(index);
   else state.added.add(index);
+  sound(state.review?.candidates[index]);
   afterEdit();
 }
 
@@ -1814,6 +1890,7 @@ function renderGroundTruthBar() {
   const classes = $('gt-classes');
   const caveat = $('gt-caveat');
   $('gt-clear').hidden = !state.scorePath;
+  renderRollLegend();
   if (!state.ground) {
     info.textContent = state.scorePath
       ? `${state.scorePath.split(/[\\/]/).pop()} — transcribe the span to align it`

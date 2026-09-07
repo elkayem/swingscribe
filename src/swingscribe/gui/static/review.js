@@ -414,8 +414,8 @@ export class PianoRoll {
 
     const noteH = this.noteHeight(h);
 
-    // The candidate pool, drawn first and faint so the line sits on top of
-    // what is merely offered. Velocity shades it: the model's loud notes are
+    // The candidate pool, drawn first so the line sits on top of what is
+    // merely offered. Velocity shades it: the model's loud notes are
     // the ones most likely to be the line's missing member. A switched-on
     // candidate is filled like a line note, in its own colour, because it IS
     // part of the transcription now and will be on the page.
@@ -434,9 +434,17 @@ export class PianoRoll {
           ctx.fillStyle = this._css('--added', '#9fd66a');
           ctx.fillRect(x0, y, width, noteH - 1);
         } else {
-          ctx.globalAlpha = 0.14 + 0.3 * Math.min(1, Math.max(0, n.confidence));
-          ctx.fillStyle = this._css('--candidate', '#b9bfd6');
+          // Solid enough to find at any velocity -- the first version, grey
+          // at a quarter alpha, could not be seen -- with the loud ones
+          // still the brightest, and an outline so a soft one keeps an edge.
+          const color = this._css('--candidate', '#ee86e2');
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.45 + 0.45 * Math.min(1, Math.max(0, n.confidence));
           ctx.fillRect(x0, y, width, noteH - 1);
+          ctx.globalAlpha = 0.9;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x0 + 0.5, y + 0.5, Math.max(1, width - 1), Math.max(1, noteH - 2));
         }
       });
       ctx.restore();

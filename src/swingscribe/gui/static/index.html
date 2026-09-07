@@ -230,6 +230,7 @@
           <button class="chip" data-roll-zoom="in" title="Zoom in (or ctrl/shift + scroll). Drag to pan.">+</button>
           <button class="chip" data-roll-zoom="out" title="Zoom out (or ctrl/shift + scroll)">−</button>
         </div>
+        <div class="roll-legend" id="roll-legend"></div>
         <div class="pianoroll" id="pianoroll"></div>
         <div class="lanes">
           <div class="lane" id="lane-f0" title="Raw CREPE pitch (dim) vs the smoothed pitch after gating (bright). A gap is a frame gated out."></div>
@@ -246,7 +247,7 @@
         <div class="edit-bar" id="edit-bar">
           <div class="tool-group" id="tool-group">
             <button class="chip active" data-tool="inspect" title="Click places the playhead and inspects a note; drag pans (E)">Inspect</button>
-            <button class="chip" data-tool="erase" title="Click a note to silence it, or a faint piano-model note to add it; drag a box to silence a run, alt-drag to restore one; shift-drag pans (E)">Edit</button>
+            <button class="chip" data-tool="erase" title="Click a note to silence it, or a magenta piano-model note to add it and hear it; drag a box to silence a run, alt-drag to restore one; shift-drag pans (E)">Edit</button>
           </div>
           <button class="chip" id="second-voice-toggle" hidden
                   title="Show every note the piano model heard that the line left out, faint. With the Edit tool, click one to add it to the transcription — a chord if it sounds with a line note (V)">piano model</button>
