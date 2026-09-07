@@ -420,9 +420,7 @@ def create_app(config: Config) -> FastAPI:
             raise HTTPException(400, str(exc)) from exc
 
         duration = entry["document"].audio.duration
-        repaired = meter.repair_beats(grid.beats, meter_config)
-        repaired = meter.extend_beats(repaired, meter_config, 0.0, duration)
-        sections = meter.derive_sections(repaired, grid.downbeats, meter_config)
+        repaired, sections = meter.bar_grid(grid.beats, grid.downbeats, meter_config, duration)
         lines = meter.bar_lines(repaired, sections, meter_config.form_start)
 
         intervals = sorted(
@@ -639,6 +637,7 @@ def create_app(config: Config) -> FastAPI:
         track_id: str,
         start: float | None = None,
         end: float | None = None,
+        line: str | None = None,
     ) -> FileResponse:
         """Download a score this track has already exported.
 
@@ -655,7 +654,7 @@ def create_app(config: Config) -> FastAPI:
                 None if end is None else round(end, SPAN_PRECISION),
             )
         )
-        path = gui_musicxml.export_path(entry["path"], span)
+        path = gui_musicxml.export_path(entry["path"], span, gui_musicxml.take_of(config, line))
         if not path.is_file():
             raise HTTPException(404, "not exported yet")
         return FileResponse(

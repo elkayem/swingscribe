@@ -367,3 +367,31 @@ def test_parse_any_dispatches_on_the_suffix(tmp_path):
     path = tmp_path / "pick.musicxml"
     path.write_text(xml, encoding="utf-8")
     assert mscz.parse_any(path).pitches == [60]
+
+
+def grace(pitch: int, kind: str = "acciaccatura") -> str:
+    """A grace note as MuseScore writes one: a Chord with a durationType and
+    a bare marker tag saying it takes no time."""
+    return (
+        f"<Chord><durationType>eighth</durationType><{kind}/>"
+        f"<Note><pitch>{pitch}</pitch></Note></Chord>"
+    )
+
+
+def test_a_grace_note_takes_no_time(tmp_path):
+    """Counted as an eighth, a grace note pushes every later position late
+    by an eighth -- the hand scores hold 53 of them. It stays in the melody
+    (the human wrote that pitch) at its main note's position, with no
+    duration."""
+    score = parse_body(tmp_path, grace(66) + chord(67, "quarter") + chord(70, "quarter"))
+    assert [(n.position, n.duration, n.pitch) for n in score.melody] == [
+        (0.0, 0.0, 66),
+        (0.0, 1.0, 67),
+        (1.0, 1.0, 70),
+    ]
+
+
+@pytest.mark.parametrize("kind", ["appoggiatura", "grace16", "grace8after"])
+def test_every_grace_kind_is_timeless(tmp_path, kind):
+    score = parse_body(tmp_path, chord(60, "quarter") + grace(62, kind) + chord(64, "quarter"))
+    assert [n.position for n in score.melody] == [0.0, 1.0, 1.0]

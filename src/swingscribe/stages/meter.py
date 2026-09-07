@@ -381,6 +381,24 @@ def derive_sections(
     return sections
 
 
+def bar_grid(
+    beats: list[float], downbeats: list[float], config: MeterConfig, duration: float
+) -> tuple[list[Beat], list[MeterSection]]:
+    """The bar grid as the GUI draws it: tracked beats repaired and extended
+    to the track's ends, and sections counted from the anchor -- the user's
+    if they placed one, the downbeat layer's best phase if not.
+
+    One function, because two callers have to agree on it exactly. The roll
+    (`/beats`) draws bar lines from this, and the Export button counts its
+    bars with it; when export derived its own grid it anchored on the first
+    beat of its margin instead, and every bar on the page sat one beat off
+    the bar lines on screen.
+    """
+    repaired = repair_beats(beats, config)
+    repaired = extend_beats(repaired, config, 0.0, duration)
+    return repaired, derive_sections(repaired, downbeats, config)
+
+
 def bar_lines(
     beats: list[Beat],
     sections: list[MeterSection],
@@ -417,7 +435,5 @@ def run(document: Document, config: Config) -> Document:
     if grid is None or not grid.beats:
         return document.model_copy(update={"meter": []})
     duration = document.audio.duration if document.audio else grid.beats[-1]
-    beats = repair_beats(grid.beats, config.meter)
-    beats = extend_beats(beats, config.meter, 0.0, duration)
-    sections = derive_sections(beats, grid.downbeats, config.meter)
+    _beats, sections = bar_grid(grid.beats, grid.downbeats, config.meter, duration)
     return document.model_copy(update={"meter": sections})

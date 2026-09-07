@@ -39,27 +39,49 @@ class NotReady(Exception):
     """A precondition the user can fix -- and the message says how."""
 
 
-def export_path(audio_path: str | Path, region: tuple[float, float | None] | None) -> Path:
+def export_path(
+    audio_path: str | Path,
+    region: tuple[float, float | None] | None,
+    line: str | None = None,
+) -> Path:
     """Where this span's score goes: beside the audio, span in the name.
 
     A whole-track export keeps the bare name; anything narrower carries its
     bounds, so the four choruses you exported one at a time are four files
-    rather than one file overwritten four times.
+    rather than one file overwritten four times. `line` is a take other than
+    the default (the pianists' Line picker): it goes in the name for the same
+    reason, so the two takes of one span can be laid side by side.
     """
     source = Path(audio_path)
+    take = f".{line}" if line else ""
     if region is None or (region[0] in (None, 0.0) and region[1] is None):
-        return source.with_suffix(".musicxml")
+        return source.with_name(f"{source.stem}{take}.musicxml")
     low = region[0] or 0.0
     high = region[1]
     span = f"{low:.0f}-{high:.0f}s" if high is not None else f"from{low:.0f}s"
-    return source.with_name(f"{source.stem}.{span}.musicxml")
+    return source.with_name(f"{source.stem}.{span}{take}.musicxml")
 
 
-def beat_times(audio_path: str | Path, config: Config) -> list[float]:
-    """The tracked beats for this track, or raise if they are not cached.
+def take_of(config: Config, line: str | None) -> str | None:
+    """The line as it appears in a filename: None for the default take."""
+    return line if line and line != config.transcribe.piano_line else None
 
-    Never tracks them: this endpoint must stay as cheap as the review it sits
-    beside, and the Beats button already exists to do the work.
+
+def bar_grid(
+    audio_path: str | Path, config: Config, settings: dict[str, Any], duration: float
+) -> tuple[list[float], float | None]:
+    """The beat grid AS THE ROLL DRAWS IT, and the beat it counts bars from.
+
+    Never tracks beats: this endpoint must stay as cheap as the review it sits
+    beside, and the Beats button already exists to do the work. Raises if the
+    grid is not cached.
+
+    The grid and the anchor come from `meter.bar_grid` with the same settings
+    the `/beats` endpoint applies -- the listener's time signature and
+    downbeat if they set them, the downbeat layer's best phase if they did
+    not. That is the whole point: the bar lines on the page have to be the
+    bar lines on the screen, and the one time export derived its own it put
+    every bar of Soul Station a beat off the roll.
 
     Takes the path rather than reading `document.audio_path`, which is the
     same fact the caller already holds. The Document's copy is restored from
@@ -68,7 +90,7 @@ def beat_times(audio_path: str | Path, config: Config) -> list[float]:
     anything else looks up a different track.
     """
     from swingscribe import pipeline
-    from swingscribe.stages import beats, ingest
+    from swingscribe.stages import beats, ingest, meter
 
     cached = pipeline.cached_document(
         audio_path,
@@ -78,7 +100,19 @@ def beat_times(audio_path: str | Path, config: Config) -> list[float]:
     grid = cached.beat_grid if cached else None
     if grid is None or not grid.beats:
         raise NotReady("no beat grid yet - press Beats first")
-    return list(grid.beats)
+    overrides = {
+        key: value
+        for key, value in {
+            "time_signature": settings.get("time_signature"),
+            "pulses_per_bar": settings.get("pulses_per_bar"),
+            "anchor": settings.get("anchor"),
+        }.items()
+        if value is not None
+    }
+    meter_config = config.meter.model_copy(update=overrides)
+    repaired, sections = meter.bar_grid(grid.beats, grid.downbeats, meter_config, duration)
+    anchor = sections[0].anchor if sections else settings.get("anchor")
+    return [beat.time for beat in repaired], anchor
 
 
 def notate_config(config: Config, settings: dict[str, Any], title: str) -> Config:
@@ -128,7 +162,8 @@ def build_notation(
     if not notes:
         raise NotReady("nothing to notate - every note in this span is silenced")
 
-    beats = beat_times(audio_path, config)
+    duration = document.audio.duration if document.audio else 0.0
+    beats, anchor = bar_grid(audio_path, config, settings, duration)
     region = run_config.transcribe.region or (0.0, None)
     stem = run_config.transcribe.stem
     signature, pulses = meter_from_settings(
@@ -141,7 +176,7 @@ def build_notation(
         region,
         stem=stem,
         config=notate_config(config, settings, Path(audio_path).stem),
-        anchor=settings.get("anchor"),
+        anchor=anchor,
         time_signature=signature,
         pulses_per_bar=pulses,
         sample_rate=document.sample_rate,
@@ -177,7 +212,7 @@ def export_span(
     region = run_config.transcribe.region or (0.0, None)
     title = Path(audio_path).stem
     signature = notation.bars[0].time_signature
-    path = export_path(audio_path, region)
+    path = export_path(audio_path, region, take_of(config, run_config.transcribe.piano_line))
     xml = to_musicxml(notation, part_name=title)
     try:
         path.write_text(xml, encoding="utf-8")

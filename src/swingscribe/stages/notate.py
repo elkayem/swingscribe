@@ -570,6 +570,10 @@ def _section_for_bar(bar: int, sections: list[MeterSection]) -> MeterSection | N
     for section in sections:
         if section.first_bar <= bar and (best is None or section.first_bar > best.first_bar):
             best = section
+    if best is None and sections:
+        # A pickup bar (numbered 0 or below, before the first section's bar
+        # 1) is in the meter of the music it leads into, not a default 4/4.
+        best = min(sections, key=lambda section: section.first_bar)
     return best
 
 

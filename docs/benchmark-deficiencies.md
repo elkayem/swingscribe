@@ -852,7 +852,98 @@ earlier one that cleared the floor, so no sheet number is the best of
 several tries. The rows above are queued for a re-run; whatever still
 fails after it is a wrong take in the sense the status claims.
 
+### D24 - The line picker takes the loudest note of a chord; the human writes the top one
+
+Found by the listener comparing both Soul Station takes at bars 9-10, where
+Kelly plays C6 over Gb5 in a repeated two-note voicing. The hand score has the
+C6 (MIDI 84) as the melody at six positions across the two bars. The piano
+model heard the C6 at all six (velocities 77, 81, 86, 75, 80, 80) -- and heard
+the Gb5 / A5 / Ab5 under it louder every time (89, 96, 95, 77, 91, 83). The
+picker (`line_selection.pick_line`) emits one note per onset cluster and its
+emission is velocity rank, so it wrote the lower note six times out of six.
+CREPE's line did the same at four of the six, for its own reason (it tracks
+the stronger partial).
+
+`mscz.Score.melody` is DEFINED as the top note of every chord, and the
+listener's own words confirm that is how they hear it: "does the piano-model
+even hear the top C?" It does. The picker throws it away.
+
+What would move: mean pitch F1 over the ten piano spans with references
+(0.8656 for the picker today, docs/issue8-line-selection.md). The candidate
+rule is narrow -- within a cluster of notes struck TOGETHER (a true chord,
+tighter than the 50 ms cluster gap), prefer the highest note when its rank
+is within some margin of the loudest -- because the earlier sweep found
+highest-of-cluster loses to loudest-of-cluster on the Peterson (0.583 vs
+0.715), where the loud note is the line and the high note is a fill. The
+margin is the thing to measure; the existing sweep script and cached oracle
+notes make it a CPU-minutes experiment with no CREPE.
+
 ## Resolved
+
+### R20 - Grace notes in the hand scores were counted as time
+
+Found while checking R19: with the export finally on the roll's bar lines, the
+hand score's bar 2 still began half a beat after ours. It did not -- the
+reference parse did. MuseScore writes a grace note as a `<Chord>` with a
+`durationType` like any other, plus a bare marker (`<acciaccatura/>`,
+`<appoggiatura/>`, `<grace16/>`...) saying it takes no time. `mscz.parse`
+never looked for the marker, so every grace note advanced the cursor by the
+eighth it was written as, and every position after it was late by that
+much -- cumulatively. The ten hand scores hold 53 of them: 22 in the
+Peterson, 8 in Soul Station, and none only in the Carl Perkins. By the end
+of Lover Come Back To Me the reference was 11 beats behind itself.
+
+The rhythm measure is gap-based, so it charged only the two gaps around each
+grace note; what this actually corrupted was every POSITION-based use of the
+reference -- the ground-truth overlay's placement, bar attribution, and any
+comparison of our bar N against theirs. The grace note now keeps its pitch
+in the melody (the human wrote it, and the aligner reads pitch sequences) at
+its main note's position, with zero duration. The MusicXML reader was already
+right: MusicXML grace notes carry no `<duration>` and advanced nothing.
+
+What it moved: the MuseScore audio-against-notation note F1, whose reference
+timestamps are the hand score's positions at a constant tempo, went 0.456 ->
+0.480 mean over the ten -- Lover Come Back To Me 0.283 -> 0.354 with its 22
+grace notes, There Will Never Be Another You 0.581 -> 0.648, All The Things
+0.520 -> 0.562. The WJazzD note F1 did not move (it never reads a hand score),
+and the hand-score notation rhythm and value moved by under 0.03 per score
+in both directions, which is the two gaps around each grace note. Re-pinned.
+
+### R19 - Export counted its bars from the margin, one beat off the roll
+
+The listener's report, verbatim in effect: every note in both Soul Station
+exports sat a quarter note early against their transcription -- an Eb4 on
+the "and" of 2 written on the "and" of 1, the Bb4 the roll showed on the
+downbeat of bar 118 written on beat 4 of the bar before. The roll was right.
+
+`notation_for_span` took `anchor` from the sidecar, and with none placed by
+hand (`anchor: null` -- the roll had been drawing from the downbeat layer's
+best phase, which the listener had accepted) fell back to the first beat of
+its trimmed grid. That grid carries a two-second margin before the span, and
+at Soul Station's 102 bpm two seconds is three beats: bar 1 began three beats
+before the span, so every bar line landed one beat AFTER the roll's, and the
+span's first bar was numbered 2 with an empty bar 1 in front of it. A second
+hole, latent: a downbeat the listener HAD clicked, at the head of the tune,
+would have resolved to the nearest trimmed beat -- the same margin beat.
+
+Two changes. `meter.bar_grid` is now the one function that repairs, extends
+and phases the grid, and both `/beats` and export read from it, so the page's
+bar lines are the roll's by construction. And `notation.span_anchor` reads
+the anchor's phase off the WHOLE grid, then makes bar 1 the in-phase bar line
+nearest the span start -- a span dragged a few milliseconds short of a bar
+line still begins on it, and a span starting more than half a bar early gets
+those notes as a pickup in bar 0, which `notate` now files under the meter of
+the section it leads into rather than a default 4/4. Verified on Soul
+Station's export against the hand score after R20: bars 1, 2, 9 and 10
+agree position for position, the only differences being the grid (a triplet
+where the hand has sixteenths) and the pitch at the chord tops (D24).
+
+`run_eval` has no roll and passes the sidecar's anchor alone; its rhythm
+number is gap-based and phase-immune, and the deltas are in the commit that
+carries this: every hand score lost one or two bars (the empty margin bar,
+and Art Pepper's and Giant Steps' two), notation rhythm moved within +-0.03
+per score in both directions (bar lines decide where ties split and which
+gaps `close_short_gaps` may close), and the mean is reported with the re-pin.
 
 ### R18 - A cached Document named a file that had been renamed away
 

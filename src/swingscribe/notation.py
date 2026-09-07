@@ -22,6 +22,17 @@ the soloist happens to enter in the tune. `anchor` is what keeps that bar 1 on
 a real downbeat: it is a phase, not an origin (model.MeterSection), so a span
 starting mid-bar still lands its bar lines correctly.
 
+The phase is read off the WHOLE grid, not the trimmed one (`span_anchor`). The
+anchor is usually outside the span -- the downbeat the listener clicked at the
+head, or the auto anchor near the track's start -- and taking the nearest
+trimmed beat to it turned every one of those into "the first beat of the
+margin". Bar 1 is then the bar line nearest the span start: a span dragged a
+few milliseconds short of a bar line still begins on it, and a span starting
+more than half a bar early gets those notes as a pickup in bar 0, the way a
+score writes them. Before this, with no downbeat in the sidecar, export
+anchored on the first beat of its two-second margin, and Soul Station's page
+sat one beat off the bar lines drawn on the roll.
+
 This deliberately does not call `stages/meter.py`. Meter derivation exists to
 find where a steady pulse starts and stops across a whole track, and to repair
 and extrapolate around the tracker's gaps; over a span the user has already
@@ -50,6 +61,31 @@ def span_beats(
     if high is None:
         return []
     return [b for b in beats if low - margin <= b <= high + margin]
+
+
+def span_anchor(
+    beats: list[float],
+    kept: list[float],
+    anchor: float | None,
+    pulses_per_bar: int,
+    start: float,
+) -> float:
+    """The kept beat that is bar 1: in phase with `anchor` over the FULL grid,
+    and nearest the span start.
+
+    `kept` must be a contiguous slice of `beats` (span_beats). With no anchor
+    at all there is no phase to keep, so bar 1 is simply the beat nearest the
+    span start.
+    """
+    if not kept:
+        raise ValueError("no beats in the span")
+    if anchor is None:
+        return min(kept, key=lambda b: abs(b - start))
+    anchor_index = min(range(len(beats)), key=lambda i: abs(beats[i] - anchor))
+    first_index = beats.index(kept[0])
+    pulses = max(1, pulses_per_bar)
+    in_phase = [b for i, b in enumerate(kept) if (first_index + i - anchor_index) % pulses == 0]
+    return min(in_phase or kept, key=lambda b: abs(b - start))
 
 
 def section_for(
@@ -126,6 +162,9 @@ def notation_for_span(
     kept = span_beats(beats, region)
     if len(kept) < MIN_BEATS:
         return None
+    # Resolved on the tracked grid, before any doubling: the beat it names
+    # survives doubling, and its phase is a fact about the tracked pulse.
+    anchor = span_anchor(beats, kept, anchor, pulses_per_bar, region[0] or 0.0)
     if double_time:
         # Double-time feel (the listener's checkbox): the notated pulse is
         # twice the tracked one, so each tracked beat is split at its
@@ -136,6 +175,12 @@ def notation_for_span(
         kept = [t for a, b in zip(kept, kept[1:], strict=False) for t in (a, (a + b) / 2.0)] + [
             kept[-1]
         ]
+    # Bars are counted from the first beat of the grid that is in phase with
+    # the anchor (quantize.bar_and_beat: the anchor is a phase, not an
+    # origin), so the grid starts just under a bar before the beat that is
+    # bar 1. Anything left before it -- a pickup -- lands in bar 0.
+    first = kept.index(anchor)
+    kept = kept[max(0, first - (pulses_per_bar - 1)) :]
 
     base = config or Config()
     run_config = base.model_copy(

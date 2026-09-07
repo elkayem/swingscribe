@@ -332,3 +332,17 @@ def test_document_without_meter_still_deserializes():
     introduction of meter would silently discard every separation."""
     old = '{"audio_path": "x.wav", "sample_rate": 44100}'
     assert Document.model_validate_json(old).meter == []
+
+
+def test_bar_grid_is_the_repaired_extended_grid_and_its_sections():
+    """`/beats` and the Export button both count bars from this one function,
+    so it has to be exactly repair + extend + derive -- a grid the roll draws
+    but export does not count on is the bug it exists to prevent."""
+    tracked = steady(20, start=1.0)
+    downbeats = [1.5, 3.5, 5.5]  # phase 1
+    config = MeterConfig()
+    beats, sections = meter.bar_grid(tracked, downbeats, config, 12.0)
+    repaired = meter.extend_beats(meter.repair_beats(tracked, config), config, 0.0, 12.0)
+    assert [b.time for b in beats] == [b.time for b in repaired]
+    assert sections == meter.derive_sections(repaired, downbeats, config)
+    assert sections and sections[0].anchor == 1.5

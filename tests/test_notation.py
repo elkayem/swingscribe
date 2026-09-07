@@ -15,6 +15,7 @@ from swingscribe.notation import (
     meter_from_settings,
     notation_for_span,
     section_for,
+    span_anchor,
     span_beats,
 )
 
@@ -313,3 +314,86 @@ def test_the_overlay_inherits_the_line_s_swing_spans():
     finally:
         quantize_stage.run = real
     assert [s.bur for s in captured["swing"]] == [1.8]
+
+
+# ── the anchor's phase, read off the whole grid ─────────────────────────────
+
+
+def numbered(beats: list[float]) -> list[NoteEvent]:
+    """One note per beat, its pitch naming the beat's index, so a bar's
+    contents say exactly which beats it holds."""
+    return [
+        NoteEvent(onset=t, duration=BEAT * 0.9, pitch=40 + i, confidence=0.9, source="other")
+        for i, t in enumerate(beats)
+    ]
+
+
+def sounded_by_bar(notation) -> dict[int, list[tuple[float, int]]]:
+    return {
+        bar.number: [(n.beat, n.pitch) for n in bar.notes if not n.is_rest] for bar in notation.bars
+    }
+
+
+def test_the_phase_comes_from_an_anchor_outside_the_span():
+    """The downbeat the listener clicked is usually at the head of the tune,
+    minutes before the span. Its PHASE is what carries: over a whole grid
+    beat 1 falls at index 1 mod 4, so inside the span bar 1 begins on a beat
+    of that phase, not on the first beat of the margin."""
+    beats = grid(count=200, start=0.0)
+    span = (50.0, 60.0)
+    notes = [n for n in numbered(beats) if span[0] <= n.onset <= span[1]]
+    notation = notation_for_span("t.wav", notes, beats, span, stem="other", anchor=0.5)
+    assert notation is not None
+    bars = sounded_by_bar(notation)
+    # Beat index 101 (50.5 s) is 1 mod 4, like the anchor, and is the in-phase
+    # beat nearest the span start: bar 1 begins there.
+    assert bars[1][0] == (0.0, 40 + 101)
+    # The beat before it is inside the span but before bar 1: a pickup.
+    assert bars[0] == [(3.0, 40 + 100)]
+
+
+def test_bar_one_is_the_bar_line_nearest_the_span_start():
+    """A span dragged a hair short of a bar line still begins on that line;
+    a span beginning just after one begins in that bar, with rests first."""
+    beats = grid(count=64, start=0.0)  # bar lines every 2.0 s with anchor 0.0
+    notes = numbered(beats)
+
+    def first_bar_contents(start: float):
+        span = (start, start + 12.0)
+        kept = [n for n in notes if span[0] <= n.onset <= span[1]]
+        notation = notation_for_span("t.wav", kept, beats, span, stem="other", anchor=0.0)
+        assert notation is not None
+        return sounded_by_bar(notation)
+
+    # 0.5 s before the bar line at 20.0: bar 1 is that line, the beat before is bar 0.
+    short = first_bar_contents(19.5)
+    assert short[1][0] == (0.0, 40 + 40)
+    assert short[0] == [(3.0, 40 + 39)]
+    # 0.5 s after the bar line at 18.0: bar 1 is that line, beat 1 of it rests.
+    late = first_bar_contents(18.5)
+    assert 0 not in late
+    assert late[1][0] == (1.0, 40 + 37)
+
+
+def test_without_an_anchor_bar_one_starts_on_the_span_not_the_margin():
+    """At 100 bpm the two-second margin is not a whole number of bars, so
+    anchoring on its first beat (what export used to do) put bar 1 three
+    beats before the span. Bar 1 is the beat nearest where the span starts."""
+    beats = grid(count=120, start=0.0, step=0.6)
+    span = (30.0, 42.0)
+    notes = [n for n in numbered(beats) if span[0] <= n.onset <= span[1]]
+    notation = notation_for_span("t.wav", notes, beats, span, stem="other")
+    assert notation is not None
+    bars = sounded_by_bar(notation)
+    assert notation.bars[0].number == 1
+    assert bars[1][0] == (0.0, 40 + 50)
+
+
+def test_span_anchor_picks_the_in_phase_beat_nearest_the_start():
+    beats = grid(count=40, start=0.0)  # 0.0, 0.5, ... 19.5
+    kept = span_beats(beats, (10.0, 15.0))  # 8.0 .. 17.0
+    # anchor at index 2 (1.0 s): in-phase beats are indices 2, 6, ... 18, 22.
+    assert span_anchor(beats, kept, 1.0, 4, 10.2) == 11.0  # index 22, 0.8 s away
+    assert span_anchor(beats, kept, 1.0, 4, 9.4) == 9.0  # index 18 is now nearer
+    assert span_anchor(beats, kept, 1.0, 4, 10.0) == 9.0  # a dead tie: the earlier one
+    assert span_anchor(beats, kept, None, 4, 10.2) == 10.0  # no phase to keep

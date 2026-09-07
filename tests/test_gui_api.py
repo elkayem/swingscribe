@@ -687,7 +687,7 @@ def test_an_unknown_ensemble_in_the_sidecar_is_ignored(world, monkeypatch):
 # ── export ──────────────────────────────────────────────────────────────────
 
 
-def _seed_beats(monkeypatch, world, step: float = 0.5, count: int = 13):
+def _seed_beats(monkeypatch, world, step: float = 0.5, count: int = 13, downbeats=()):
     """A cached beat grid, without running beat_this.
 
     The export endpoint never tracks beats itself — that is the Beats button's
@@ -700,7 +700,9 @@ def _seed_beats(monkeypatch, world, step: float = 0.5, count: int = 13):
             audio_path=str(path),
             sample_rate=world["rate"],
             beat_grid=BeatGrid(
-                beats=[round(i * step, 6) for i in range(count)], downbeats=[], beats_per_bar=4
+                beats=[round(i * step, 6) for i in range(count)],
+                downbeats=list(downbeats),
+                beats_per_bar=4,
             ),
         )
 
@@ -747,6 +749,29 @@ def test_export_writes_musicxml_beside_the_audio(world, monkeypatch):
     assert written.suffix == ".musicxml"
     assert payload["bars"] >= 1
     assert "<score-partwise" in written.read_text(encoding="utf-8")
+
+
+def test_export_counts_bars_from_the_downbeat_the_roll_draws(world, monkeypatch):
+    """With no downbeat in the sidecar the roll draws bars from the downbeat
+    layer's best phase, and the page must agree with the screen. Export used
+    to anchor on the first beat of its own margin instead, which on Soul
+    Station put every note a beat late against the bar lines on the roll."""
+    from swingscribe import mscz
+
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0, pitches=(60, 62, 64, 65))
+    # Beats every 0.5 s from 0; the detected downbeats vote for phase 1.
+    _seed_beats(monkeypatch, world, downbeats=(0.5, 2.5, 4.5))
+    params = {"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0}
+    roll = world["client"].get(f"/api/tracks/{track['id']}/beats", params=params).json()
+    assert roll["anchor"] == 0.5
+    written = world["client"].post(f"/api/tracks/{track['id']}/export", params=params).json()
+    placed = {n.pitch: (n.bar, n.position) for n in mscz.parse_any(written["path"]).melody}
+    # The bar line nearest the span start (1.0 s) is 0.5 s: bar 1. The note at
+    # 1.1 s sits a sixteenth after its second beat, and the note at 2.6 s a
+    # sixteenth into bar 2 (2.5 s). Anchored on the margin's first beat (0.0 s)
+    # instead, both would read a beat later.
+    assert placed[60] == (1, 1.25)
+    assert placed[65] == (2, 4.25)
 
 
 def test_the_span_is_in_the_filename(world, monkeypatch):
@@ -1161,3 +1186,19 @@ def test_a_transcribe_job_carries_the_line_choice(world, monkeypatch):
     other = world["client"].get(f"/api/tracks/{track['id']}/review", params=base)
     assert asked.json()["ready"] is True
     assert other.json()["ready"] is False
+
+
+def test_the_take_is_in_the_filename_when_it_is_not_the_default():
+    """The pianists' second take must not overwrite the first: exporting
+    CREPE's line and then the oracle's is two files, not one file twice."""
+    from swingscribe.gui.musicxml import export_path, take_of
+
+    config = Config()
+    assert take_of(config, None) is None
+    assert take_of(config, config.transcribe.piano_line) is None
+    assert take_of(config, "oracle") == "oracle"
+    plain = export_path("C:/music/Tune.m4a", (275.2, 351.0))
+    oracle = export_path("C:/music/Tune.m4a", (275.2, 351.0), "oracle")
+    assert plain.name == "Tune.275-351s.musicxml"
+    assert oracle.name == "Tune.275-351s.oracle.musicxml"
+    assert export_path("C:/music/Tune.m4a", None, "oracle").name == "Tune.oracle.musicxml"

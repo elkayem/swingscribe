@@ -250,6 +250,16 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   placed by hand, meter derivation has nothing left to decide. The score lands
   beside the audio like `ab`/`audition`/`click`, never in the cache, with the
   span in the filename so a second chorus does not overwrite the first.
+- **The page's bar lines are the roll's bar lines, by construction** (2026-09-07).
+  Export takes its grid and downbeat from `meter.bar_grid` — the one function
+  `/beats` draws from — so the sidecar's downbeat or, absent one, the downbeat
+  layer's best phase reaches the page. It used to fall back to the first beat
+  of its own 2 s margin, which on Soul Station put every note a beat late
+  against the bars on screen and left bar 1 empty. `notation.span_anchor`
+  reads the anchor's PHASE off the whole grid (the anchor is usually minutes
+  before the span) and makes bar 1 the bar line nearest the span start; notes
+  before it are a pickup in bar 0. `run_eval` has no roll and passes the
+  sidecar's anchor only; its rhythm number is gap-based and phase-immune.
 - **`ensemble` and `transposition` are per-track sidecar fields with menus
   built from `config.ENSEMBLES`/`TRANSPOSITIONS`.** Neither is inferable from
   the signal — one says who is playing, the other which horn — so both can only
@@ -612,6 +622,12 @@ made. Both are kept; neither subsumes the other.
   a ground-truth bug worth an octave on 58 notes across 5 of the 10 hand
   scores. Writing a passage 8va to keep it on the staff is ordinary notation,
   not an error on the transcriber's side — do not "correct" it back.
+- **A grace note in `.mscz` carries a `durationType` like any chord and takes
+  NO time** (`<acciaccatura/>`, `<appoggiatura/>`, `<grace16/>`...). Counted
+  as an eighth (2026-09-07, R20), every position after it ran an eighth late;
+  the ten hand scores hold 53 of them, 22 in the Peterson, so its reference
+  bar 40 began a bar and a half after the music's. `mscz.parse` keeps the
+  pitch in the melody at its main note's position with zero duration.
 - **WJazzD carries a human's NOTATION, not just their onsets.** Every note has
   `bar`, `beat`, and `tatum` out of `division` subdivisions — a swung pair is
   two eighths, which is the convention we target. `wjazz.notated_positions`

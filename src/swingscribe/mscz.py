@@ -110,6 +110,27 @@ def read_mscx_xml(path: str | Path) -> str:
         return archive.read(names[0]).decode("utf-8")
 
 
+# A Chord carrying one of these is a grace note: MuseScore writes it with a
+# durationType like any other chord, but it takes no time from the bar. Counted
+# as time, every position after it is an eighth late -- and the hand scores
+# carry 53 of them (22 in the Peterson alone), so by the end of a solo the
+# reference's bar 40 was starting a bar and a half after the music's.
+GRACE_TAGS = (
+    "acciaccatura",
+    "appoggiatura",
+    "grace4",
+    "grace16",
+    "grace32",
+    "grace8after",
+    "grace16after",
+    "grace32after",
+)
+
+
+def _is_grace(chord: ElementTree.Element) -> bool:
+    return any(chord.find(tag) is not None for tag in GRACE_TAGS)
+
+
 def _duration_of(element: ElementTree.Element, beats_per_bar: float) -> float:
     """Quarter-note length of a Chord or Rest, honouring dots."""
     name = element.findtext("durationType", "")
@@ -306,7 +327,14 @@ def parse(path: str | Path) -> Score:
                     cursor += _duration_of(element, beats_per_bar) * tuplet_ratio
                     pending_tie = None  # a rest breaks any tie
                 elif element.tag == "Chord":
-                    duration = _duration_of(element, beats_per_bar) * tuplet_ratio
+                    # A grace note is a pitch the human wrote, so it stays in
+                    # the sequence the aligner reads -- at the position of the
+                    # note it decorates, with no duration, advancing nothing.
+                    duration = (
+                        0.0
+                        if _is_grace(element)
+                        else _duration_of(element, beats_per_bar) * tuplet_ratio
+                    )
                     pitches = [
                         int(n.findtext("pitch", "0")) + ottava
                         for n in element.findall("Note")

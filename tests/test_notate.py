@@ -592,3 +592,15 @@ def test_the_cap_is_off_by_default_so_the_pipeline_is_unchanged():
     assert build(notes, [], swing=False, transpose=0, legato_fill=0.75).bars[0].notes[
         0
     ].duration == pytest.approx(0.5)
+
+
+def test_a_pickup_bar_is_in_the_meter_it_leads_into():
+    """Bar 0 sits before the first section's bar 1 and matches no section.
+    It is the pickup to that section, so it takes its time signature -- not
+    a default 4/4 that would make a 3/4 pickup a bar too long."""
+    section = MeterSection(
+        start=0.0, end=10.0, pulses_per_bar=3, time_signature=(3, 4), anchor=1.5, first_bar=1
+    )
+    assert notate._section_for_bar(0, [section]) is section
+    assert notate._section_for_bar(1, [section]) is section
+    assert notate._section_for_bar(0, []) is None
