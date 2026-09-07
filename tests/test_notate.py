@@ -604,3 +604,23 @@ def test_a_pickup_bar_is_in_the_meter_it_leads_into():
     assert notate._section_for_bar(0, [section]) is section
     assert notate._section_for_bar(1, [section]) is section
     assert notate._section_for_bar(0, []) is None
+
+
+def test_a_chord_is_written_on_every_tie_segment_of_its_head():
+    """Chord members strike and release with the head, so when the head is
+    split at a bar line and tied, each piece carries the chord — otherwise
+    the second bar would show the head alone and the chord would end early."""
+    section = MeterSection(
+        start=0.0, end=100.0, pulses_per_bar=4, time_signature=(4, 4), anchor=0.0, first_bar=1
+    )
+    held = QuantizedNote(
+        bar=1, beat=3.0, duration_beats=2.0, pitch=78, timing_residual=0.0, chord=[84]
+    )
+    notation = build([held], [section], swing=False, transpose=0)
+    pieces = [n for bar in notation.bars for n in bar.notes if not n.is_rest]
+    assert [(n.pitch, n.chord, n.tie_start, n.tie_stop) for n in pieces] == [
+        (78, [84], True, False),
+        (78, [84], False, True),
+    ]
+    rests = [n for bar in notation.bars for n in bar.notes if n.is_rest]
+    assert all(n.chord == [] for n in rests)

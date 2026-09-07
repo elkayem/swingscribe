@@ -23,6 +23,13 @@ class NoteEvent(BaseModel):
     pitch: int  # MIDI note number
     confidence: float
     source: str  # which stem/model produced it
+    # Other pitches struck AND released with this one, so the page writes a
+    # chord and not two notes fighting for one grid position. The transcriber
+    # never fills this: a line is one note at a time. It is the listener,
+    # enabling a note the piano model heard beside the line's
+    # (notation.with_chords). MIGRATION: additive with a default, so every
+    # cached Document deserializes unchanged and no cache key moves.
+    chord: list[int] = []
 
 
 class BeatGrid(BaseModel):
@@ -80,6 +87,7 @@ class QuantizedNote(BaseModel):
     duration_beats: float
     pitch: int
     timing_residual: float  # microtiming AFTER swing removal — the expressive layer
+    chord: list[int] = []  # see NoteEvent.chord; carried, never derived here
 
 
 class NotatedNote(BaseModel):
@@ -116,6 +124,11 @@ class NotatedNote(BaseModel):
     # before this deserializes unchanged as voice 1, and no cache key moves —
     # keys come from stage config, not from the schema. Nothing is invalidated.
     voice: int = 1
+    # The other pitches of a chord this note heads. Every tie segment of a
+    # chorded note carries the same list: chord members strike and release
+    # together, so they split at bar lines and tie exactly as their head does.
+    # Written as <chord/> notes in MusicXML; rests never carry one.
+    chord: list[int] = []
 
 
 class NotatedBar(BaseModel):

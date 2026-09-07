@@ -33,6 +33,16 @@ Matching is done HERE and only here: the review screen and the A/B render both
 resolve through this module, because two implementations would eventually
 disagree about which note is silenced and the place that would show up is the
 audio.
+
+## Additions (2026-09-07)
+
+The same judgement with the opposite sign: a note the piano model heard that
+the line left out, and the listener wants on the page. They live in the
+sidecar's `additions` list, in the same record shape, and are matched by the
+same rule against the candidate POOL (`pool`: the model's notes the line does
+not already hold) rather than the line. Piano only, because only a pianist
+has a pool worth offering. An enabled candidate struck with a line note
+reaches the page as a chord on it (notation.with_chords).
 """
 
 from typing import Any
@@ -47,6 +57,19 @@ TOLERANCE_S = 0.03
 # kind — an obvious octave error, say — cannot be confused with this one when
 # the set is read back as training data.
 REASON = "not-solo"
+
+# The other sign of the same judgement: a note the piano model heard that the
+# line left out and the listener wants on the page. Stored in the sidecar's
+# `additions` list, matched back by content exactly as erasures are, and just
+# as much a label — "heard, and part of the solo" is the positive example
+# line selection (issue #8) has never had.
+ADDED = "added"
+
+# A candidate this close to a line note at the same pitch IS that note, seen
+# by the other detector, and is not offered again. Wider than TOLERANCE_S
+# because two detectors disagree about an onset by more than one re-run of
+# the same detector does; it is the review overlay's own cluster width.
+POOL_TOLERANCE_S = 0.05
 
 
 def record(note: dict[str, Any], stem: str, model: str) -> dict[str, Any]:
@@ -65,6 +88,70 @@ def record(note: dict[str, Any], stem: str, model: str) -> dict[str, Any]:
         "stem": stem,
         "model": model,
     }
+
+
+def record_addition(note: dict[str, Any], stem: str, model: str) -> dict[str, Any]:
+    """One addition, self-contained, the same shape as an erasure."""
+    return {**record(note, stem, model), "reason": ADDED}
+
+
+def pool(
+    candidates: list[dict[str, Any]],
+    notes: list[dict[str, Any]],
+    tolerance: float = POOL_TOLERANCE_S,
+) -> list[dict[str, Any]]:
+    """The candidates the line does not already contain.
+
+    A model note at a line note's pitch within `tolerance` is the same event
+    heard twice (the line was corroborated against this very output), so it
+    is not a candidate — offering it would draw every line note twice and
+    let the listener "add" what is already there.
+    """
+    taken = [(float(n["onset"]), int(n["pitch"])) for n in notes]
+    out = []
+    for candidate in sorted(candidates, key=lambda n: (float(n["onset"]), int(n["pitch"]))):
+        onset, pitch = float(candidate["onset"]), int(candidate["pitch"])
+        if any(p == pitch and abs(t - onset) <= tolerance for t, p in taken):
+            continue
+        out.append(candidate)
+    return out
+
+
+def resolve_additions(
+    additions: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    span: tuple[float, float] | None = None,
+) -> dict[str, Any]:
+    """Match stored additions onto the current candidate pool.
+
+    The same matching as `resolve`, against the pool instead of the line, so
+    the two edits cannot disagree about what "the same note" means. `added`
+    is the pool indices switched on; `carried` and `unmatched` mean what they
+    do for erasures, and a label is never dropped.
+    """
+    resolved = resolve(additions, candidates, span)
+    return {
+        "added": resolved["silenced"],
+        "carried": resolved["carried"],
+        "unmatched": resolved["unmatched"],
+        "moved": resolved["moved"],
+        "stored": resolved["stored"],
+    }
+
+
+def enabled(candidates: list[dict[str, Any]], added: list[int] | set[int]) -> list[dict[str, Any]]:
+    """The switched-on candidates as plain notes, in onset order."""
+    keep = set(added)
+    return [
+        {
+            "onset": c["onset"],
+            "duration": c["duration"],
+            "pitch": c["pitch"],
+            "confidence": c.get("confidence", 0.0),
+        }
+        for index, c in enumerate(candidates)
+        if index in keep
+    ]
 
 
 def _in_span(erasure: dict[str, Any], span: tuple[float, float] | None) -> bool:

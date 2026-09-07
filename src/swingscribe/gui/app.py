@@ -203,6 +203,41 @@ def create_app(config: Config) -> FastAPI:
 
     # ── library ─────────────────────────────────────────────────────────────
 
+    def resolve_edits(
+        track_id: str, entry: dict[str, Any], run_config: Config, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Both of the listener's edits against this review, and what they leave.
+
+        `erasures` and `additions` are the two resolutions the client reads;
+        `candidates` is the pool the roll draws (the model's notes the line
+        does not already hold); `audible` and `added` are the notes that reach
+        a render or a page. One function, so the ear test, Export and Score
+        cannot disagree about which notes the listener kept.
+        """
+        notes = payload["notes"]
+        erased = resolve_erasures(track_id, entry, run_config, notes)
+        candidates = gui_erasures.pool(payload.get("candidates") or [], notes)
+        settings = library.load_settings(entry["path"], config, track_id)
+        region = run_config.transcribe.region
+        span = (
+            None
+            if region is None
+            else (
+                region[0] or 0.0,
+                entry["document"].audio.duration if region[1] is None else region[1],
+            )
+        )
+        additions = gui_erasures.resolve_additions(
+            settings.get("additions") or [], candidates, span
+        )
+        return {
+            "erasures": erased,
+            "additions": additions,
+            "candidates": candidates,
+            "audible": gui_erasures.audible(notes, erased["silenced"]),
+            "added": gui_erasures.enabled(candidates, additions["added"]),
+        }
+
     @app.get("/api/config")
     def get_config() -> dict[str, Any]:
         return {
@@ -489,8 +524,16 @@ def create_app(config: Config) -> FastAPI:
         payload = review.cached_review(entry["document"], run_config, model)
         if payload is None:
             return {"ready": False}
-        resolution = resolve_erasures(track_id, entry, run_config, payload["notes"])
-        return {"ready": True, **payload, "erasures": resolution}
+        edits = resolve_edits(track_id, entry, run_config, payload)
+        return {
+            "ready": True,
+            **payload,
+            # The pool the roll offers, not the raw model output: what the line
+            # already holds is not a candidate (gui/erasures.py `pool`).
+            "candidates": edits["candidates"],
+            "erasures": edits["erasures"],
+            "additions": edits["additions"],
+        }
 
     @app.get("/api/tracks/{track_id}/transcription")
     def get_transcription(
@@ -518,11 +561,14 @@ def create_app(config: Config) -> FastAPI:
         # A note the listener silenced is still drawn on the roll — you have to
         # see what you cut — but it must not sound in the ear test, or the A/B
         # stops describing the transcription you are actually keeping.
-        resolution = resolve_erasures(track_id, entry, run_config, payload["notes"])
-        notes = [
-            NoteEvent(source=stem, **n)
-            for n in gui_erasures.audible(payload["notes"], resolution["silenced"])
-        ]
+        # ... and a note the listener switched on must sound, or the ear
+        # test is not describing the page they are about to export.
+        edits = resolve_edits(track_id, entry, run_config, payload)
+        notes = sorted(
+            [NoteEvent(source=stem, **n) for n in edits["audible"]]
+            + [NoteEvent(source=f"{stem}:added", **n) for n in edits["added"]],
+            key=lambda n: (n.onset, n.pitch),
+        )
         resolved_end = document.audio.duration if end is None else end
         try:
             audio = gui_audio.render_transcription(
@@ -558,10 +604,12 @@ def create_app(config: Config) -> FastAPI:
         payload = review.cached_review(entry["document"], run_config, model)
         if payload is None:
             raise HTTPException(409, "transcribe the span first")
-        # Through resolve_erasures, so the score holds exactly the notes the
-        # A/B render plays. A silenced note must not come back on the page.
-        resolution = resolve_erasures(track_id, entry, run_config, payload["notes"])
-        audible = gui_erasures.audible(payload["notes"], resolution["silenced"])
+        # Through resolve_edits, so the score holds exactly the notes the
+        # A/B render plays. A silenced note must not come back on the page,
+        # and an enabled candidate must reach it (as a chord, if struck with
+        # a line note — notation.with_chords).
+        edits = resolve_edits(track_id, entry, run_config, payload)
+        audible = edits["audible"]
         settings = library.load_settings(entry["path"], config, track_id)
         # The overlay goes through erasures too: a second-voice note the
         # listener silenced on the review screen must not reappear on the page.
@@ -571,7 +619,14 @@ def create_app(config: Config) -> FastAPI:
             overlay = gui_erasures.audible(overlay, silenced)
         try:
             return gui_musicxml.export_span(
-                entry["document"], config, run_config, entry["path"], audible, settings, overlay
+                entry["document"],
+                config,
+                run_config,
+                entry["path"],
+                audible,
+                settings,
+                overlay,
+                edits["added"],
             )
         except gui_musicxml.NotReady as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -609,8 +664,7 @@ def create_app(config: Config) -> FastAPI:
         payload = review.cached_review(entry["document"], run_config, model)
         if payload is None:
             raise HTTPException(409, "transcribe the span first")
-        resolution = resolve_erasures(track_id, entry, run_config, payload["notes"])
-        audible = gui_erasures.audible(payload["notes"], resolution["silenced"])
+        edits = resolve_edits(track_id, entry, run_config, payload)
         settings = library.load_settings(entry["path"], config, track_id)
         try:
             return gui_musicxml.score_span(
@@ -618,9 +672,10 @@ def create_app(config: Config) -> FastAPI:
                 config,
                 run_config,
                 entry["path"],
-                audible,
+                edits["audible"],
                 settings,
                 score_path,
+                edits["added"],
             )
         except gui_musicxml.NotReady as exc:
             raise HTTPException(409, str(exc)) from exc

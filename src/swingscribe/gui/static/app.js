@@ -48,6 +48,9 @@ const state = {
   tool: 'inspect',          // inspect | erase — what a click on the roll does
   silenced: new Set(),      // note indices marked "heard right, not the solo"
   carried: [],              // stored erasures with no note in this transcription
+  added: new Set(),         // candidate indices the listener switched on (piano)
+  carriedAdditions: [],     // stored additions with no candidate in this pool
+  unmatchedAdditions: [],   // the subset of those inside the span
   unmatched: [],            // the subset of those inside the span — worth reporting
   moved: [],                // of those, the ones with a note still sounding there
   undoStack: [],            // whole-state snapshots; see pushHistory
@@ -149,6 +152,7 @@ const pianoRoll = new PianoRoll($('pianoroll'), $('lane-f0'), $('lane-gate'), {
   onSeek: (t) => seekReviewTo(t),
   onView: (view, spanWidth) => renderRollRange(view, spanWidth),
   onToggleSilence: (index) => toggleSilence(index),
+  onToggleAdd: (index) => toggleAdd(index),
   onBand: (indices, restoring) => silenceRun(indices, restoring),
 });
 
@@ -377,6 +381,9 @@ async function loadTrack(track) {
   state.silenced.clear();
   state.unmatched = [];
   state.moved = [];
+  state.carriedAdditions = Array.isArray(remembered.additions) ? remembered.additions : [];
+  state.added.clear();
+  state.unmatchedAdditions = [];
   state.undoStack.length = 0;
   state.redoStack.length = 0;
   setTool('inspect');
@@ -694,15 +701,18 @@ function updateBars() {
       : `${bars} bars`;
 }
 
-/* The overlay only exists for a pianist, so the button only exists then too:
+/* The pool only exists for a pianist, so the button only exists then too:
    a control that is permanently inert on horn tracks teaches people to ignore
-   the row it sits in. */
+   the row it sits in. It shows everything the piano model heard that the
+   line left out, faint, and the Edit tool switches any of them on. */
 function renderSecondVoiceToggle(payload) {
   const chip = $('second-voice-toggle');
-  const count = (payload && payload.second_voice && payload.second_voice.length) || 0;
+  const count =
+    ((payload && payload.candidates && payload.candidates.length) || 0) +
+    ((payload && payload.second_voice && payload.second_voice.length) || 0);
   chip.hidden = count === 0;
   chip.classList.toggle('active', state.showSecond);
-  chip.textContent = state.showSecond ? `2nd voice · ${count}` : '2nd voice';
+  chip.textContent = state.showSecond ? `piano model · ${count}` : 'piano model';
 }
 
 function toggleSecondVoice() {
@@ -1198,9 +1208,13 @@ function invalidateReview() {
   state.silenced.clear();
   state.unmatched = state.carried.filter((e) => inSpan(e));
   state.moved = [];  // nothing to compare against until a transcription exists
+  state.carriedAdditions = additionList();
+  state.added.clear();
+  state.unmatchedAdditions = state.carriedAdditions.filter((e) => inSpan(e));
   state.undoStack.length = 0;
   state.redoStack.length = 0;
   pianoRoll.setSilenced(state.silenced);
+  pianoRoll.setAdded(state.added);
   renderEditBar();
   // The overlay is an alignment *to* these notes, so it dies with them — but
   // the chosen score does not: it is still the right score for the next
@@ -1277,12 +1291,18 @@ async function showReview(payload) {
   state.carried = resolved.carried;
   state.unmatched = resolved.unmatched;
   state.moved = resolved.moved ?? [];
+  // Additions the same way: matched onto the candidate pool by content.
+  const additions = payload.additions ?? { added: [], carried: [], unmatched: [] };
+  state.added = new Set(additions.added);
+  state.carriedAdditions = additions.carried;
+  state.unmatchedAdditions = additions.unmatched;
   state.notationScore = null;
   state.undoStack.length = 0;
   state.redoStack.length = 0;
 
   pianoRoll.setData({ a: state.selection.a, b: state.selection.b }, payload, state.showBeats ? state.beats : null);
   pianoRoll.setSilenced(state.silenced);
+  pianoRoll.setAdded(state.added);
   pianoRoll.setShowSecondVoice(state.showSecond);
   renderSecondVoiceToggle(payload);
   // Park the marker at the start rather than leaving it undrawn: a playhead
@@ -1494,7 +1514,12 @@ function midiName(pitch) {
 const HISTORY_LIMIT = 200;
 
 function editSnapshot() {
-  return { silenced: [...state.silenced], carried: state.carried.map((e) => ({ ...e })) };
+  return {
+    silenced: [...state.silenced],
+    carried: state.carried.map((e) => ({ ...e })),
+    added: [...state.added],
+    carriedAdditions: state.carriedAdditions.map((e) => ({ ...e })),
+  };
 }
 
 function pushHistory() {
@@ -1506,6 +1531,9 @@ function pushHistory() {
 function applyEditSnapshot(snapshot) {
   state.silenced = new Set(snapshot.silenced);
   state.carried = snapshot.carried;
+  state.added = new Set(snapshot.added ?? []);
+  state.carriedAdditions = snapshot.carriedAdditions ?? state.carriedAdditions;
+  state.unmatchedAdditions = state.carriedAdditions.filter((e) => inSpan(e));
   state.unmatched = state.carried.filter((e) => inSpan(e));
   // Undo restores labels, not the server's classification of them, so keep
   // only the ones still carried rather than re-deriving what "moved" means.
@@ -1536,6 +1564,16 @@ function toggleSilence(index) {
   pushHistory();
   if (state.silenced.has(index)) state.silenced.delete(index);
   else state.silenced.add(index);
+  afterEdit();
+}
+
+/* The other sign of the same edit: a note the piano model heard that the
+   line left out, switched on. It sounds in the ear test and reaches the page
+   — as a chord on the line note it was struck with, if there is one. */
+function toggleAdd(index) {
+  pushHistory();
+  if (state.added.has(index)) state.added.delete(index);
+  else state.added.add(index);
   afterEdit();
 }
 
@@ -1572,6 +1610,7 @@ const erasureId = (e) => `${e.onset}:${e.pitch}`;
 
 function afterEdit() {
   pianoRoll.setSilenced(state.silenced);
+  pianoRoll.setAdded(state.added);
   renderEditBar();
   // Silencing a note after exporting is the quietest way to end up with a
   // file on disk that no longer matches the screen, and a stale score is
@@ -1610,6 +1649,29 @@ function erasureList() {
 
 const round3 = (v) => Math.round(v * 1000) / 1000;
 
+/* The additions written to the sidecar, built the same way as the erasures:
+   everything still carried plus a record for every candidate switched on. */
+function additionList() {
+  const made = [];
+  if (state.review && Array.isArray(state.review.candidates)) {
+    for (const index of [...state.added].sort((a, b) => a - b)) {
+      const note = state.review.candidates[index];
+      if (!note) continue;
+      made.push({
+        onset: round3(note.onset),
+        pitch: note.pitch,
+        duration: round3(note.duration),
+        confidence: round3(note.confidence),
+        reason: 'added',
+        stem: state.leadStem,
+        model: state.model,
+        line: state.line || 'crepe',
+      });
+    }
+  }
+  return [...state.carriedAdditions, ...made].sort((a, b) => a.onset - b.onset);
+}
+
 function setTool(tool) {
   state.tool = tool;
   pianoRoll.setTool(tool);
@@ -1620,11 +1682,13 @@ function setTool(tool) {
 
 function renderEditBar() {
   const count = state.silenced.size;
+  const added = state.added.size;
   const total = state.review ? state.review.notes.length : 0;
-  $('silenced-count').textContent = count
-    ? `${count} of ${total} silenced`
-    : 'nothing silenced';
-  $('silenced-count').classList.toggle('has-cuts', count > 0);
+  const parts = [];
+  if (count) parts.push(`${count} of ${total} silenced`);
+  if (added) parts.push(`${added} added`);
+  $('silenced-count').textContent = parts.length ? parts.join(' · ') : 'nothing silenced';
+  $('silenced-count').classList.toggle('has-cuts', count > 0 || added > 0);
   $('undo-btn').disabled = !state.undoStack.length;
   $('redo-btn').disabled = !state.redoStack.length;
   $('restore-all').disabled = !count;
@@ -1920,6 +1984,7 @@ function settingsPayload() {
     line: state.line,
     transposition: state.transposition,
     erasures: erasureList(),
+    additions: additionList(),
   };
 }
 
@@ -2066,6 +2131,7 @@ function exportSignature() {
     transposition: state.transposition,
     token: state.reviewToken,
     silenced: [...state.silenced].sort((x, y) => x - y),
+    added: [...state.added].sort((x, y) => x - y),
     timeSignature: state.timeSignature,
     anchor: state.anchor,
   });
@@ -2127,7 +2193,7 @@ function renderExport(message) {
   stale.hidden = !behind;
   stale.title =
     'Something that would change the page has changed since it was written — the span, ' +
-    'the transposition, the notes, or which of them are silenced. Export again to catch it up.';
+    'the transposition, the notes, or which of them are silenced or added. Export again to catch it up.';
   info.classList.toggle('written', Boolean(written) && !behind);
   renderScoreLine();
 
@@ -2137,7 +2203,8 @@ function renderExport(message) {
     return;
   }
   if (!written) {
-    info.textContent = 'Bars are numbered from 1 within the span, and silenced notes are left out.';
+    info.textContent =
+      'Bars are numbered from 1 within the span; silenced notes are left out and notes you switched on are written in, as chords where they sound together.';
     link.hidden = true;
     return;
   }

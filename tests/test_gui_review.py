@@ -244,3 +244,31 @@ def test_span_precision_is_canonicalised_server_side(tmp_path):
     assert review.review_key(document, raw, "htdemucs_ft") == review.review_key(
         document, rounded, "htdemucs_ft"
     )
+
+
+def test_a_pianists_review_without_a_candidate_pool_is_a_cache_miss(tmp_path, monkeypatch):
+    """Versioning by payload shape: the client needs `candidates` for a
+    pianist and re-running writes the complete payload under the same key,
+    while every horn review — which never has a pool — stays valid."""
+    from swingscribe.gui import review as review_module
+
+    store = {}
+
+    class Cache:
+        def get_json(self, key):
+            return store.get(key)
+
+    monkeypatch.setattr(review_module, "_cache", lambda config: Cache())
+    monkeypatch.setattr(review_module, "review_key", lambda document, config, model: "k")
+    store["k"] = {"notes": [], "second_voice": [], "diagnostics": {}}
+
+    piano = Config().model_copy(
+        update={"transcribe": Config().transcribe.model_copy(update={"ensemble": "trio"})}
+    )
+    horn = Config().model_copy(
+        update={"transcribe": Config().transcribe.model_copy(update={"ensemble": "horn-led"})}
+    )
+    assert review_module.cached_review(None, horn, "m") == store["k"]
+    assert review_module.cached_review(None, piano, "m") is None
+    store["k"]["candidates"] = []
+    assert review_module.cached_review(None, piano, "m") == store["k"]

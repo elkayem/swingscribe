@@ -32,7 +32,7 @@ from typing import Any
 
 from swingscribe.config import TRANSPOSITIONS, Config
 from swingscribe.model import Document, NoteEvent
-from swingscribe.notation import meter_from_settings, notation_for_span
+from swingscribe.notation import meter_from_settings, notation_for_span, with_chords
 
 
 class NotReady(Exception):
@@ -142,6 +142,7 @@ def build_notation(
     notes: list[dict[str, Any]],
     settings: dict[str, Any],
     second_voice: list[dict[str, Any]] | None = None,
+    added: list[dict[str, Any]] | None = None,
 ):
     """The reviewed span as a Notation, or raise something the user can fix.
 
@@ -158,8 +159,14 @@ def build_notation(
     The Score button must never see it: it compares our line against a hand
     transcription's single melody, and a second voice on the page would be
     scored as a page full of notes the human did not write.
+
+    `added` is the listener's enabled candidates (gui/erasures.py): folded
+    into the line through `notation.with_chords`, so one struck with a line
+    note is written as a chord on it and one struck alone is a note of its
+    own. Passed by Export AND Score: unlike the overlay they are the
+    listener's claim about the solo, and the page is scored as written.
     """
-    if not notes:
+    if not notes and not added:
         raise NotReady("nothing to notate - every note in this span is silenced")
 
     duration = document.audio.duration if document.audio else 0.0
@@ -169,9 +176,12 @@ def build_notation(
     signature, pulses = meter_from_settings(
         settings.get("time_signature"), settings.get("pulses_per_bar"), config
     )
+    line = [NoteEvent(source=stem, **note) for note in notes]
+    if added:
+        line = with_chords(line, [NoteEvent(source=f"{stem}:added", **note) for note in added])
     notation = notation_for_span(
         audio_path,
-        [NoteEvent(source=stem, **note) for note in notes],
+        line,
         beats,
         region,
         stem=stem,
@@ -201,13 +211,14 @@ def export_span(
     notes: list[dict[str, Any]],
     settings: dict[str, Any],
     second_voice: list[dict[str, Any]] | None = None,
+    added: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Write the reviewed span to MusicXML and say what was written."""
     from swingscribe.benchmark import readability
     from swingscribe.stages.export import to_musicxml
 
     notation = build_notation(
-        document, config, run_config, audio_path, notes, settings, second_voice
+        document, config, run_config, audio_path, notes, settings, second_voice, added
     )
     region = run_config.transcribe.region or (0.0, None)
     title = Path(audio_path).stem
@@ -246,6 +257,7 @@ def score_span(
     notes: list[dict[str, Any]],
     settings: dict[str, Any],
     score_path: Path,
+    added: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Score the span's notation against a hand transcription, as notation.
 
@@ -264,7 +276,9 @@ def score_span(
     from swingscribe import mscz
     from swingscribe.benchmark import score_against_notation
 
-    notation = build_notation(document, config, run_config, audio_path, notes, settings)
+    notation = build_notation(
+        document, config, run_config, audio_path, notes, settings, added=added
+    )
     try:
         reference = mscz.parse_any(score_path)
     except Exception as exc:

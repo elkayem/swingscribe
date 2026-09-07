@@ -668,7 +668,7 @@ def test_an_unavailable_oracle_leaves_the_line_alone(monkeypatch):
     monkeypatch.setattr(piano, "transcribe", explode)
     notes = [NoteEvent(onset=1.0, duration=0.2, pitch=60, confidence=0.9, source="other:crepe")]
     tc = TranscribeConfig(ensemble="trio")
-    assert stage._consult_piano_oracle(None, 44100, tc, 0.0, notes) == (notes, [])
+    assert stage._consult_piano_oracle(None, 44100, tc, 0.0, notes) == (notes, [], [])
 
 
 def test_an_oracle_that_hears_nothing_leaves_the_line_alone(monkeypatch):
@@ -679,7 +679,7 @@ def test_an_oracle_that_hears_nothing_leaves_the_line_alone(monkeypatch):
     notes = [NoteEvent(onset=1.0, duration=0.2, pitch=60, confidence=0.9, source="other:crepe")]
     assert stage._consult_piano_oracle(
         None, 44100, TranscribeConfig(ensemble="trio"), 0.0, notes
-    ) == (notes, [])
+    ) == (notes, [], [])
 
 
 def test_the_oracle_corrects_an_octave_and_drops_a_phantom(monkeypatch):
@@ -697,7 +697,7 @@ def test_the_oracle_corrects_an_octave_and_drops_a_phantom(monkeypatch):
         NoteEvent(onset=1.0, duration=0.2, pitch=60, confidence=0.9, source="other:crepe"),
         NoteEvent(onset=5.0, duration=0.2, pitch=43, confidence=0.5, source="other:crepe"),
     ]
-    got, extra = stage._consult_piano_oracle(
+    got, extra, _pool = stage._consult_piano_oracle(
         None, 44100, TranscribeConfig(ensemble="trio"), 0.0, notes
     )
     assert [n.pitch for n in got] == [72]
@@ -724,7 +724,7 @@ def test_the_second_voice_is_opt_in_and_never_joins_the_line(monkeypatch):
     )
     notes = [NoteEvent(onset=1.0, duration=0.2, pitch=72, confidence=0.9, source="other:crepe")]
     tc = TranscribeConfig(ensemble="trio", piano_second_voice=True)
-    line, extra = stage._consult_piano_oracle(None, 44100, tc, 0.0, notes)
+    line, extra, _pool = stage._consult_piano_oracle(None, 44100, tc, 0.0, notes)
 
     assert [n.pitch for n in line] == [72]  # the line is untouched
     assert [n["pitch"] for n in extra] == [64]  # the second of the top two
@@ -753,7 +753,7 @@ def test_the_oracle_line_replaces_crepe_when_asked_for(monkeypatch):
     )
     crepe = [NoteEvent(onset=1.0, duration=0.2, pitch=48, confidence=0.9, source="other:crepe")]
     tc = TranscribeConfig(ensemble="trio", piano_line="oracle")
-    line, extra = stage._consult_piano_oracle(None, 44100, tc, 0.0, crepe)
+    line, extra, _pool = stage._consult_piano_oracle(None, 44100, tc, 0.0, crepe)
 
     assert [n.pitch for n in line] == [72, 74]
     assert {n.source for n in line} == {"other:piano"}
@@ -776,7 +776,7 @@ def test_the_oracle_line_needs_no_crepe_notes_to_start_from(monkeypatch):
         ],
     )
     tc = TranscribeConfig(ensemble="trio", piano_line="oracle")
-    line, _ = stage._consult_piano_oracle(None, 44100, tc, 0.0, [])
+    line, _, _pool = stage._consult_piano_oracle(None, 44100, tc, 0.0, [])
     assert [n.pitch for n in line] == [72, 74]  # the quiet low note is skipped
 
 
@@ -792,7 +792,7 @@ def test_an_unavailable_oracle_falls_back_to_crepe_for_the_oracle_line(monkeypat
     monkeypatch.setattr(piano, "transcribe", explode)
     crepe = [NoteEvent(onset=1.0, duration=0.2, pitch=60, confidence=0.9, source="other:crepe")]
     tc = TranscribeConfig(ensemble="trio", piano_line="oracle")
-    assert stage._consult_piano_oracle(None, 44100, tc, 0.0, crepe) == (crepe, [])
+    assert stage._consult_piano_oracle(None, 44100, tc, 0.0, crepe) == (crepe, [], [])
 
 
 def test_the_crepe_line_keys_exactly_as_before_the_line_fields_existed():

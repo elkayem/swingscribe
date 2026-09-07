@@ -280,3 +280,54 @@ def test_voices_are_grouped_not_interleaved():
     assert numbers == [1, 2]
     assert [n.pitch for n in voices_of(bar)[0][1]] == [72, 74]
     assert [n.pitch for n in voices_of(bar)[1][1]] == [60]
+
+
+# ── chords ──────────────────────────────────────────────────────────────────
+
+
+def test_a_chord_is_the_head_note_followed_by_chord_marked_notes():
+    """MusicXML's chord is positional: the head advances the cursor, each
+    following <chord/> note repeats its duration and advances nothing. The
+    measure must still sum to its signature counting only the heads."""
+    notation = Notation(
+        bars=[bar_of([note(0.0, 1.0, 78, chord=[84, 82]), note(1.0, 3.0, 75)])],
+        key_fifths=0,
+    )
+    measure = document(notation).find(".//measure")
+    notes = measure.findall("note")
+    assert [n.find("chord") is not None for n in notes] == [False, True, True, False]
+    # Steps only; the alters (F#, Bb, Eb) are checked by the spelling tests.
+    assert [n.findtext("pitch/step") + n.findtext("pitch/octave") for n in notes] == [
+        "F5",
+        "B5",
+        "C6",
+        "E5",
+    ]
+    assert [int(n.findtext("duration")) for n in notes] == [DIVISIONS] * 3 + [3 * DIVISIONS]
+    heads = [n for n in notes if n.find("chord") is None]
+    assert sum(int(n.findtext("duration")) for n in heads) == 4 * DIVISIONS
+
+
+def test_chord_members_repeat_the_heads_type_tie_and_tuplet_but_not_its_bracket():
+    tied = note(0.0, 1.0, 78, chord=[84], tie_start=True, tuplet=(3, 2))
+    notation = Notation(bars=[bar_of([tied, note(1.0, 3.0, 75)])])
+    notes = document(notation).find(".//measure").findall("note")
+    head, member = notes[0], notes[1]
+    assert member.findtext("type") == head.findtext("type")
+    assert member.find("tie").get("type") == "start"
+    assert member.findtext("time-modification/actual-notes") == "3"
+    assert head.find("notations/tuplet") is not None
+    assert member.find("notations/tuplet") is None
+
+
+def test_our_chord_reads_back_through_the_musicxml_reader(tmp_path):
+    """mscz.parse_musicxml already understands <chord/>: the member lands at
+    the head's position, and the melody view keeps the top note."""
+    from swingscribe import mscz
+
+    notation = Notation(bars=[bar_of([note(0.0, 1.0, 78, chord=[84]), note(1.0, 3.0, 75)])])
+    path = tmp_path / "chord.musicxml"
+    path.write_text(to_musicxml(notation), encoding="utf-8")
+    score = mscz.parse_musicxml(path)
+    assert sorted((n.position, n.pitch) for n in score.notes) == [(0.0, 78), (0.0, 84), (1.0, 75)]
+    assert [n.pitch for n in score.melody] == [84, 75]

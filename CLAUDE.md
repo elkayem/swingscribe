@@ -230,6 +230,27 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   — a re-decoding that follows another voice must fail to match and be
   reported, not erase a note nobody judged. They are training data for
   melodic-line selection (issue #8): never drop one as a side effect.
+- **Additions are the other sign of the same edit, and they are PIANO ONLY**
+  (2026-09-07). The review payload carries `candidates` — everything the
+  piano model heard that the line does not hold (`erasures.pool`) — drawn
+  faint on the roll; the Edit tool switches one on, stored in the sidecar's
+  `additions` list and matched back by content exactly like an erasure. A
+  pianist's cached review without `candidates` is served as a MISS
+  (`review.cached_review` versions by payload shape), so old piano reviews
+  re-run once and horn reviews never do. Horns have no pool: the piano
+  model vouches for nothing on a saxophone. One `resolve_edits` in app.py
+  feeds the ear test, Export and Score, so they cannot disagree.
+- **An enabled candidate struck with a line note is written as a CHORD, with
+  the line note's duration.** `notation.with_chords` folds it into
+  `NoteEvent.chord`; quantize and notate carry the list (every tie segment
+  wears it), and export writes `<chord/>` notes. Quantize must see ONE onset
+  per chord — two simultaneous notes in one list are "a grid too coarse" and
+  one is silently dropped. Members take the head's duration because they
+  strike and release together; two measured lengths put one a 32nd short.
+  Default is still a single line: a page only gains a chord when the
+  listener switches a note on. The `chord` fields on NoteEvent, QuantizedNote
+  and NotatedNote are additive with defaults — no cached artifact or key
+  moved.
 - Bar lines are derived by counting beats from an anchor. The beat tracker's
   detected downbeat layer is noise (open-issue #5) and must not be drawn or
   trusted; only its pulse layer is reliable.

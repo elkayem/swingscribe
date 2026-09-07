@@ -398,7 +398,9 @@ def test_beats_endpoint_rejects_a_nonsense_time_signature(world, monkeypatch):
     assert response.status_code == 400
 
 
-def _seed_review(world, monkeypatch, *, stem="other", start=1.0, end=3.0, pitches=(64,)):
+def _seed_review(
+    world, monkeypatch, *, stem="other", start=1.0, end=3.0, pitches=(64,), candidates=()
+):
     """Populate the review cache for a span without running CREPE."""
     from dataclasses import dataclass
 
@@ -413,6 +415,7 @@ def _seed_review(world, monkeypatch, *, stem="other", start=1.0, end=3.0, pitche
         energy_ok: list = None
         pitch: list = None
         onsets: list = None
+        candidates: list = None
 
         @property
         def voiced_fraction(self):
@@ -437,6 +440,7 @@ def _seed_review(world, monkeypatch, *, stem="other", start=1.0, end=3.0, pitche
         energy_ok=[True, True],
         pitch=[64.0, 64.0],
         onsets=[note.onset for note in notes],
+        candidates=list(candidates),
     )
     monkeypatch.setattr("swingscribe.stages.transcribe.analyze", lambda sp, tc: (notes, diag))
 
@@ -1202,3 +1206,91 @@ def test_the_take_is_in_the_filename_when_it_is_not_the_default():
     assert plain.name == "Tune.275-351s.musicxml"
     assert oracle.name == "Tune.275-351s.oracle.musicxml"
     assert export_path("C:/music/Tune.m4a", None, "oracle").name == "Tune.oracle.musicxml"
+
+
+# ── the candidate pool and additions ───────────────────────────────────────
+
+
+def _seed_piano_review(world, monkeypatch):
+    """A line of two notes and a model pool of three: one duplicates the
+    first line note (not offered), one is struck with the second (a chord
+    if enabled), one sits in a gap."""
+    return _seed_review(
+        world,
+        monkeypatch,
+        start=1.0,
+        end=3.0,
+        pitches=(78, 75),  # line notes at 1.1 s and 1.6 s
+        candidates=[
+            {"onset": 1.11, "duration": 0.2, "pitch": 78, "velocity": 80},
+            {"onset": 1.61, "duration": 0.7, "pitch": 84, "velocity": 90},
+            {"onset": 2.1, "duration": 0.2, "pitch": 72, "velocity": 60},
+        ],
+    )
+
+
+def test_the_review_offers_the_pool_minus_the_line(world, monkeypatch):
+    track = _seed_piano_review(world, monkeypatch)
+    params = {"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0}
+    payload = world["client"].get(f"/api/tracks/{track['id']}/review", params=params).json()
+    assert [(c["onset"], c["pitch"]) for c in payload["candidates"]] == [(1.61, 84), (2.1, 72)]
+    assert payload["additions"] == {
+        "added": [],
+        "carried": [],
+        "unmatched": [],
+        "moved": [],
+        "stored": 0,
+    }
+
+
+def test_an_enabled_candidate_is_written_as_a_chord_on_the_line_note(world, monkeypatch):
+    """The listener switches on the C6 the model heard over the line's Eb5
+    (struck 10 ms apart): the page gets one event with two pitches, not two
+    notes fighting for one grid slot."""
+    from swingscribe import mscz
+
+    track = _seed_piano_review(world, monkeypatch)
+    _seed_beats(monkeypatch, world)
+    params = {"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0}
+    payload = world["client"].get(f"/api/tracks/{track['id']}/review", params=params).json()
+    world["client"].post(
+        f"/api/tracks/{track['id']}/state",
+        json={
+            "state": {
+                "additions": [
+                    {**payload["candidates"][0], "reason": "added", "stem": "other", "model": "m"}
+                ]
+            }
+        },
+    )
+    resolved = world["client"].get(f"/api/tracks/{track['id']}/review", params=params).json()
+    assert resolved["additions"]["added"] == [0]
+
+    written = world["client"].post(f"/api/tracks/{track['id']}/export", params=params).json()
+    assert written["notes"] == 2  # two heads: the chord is one event
+    score = mscz.parse_musicxml(written["path"])
+    by_position = {}
+    for n in score.notes:
+        by_position.setdefault(n.position, []).append(n.pitch)
+    chord = next(pitches for pitches in by_position.values() if len(pitches) > 1)
+    assert sorted(chord) == [75, 84]
+
+
+def test_an_enabled_candidate_in_a_gap_is_a_note_of_its_own_and_sounds(world, monkeypatch):
+    track = _seed_piano_review(world, monkeypatch)
+    params = {"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0}
+    payload = world["client"].get(f"/api/tracks/{track['id']}/review", params=params).json()
+    world["client"].post(
+        f"/api/tracks/{track['id']}/state",
+        json={"state": {"additions": [{**payload["candidates"][1], "reason": "added"}]}},
+    )
+    seen = {}
+
+    def fake_render(notes, start, end, sample_rate, rate):
+        seen["pitches"] = [n.pitch for n in notes]
+        return b"RIFF"
+
+    monkeypatch.setattr("swingscribe.gui.audio.render_transcription", fake_render)
+    response = world["client"].get(f"/api/tracks/{track['id']}/transcription", params=params)
+    assert response.status_code == 200, response.text
+    assert seen["pitches"] == [78, 75, 72]

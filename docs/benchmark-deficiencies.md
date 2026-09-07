@@ -864,9 +864,18 @@ emission is velocity rank, so it wrote the lower note six times out of six.
 CREPE's line did the same at four of the six, for its own reason (it tracks
 the stronger partial).
 
-`mscz.Score.melody` is DEFINED as the top note of every chord, and the
-listener's own words confirm that is how they hear it: "does the piano-model
-even hear the top C?" It does. The picker throws it away.
+**Update, same day.** The listener, having heard bar 9 again, sides with the
+picker: both notes matter there, but the melody is the SECOND-from-top, the
+Gb5, which is the one the velocity rule chose. So this is not "the picker is
+wrong"; it is "the reference is ambiguous about two-note voicings", and it
+exposes a scoring caveat: `mscz.Score.melody` is DEFINED as the top note of
+every chord, so the pitch measure wants the C6 at bar 9 while the human who
+wrote that score says the Gb5 is the line. Piano pitch F1 under-credits a
+correct velocity pick in every two-note voicing. The fix is on the measure,
+not the picker: treat any member of a reference chord as an acceptable match
+for the time-free pitch alignment. The listener's additions and erasures on
+the new candidate layer (2026-09-07) are the labels that will settle which
+member humans want, chord by chord, instead of a rule.
 
 What would move: mean pitch F1 over the ten piano spans with references
 (0.8656 for the picker today, docs/issue8-line-selection.md). The candidate

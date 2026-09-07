@@ -477,8 +477,8 @@ select {
 /* The piano second-voice overlay. A hue of its own, distinct from --lead and
    from every ground-truth class colour: it is neither the line nor a verdict
    on the line, it is a suggestion the listener accepts by leaving it alone. */
-:root { --second-voice: #7a6fc4; }
-@media (prefers-color-scheme: dark) { :root { --second-voice: #a99cf0; } }
+:root { --second-voice: #7a6fc4; --candidate: #6d7390; --added: #4f9e3f; }
+@media (prefers-color-scheme: dark) { :root { --second-voice: #a99cf0; --candidate: #b9bfd6; --added: #9fd66a; } }
 #second-voice-toggle.active {
   border-color: var(--second-voice);
   color: var(--second-voice);

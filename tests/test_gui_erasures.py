@@ -325,3 +325,44 @@ def test_silenced_notes_do_not_reach_the_render(world, monkeypatch):
     )
     assert world["client"].get(url).status_code == 200
     assert seen["pitches"] == [60, 64, 67]
+
+
+# ── additions: the other sign of the same judgement ────────────────────────
+
+CANDIDATES = [
+    {"onset": 10.02, "pitch": 60, "duration": 0.3, "confidence": 0.6, "velocity": 76},  # = NOTES[0]
+    {"onset": 10.5, "pitch": 84, "duration": 0.3, "confidence": 0.7, "velocity": 89},
+    {"onset": 10.5, "pitch": 48, "duration": 0.3, "confidence": 0.3, "velocity": 40},
+    {"onset": 12.0, "pitch": 55, "duration": 0.2, "confidence": 0.4, "velocity": 50},
+]
+
+
+def test_the_pool_leaves_out_what_the_line_already_holds():
+    """A model note at a line note's pitch within 50 ms is the same event
+    heard by the other detector, not something to offer twice."""
+    offered = erasures.pool(CANDIDATES, NOTES)
+    assert [(c["onset"], c["pitch"]) for c in offered] == [(10.5, 48), (10.5, 84), (12.0, 55)]
+
+
+def test_an_addition_is_matched_onto_the_pool_by_content():
+    offered = erasures.pool(CANDIDATES, NOTES)
+    stored = [erasures.record_addition(offered[1], "other", "htdemucs_ft")]
+    assert stored[0]["reason"] == "added"
+    resolved = erasures.resolve_additions(stored, offered, SPAN)
+    assert resolved["added"] == [1]
+    assert resolved["unmatched"] == []
+
+
+def test_an_addition_the_pool_no_longer_holds_is_carried_not_dropped():
+    offered = erasures.pool(CANDIDATES, NOTES)
+    stale = erasures.record_addition({"onset": 11.7, "pitch": 79, "duration": 0.2}, "other", "m")
+    resolved = erasures.resolve_additions([stale], offered, SPAN)
+    assert resolved["added"] == []
+    assert resolved["carried"] == [stale]
+    assert resolved["unmatched"] == [stale]
+
+
+def test_enabled_returns_the_switched_on_candidates_as_plain_notes():
+    offered = erasures.pool(CANDIDATES, NOTES)
+    on = erasures.enabled(offered, [1])
+    assert on == [{"onset": 10.5, "duration": 0.3, "pitch": 84, "confidence": 0.7}]

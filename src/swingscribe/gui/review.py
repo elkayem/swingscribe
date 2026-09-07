@@ -146,8 +146,17 @@ def _cache(config: Config) -> StageCache:
 
 
 def cached_review(document: Document, config: Config, model: str) -> dict[str, Any] | None:
-    """The stored review for this exact stem+model+config, or None."""
-    return _cache(config).get_json(review_key(document, config, model))
+    """The stored review for this exact stem+model+config, or None.
+
+    A pianist's review written before the candidate pool existed is treated
+    as a miss: the client needs that key, and re-running writes the complete
+    payload under the SAME key. Versioning by payload shape rather than by
+    key keeps every horn review valid — a horn never has a pool to lack.
+    """
+    payload = _cache(config).get_json(review_key(document, config, model))
+    if payload is not None and config.transcribe.uses_piano_oracle and "candidates" not in payload:
+        return None
+    return payload
 
 
 def _payload(notes: list[NoteEvent], diagnostics: Any) -> dict[str, Any]:
@@ -186,6 +195,19 @@ def _payload(notes: list[NoteEvent], diagnostics: Any) -> dict[str, Any]:
                 "confidence": round(float(n.get("velocity", 0)) / 127.0, _ROUND),
             }
             for n in getattr(diagnostics, "second_voice", []) or []
+        ],
+        # Everything the piano model heard: the candidate pool a pianist's
+        # transcriber switches notes on from (gui/erasures.py additions). Same
+        # rule as the overlay — a separate key, never entries in "notes".
+        "candidates": [
+            {
+                "onset": round(float(n["onset"]), _ROUND),
+                "duration": round(float(n["duration"]), _ROUND),
+                "pitch": int(n["pitch"]),
+                "confidence": round(float(n.get("velocity", 0)) / 127.0, _ROUND),
+                "velocity": int(n.get("velocity", 0)),
+            }
+            for n in getattr(diagnostics, "candidates", []) or []
         ],
         "diagnostics": {
             "hop_s": diagnostics.hop_s,

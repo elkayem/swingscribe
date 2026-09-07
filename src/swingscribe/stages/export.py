@@ -126,17 +126,42 @@ def _append_note(
     written_key: int,
     tuplet_mark: str | None = None,
 ) -> None:
+    """One notated note, plus a <chord/> note for every other pitch it heads.
+
+    A MusicXML chord is the head note followed by notes marked <chord/>, each
+    repeating the duration, type, dots, ties and tuplet ratio, and advancing
+    the time cursor by nothing. The tuplet bracket mark goes on the head only:
+    a reader draws one bracket per group, not one per chord member.
+    """
+    pitches = [note.pitch] if note.is_rest else [note.pitch, *sorted(set(note.chord))]
+    for index, pitch in enumerate(pitches):
+        _append_pitch(parent, note, pitch, transpose, written_key, tuplet_mark, chord=index > 0)
+
+
+def _append_pitch(
+    parent,
+    note: NotatedNote,
+    sounding: int,
+    transpose: int,
+    written_key: int,
+    tuplet_mark: str | None,
+    chord: bool,
+) -> None:
     element = ElementTree.SubElement(parent, "note")
+    if chord:
+        ElementTree.SubElement(element, "chord")
     if note.is_rest:
         ElementTree.SubElement(element, "rest")
     else:
-        step, alter, octave = spell(note.pitch + transpose, written_key)
+        step, alter, octave = spell(sounding + transpose, written_key)
         pitch = ElementTree.SubElement(element, "pitch")
         ElementTree.SubElement(pitch, "step").text = step
         if alter:
             ElementTree.SubElement(pitch, "alter").text = str(alter)
         ElementTree.SubElement(pitch, "octave").text = str(octave)
     ElementTree.SubElement(element, "duration").text = str(_duration_ticks(note))
+    if chord:
+        tuplet_mark = None
 
     # A tie is two things in MusicXML: <tie> is what sounds, <tied> is what is
     # drawn. Writing only one of them opens with a warning in some readers and

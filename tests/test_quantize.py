@@ -501,3 +501,18 @@ def test_the_same_figure_is_written_finer_on_a_slow_beat():
 
     assert second_note_beat(60.0) == pytest.approx(0.75)  # sixteenth grid: dotted figure
     assert second_note_beat(200.0) == pytest.approx(0.5)  # eighth grid: an eighth pair
+
+
+def test_a_chord_rides_through_quantize_on_its_head_note():
+    """quantize_notes never derives a chord; it carries the one it is handed
+    and hands it back on the same note, so notate can write it."""
+    from swingscribe.stages.quantize import quantize_notes
+
+    beats = [float(i) * 0.5 for i in range(40)]
+    onsets = [beats[4], beats[6], beats[8]]
+    quantized, _ = quantize_notes(
+        onsets, [0.2, 0.2, 0.2], [60, 64, 67], beats, [], [], chords=[[], [72, 76], []]
+    )
+    assert [n.chord for n in quantized] == [[], [72, 76], []]
+    plain, _ = quantize_notes(onsets, [0.2, 0.2, 0.2], [60, 64, 67], beats, [], [])
+    assert [n.chord for n in plain] == [[], [], []]

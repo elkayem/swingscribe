@@ -66,6 +66,11 @@ export class PianoRoll {
     this.notes = [];
     this.second = [];
     this.showSecond = true;
+    // Everything the piano model heard that the line does not hold, drawn
+    // faint under the line; `added` are the ones the listener switched on.
+    // Piano only — the server sends an empty pool for a horn.
+    this.candidates = [];
+    this.added = new Set();
     this.diag = null;
     this.beats = null;
     this.selected = -1;
@@ -110,6 +115,7 @@ export class PianoRoll {
     // apart -- everything that scores, exports or erases treats `notes` as the
     // transcription, and this is a suggestion, not a claim.
     this.second = (review && review.second_voice) || [];
+    this.candidates = (review && review.candidates) || [];
     this.diag = review ? review.diagnostics : null;
     this.beats = beats;
     this.selected = -1;
@@ -118,9 +124,18 @@ export class PianoRoll {
     if (this.opts.onView) this.opts.onView(this.view, this.spanWidth);
   }
 
-  /* Show or hide the piano second-voice overlay. */
+  /* Show or hide what the piano model offers (the candidate pool, and the
+     legacy second-voice overlay). Switched-on candidates stay drawn: they
+     are part of the transcription now. */
   setShowSecondVoice(on) {
     this.showSecond = !!on;
+    this._range();
+    this.draw();
+  }
+
+  /* Candidate indices the listener has switched on. */
+  setAdded(indices) {
+    this.added = new Set(indices);
     this._range();
     this.draw();
   }
@@ -159,6 +174,11 @@ export class PianoRoll {
   _range() {
     const pitches = this.notes.map((n) => n.pitch);
     if (this.showSecond) for (const n of this.second) pitches.push(n.pitch);
+    // The pool spans the whole keyboard (the left hand is in it), so it only
+    // widens the axis while it is shown; an added note is always in range.
+    this.candidates.forEach((n, i) => {
+      if (this.showSecond || this.added.has(i)) pitches.push(n.pitch);
+    });
     if (this.ground) for (const n of this.ground.reference_notes) pitches.push(n.pitch);
     if (!pitches.length) {
       this.pitchLo = 48;
@@ -393,6 +413,34 @@ export class PianoRoll {
     }
 
     const noteH = this.noteHeight(h);
+
+    // The candidate pool, drawn first and faint so the line sits on top of
+    // what is merely offered. Velocity shades it: the model's loud notes are
+    // the ones most likely to be the line's missing member. A switched-on
+    // candidate is filled like a line note, in its own colour, because it IS
+    // part of the transcription now and will be on the page.
+    if (this.candidates.length) {
+      ctx.save();
+      this.candidates.forEach((n, i) => {
+        const on = this.added.has(i);
+        if (!on && !this.showSecond) return;
+        const x0 = this.timeToX(n.onset, w);
+        const x1 = this.timeToX(n.onset + n.duration, w);
+        if (x1 < 0 || x0 > w) return;
+        const width = Math.max(2, x1 - x0);
+        const y = this.pitchToY(n.pitch, h) - noteH / 2;
+        if (on) {
+          ctx.globalAlpha = 0.95;
+          ctx.fillStyle = this._css('--added', '#9fd66a');
+          ctx.fillRect(x0, y, width, noteH - 1);
+        } else {
+          ctx.globalAlpha = 0.14 + 0.3 * Math.min(1, Math.max(0, n.confidence));
+          ctx.fillStyle = this._css('--candidate', '#b9bfd6');
+          ctx.fillRect(x0, y, width, noteH - 1);
+        }
+      });
+      ctx.restore();
+    }
 
     // Drawn first, so the line always sits on top of what is merely offered,
     // and outlined rather than filled: it must never be mistaken for a note
@@ -695,6 +743,16 @@ export class PianoRoll {
       );
       if (hit.index >= 0) {
         if (this.opts.onToggleSilence) this.opts.onToggleSilence(hit.index);
+        return;
+      }
+      // Not on a line note: a candidate under the pointer is switched on or
+      // off. The same gesture as erasing, with the opposite sign — one tool
+      // edits the transcription in both directions.
+      const offered = this._hit(this.candidates, event, rect, (n) => n.onset, (n, i) =>
+        this.showSecond || this.added.has(i),
+      );
+      if (offered.index >= 0) {
+        if (this.opts.onToggleAdd) this.opts.onToggleAdd(offered.index);
         return;
       }
     }

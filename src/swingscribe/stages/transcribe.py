@@ -679,6 +679,11 @@ class FrameDiagnostics:
     # list — doubling the note count would halve precision on every benchmark
     # while describing the same playing. Empty for anything but a pianist.
     second_voice: list[dict] = dataclasses.field(default_factory=list)
+    # EVERYTHING the piano oracle heard, velocities included: the candidate
+    # pool the review screen offers a pianist's transcriber to switch on
+    # (gui/erasures.py additions). The same rule as `second_voice`: it rides
+    # here, never in the note list. Empty for anything but a pianist.
+    candidates: list[dict] = dataclasses.field(default_factory=list)
 
     @property
     def times(self) -> list[float]:
@@ -697,11 +702,12 @@ def _consult_piano_oracle(
     notes: list[NoteEvent],
     *,
     log: bool = False,
-) -> tuple[list[NoteEvent], list[dict]]:
+) -> tuple[list[NoteEvent], list[dict], list[dict]]:
     """Correct and filter the monophonic line against a polyphonic piano model.
 
-    Returns the corrected line and, separately, the review-only second voice —
-    separately because only the first is the transcription.
+    Returns the corrected line and, separately, the review-only second voice
+    and the oracle's FULL output — separately because only the first is the
+    transcription. The full output is the candidate pool the review offers.
 
     Kept out of `analyze` so the CREPE path reads as one thing. Failure here
     is reported and swallowed: the oracle is an improvement to a line that
@@ -712,7 +718,7 @@ def _consult_piano_oracle(
     from swingscribe import line_selection, piano
 
     if not notes and tc.piano_line != "oracle":
-        return notes, []
+        return notes, [], []
     try:
         import torch
 
@@ -724,10 +730,10 @@ def _consult_piano_oracle(
         oracle = piano.transcribe(mono, rate, device=device, offset=region_offset)
     except Exception as exc:  # noqa: BLE001 — see docstring
         print(f"transcribe: piano oracle unavailable ({type(exc).__name__}: {exc}); keeping CREPE")
-        return notes, []
+        return notes, [], []
     if not oracle:
         print("transcribe: piano oracle found no notes; keeping CREPE")
-        return notes, []
+        return notes, [], []
 
     if tc.piano_line == "oracle":
         # Issue #8: the line is PICKED from the model's full output rather
@@ -743,16 +749,20 @@ def _consult_piano_oracle(
             f"transcribe: piano oracle heard {len(oracle)} notes; "
             f"picked a line of {len(picked)} (CREPE's {len(notes)} set aside)"
         )
-        return [
-            NoteEvent(
-                onset=n["onset"],
-                duration=n["duration"],
-                pitch=n["pitch"],
-                confidence=n["confidence"],
-                source=f"{tc.stem}:piano",
-            )
-            for n in picked
-        ], []
+        return (
+            [
+                NoteEvent(
+                    onset=n["onset"],
+                    duration=n["duration"],
+                    pitch=n["pitch"],
+                    confidence=n["confidence"],
+                    source=f"{tc.stem}:piano",
+                )
+                for n in picked
+            ],
+            [],
+            oracle,
+        )
 
     as_dicts = [
         {"onset": n.onset, "duration": n.duration, "pitch": n.pitch, "confidence": n.confidence}
@@ -794,7 +804,7 @@ def _consult_piano_oracle(
         if tc.piano_second_voice
         else []
     )
-    return line, extra
+    return line, extra, oracle
 
 
 def analyze(
@@ -890,8 +900,11 @@ def analyze(
     # never get this. The oracle sees the SAME cropped signal, so its onsets
     # are in region time and get the same offset applied.
     second_voice: list[dict] = []
+    candidates: list[dict] = []
     if tc.uses_piano_oracle:
-        notes, second_voice = _consult_piano_oracle(mono, rate, tc, region_offset, notes, log=log)
+        notes, second_voice, candidates = _consult_piano_oracle(
+            mono, rate, tc, region_offset, notes, log=log
+        )
 
     # Last: what is left that the line itself disowns — an octave under its
     # neighbours, or (horns only) far quieter than them. After the oracle so
@@ -919,6 +932,7 @@ def analyze(
         pitch=pitches,
         onsets=sorted(region_offset + f * hop_s for f in onset_frames),
         second_voice=second_voice,
+        candidates=candidates,
     )
     progress.report("transcribe", 1.0, f"{len(notes)} notes")
     return notes, diagnostics

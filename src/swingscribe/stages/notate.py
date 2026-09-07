@@ -731,9 +731,14 @@ def build(
     # remaining barline ties are legato-into-the-next-note, where cutting
     # would invent a rest the ear never heard.
 
+    # Chords ride beside the event tuples rather than inside them: every pass
+    # above works on (bar, beat, duration, pitch) and none of them moves an
+    # onset, so the quantized note's own position still names it here.
+    chord_of = {(n.bar, n.beat, n.pitch): sorted(set(n.chord)) for n in quantized if n.chord}
     by_bar: dict[int, list[NotatedNote]] = {}
     for bar_number, beat, duration, pitch in events:
         step, alter, octave = spell(pitch, key_fifths)
+        chord = chord_of.get((bar_number, beat, pitch), [])
         bar, start, remaining = bar_number, beat, duration
         first_piece = True
         while remaining > TICK:
@@ -755,6 +760,7 @@ def build(
                         tuplet=tuplet,
                         tie_start=not last_piece,
                         tie_stop=not first_piece,
+                        chord=chord,
                     )
                 )
                 first_piece = False

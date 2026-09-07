@@ -293,6 +293,7 @@ def quantize_notes(
     allow_triplets: bool = True,
     min_onsets_for_tuplet: int = 3,
     grid_slack_s: float = 0.02,
+    chords: list[list[int]] | None = None,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -315,8 +316,9 @@ def quantize_notes(
     # Warp first, then group by beat so the grid choice sees the whole beat.
     # The RAW fractional offset rides along: the ternary hypothesis is scored
     # and snapped in raw time (see choose_grid — the warp is a binary story).
-    warped: list[tuple[int, float, float, int, float]] = []
-    for onset, duration, pitch in zip(onsets, durations, pitches, strict=True):
+    warped: list[tuple[int, float, float, int, float, list[int]]] = []
+    extras = chords if chords is not None else [[] for _ in onsets]
+    for onset, duration, pitch, chord in zip(onsets, durations, pitches, extras, strict=True):
         position = beat_position(onset, beats)
         if position is None:
             continue
@@ -330,12 +332,19 @@ def quantize_notes(
             end_index = int(end)
             warped_end = end_index + warp_phase(end - end_index, by_beat.get(end_index, 0.5))
         warped.append(
-            (index, warped_start, max(0.0, warped_end - warped_start), pitch, position - index)
+            (
+                index,
+                warped_start,
+                max(0.0, warped_end - warped_start),
+                pitch,
+                position - index,
+                list(chord),
+            )
         )
 
     per_beat: dict[int, list[float]] = {}
     per_beat_raw: dict[int, list[float]] = {}
-    for index, position, _duration, _pitch, raw in warped:
+    for index, position, _duration, _pitch, raw, _chord in warped:
         per_beat.setdefault(index, []).append(position - index)
         per_beat_raw.setdefault(index, []).append(raw)
     # The slack is a time budget (config.py: it absorbs a player's motor
@@ -365,7 +374,7 @@ def quantize_notes(
         )
 
     out, positions = [], []
-    for index, position, duration, pitch, raw in warped:
+    for index, position, duration, pitch, raw, chord in warped:
         grid = grids.get(index, finest)
         if grid % 3 == 0:
             # Ternary: the NOTATION is the raw third (a performed triplet
@@ -394,6 +403,7 @@ def quantize_notes(
                 # In beats, not seconds: a residual only means anything
                 # relative to the pulse it deviates from.
                 timing_residual=residual,
+                chord=chord,
             )
         )
     return out, positions
@@ -468,6 +478,7 @@ def run(document: Document, config: Config) -> Document:
         allow_triplets=qc.allow_triplets,
         min_onsets_for_tuplet=qc.min_onsets_for_tuplet,
         grid_slack_s=qc.grid_slack_s,
+        chords=[list(n.chord) for n in notes],
     )
 
     by_beat, track = pooled_phase(document.swing, qc.straight_bur_ceiling)

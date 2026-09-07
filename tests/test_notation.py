@@ -17,6 +17,7 @@ from swingscribe.notation import (
     section_for,
     span_anchor,
     span_beats,
+    with_chords,
 )
 
 BEAT = 0.5  # 120 bpm
@@ -397,3 +398,60 @@ def test_span_anchor_picks_the_in_phase_beat_nearest_the_start():
     assert span_anchor(beats, kept, 1.0, 4, 9.4) == 9.0  # index 18 is now nearer
     assert span_anchor(beats, kept, 1.0, 4, 10.0) == 9.0  # a dead tie: the earlier one
     assert span_anchor(beats, kept, None, 4, 10.2) == 10.0  # no phase to keep
+
+
+# ── chords from the listener's enabled candidates ───────────────────────────
+
+
+def ev(onset: float, pitch: int, duration: float = 0.4, source: str = "other") -> NoteEvent:
+    return NoteEvent(onset=onset, duration=duration, pitch=pitch, confidence=0.8, source=source)
+
+
+def test_an_extra_struck_with_a_line_note_joins_its_chord_and_takes_its_duration():
+    """Chord members strike and release together: the extra's own measured
+    length is dropped, or the page shows one note ending a 32nd early."""
+    line = [ev(10.0, 78, 0.40), ev(10.5, 75, 0.30)]
+    extras = [ev(10.02, 84, 0.71, "other:added")]
+    out = with_chords(line, extras)
+    assert [(n.onset, n.pitch, n.chord, n.duration) for n in out] == [
+        (10.0, 78, [84], 0.40),
+        (10.5, 75, [], 0.30),
+    ]
+
+
+def test_an_extra_with_no_line_note_under_it_is_a_note_of_its_own():
+    line = [ev(10.0, 78)]
+    extras = [ev(10.25, 72, 0.2, "other:added")]
+    out = with_chords(line, extras)
+    assert [(n.onset, n.pitch, n.chord) for n in out] == [(10.0, 78, []), (10.25, 72, [])]
+
+
+def test_two_extras_struck_together_in_a_gap_chord_onto_each_other():
+    line = [ev(10.0, 78)]
+    extras = [ev(11.0, 72, 0.2, "other:added"), ev(11.01, 76, 0.2, "other:added")]
+    out = with_chords(line, extras)
+    assert [(n.onset, n.pitch, n.chord) for n in out] == [(10.0, 78, []), (11.0, 72, [76])]
+
+
+def test_an_extra_at_the_line_notes_own_pitch_adds_nothing():
+    out = with_chords([ev(10.0, 78)], [ev(10.01, 78, 0.2, "other:added")])
+    assert [(n.pitch, n.chord) for n in out] == [(78, [])]
+
+
+def test_a_chorded_note_reaches_the_page_as_one_event_with_a_chord():
+    """Quantize sees one onset per chord, so the grid is not called too
+    coarse and nothing is silently dropped; every bar still adds up."""
+    beats = grid(count=40, start=0.0)
+    notes = line(beats)
+    extras = [ev(beats[4] + 0.01, notes[4].pitch + 6, 0.2, "other:added")]
+    region = (beats[0], beats[-1])
+    plain = notation_for_span("t.wav", notes, beats, region, stem="other")
+    notation = notation_for_span("t.wav", with_chords(notes, extras), beats, region, stem="other")
+    assert notation is not None and plain is not None
+    sounded = [n for bar in notation.bars for n in bar.notes if not n.is_rest]
+    # Exactly as many events as without the chord: the extra joined one.
+    assert len(sounded) == sum(1 for bar in plain.bars for n in bar.notes if not n.is_rest)
+    chorded = [n for n in sounded if n.chord]
+    assert [(n.pitch, n.chord) for n in chorded] == [(notes[4].pitch, [notes[4].pitch + 6])]
+    for bar in notation.bars:
+        assert sum(n.duration for n in bar.notes) == pytest.approx(4.0)

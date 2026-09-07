@@ -48,6 +48,12 @@ from swingscribe.stages import meter
 # the selection still needs the beat after it to be placed against.
 MARGIN_SECONDS = 2.0
 
+# An enabled note struck within this of a line note is a member of that
+# note's chord. Tighter than the review's own 50 ms cluster gap on purpose: a
+# chord is one gesture, and the piano model's onsets for one are within a
+# frame or two of each other.
+CHORD_TOLERANCE_S = 0.03
+
 # Below this a span cannot support a bar grid at all -- two bars of 4/4.
 MIN_BEATS = 8
 
@@ -61,6 +67,44 @@ def span_beats(
     if high is None:
         return []
     return [b for b in beats if low - margin <= b <= high + margin]
+
+
+def with_chords(
+    line: list[NoteEvent], extras: list[NoteEvent], tolerance: float = CHORD_TOLERANCE_S
+) -> list[NoteEvent]:
+    """The line with the listener's enabled extras folded in as chords.
+
+    A pianist's transcription is a single line by default, and the roll offers
+    every other note the piano model heard as a candidate the listener can
+    switch on. An extra struck together with a line note joins that note's
+    `chord` and takes its DURATION: chord members strike and release together,
+    and two independently-measured lengths would put one of them a 32nd short
+    on the page. An extra with no line note under it becomes a note of its
+    own, and later extras may then chord onto it. Quantize sees one onset per
+    chord, which is what keeps it from calling the grid too coarse.
+    """
+    hosts: list[tuple[NoteEvent, set[int]]] = [
+        (note, set(note.chord)) for note in sorted(line, key=lambda n: n.onset)
+    ]
+    for extra in sorted(extras, key=lambda n: n.onset):
+        nearest = None
+        for host, _members in hosts:
+            distance = abs(host.onset - extra.onset)
+            if distance <= tolerance and (nearest is None or distance < nearest[0]):
+                nearest = (distance, host)
+        if nearest is None:
+            hosts.append((extra, set()))
+            continue
+        for host, members in hosts:
+            if host is nearest[1] and extra.pitch != host.pitch:
+                members.add(extra.pitch)
+    return sorted(
+        (
+            host.model_copy(update={"chord": sorted(members - {host.pitch})})
+            for host, members in hosts
+        ),
+        key=lambda n: (n.onset, n.pitch),
+    )
 
 
 def span_anchor(
