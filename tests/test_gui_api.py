@@ -250,6 +250,37 @@ def test_stem_slice_names_what_is_available_when_it_is_not(world):
     assert "other" in response.json()["detail"]  # tells you what you can pick
 
 
+def test_a_span_scoped_separation_is_served_for_the_selection(world):
+    """Separate the selection only, then audition it: the slice and the peaks
+    must come from that set, and a selection it does not cover is still a 404
+    that names nothing rather than a stem from the wrong time."""
+    import io
+
+    track = open_track(world)
+    rate = world["rate"]
+    tone = (0.2 * np.sin(2 * np.pi * 330 * np.arange(rate * 6) / rate)).astype("float32")
+    normalized = pathlib.Path(world["config"].cache_dir) / "audio" / "normalized.wav"
+    scoped = stems_dir(
+        world["config"].cache_dir, library.file_digest(normalized), "bsroformer_sw", (1.0, 5.0)
+    )
+    scoped.mkdir(parents=True)
+    for name in ("drums", "bass", "other", "vocals", "guitar", "piano"):
+        soundfile.write(str(scoped / f"{name}.wav"), np.stack([tone, tone], axis=1), rate)
+
+    inside = {"stem": "bass", "model": "bsroformer_sw", "start": 1.5, "end": 4.5}
+    sliced = world["client"].get(f"/api/tracks/{track['id']}/stem", params=inside)
+    assert sliced.status_code == 200, sliced.text
+    data, _ = soundfile.read(io.BytesIO(sliced.content), always_2d=True)
+    assert data.shape[0] == pytest.approx(3.0 * rate, abs=2)
+    peaks = world["client"].get(f"/api/tracks/{track['id']}/peaks", params=inside)
+    assert peaks.status_code == 200, peaks.text
+
+    outside = {**inside, "start": 0.0, "end": 4.5}
+    missing = world["client"].get(f"/api/tracks/{track['id']}/stem", params=outside)
+    assert missing.status_code == 404
+    assert "available: none" in missing.json()["detail"]
+
+
 def test_download_sets_a_filename(world):
     track = open_track(world)
     response = world["client"].get(

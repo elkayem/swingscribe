@@ -312,7 +312,10 @@ def create_app(config: Config) -> FastAPI:
         document = entry["document"]
         source = document.audio.path
         if stem is not None and stem != "mix":
-            resolved = library.resolve_stem(document, config, model or config.separate.model, stem)
+            span = (start, end) if start is not None and end is not None else None
+            resolved = library.resolve_stem(
+                document, config, model or config.separate.model, stem, span
+            )
             if resolved is None:
                 raise HTTPException(404, f"no {stem!r} stem for {model}")
             source = resolved
@@ -368,9 +371,12 @@ def create_app(config: Config) -> FastAPI:
         if stem == "mix":
             source = document.audio.path
         else:
-            resolved = library.resolve_stem(document, config, model, stem)
+            # The selection decides which stem sets can answer: a set separated
+            # over the span alone is only found when the span is asked about.
+            span = (start, end) if end is not None else None
+            resolved = library.resolve_stem(document, config, model, stem, span)
             if resolved is None:
-                available = library.selectable_stems(document, config, model)
+                available = library.selectable_stems(document, config, model, span)
                 raise HTTPException(
                     404,
                     f"no {stem!r} stem for {model}; separate it first "

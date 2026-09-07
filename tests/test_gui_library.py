@@ -461,6 +461,31 @@ def test_a_span_scoped_set_answers_for_a_selection_it_covers(config, tmp_path):
     ] is False
 
 
+def test_resolve_stem_finds_a_span_scoped_set_for_the_selection(config, tmp_path):
+    """The audition routes hold only the request's bounds, not a config with
+    the region folded in. Without the span, a set separated over the
+    selection alone was invisible to playback and reported "available: none"
+    seconds after the listener watched it finish."""
+    wav = make_audio(tmp_path / "cache" / "audio" / "norm.wav", b"normalized")
+    document = Document(
+        audio_path="orig.m4a",
+        sample_rate=44100,
+        audio=AudioRef(path=str(wav), sample_rate=44100, channels=2, duration=200.0),
+    )
+    from swingscribe.stages.separate import stems_dir
+
+    out = stems_dir(config.cache_dir, library.file_digest(wav), "bsroformer_sw", (30.0, 80.0))
+    out.mkdir(parents=True)
+    for name in ("drums", "bass", "other", "vocals", "guitar", "piano"):
+        (out / f"{name}.wav").write_bytes(b"stem")
+
+    assert library.resolve_stem(document, config, "bsroformer_sw", "bass") is None
+    assert library.resolve_stem(document, config, "bsroformer_sw", "bass", (38.4, 75.1)) == str(
+        out / "bass.wav"
+    )
+    assert library.resolve_stem(document, config, "bsroformer_sw", "bass", (10.0, 75.1)) is None
+
+
 def test_a_partial_stem_folder_is_not_ready_and_says_what_is_missing(config, tmp_path):
     """One stem copied across from another cache (CLAUDE.md's own advice)
     used to read as "Separated", which hid the Separate button and left a

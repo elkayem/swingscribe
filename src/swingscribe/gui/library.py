@@ -264,7 +264,13 @@ def selectable_stems(
     return sorted(set(stems) | set(combinable_stems(stems)))
 
 
-def resolve_stem(document: Document, config: Config, model: str, stem: str) -> str | None:
+def resolve_stem(
+    document: Document,
+    config: Config,
+    model: str,
+    stem: str,
+    span: tuple[float, float] | None = None,
+) -> str | None:
     """Path to `stem`'s audio, summing its parts when it names a combination.
 
     A separated stem resolves to exactly the path `available_stems` gives, so
@@ -272,8 +278,15 @@ def resolve_stem(document: Document, config: Config, model: str, stem: str) -> s
     reviewed. A combination is written ONCE, beside the stems it is made of and
     keyed by the same content digest, so it is as safely deletable as they are
     and `review_key`'s stem hash sees its real bytes rather than a name.
+
+    `span` is the selection being served, exactly as `available_stems` takes
+    it: a span-scoped set is invisible without one. The review path needs no
+    explicit span because `span_config` has already folded the selection into
+    `transcribe.region`; the audition routes have only the request's bounds,
+    and forgetting to pass them made a separation the listener had just
+    watched finish answer "no stem; separate it first (available: none)".
     """
-    stems = available_stems(document, config, model)
+    stems = available_stems(document, config, model, span)
     if stem in stems:
         return stems[stem]
     parts = stem.split(COMBINED_SEPARATOR)
