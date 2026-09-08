@@ -729,7 +729,16 @@ made. Both are kept; neither subsumes the other.
   A whole-file set answers for any span; a span set answers only for a
   selection it covers (`library.available_stems`, `separate.covering_dirs`).
   The batch keeps pass 1 (whole-file locate) on htdemucs_6s and separates
-  only the located span with `--separation-model`.
+  only the located span with `--separation-model`. **Re-running the sheet
+  after a transcribe change takes `--reuse-span`** (2026-09-07): pass 1 is
+  a whole-file CREPE pass per track under the new config, and a fit that
+  moves by a millisecond names a span the Roformer set on disk no longer
+  covers, so every solo would be re-separated. With the flag the sidecar's
+  located span, stem and melid are reused, and the fit (offset, rate, the
+  match-rate gate) is re-derived from the span's own notes after pass 2.
+  `benchmark_batch.py` separates a span the same way the Separate button
+  does — it used to submit a whole-file job, an hour per track on the
+  Roformer.
 - **A missing note may mean the soloist LEFT THE STEM.** Demucs assigns each
   moment to exactly one source, so an instrument it cannot place consistently
   is not attenuated across stems — it is switched between them, leaving

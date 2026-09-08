@@ -121,6 +121,11 @@ def run_job(client, path: str, kind: str, model: str, stem=None, span=None, log=
     body = {"path": path, "kind": kind, "model": model}
     if kind == "transcribe":
         body |= {"stem": stem, "start": span[0], "end": span[1]}
+    elif kind == "separate" and span is not None:
+        # The Separate button sends the selection: a span-scoped set (stems
+        # full-length, silent outside it) is minutes where a whole file on
+        # the Roformer is the better part of an hour (SeparateConfig.span).
+        body |= {"start": span[0], "end": span[1]}
     job = client.post("/api/jobs", json=body).json()
     if "state" not in job:
         raise RuntimeError(f"{kind} job refused: {job}")
@@ -165,9 +170,14 @@ def process_track(client, audio_path: Path, log=print) -> dict:
         # The transcribe job runs on an already-separated stem; if separation
         # (or the beat grid) is missing too, run those buttons first, exactly
         # as the frontend would.
-        stems = client.get(f"/api/tracks/{track_id}/stems", params={"model": model}).json()
+        # Asked for THIS span, as the frontend asks: a whole-file set answers
+        # for any span and a span-scoped set answers when it covers it.
+        stems = client.get(
+            f"/api/tracks/{track_id}/stems",
+            params={"model": model, "start": span[0], "end": span[1]},
+        ).json()
         if stem not in stems.get("stems", []):
-            run_job(client, str(audio_path), "separate", model, log=log)
+            run_job(client, str(audio_path), "separate", model, span=span, log=log)
         job = run_job(client, str(audio_path), "transcribe", model, stem=stem, span=span, log=log)
         if job["state"] != "done":
             row["status"] = f"transcribe failed: {job.get('error') or job['state']}"

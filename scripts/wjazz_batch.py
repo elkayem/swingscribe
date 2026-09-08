@@ -173,6 +173,7 @@ is actually being run from.
 """
 
 import argparse
+import json
 import os
 import re
 import sqlite3
@@ -405,12 +406,21 @@ def process_file(
     log=print,
     fresh: bool = False,
     separation_model: str | None = None,
+    reuse_span: bool = False,
 ) -> dict:
     """Run the GUI workflow end to end for one wjazzd audio file.
 
     `separation_model` overrides `auto_settings`' choice for HORN soloists
     only (a pianist keeps plain htdemucs, D3) — how the Roformer trial is
     run through the batch (docs/separation-research.md).
+
+    `reuse_span` skips pass 1 when the sidecar already holds THIS melid's
+    located span: the fit (offset, rate, match rate) is then derived from
+    the span's own notes after pass 2, and the anchor from that fit. For a
+    re-run under a changed transcribe config, where pass 1 would otherwise
+    re-run CREPE over every WHOLE file, and a fit that moved by a
+    millisecond would orphan every span-scoped Roformer set on disk.
+    `fresh` still wins: it re-locates.
 
     Always returns a dict keyed by FIELDS. On any failure `status` explains
     why and the data columns are left blank rather than raising — one bad
@@ -447,6 +457,8 @@ def process_file(
     transcribe_model = separation_model or DEFAULT_TRANSCRIBE_MODEL
     row["ensemble"], row["separation_model"] = ensemble, model
 
+    import numpy as np
+
     from swingscribe import wjazz
     from swingscribe.config import Config
     from swingscribe.gui import ground_truth, library, review
@@ -475,95 +487,120 @@ def process_file(
     prepared = run_pipeline(audio_path, base, prep_stages)
     duration = prepared.audio.duration
 
-    # Pass 1: whole file, so the solo can be located by content.
-    #
-    # In WHICH stem is decided by where the solo can be located at all, in a
-    # fixed order, `other` first. Demucs does not always put the horn in
-    # `other`: htdemucs_6s filed Bird's alto under `guitar` on Ornithology
-    # (in-span RMS 0.123 against 0.004, with `other` a third digital
-    # silence), and a locate pass hard-wired to `other` matched 5% and called
-    # the right take a wrong one (docs/benchmark-deficiencies.md D23). This
-    # is the one place a reference may steer a stem choice, and it is a
-    # found/not-found gate rather than a best-of-N: the first stem that
-    # clears MIN_MATCH_RATE wins even if a later one would match more, so
-    # no number on the sheet is the best of several tries.
-    import numpy as np
+    def place(offset: float, rate: float) -> tuple[float, float, float | None]:
+        """The solo's start and end in our timeline, and the downbeat ANCHOR,
+        all through the fit.
 
-    available = library.available_stems(prepared, base, model)
-    candidates = [s for s in LOCATE_STEM_ORDER if s in available] or ["other"]
-    tried: list[str] = []
-    located = None
-    for locate_stem in candidates:
-        wide = base.model_copy(
-            update={
-                "transcribe": base.transcribe.model_copy(
-                    update={"stem": locate_stem, "region": (0.0, duration)}
-                )
-            }
-        )
+        The anchor comes from the annotator's own bar lines. In the GUI the
+        listener places it by hand; without one, bar 1's phase is whatever the
+        located span start happens to be modulo the bar — Don't Blame Me came
+        out one beat off, every note in the wrong place in its bar, and the
+        interval-based rhythm measure is immune to a constant shift BY DESIGN,
+        so nothing scored it. WJazzD marks every note's bar and beat, so any
+        note the annotator put ON a downbeat, mapped through the fit, IS a
+        downbeat in our timeline (notation.section_for treats the anchor as a
+        phase, so any downbeat serves). The one nearest the span start wins.
+        """
+        solo_start = float(ref_on[0] * rate + offset)
+        solo_end = float(ref_on[-1] * rate + offset)
+        row["solo_start"] = round(solo_start, 3)
+        row["solo_end"] = round(solo_end, 3)
+        downbeats = [
+            float(onset) * rate + offset
+            for (onset,) in db.execute(
+                "select onset from melody where melid=? and beat=1 and tatum=1 order by onset",
+                (melid,),
+            )
+        ]
+        anchor = min(downbeats, key=lambda t: abs(t - solo_start)) if downbeats else None
+        return solo_start, solo_end, anchor
+
+    reused = None
+    if reuse_span and not fresh:
+        sidecar_path = Path(str(audio_path) + ".swingscribe.json")
+        if sidecar_path.is_file():
+            stored = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            if stored.get("melid") == melid and stored.get("region"):
+                reused = stored
+        if reused is None:
+            log(f"  [{melid}] no located span for melid {melid} in the sidecar — locating")
+
+    if reused is not None:
+        located = reused.get("stem") or "other"
+        region = (float(reused["region"][0]), float(reused["region"][1]))
         log(
-            f"  [{melid}] {performer} - {title} ({instrument}): pass 1 — whole file, "
-            f"{model}/{ensemble}, {locate_stem} stem"
+            f"  [{melid}] {performer} - {title} ({instrument}): pass 1 skipped, reusing "
+            f"the sidecar's span {region[0]:.1f}-{region[1]:.1f}s in {located}"
         )
-        started = time.time()
-        document = run_pipeline(audio_path, wide, stage_list)
-        notes = document.notes.get(locate_stem, [])
-        log(f"  [{melid}] pass 1: {len(notes)} notes in {time.time() - started:.0f}s")
-        tried.append(locate_stem)
-        if not notes:
-            continue
-        order = np.argsort([n.onset for n in notes])
-        est_on = np.array([notes[i].onset for i in order])
-        est_p = np.array([notes[i].pitch for i in order])
-        offset, rate, hits = wjazz.fit_affine(ref_on, ref_p, est_on, est_p, (0.0, duration))
-        match_rate = hits / len(ref_on)
-        # Recorded before the gate, so a rejected row still shows the rate it
-        # was rejected at. A rate sitting AT wjazz.RATE_LOW/RATE_HIGH is a
-        # confession: the true rate is outside the clamp and every number
-        # scored against that drifting clock is suspect (D19).
-        row["fit_rate"] = round(rate, 5)
-        if match_rate >= MIN_MATCH_RATE:
-            located = locate_stem
-            break
-        log(f"  [{melid}] pass 1: {locate_stem} matched {match_rate:.0%} — trying the next stem")
-    if located is None:
-        row["status"] = (
-            f"best fit only matched {match_rate:.0%} of melid {melid}'s notes in "
-            f"{'/'.join(tried)} — wrong file/take?"
-            if tried and notes
-            else "transcribed zero notes in the whole file — check separation/ensemble"
-        )
-        return row
-    if located != "other":
-        log(f"  [{melid}] the solo is in the {located} stem, not `other`")
+    else:
+        # Pass 1: whole file, so the solo can be located by content.
+        #
+        # In WHICH stem is decided by where the solo can be located at all, in a
+        # fixed order, `other` first. Demucs does not always put the horn in
+        # `other`: htdemucs_6s filed Bird's alto under `guitar` on Ornithology
+        # (in-span RMS 0.123 against 0.004, with `other` a third digital
+        # silence), and a locate pass hard-wired to `other` matched 5% and called
+        # the right take a wrong one (docs/benchmark-deficiencies.md D23). This
+        # is the one place a reference may steer a stem choice, and it is a
+        # found/not-found gate rather than a best-of-N: the first stem that
+        # clears MIN_MATCH_RATE wins even if a later one would match more, so
+        # no number on the sheet is the best of several tries.
+        available = library.available_stems(prepared, base, model)
+        candidates = [s for s in LOCATE_STEM_ORDER if s in available] or ["other"]
+        tried: list[str] = []
+        located = None
+        for locate_stem in candidates:
+            wide = base.model_copy(
+                update={
+                    "transcribe": base.transcribe.model_copy(
+                        update={"stem": locate_stem, "region": (0.0, duration)}
+                    )
+                }
+            )
+            log(
+                f"  [{melid}] {performer} - {title} ({instrument}): pass 1 — whole file, "
+                f"{model}/{ensemble}, {locate_stem} stem"
+            )
+            started = time.time()
+            document = run_pipeline(audio_path, wide, stage_list)
+            notes = document.notes.get(locate_stem, [])
+            log(f"  [{melid}] pass 1: {len(notes)} notes in {time.time() - started:.0f}s")
+            tried.append(locate_stem)
+            if not notes:
+                continue
+            order = np.argsort([n.onset for n in notes])
+            est_on = np.array([notes[i].onset for i in order])
+            est_p = np.array([notes[i].pitch for i in order])
+            offset, rate, hits = wjazz.fit_affine(ref_on, ref_p, est_on, est_p, (0.0, duration))
+            match_rate = hits / len(ref_on)
+            # Recorded before the gate, so a rejected row still shows the rate it
+            # was rejected at. A rate sitting AT wjazz.RATE_LOW/RATE_HIGH is a
+            # confession: the true rate is outside the clamp and every number
+            # scored against that drifting clock is suspect (D19).
+            row["fit_rate"] = round(rate, 5)
+            if match_rate >= MIN_MATCH_RATE:
+                located = locate_stem
+                break
+            log(
+                f"  [{melid}] pass 1: {locate_stem} matched {match_rate:.0%} — trying the next stem"
+            )
+        if located is None:
+            row["status"] = (
+                f"best fit only matched {match_rate:.0%} of melid {melid}'s notes in "
+                f"{'/'.join(tried)} — wrong file/take?"
+                if tried and notes
+                else "transcribed zero notes in the whole file — check separation/ensemble"
+            )
+            return row
+        if located != "other":
+            log(f"  [{melid}] the solo is in the {located} stem, not `other`")
 
-    solo_start = float(ref_on[0] * rate + offset)
-    solo_end = float(ref_on[-1] * rate + offset)
-    region = (max(0.0, solo_start - SOLO_MARGIN_S), min(duration, solo_end + SOLO_MARGIN_S))
-    row["solo_start"] = round(solo_start, 3)
-    row["solo_end"] = round(solo_end, 3)
-
-    # The downbeat ANCHOR, from the annotator's own bar lines. In the GUI the
-    # listener places it by hand; without one, bar 1's phase is whatever the
-    # located span start happens to be modulo the bar — Don't Blame Me came
-    # out one beat off, every note in the wrong place in its bar, and the
-    # interval-based rhythm measure is immune to a constant shift BY DESIGN,
-    # so nothing scored it. WJazzD marks every note's bar and beat, so any
-    # note the annotator put ON a downbeat, mapped through the fit, IS a
-    # downbeat in our timeline (notation.section_for treats the anchor as a
-    # phase, so any downbeat serves). The one nearest the span start wins.
-    downbeats = [
-        float(onset) * rate + offset
-        for (onset,) in db.execute(
-            "select onset from melody where melid=? and beat=1 and tatum=1 order by onset",
-            (melid,),
+        solo_start, solo_end, anchor = place(offset, rate)
+        region = (max(0.0, solo_start - SOLO_MARGIN_S), min(duration, solo_end + SOLO_MARGIN_S))
+        log(
+            f"  [{melid}] located at offset {offset:+.2f}s rate {rate:.4f}, "
+            f"matched {match_rate:.0%} -> region {region[0]:.1f}-{region[1]:.1f}s"
         )
-    ]
-    anchor = min(downbeats, key=lambda t: abs(t - solo_start)) if downbeats else None
-    log(
-        f"  [{melid}] located at offset {offset:+.2f}s rate {rate:.4f}, matched {match_rate:.0%}"
-        f" -> region {region[0]:.1f}-{region[1]:.1f}s"
-    )
 
     # Pass 2: narrowed to the located solo, through the GUI's OWN review path.
     #
@@ -625,6 +662,26 @@ def process_file(
     if not note_dicts:
         row["status"] = "narrowed pass produced zero notes"
         return row
+    if reused is not None:
+        # The fit from the span's own notes, the way run_eval's identify does
+        # it: pass 1 had the whole file to search, this has the span.
+        est_on = np.array([float(n["onset"]) for n in note_dicts])
+        est_p = np.array([int(n["pitch"]) for n in note_dicts])
+        order = np.argsort(est_on)
+        offset, rate, hits = wjazz.fit_affine(ref_on, ref_p, est_on[order], est_p[order], region)
+        match_rate = hits / len(ref_on)
+        row["fit_rate"] = round(rate, 5)
+        if match_rate < MIN_MATCH_RATE:
+            row["status"] = (
+                f"reused span: the fit matched only {match_rate:.0%} of melid {melid}'s "
+                "notes — re-run without --reuse-span"
+            )
+            return row
+        _solo_start, _solo_end, anchor = place(offset, rate)
+        log(
+            f"  [{melid}] fit over the span: offset {offset:+.2f}s rate {rate:.4f}, "
+            f"matched {match_rate:.0%}"
+        )
 
     score_path = ensure_ground_truth(db, melid, performer, title, titleaddon, instrument)
     # The sidecar is written BEFORE notating, because the GUI reads its
@@ -790,6 +847,15 @@ def main() -> None:
     parser.add_argument("--random", type=int, default=None, help="N files chosen at random")
     parser.add_argument("--all", action="store_true", help="every audio file in benchmark/wjazzd")
     parser.add_argument(
+        "--reuse-span",
+        action="store_true",
+        help=(
+            "skip the whole-file locate pass wherever the sidecar already holds this "
+            "melid's located span; the fit is re-derived from the span's own notes. "
+            "For re-running the sheet under a changed transcribe config."
+        ),
+    )
+    parser.add_argument(
         "--fresh",
         action="store_true",
         help=(
@@ -841,7 +907,12 @@ def main() -> None:
     for audio_path in files:
         print(f"\n== {audio_path.name} ==")
         row = process_file(
-            db, audio_path, cache_dir, fresh=args.fresh, separation_model=args.separation_model
+            db,
+            audio_path,
+            cache_dir,
+            fresh=args.fresh,
+            separation_model=args.separation_model,
+            reuse_span=args.reuse_span,
         )
         write_row(ws, index, row)
         save_sheet(wb, ws)  # after every file: a crash mid-batch loses nothing already done
