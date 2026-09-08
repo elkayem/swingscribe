@@ -2,6 +2,7 @@
 
 import threading
 import webbrowser
+from urllib.parse import urlencode
 
 from swingscribe.config import Config
 from swingscribe.gui.app import create_app
@@ -11,6 +12,8 @@ def serve(config: Config) -> None:
     import uvicorn
 
     url = f"http://{config.gui.host}:{config.gui.port}/"
+    if config.gui.open_track:
+        url += "?" + urlencode({"open": config.gui.open_track})
     if config.gui.open_browser:
         # Fired on a timer rather than inline: uvicorn needs a moment to bind,
         # and a browser that arrives first shows a connection error.

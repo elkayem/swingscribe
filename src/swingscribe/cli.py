@@ -240,8 +240,11 @@ def cmd_gui(config: Config, args: argparse.Namespace) -> int:
     if args.library:
         updates["library_dir"] = args.library
     elif args.audio:
-        # A file was named: list the folder it lives in, and it will be there.
-        updates["library_dir"] = str(Path(args.audio).expanduser().resolve().parent)
+        # A file was named: open it as soon as the page loads, and list the
+        # folder it lives in so its neighbours are a click away.
+        audio = Path(args.audio).expanduser().resolve()
+        updates["library_dir"] = str(audio.parent)
+        updates["open_track"] = str(audio)
     if args.port:
         updates["port"] = args.port
     if args.no_browser:

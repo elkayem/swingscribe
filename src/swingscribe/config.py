@@ -469,6 +469,9 @@ class GuiConfig(BaseModel):
     host: str = "127.0.0.1"  # localhost only; this serves local files by path
     port: int = 8420
     open_browser: bool = True
+    # A track to open as soon as the page loads (`swingscribe gui <file>`);
+    # passed to the page as ?open=<path>, never to the pipeline.
+    open_track: str | None = None
     # Where the track picker looks. null = the directory swingscribe was run from.
     library_dir: str | None = None
     # Separation models offered on the audition screen, in menu order — the

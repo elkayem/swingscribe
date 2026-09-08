@@ -848,6 +848,31 @@ async function pollBeatsJob(jobId, chip) {
 
 // ── screen 3: isolate & audition ────────────────────────────────────────────
 
+/* The separation models by a name a person can read. The ids stay in the
+   config, the cache and the CLI command; the chip shows the name and the
+   tooltip says what the model is for. An unknown id shows as itself. */
+const MODEL_LABELS = {
+  bsroformer_sw: 'BS-RoFormer',
+  htdemucs: 'Demucs',
+  htdemucs_6s: 'Demucs 6-stem',
+  htdemucs_ft: 'Demucs fine-tuned',
+};
+const MODEL_NOTES = {
+  bsroformer_sw:
+    'The default. Much slower than Demucs but far better at keeping a horn in one stem, ' +
+    'so it separates only the selected span: minutes rather than tens of minutes.',
+  htdemucs:
+    'Hybrid Transformer Demucs, four stems: vocals, drums, bass and other. The fast choice — ' +
+    'about three minutes for a ten-minute track on CPU.',
+  htdemucs_6s:
+    'Demucs with guitar and piano stems added. Worth trying on a piano solo; it sometimes files a ' +
+    'horn under guitar or vocals.',
+  htdemucs_ft:
+    'Four Demucs models averaged. Four times slower than Demucs and, measured on our benchmark, ' +
+    'no more accurate; kept for comparison.',
+};
+const modelLabel = (id) => MODEL_LABELS[id] ?? id;
+
 function renderModels() {
   const node = $('model-chips');
   node.innerHTML = '';
@@ -856,20 +881,20 @@ function renderModels() {
     const button = document.createElement('button');
     button.className = `chip${entry.model === state.model ? ' active' : ''}`;
     button.innerHTML = `<span class="dot${entry.ready ? ' ready' : ''}"></span>`;
-    button.append(entry.model);
-    button.title = entry.ready
-      ? `Separated${entry.span ? ` (${clock(entry.span[0])}–${clock(entry.span[1])} only)` : ''} — ${entry.stems.join(', ')}`
+    button.append(modelLabel(entry.model));
+    const status = entry.ready
+      ? `Already separated${entry.span ? ` for ${clock(entry.span[0])}–${clock(entry.span[1])}` : ''}: ${entry.stems.join(', ')}.`
       : entry.stems?.length
-        ? `Partial — only ${entry.stems.join(', ')} on disk (missing ${entry.missing.join(', ')}); ` +
-          'Separate to get the rest'
-        : 'Not separated yet — 6-13 minutes on CPU';
+        ? `Partly on disk — ${entry.stems.join(', ')}; missing ${entry.missing.join(', ')}. Separate to get the rest.`
+        : 'Not separated yet for this span.';
+    button.title = `${MODEL_NOTES[entry.model] ?? entry.model} ${status}`;
     button.addEventListener('click', () => selectModel(entry.model));
     node.appendChild(button);
   }
   const current = models.find((m) => m.model === state.model);
   const button = $('separate-btn');
   button.hidden = Boolean(current?.ready);
-  button.textContent = `Separate ${state.selection ? 'selection' : 'track'} with ${state.model ?? ''}`;
+  button.textContent = `Separate ${state.selection ? 'selection' : 'track'} with ${modelLabel(state.model)}`;
   if (!button.hidden) refreshEstimate();
 }
 
@@ -882,7 +907,7 @@ async function refreshEstimate() {
     const data = await api(`/api/tracks/${state.track.id}/estimate?model=${state.model}${spanParams()}`);
     const minutes = data.seconds / 60;
     const wait = minutes < 1.5 ? `~${Math.ceil(data.seconds)} s` : `~${Math.ceil(minutes)} min`;
-    button.textContent = `Separate ${state.selection ? 'selection' : 'track'} with ${state.model} (${wait})`;
+    button.textContent = `Separate ${state.selection ? 'selection' : 'track'} with ${modelLabel(state.model)} (${wait})`;
   } catch (_error) { /* the button keeps its plain label */ }
 }
 
@@ -1070,8 +1095,8 @@ function renderMixer() {
     const isLead = key === state.leadStem;
     row.className = `stem-row${isLead ? ' is-lead' : ''}${settings.muted ? ' muted-row' : ''}`;
     row.innerHTML = `
-      <button class="s${settings.muted ? '' : ' on'}" title="Mute / unmute">${settings.muted ? '○' : '◉'}</button>
-      <span class="stem-name">${key === 'mix' ? 'original mix' : key === CLICK_KEY ? 'click' : key}${isLead ? '<span class="lead-tag">lead</span>' : ''}</span>
+      <button class="s${settings.muted ? '' : ' on'}" title="Mute or unmute this stem in the audition.">${settings.muted ? '○' : '◉'}</button>
+      <span class="stem-name" title="${key === 'mix' ? 'The original recording, for reference.' : key === CLICK_KEY ? 'The metronome on the bar grid.' : `The ${key} stem${key.includes('+') ? ', summed from its parts' : ''}.`}">${key === 'mix' ? 'original mix' : key === CLICK_KEY ? 'click' : key}${isLead ? '<span class="lead-tag">lead</span>' : ''}</span>
       <input type="range" min="0" max="1" step="0.02" value="${settings.level}">
       <span class="loading"${settings.muted || stemEngine.has(key) ? ' hidden' : ''}>loading…</span>`;
 
@@ -1255,10 +1280,10 @@ async function pollJob(jobId) {
     return;
   }
   if (job && job.state === 'cancelled') {
-    toast(`${job.model}: separation cancelled`);
+    toast(`${modelLabel(job.model)}: separation cancelled`);
     return;
   }
-  if (job) toast(`${job.model}: ${job.stems.length} stems ready`);
+  if (job) toast(`${modelLabel(job.model)}: ${job.stems.length} stems ready`);
   // Re-read from disk either way: a job we lost contact with may have finished.
   state.track = await api('/api/tracks/open', {
     method: 'POST',
@@ -1937,6 +1962,13 @@ async function loadGroundTruth() {
   return 'ok';
 }
 
+const GT_CLASS_NOTES = {
+  matched: 'Notes we transcribed that agree with the hand transcription.',
+  wrong: 'Notes where we produced a different pitch from the one written.',
+  invented: 'Notes we produced that the hand transcription does not have.',
+  missed: 'Notes in the hand transcription that we did not produce.',
+};
+
 function renderGroundTruthBar() {
   const info = $('gt-info');
   const classes = $('gt-classes');
@@ -1970,6 +2002,7 @@ function renderGroundTruthBar() {
     const button = document.createElement('button');
     button.className = `chip gt-chip gt-${name}${state.gtClasses.includes(name) ? ' active' : ''}`;
     button.textContent = `${CLASS_LABEL[name]} ${state.ground.counts[name]}`;
+    button.title = `${GT_CLASS_NOTES[name]} Click to show or hide these notes on the roll.`;
     button.addEventListener('click', () => toggleGroundClass(name));
     classes.appendChild(button);
   }
@@ -2794,3 +2827,7 @@ $('picker').hidden = false;
 loadChoices();
 refreshPicker();
 requestAnimationFrame(tick);
+// `swingscribe gui <file>` lands here with the file in the URL: open it
+// straight away rather than making the listener find it in the picker.
+const opened = new URLSearchParams(window.location.search).get('open');
+if (opened) openTrack(opened);

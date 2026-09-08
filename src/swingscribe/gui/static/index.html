@@ -9,10 +9,10 @@
 <body>
 
 <header class="topbar">
-  <div class="brand">SwingScribe</div>
+  <div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none"><path d="M5.5 12.2V3.6l7-1.6v8.4" stroke="#1b1305" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="3.9" cy="12.3" r="1.9" fill="#1b1305"/><circle cx="10.9" cy="10.6" r="1.9" fill="#1b1305"/></svg></span>SwingScribe</div>
   <div class="track-title" id="track-title">No track loaded</div>
-  <button class="ghost" id="open-picker">Open track…</button>
-  <a class="ghost button-link" id="help-link" href="/guide/" target="_blank" rel="noopener" title="The user guide, in a new tab">Help</a>
+  <button class="ghost" id="open-picker" title="Choose a track: one you opened recently, one in the cache, or browse for a file.">Open track…</button>
+  <a class="ghost button-link" id="help-link" href="/guide/" target="_blank" rel="noopener" title="Open the user guide in a new tab.">Help</a>
 </header>
 
 <!-- ── Screen 1: load & navigate ─────────────────────────────────────────── -->
@@ -20,7 +20,7 @@
   <div class="picker-panel">
     <div class="picker-head">
       <h2 id="picker-title">Open a track</h2>
-      <button class="ghost" id="picker-close" hidden>Close</button>
+      <button class="ghost" id="picker-close" hidden title="Back to the track that is open.">Close</button>
     </div>
     <div class="picker-body">
       <section id="picker-recent">
@@ -30,7 +30,7 @@
       <section id="picker-storage">
         <div class="storage-head">
           <h3>Cache</h3>
-          <button class="chip" id="storage-toggle" title="What the cache holds for each track, and a way to reclaim the disk">Show</button>
+          <button class="chip" id="storage-toggle" title="Show what the cache holds for each track — separated stems and the decoded audio — with a way to reclaim the disk. Deleting from here never touches your saved span, downbeat or edits.">Show</button>
           <span class="muted" id="storage-summary"></span>
         </div>
         <ul class="track-list storage-list" id="storage-list" hidden></ul>
@@ -38,17 +38,17 @@
       <section>
         <h3>Browse</h3>
         <div class="browse-bar">
-          <button class="ghost" id="browse-up" title="Up one level">↑ Up</button>
-          <select class="chip-select" id="browse-drive" title="Jump to a drive"></select>
+          <button class="ghost" id="browse-up" title="Go up one folder.">↑ Up</button>
+          <select class="chip-select" id="browse-drive" title="Jump to another drive."></select>
           <input type="text" id="browse-path" class="browse-path-input" spellcheck="false"
-                 title="Current folder — edit and press Enter to jump to a path">
+                 title="The folder being shown. Edit the path and press Enter to jump there.">
         </div>
         <ul class="track-list" id="library-list"><li class="empty">Scanning…</li></ul>
       </section>
     </div>
     <div class="picker-foot">
       <input type="text" id="path-input" placeholder="…or paste a full path to an audio file" spellcheck="false" data-track="…or paste a full path to an audio file" data-score="…or paste a full path to a .mscz / .mscx">
-      <button id="path-open">Open</button>
+      <button id="path-open" title="Open the file at the pasted path.">Open</button>
     </div>
     <p class="picker-error" id="picker-error" hidden></p>
   </div>
@@ -74,10 +74,10 @@
         <span class="muted gesture-hint">scroll to zoom · shift-scroll or drag to pan</span>
         <span class="spacer"></span>
         <span class="muted beats-info" id="beats-info" hidden></span>
-        <button class="chip" id="beats-toggle" title="Show the bar grid transcription will quantize against">Beats</button>
-        <select class="chip-select" id="time-signature" disabled title="Time signature for the whole tune"></select>
-        <button class="chip" id="double-time" disabled title="Notate at twice the pulse — a ballad's 32nd runs become sixteenths, and the page says 'Notated in double time'">2× time: off</button>
-        <select class="chip-select" id="chorus-bars" disabled title="Heavier line every N bars — a solo is a whole number of choruses">
+        <button class="chip" id="beats-toggle" title="Show or hide the bar grid the transcription will quantize against: a tick per beat, a numbered dot per bar. The first time, this runs the beat tracker over the whole track, which takes a few seconds.">Beats</button>
+        <select class="chip-select" id="time-signature" disabled title="Beats per bar, for the whole tune. Bars are counted from the downbeat using this."></select>
+        <button class="chip" id="double-time" disabled title="Notate at twice the tracked pulse. On a ballad the tracker often hears the slow pulse, so fast runs come out as 32nd notes; doubling writes them as sixteenths, and the page says 'Notated in double time'.">2× time: off</button>
+        <select class="chip-select" id="chorus-bars" disabled title="Draw a heavier bar line every N bars, so a solo that is a whole number of choruses lines up with them. Purely visual; it changes nothing in the transcription.">
           <option value="0">no chorus</option>
           <option value="8">8-bar</option>
           <option value="12">12-bar</option>
@@ -85,39 +85,39 @@
           <option value="24">24-bar</option>
           <option value="32">32-bar</option>
         </select>
-        <button class="chip" id="snap-toggle" disabled title="Snap A/B to the nearest beat, or bar (S)">Snap: off</button>
-        <button class="chip" id="form-reset" hidden title="Clear the form start; bar 1 returns to the first bar line">bar 1 set ✕</button>
-        <button class="chip" data-focus="fit">Fit selection</button>
-        <button class="chip" data-focus="a">Edge A</button>
-        <button class="chip" data-focus="b">Edge B</button>
-        <button class="chip" data-zoom="in" title="Zoom in">+</button>
-        <button class="chip" data-zoom="out" title="Zoom out">−</button>
+        <button class="chip" id="snap-toggle" disabled title="When placing A or B, snap to the nearest beat or bar line. The nudge buttons never snap, so you can still fine-tune afterwards. (S)">Snap: off</button>
+        <button class="chip" id="form-reset" hidden title="Clear the form start. Bar 1 goes back to the first bar line of the track.">bar 1 set ✕</button>
+        <button class="chip" data-focus="fit" title="Zoom the detail view to the whole selection, with a little room either side.">Fit selection</button>
+        <button class="chip" data-focus="a" title="Zoom the detail view in tight around A, to place it by eye.">Edge A</button>
+        <button class="chip" data-focus="b" title="Zoom the detail view in tight around B, to place it by eye.">Edge B</button>
+        <button class="chip" data-zoom="in" title="Zoom in. Scrolling over the waveform does the same.">+</button>
+        <button class="chip" data-zoom="out" title="Zoom out. Scrolling over the waveform does the same.">−</button>
       </div>
       <div class="wave detail" id="wave-detail"></div>
     </div>
 
     <div class="transport">
-      <button class="play" id="play" title="Play / pause (Space)">▶</button>
-      <button class="restart" id="restart" title="Play from the start — of the selection while Loop A/B is on, of the track otherwise (Enter)">⇤ Start</button>
+      <button class="play" id="play" title="Play or pause the original recording. (Space)">▶</button>
+      <button class="restart" id="restart" title="Play from the start: of the selection while Loop A/B is on, of the track when it is off. (Enter)">⇤ Start</button>
       <div class="time"><span id="time-now">0:00.00</span><span class="sep">/</span><span id="time-total">0:00</span></div>
-      <button class="toggle" id="loop" title="Play only the A/B selection, looped. Off, the whole track plays freely — listen around the span without moving it (L)">Loop A/B</button>
+      <button class="toggle" id="loop" title="Play only the A/B selection, looped. Switch it off to play the whole track freely and listen around the span without moving it. (L)">Loop A/B</button>
       <div class="rate-group" id="mix-rate">
-        <button class="chip" data-rate="1">1×</button>
-        <button class="chip" data-rate="0.75">¾×</button>
-        <button class="chip" data-rate="0.5">½×</button>
+        <button class="chip" data-rate="1" title="Play at full speed.">1×</button>
+        <button class="chip" data-rate="0.75" title="Play at three-quarter speed, pitch unchanged. Slow a fast line down to hear where a phrase starts.">¾×</button>
+        <button class="chip" data-rate="0.5" title="Play at half speed, pitch unchanged.">½×</button>
       </div>
       <span class="spacer"></span>
       <div class="edge" id="edge-a">
-        <button class="tap" data-set="a" title="Set A at the playhead (A)">Set A</button>
+        <button class="tap" data-set="a" title="Set A, the start of the selection, at the playhead. Tap it while the track plays, then nudge. (A)">Set A</button>
         <span class="edge-time" id="a-time">0:00.00</span>
-        <button class="nudge" data-nudge="a" data-delta="-0.1">−.1</button>
-        <button class="nudge" data-nudge="a" data-delta="0.1">+.1</button>
+        <button class="nudge" data-nudge="a" data-delta="-0.1" title="Move A back a tenth of a second. Never snaps to the grid.">−.1</button>
+        <button class="nudge" data-nudge="a" data-delta="0.1" title="Move A forward a tenth of a second. Never snaps to the grid.">+.1</button>
       </div>
       <div class="edge" id="edge-b">
-        <button class="tap" data-set="b" title="Set B at the playhead (B)">Set B</button>
+        <button class="tap" data-set="b" title="Set B, the end of the selection, at the playhead. Tap it while the track plays, then nudge. (B)">Set B</button>
         <span class="edge-time" id="b-time">0:00.00</span>
-        <button class="nudge" data-nudge="b" data-delta="-0.1">−.1</button>
-        <button class="nudge" data-nudge="b" data-delta="0.1">+.1</button>
+        <button class="nudge" data-nudge="b" data-delta="-0.1" title="Move B back a tenth of a second. Never snaps to the grid.">−.1</button>
+        <button class="nudge" data-nudge="b" data-delta="0.1" title="Move B forward a tenth of a second. Never snaps to the grid.">+.1</button>
       </div>
       <div class="span-readout">
         <span id="span-length">—</span>
@@ -135,12 +135,12 @@
     </div>
 
     <div class="model-row">
-      <label>Separation</label>
+      <label title="The model that splits the recording into stems. Each chip says whether its stems are already on disk for this span.">Separation</label>
       <div class="model-chips" id="model-chips"></div>
-      <button id="separate-btn" hidden>Separate</button>
+      <button id="separate-btn" hidden title="Run the chosen model over the selected span. The stems are cached, so this only costs once per span and model.">Separate</button>
       <span class="spacer"></span>
-      <label class="lead-label">Lead stem</label>
-      <select id="lead-stem"></select>
+      <label class="lead-label" for="lead-stem">Lead stem</label>
+      <select id="lead-stem" title="The stem that carries the soloist. 'other' is Demucs' name for everything that is not bass, drums or vocals — usually the horns. A summed option such as other+vocals covers a soloist the model split between two stems."></select>
     </div>
 
     <div class="job" id="job" hidden>
@@ -148,7 +148,7 @@
       <div class="job-text">
         <span id="job-message">…</span>
         <span class="muted" id="job-elapsed"></span>
-        <button class="chip" id="job-cancel" type="button" title="Stop this separation">Cancel</button>
+        <button class="chip" id="job-cancel" type="button" title="Stop this separation. The panel returns to the Separate button, ready to run again.">Cancel</button>
       </div>
     </div>
 
@@ -169,19 +169,19 @@
       </div>
 
       <div class="ab-row">
-        <button class="play" id="a-play" title="Play / pause (Space)">▶</button>
-        <button class="restart" id="a-restart" title="Play from the start of the span (Enter)">⇤ Start</button>
+        <button class="play" id="a-play" title="Play or pause the isolated stem over the span. (Space)">▶</button>
+        <button class="restart" id="a-restart" title="Play the span again from the start. (Enter)">⇤ Start</button>
         <div class="time"><span id="a-time-now">0:00.00</span><span class="sep">/</span><span id="a-time-total">0:00</span></div>
         <div class="ab-toggle" id="ab-toggle">
-          <button data-ab="stem" class="active">Isolated</button>
-          <button data-ab="mix">Original</button>
-          <button data-ab="both">Both</button>
+          <button data-ab="stem" class="active" title="Hear only the isolated stem.">Isolated</button>
+          <button data-ab="mix" title="Hear the original recording at the same instant, so you can judge what separation removed.">Original</button>
+          <button data-ab="both" title="Hear the stem and the original together.">Both</button>
         </div>
-        <button class="chip" id="click-toggle" title="Mix a metronome on the bar grid into the audition (C)">Click</button>
+        <button class="chip" id="click-toggle" title="Mix a metronome on the bar grid into the audition: a tick on every beat, a high tick on bar lines, higher still at a chorus start. A wrong downbeat is obvious against it. (C)">Click</button>
         <div class="rate-group" id="stem-rate">
-          <button class="chip" data-rate="1">1×</button>
-          <button class="chip" data-rate="0.75">¾×</button>
-          <button class="chip" data-rate="0.5">½×</button>
+          <button class="chip" data-rate="1" title="Play at full speed.">1×</button>
+          <button class="chip" data-rate="0.75" title="Play at three-quarter speed, stretched without changing pitch.">¾×</button>
+          <button class="chip" data-rate="0.5" title="Play at half speed, stretched without changing pitch.">½×</button>
         </div>
         <span class="spacer"></span>
         <span class="hint">Sample-locked — switching mid-phrase compares the same instant</span>
@@ -190,8 +190,8 @@
       <div class="mixer" id="mixer"></div>
 
       <div class="handoff">
-        <div class="handoff-cmd"><code id="cli-command">—</code><button class="ghost" id="copy-cmd">Copy</button></div>
-        <button class="ghost" id="download-stem">Download isolated span</button>
+        <div class="handoff-cmd"><code id="cli-command">—</code><button class="ghost" id="copy-cmd" title="Copy the command that produces this same stem from the command line.">Copy</button></div>
+        <button class="ghost" id="download-stem" title="Save the isolated stem over the span as a wav file.">Download isolated span</button>
       </div>
     </div>
   </section>
@@ -204,12 +204,12 @@
     </div>
 
     <div class="review-bar">
-      <button id="transcribe-btn">Transcribe span</button>
+      <button id="transcribe-btn" title="Transcribe the isolated stem over the span: pitch tracking, onsets and, for a pianist, a second opinion from the piano model. Cached, so running the same span again is instant.">Transcribe span</button>
       <label class="picker-label" for="ensemble-select" title="Who is playing. A trio or solo piano gets a second opinion from the polyphonic piano model; a horn never does — a piano model asked about a saxophone vouches for nothing.">Ensemble</label>
-      <select id="ensemble-select"></select>
+      <select id="ensemble-select" title="Who is playing. A trio or solo piano gets a second opinion from the polyphonic piano model; a horn never does, because a piano model asked about a saxophone vouches for nothing."></select>
       <span class="muted" id="ensemble-hint"></span>
       <label class="picker-label" for="line-select" id="line-label" title="Which detector supplies the line, for a pianist only. CREPE hears one pitch at a time and the piano model checks it; or the piano model hears every note and a sequence picker chooses the melody among them. Two takes of the same span — compare them by ear." hidden>Line</label>
-      <select id="line-select" hidden></select>
+      <select id="line-select" hidden title="Which detector supplies the line, for a pianist. Either the pitch tracker checked by the piano model, or the piano model's own notes with the melody picked out of them. Two takes of the same span — compare them by ear."></select>
       <span class="muted" id="review-range"></span>
       <span class="spacer"></span>
       <span class="muted" id="review-summary" hidden></span>
@@ -222,12 +222,12 @@
 
     <div class="review" id="review" hidden>
       <div class="gt-bar" id="gt-bar">
-        <button class="chip" id="gt-pick" title="Draw a MuseScore hand transcription against ours">Ground truth…</button>
+        <button class="chip" id="gt-pick" title="Load a MuseScore hand transcription (.mscz or .mscx) and draw it over ours, each note coloured by how it aligned: matched, wrong pitch, missed, or invented by us.">Ground truth…</button>
         <span class="muted" id="gt-info">No hand transcription loaded</span>
         <div class="gt-classes" id="gt-classes" hidden></div>
         <span class="spacer"></span>
         <span class="muted gt-caveat" id="gt-caveat" hidden></span>
-        <button class="chip" id="gt-clear" hidden title="Stop drawing the hand transcription">✕</button>
+        <button class="chip" id="gt-clear" hidden title="Stop drawing the hand transcription.">✕</button>
       </div>
 
       <div class="pianoroll-wrap">
@@ -236,9 +236,9 @@
           <span class="muted gesture-hint">scroll to zoom · shift-scroll or drag to pan</span>
           <span class="spacer"></span>
           <span class="muted roll-range" id="roll-range" hidden></span>
-          <button class="chip" id="roll-fit" title="Show the whole span">Fit</button>
-          <button class="chip" data-roll-zoom="in" title="Zoom in (or scroll). Drag or shift-scroll to pan.">+</button>
-          <button class="chip" data-roll-zoom="out" title="Zoom out (or scroll)">−</button>
+          <button class="chip" id="roll-fit" title="Zoom out to the whole span.">Fit</button>
+          <button class="chip" data-roll-zoom="in" title="Zoom in. Scrolling over the roll does the same; drag or shift-scroll to pan.">+</button>
+          <button class="chip" data-roll-zoom="out" title="Zoom out. Scrolling over the roll does the same.">−</button>
         </div>
         <div class="roll-legend" id="roll-legend"></div>
         <div class="pianoroll" id="pianoroll"></div>
@@ -256,18 +256,18 @@
 
         <div class="edit-bar" id="edit-bar">
           <div class="tool-group" id="tool-group">
-            <button class="chip active" data-tool="inspect" title="Click places the playhead, inspects a note and sounds its pitch; drag pans (E)">Inspect</button>
-            <button class="chip" data-tool="erase" title="Click a note to silence it, or a magenta piano-model note to add it and hear it; drag a box to silence a run, alt-drag to restore one; shift-drag pans (E)">Edit</button>
+            <button class="chip active" data-tool="inspect" title="Click a note to inspect it, hear its pitch and move the playhead there. Drag to pan. (E)">Inspect</button>
+            <button class="chip" data-tool="erase" title="Click a note to silence it — heard right, but not the solo — or click a faint piano-model note to add it. Drag a box to silence a run, alt-drag to restore one. Shift-drag pans. (E)">Edit</button>
           </div>
           <button class="chip" id="second-voice-toggle" hidden
-                  title="Show every note the piano model heard that the line left out, faint. With the Edit tool, click one to add it to the transcription — a chord if it sounds with a line note (V)">piano model</button>
+                  title="Show, faintly, every note the piano model heard that the line left out. With the Edit tool, click one to add it to the transcription — written as a chord if it sounds with a line note. (V)">piano model</button>
           <span class="muted" id="silenced-count">nothing silenced</span>
-          <button class="chip" id="undo-btn" disabled title="Undo (ctrl+Z)">↶</button>
-          <button class="chip" id="redo-btn" disabled title="Redo (ctrl+shift+Z)">↷</button>
-          <button class="chip" id="restore-all" disabled title="Restore every silenced note — itself undoable">Restore all</button>
+          <button class="chip" id="undo-btn" disabled title="Undo the last edit. (Ctrl+Z)">↶</button>
+          <button class="chip" id="redo-btn" disabled title="Redo the edit you just undid. (Ctrl+Shift+Z)">↷</button>
+          <button class="chip" id="restore-all" disabled title="Bring back every silenced note and drop every added one. Itself undoable.">Restore all</button>
           <span class="spacer"></span>
           <span class="erasure-warning" id="erasure-warning" hidden></span>
-          <button class="chip" id="discard-unmatched" hidden title="Forget these erasures permanently">Discard</button>
+          <button class="chip" id="discard-unmatched" hidden title="Forget the remembered erasures that no longer match any note in this transcription. Undoable.">Discard</button>
         </div>
       </div>
 
@@ -277,31 +277,31 @@
       </div>
 
       <div class="ab-row">
-        <button class="play" id="r-play" title="Play / pause (Space)">▶</button>
-        <button class="restart" id="r-restart" title="Play from the start of the span (Enter)">⇤ Start</button>
+        <button class="play" id="r-play" title="Play or pause the review: the original, the transcription as tones, or both. (Space)">▶</button>
+        <button class="restart" id="r-restart" title="Play the span again from the start. (Enter)">⇤ Start</button>
         <div class="time"><span id="r-time-now">0:00.00</span><span class="sep">/</span><span id="r-time-total">0:00</span></div>
         <div class="ab-toggle" id="review-ab">
-          <button data-rab="mix" class="active">Original</button>
-          <button data-rab="transcription">Transcription</button>
-          <button data-rab="both">Both</button>
+          <button data-rab="mix" class="active" title="Hear the original recording.">Original</button>
+          <button data-rab="transcription" title="Hear the transcription rendered as plain tones, silenced notes left out, so a wrong note stands out.">Transcription</button>
+          <button data-rab="both" title="Hear the recording and the rendered transcription together.">Both</button>
         </div>
         <div class="rate-group" id="review-rate">
-          <button class="chip" data-rrate="1">1×</button>
-          <button class="chip" data-rrate="0.75">¾×</button>
-          <button class="chip" data-rrate="0.5">½×</button>
+          <button class="chip" data-rrate="1" title="Play at full speed.">1×</button>
+          <button class="chip" data-rrate="0.75" title="Play at three-quarter speed, pitch unchanged.">¾×</button>
+          <button class="chip" data-rrate="0.5" title="Play at half speed, pitch unchanged.">½×</button>
         </div>
         <span class="spacer"></span>
         <span class="hint">A wrong downbeat is obvious against the bar lines; open issue #1 shows as repeated same-pitch fragments.</span>
       </div>
 
       <div class="export-bar" id="export-bar">
-        <button id="export-btn" title="Write this span as MusicXML, beside the audio (X)">Export MusicXML</button>
+        <button id="export-btn" title="Write this span as MusicXML beside the audio file, with the span in the filename, ready to open in MuseScore. Silenced notes are left out and added ones written in. (X)">Export MusicXML</button>
         <label class="picker-label" for="transpose-select" title="The part's key. Nothing in the audio says which horn it was, so this can only come from you — and the key signature moves with it.">Written for</label>
-        <select id="transpose-select"></select>
-        <button class="chip" id="score-btn" hidden title="Score this notation against the loaded hand transcription — a different question from the pitch F1 above">Score it</button>
+        <select id="transpose-select" title="The instrument the part is written for. Nothing in the audio says which horn it was, so this can only come from you; the key signature moves with it."></select>
+        <button class="chip" id="score-btn" hidden title="Score this notation against the loaded hand transcription: are the notes written the way a human wrote them? A different, harder question than the pitch F1 above, and it always reads lower.">Score it</button>
         <span class="spacer"></span>
         <span class="export-stale" id="export-stale" hidden>file on disk is older than what you see</span>
-        <a class="chip" id="export-download" hidden download>Download</a>
+        <a class="chip" id="export-download" hidden download title="Download the MusicXML file.">Download</a>
       </div>
       <!-- Two lines, not one: where the file went and how it scored are both
            worth keeping on screen, and the second used to hide the first. -->

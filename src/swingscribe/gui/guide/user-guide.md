@@ -13,6 +13,12 @@ Launch it from the repo with:
 uv run python -m swingscribe gui
 ```
 
+Name a file to open it straight away, with its folder listed in the picker:
+
+```
+uv run python -m swingscribe gui path/to/track.m4a
+```
+
 On Windows, `.\swingscribe gui` (the `.cmd` shim beside `pyproject.toml`) does
 the same thing. Prefer either to `uv run swingscribe`: that runs a
 console-script `.exe` generated fresh at install time, which Windows Smart
@@ -120,11 +126,24 @@ stem, no amount of tuning downstream will rescue the transcription. Listen
 here before spending time on transcription.
 
 **Separation model:** the chips let you pick which model separates the
-track. `bsroformer_sw` is the default — slower, but it routes horns to the
-right stem far more reliably than `htdemucs`. `htdemucs` is there for when
-speed matters more than routing accuracy. A dot on a chip means that model's
-stems are already cached for this track/span; picking an uncached model
-starts a background job.
+track. Hover over a chip for what it is and whether its stems are already on
+disk for this span; a lit dot means they are.
+
+- **BS-RoFormer** — the default. Much slower than Demucs, but far better at
+  keeping a horn in one stem. Because it separates only the selected span,
+  a solo takes minutes rather than tens of minutes.
+- **Demucs** — Hybrid Transformer Demucs, four stems (vocals, drums, bass
+  and *other*). The fast choice: about three minutes for a ten-minute track
+  on a CPU.
+- **Demucs 6-stem** — Demucs with guitar and piano stems added. Worth trying
+  on a piano solo; it sometimes files a horn under guitar or vocals.
+- **Demucs fine-tuned** — four Demucs models averaged. Four times slower
+  than Demucs and, measured on our benchmark, no more accurate. Kept for
+  comparison.
+
+The command-line names for these are `bsroformer_sw`, `htdemucs`,
+`htdemucs_6s` and `htdemucs_ft`; the command box at the bottom of the panel
+uses them.
 
 Separation is scoped to your selected span, and the **Separate** button
 shows a time estimate before you click it (a span-scoped Roformer separation
@@ -276,6 +295,39 @@ track loaded.
 - <kbd>Ctrl+Z</kbd> — undo an edit
 - <kbd>Ctrl+Shift+Z</kbd> (or <kbd>Ctrl+Y</kbd>) — redo
 
+## The command line
+
+Everything the GUI does has a command. The pipeline caches every stage, so
+a command re-run with the same inputs is instant, and the GUI and the
+commands share one cache.
+
+- `swingscribe run <file>` — the whole pipeline: separate, track beats,
+  transcribe, notate, and write MusicXML. Add `--start` / `--end` (seconds)
+  to limit it to one solo, `--stem` to name the stem carrying the soloist,
+  and `--tempo-hint <bpm>` if the beat tracker picks the wrong octave.
+- `swingscribe audition <file> --stem other --start 90 --end 210` — write
+  just the isolated stem over a span, so you can hear whether the soloist is
+  cleanly separated before spending minutes on analysis.
+- `swingscribe ab <file> ...` — the ear test: a stereo wav with the original
+  on the left and the rendered transcription on the right, plus the
+  transcribed MIDI. The GUI's command box shows the exact `ab` command for
+  the span and stem you settled on.
+- `swingscribe click <file>` — the music with a click on every detected
+  beat, for checking the grid by ear.
+- `swingscribe cache ls` / `swingscribe cache rm` — what the cache holds,
+  and a way to reclaim disk, the same as the picker's Cache panel.
+
+Options that mirror the GUI's settings: `--time-signature`, `--downbeat`
+and `--bars-per-chorus` for the bar grid, and `separate.model` in the config
+file for the separation model. Audio can be wav or flac natively, plus
+anything ffmpeg decodes (mp3, m4a/aac, ogg, opus, wma, aiff, ...).
+
+Separation and transcription need the ML dependency group
+(`uv sync --group ml --group gui --group roformer`) and download model
+weights (about 300 MB) on first use. Without a CUDA GPU they run on the
+CPU: expect minutes, not seconds, for a whole track — which is why the GUI
+separates only the span you selected.
+
 ## Troubleshooting
 
 **A chunk of the solo is missing entirely.** Demucs assigns every moment to
@@ -296,3 +348,16 @@ consults the piano model. Pick `Trio (piano)` or `Solo piano` explicitly.
 **A separation is stuck or you picked the wrong model.** Click **Cancel**
 to stop it and return to the Separate button; pick a different model or
 span and run it again.
+
+**Windows refuses to run `swingscribe.exe`.** If `uv run swingscribe ...`
+fails with `An Application Control policy has blocked this file (os error
+4551)`, Smart App Control is refusing the console-script stub that pip
+generates at install time, not SwingScribe itself. Run the module instead —
+`uv run python -m swingscribe gui`, or the `.\swingscribe` shim beside
+`pyproject.toml` — which goes through an interpreter Windows already trusts.
+A first launch can also fail once on the reputation lookup and pass on the
+retry.
+
+**Model weights will not download.** On a network that intercepts TLS, set
+`SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` to a bundle that includes your
+organisation's root certificate; `uv` needs `UV_SYSTEM_CERTS=true`.
