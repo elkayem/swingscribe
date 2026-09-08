@@ -15,6 +15,17 @@ alignment's local residual. Mean F1, the error count and the deficit are
 unchanged; what moved is how the 2,461 old `absorbed` rows are named, and
 every number below is the re-pinned one.
 
+**Third pin, the overnight run (2026-09-07, later still).** The transcriber
+DID change after that: `pitch_persist_ms` 60 → 40 and the piano model's
+onset shift in `fill_gaps`, one CACHE_VERSION bump. Mean F1 0.8549 →
+0.8583 over the same 73, errors 7,707 → 7,583, `absorbed` 948 → 333 and
+`too_short` 345 → 765. The tables below are the SECOND pin's — the one
+this analysis was written against — and the third pin's paired deltas, the
+page-side cost and what leads the Pareto now are in
+`docs/error-taxonomy-review.md`, section 7. Re-running this instrument
+after any transcribe change now needs `scripts/wjazz_reviews.py` first
+(D26), or the frame-evidence classes vanish into `unclassified`.
+
 Reproduce:
 
     .venv\Scripts\python.exe scripts/error_taxonomy.py --db wjazz/wjazzd.db

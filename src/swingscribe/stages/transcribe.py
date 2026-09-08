@@ -53,8 +53,9 @@ CENTS_PER_BIN = 20.0
 CENTS_ORIGIN = 1997.3794084376191  # cents of bin 0, from torchcrepe.convert
 
 # Bump when this stage's behavior changes without a config change (see
-# pipeline._cache_name).
-CACHE_VERSION = 1
+# pipeline._cache_name). 2 (2026-09-07): corroborate.fill_gaps moves the
+# oracle notes it copies late by the piano model's measured onset lead.
+CACHE_VERSION = 2
 
 
 def hz_to_midi(hz: float) -> float:

@@ -136,7 +136,14 @@ class TranscribeConfig(BaseModel):
     onset_dip_db: float = 0.0
     onset_window_ms: float = 60.0  # lookback/lookahead for that rise
     min_note_ms: float = 60.0  # drop specks shorter than a fast bebop 16th
-    pitch_persist_ms: float = 60.0  # a new pitch must hold this long to split a note
+    # A new pitch must hold this long to split a note. 40 with the floor kept
+    # at 60: re-segmenting the cached traces of 68 WJazzD horns on two
+    # independent paths read +0.0027 to +0.0028 mean note F1 (41-42 solos up,
+    # 25 down, paired t 2.5), precision unchanged. The run-through error
+    # (`absorbed`, 798 -> 252) IS this rule; the cost is `split_sustain`
+    # +124 (docs/error-taxonomy-review.md, 3b.1). Shipped 2026-09-07 with
+    # transcribe.CACHE_VERSION 2.
+    pitch_persist_ms: float = 40.0
     silence_gap_ms: float = 40.0  # unvoiced dropouts shorter than this bridge a phrase
     median_filter_ms: float = 50.0  # f0 smoothing kernel — flattens vibrato wobble
     # Viterbi continuity for f0 decoding: the log-probability charged per

@@ -35,6 +35,15 @@ no model. Piano-model evidence comes from `oracle-notes/` in that cache,
 where `scripts/line_selection.py` left the polyphonic model's full output
 for the pianists. Any evidence that is missing skips the rules that need it.
 
+The review key carries every transcribe setting, so a change to the
+transcriber's defaults (or its CACHE_VERSION) leaves EVERY solo without frame
+evidence until `scripts/wjazz_reviews.py` recomputes the reviews under the
+new key: the recipe after a transcribe change is `run_eval.py`, then
+`wjazz_reviews.py`, then this (D26). Without that step the frame-evidence
+classes read as gone and their misses as `unclassified`; the header line
+below says how many solos had a frame trace, and a run short of all of them
+is not a taxonomy to pin.
+
 ## The table's schema (`.benchmark-taxonomy-table.csv`)
 
 One row per error. Columns, in order:
@@ -302,6 +311,10 @@ def load_evidence(name, run, sidecar, lo, hi, cache_dir, log=print):
                 diagnostics = payload["diagnostics"]
             else:
                 log(f"  {name}: review cache holds a DIFFERENT transcription; no frame evidence")
+        else:
+            # Silent absence is how D26 hid: after a transcribe change every
+            # key moves and nothing else in the run says so.
+            log(f"  {name}: no review under the current key; no frame evidence")
     except Exception as error:  # noqa: BLE001 - evidence is optional
         log(f"  {name}: no review ({error})")
 
@@ -455,6 +468,7 @@ def classify_all(db, runs, cache_dir, with_audio=True, limit=None, log=print):
                 "melid": solo["melid"],
                 "info": info,
                 "family": family,
+                "frame_evidence": getattr(evidence, "diagnostics", None) is not None,
                 "fit": {
                     "offset": round(solo["offset"], 3),
                     "rate": round(solo["rate"], 5),
@@ -860,6 +874,13 @@ def main():
     if not results:
         print("nothing to classify")
         return
+    traced = sum(1 for r in results if r["frame_evidence"])
+    print(f"== Frame evidence: {traced} of {len(results)} solos have a review trace ==")
+    if not args.no_audio and traced < len(results):
+        print(
+            "  WARNING: the frame-evidence classes are incomplete and their misses fall into "
+            "`unclassified`; run scripts/wjazz_reviews.py before trusting or pinning this (D26)"
+        )
 
     agg = aggregate(results, args.resamples, args.seed)
     render(agg)

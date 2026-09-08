@@ -639,8 +639,10 @@ list of what is actually wrong; run everything with one command:
 - **WJazzD (`score_wjazz.py`) is audio against audio** — a human's per-note
   onsets in seconds for the same recording. Asks "did we hear what was
   played?" and is the right measure of `transcribe`. Currently **mean note F1
-  0.855 and mean beat F1 0.941, both over the same 73 solos** (2026-09-02,
-  Roformer stems and the line floors; 0.801/0.940 over 20 before). Quote
+  0.858 and mean beat F1 0.942, both over the same 73 solos** (2026-09-07,
+  `pitch_persist_ms` 40 and the oracle onset shift; 0.855/0.941 on
+  2026-09-02 with Roformer stems and the line floors, 0.801/0.940 over 20
+  before). Quote
   the `n` with the mean: beat F1 was once reported as 0.97 because it was
   silently a mean over 4 (R8). `run_eval.py` now pins and prints each mean's
   own count. It reads stems from `--cache-dir`; the batch's span-scoped
@@ -649,9 +651,11 @@ list of what is actually wrong; run everything with one command:
 - **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
   this notate the way a human notated it?" It charges the gap between
   performed timing and notated rhythm to the transcriber, so it reads lower
-  and always will. Currently mean note F1 0.456 over the 10 hand scores
-  (pitch-only F1 0.808 on the same ten — the gap between the two IS the
-  notation charge).
+  and always will. Currently mean note F1 0.527 over the 10 hand scores
+  (pitch-only F1 0.849 on the same ten — the gap between the two IS the
+  notation charge). The ten changed on 2026-09-07: Birks Works joined
+  (pitch F1 0.923) and Soul Station left, because the listener cleared its
+  score link in the GUI; relink the .mscz and it is scored again.
 
 Reading the second as a transcription failure is exactly the mistake that was
 made. Both are kept; neither subsumes the other.

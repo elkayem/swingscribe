@@ -385,3 +385,86 @@ listener's call.
 - The sweep varies the two segmenter thresholds only. `median_filter_ms`,
   `silence_gap_ms` and the onset corroboration were held at their shipped
   values; the tempo used for F and G is WJazzD's `avgtempo` for the solo.
+
+## 7. Shipped and re-measured (2026-09-07, the overnight run)
+
+Items 1 and 2 of section 5 were bundled into one `transcribe.CACHE_VERSION`
+bump (2) and re-run over every span the harness holds: `pitch_persist_ms`
+60 → 40 with `min_note_ms` kept at 60, and the +20 ms onset shift applied
+where `corroborate.fill_gaps` copies oracle notes into the default piano
+line (the picked line had it since b66f901). One CREPE pass per span, 83
+spans, 85 minutes. Both harnesses were re-pinned; the baselines moved because
+the transcriber did, and this section is the record of how much.
+
+**WJazzD, paired over the same 73 solos** (the prediction was +0.0028 on 68
+horns from cached traces):
+
+| measure | pinned | now | Δ | se | up / down |
+|---|---|---|---|---|---|
+| note F1 | 0.8549 | 0.8583 | +0.0034 | 0.0011 | 39 / 23 |
+| note recall | 0.8404 | 0.8476 | +0.0072 | 0.0012 | 51 / 11 |
+| note precision | 0.8724 | 0.8716 | −0.0008 | 0.0012 | 26 / 30 |
+| onset F1 | 0.9001 | 0.8987 | −0.0014 | 0.0008 | 24 / 37 |
+| beat F1 | 0.9410 | 0.9422 | +0.0012 | 0.0017 | 7 / 5 |
+| horns (68), note F1 | 0.8521 | 0.8552 | +0.0030 | 0.0011 | 35 / 23 |
+| pianists (4), note F1 | 0.8949 | 0.9042 | +0.0093 | 0.0021 | 4 / 0 |
+
+The gain is recall, as the mechanism said it would be; precision is level.
+The pianists gain three times what the horns do, all four up — that is the
+onset shift reaching the default line, which the cached-trace sweep could
+not measure. Largest movers: My Favorite Things (227) +0.039, Maiden Voyage
+(Hubbard) +0.028, Sidewinder (Henderson) +0.021; Suede Shoes −0.013, KC
+Blues (Miles) −0.012.
+
+**The taxonomy, paired per solo** (same 73, frame evidence on all 73 after
+`scripts/wjazz_reviews.py` — see D26 for the pass that lacked it):
+
+| class | pinned | now | Δ | verdict (se, up / down) |
+|---|---|---|---|---|
+| absorbed | 948 | 333 | −615 | beyond 2 se (91.9, 0 / 67) |
+| too_short | 345 | 765 | +420 | beyond 2 se (51.6, 60 / 1) |
+| merged | 631 | 479 | −152 | beyond 2 se (21.1, 1 / 50) |
+| neighbour | 964 | 836 | −128 | beyond 2 se (20.8, 6 / 44) |
+| split_sustain | 453 | 578 | +125 | beyond 2 se (20.6, 44 / 3) |
+| squeezed | 1,018 | 1,145 | +127 | beyond 2 se (49.5, 41 / 25) |
+| tracked_other | 189 | 252 | +63 | beyond 2 se (12.4, 32 / 4) |
+| fragment_neighbour | 585 | 632 | +47 | beyond 2 se (11.0, 40 / 10) |
+| loose | 207 | 228 | +21 | beyond 2 se (9.9, 25 / 13) |
+| attack_transient | 224 | 204 | −20 | beyond 2 se (6.6, 5 / 18) |
+| body_late | 186 | 170 | −16 | beyond 2 se (6.0, 5 / 15) |
+| every other class | | | | inside noise |
+| errors | 7,707 | 7,583 | −124 | |
+| sum of F1 costs | 0.1451 | 0.1417 | −0.0034 | |
+
+Section 3b.1 predicted, on 68 horns from cached traces, `absorbed` 798 →
+252, `too_short` 339 → 778 and `split_sustain` +124; the shipped run reads
+798 → 242, 339 → 757 and +124 on the horns. The sweep was the measurement.
+Two things it did not predict: `merged` −152 and `neighbour` −128 (a note
+that now splits off in time is no longer a same-pitch merge, and no longer
+pairs with a neighbouring pitch), and `squeezed` +127, which is `absorbed`
+rows changing name as the coverer shortens rather than new misses — the
+miss population fell by 134. `absorbed` is no longer the largest class; it
+is eighth. What leads now is `squeezed` (15.1%) and `neighbour` (11.0%),
+then `too_short` (10.1%): the freed excursions are shorter than the 60 ms
+floor and are dropped, which is the same note failing one rule instead of
+another. The next threshold to measure is that floor — but "never filter
+notes by duration" (CLAUDE.md) was measured against erasure labels, and a
+60 → 40 ms floor would have to be scored on WJazzD with `split_sustain` and
+precision watched, since 3b.1's row F (40 / 40) was one-for-one.
+
+**The page.** `split_sustain` +125 is a note cut in two, so the question
+was whether it shows on the score. Over the 73 WJazzD notations: rhythm
+0.6265 → 0.6294 (+0.0029, se 0.0017, 39 / 25), coverage 0.860 → 0.865,
+readability 0.9909 → 0.9909, tie rate 0.1006 → 0.0962 (down on 46, up on
+11), sub-eighth rests 0.887 → 0.885 per hundred notes. On the nine hand
+scores shared with the pin: MuseScore note F1 0.5045 → 0.5089 (6 / 3),
+notation rhythm 0.7348 → 0.7306 (se 0.0034, inside noise), readability
+0.9953 → 0.9928 — sub-eighth rests up on six of nine (Giant Steps 0.24 →
+0.94 per hundred, with one sub-sixteenth value in 355 notes), still under
+the human's 1.2 per hundred. That is the price, on the record; the
+persistence change stays.
+
+**Not measured here.** The WJazzD spreadsheet (`wjazzd_benchmark_test.xlsx`)
+still carries the 09-02 rows: refreshing it through `wjazz_batch.py` would
+re-run the whole-file locate pass under the new config, and the located
+spans have not moved. `benchmark_test.xlsx` was refreshed.

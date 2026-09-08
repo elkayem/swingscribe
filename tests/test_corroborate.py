@@ -3,7 +3,10 @@
 Pure numpy over note dicts, so all of it runs in CI without the ml group.
 """
 
+import pytest
+
 from swingscribe.corroborate import apply, corroborate, fill_gaps, second_voice, snap_octaves
+from swingscribe.line_selection import ONSET_SHIFT_S
 
 
 def note(onset: float, pitch: int, duration: float = 0.2) -> dict:
@@ -201,6 +204,18 @@ def test_a_note_in_a_hole_in_the_line_is_filled_in():
     merged, stats = fill_gaps(line, [loud(0.0, 67), loud(0.5, 70), loud(1.0, 67)])
     assert stats["filled"] == 1
     assert [n["pitch"] for n in merged] == [67, 70, 67]
+    assert merged[1]["onset"] == pytest.approx(0.5 + ONSET_SHIFT_S)
+
+
+def test_a_filled_note_is_moved_late_by_the_models_measured_lead():
+    """The piano model's onsets lead a human annotator's by 16-24 ms on every
+    WJazzD pianist. The picked line already corrects for it; a note copied
+    into the default line must carry the same correction, or the two takes
+    disagree about when the same note began."""
+    line = [note(0.0, 67, 0.1), note(1.0, 67, 0.1)]
+    merged, _stats = fill_gaps(line, [loud(0.5, 70)])
+    assert merged[1]["onset"] == pytest.approx(0.520)
+    merged, _stats = fill_gaps(line, [loud(0.5, 70)], onset_shift=0.0)
     assert merged[1]["onset"] == 0.5
 
 

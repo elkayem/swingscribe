@@ -28,6 +28,8 @@ from typing import Any
 
 import numpy as np
 
+from swingscribe.line_selection import ONSET_SHIFT_S
+
 # How far apart two detectors may place the same note and still be talking
 # about it. Generous on purpose: they segment onsets by different means, and
 # 0.05s measured tighter precision at a real cost in recall while 0.20s let
@@ -233,8 +235,14 @@ def fill_gaps(
     window: float = REGISTER_WINDOW,
     min_confidence: float = FILL_CONFIDENCE,
     cover_fraction: float = COVER_FRACTION,
+    onset_shift: float = ONSET_SHIFT_S,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Notes the oracle heard where our line has a HOLE, merged into the line.
+
+    Every copied onset is moved late by `onset_shift`, the piano model's
+    measured lead over a human annotator (line_selection.ONSET_SHIFT_S: 16-24
+    ms early on every WJazzD pianist). The hole tests below read the shifted
+    time too, because it is the better estimate of when the note began.
 
     This is the second opinion used the way the listener asked for it: one
     monophonic line, as complete as we can make it, rather than a second voice
@@ -276,7 +284,7 @@ def fill_gaps(
     for note in second_voice(notes, oracle):
         if _velocity_confidence(note) < min_confidence:
             continue
-        onset = float(note["onset"])
+        onset = float(note["onset"]) + onset_shift
         if np.min(np.abs(onsets - onset)) < gap_tolerance:
             continue
         if np.any((onsets <= onset) & (onset < ends)):

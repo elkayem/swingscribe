@@ -126,3 +126,11 @@ a cached oracle review is recomputed once. `corroborate.fill_gaps` copies
 oracle onsets into the DEFAULT piano line unshifted; that is the part left
 for the next bundled re-transcription, because it would re-fingerprint the
 note cache.
+
+The default piano line carries the same shift since the 2026-09-07 overnight
+run: `corroborate.fill_gaps` moves every oracle note it copies late by
+`ONSET_SHIFT_S`, under `transcribe.CACHE_VERSION` 2. Paired over the four
+WJazzD pianists it read note F1 0.8949 → 0.9042, all four up (with
+`pitch_persist_ms` 40 landing in the same run; the horns moved +0.0030), and
+`absorbed` + `squeezed` on the pianists went 222 → 187. See
+docs/error-taxonomy-review.md section 7.

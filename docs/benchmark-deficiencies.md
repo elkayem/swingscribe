@@ -915,6 +915,31 @@ cost of `split_sustain`. Open: whether the raw spectral-flux set, before
 corroboration, holds the missing half — the cache keeps only the
 corroborated ticks, so that needs the stem, not CREPE.
 
+### D26 - A transcribe change silently strips the error taxonomy of its frame evidence
+
+Found on the first taxonomy pass after the 2026-09-07 overnight re-pin.
+`scripts/error_taxonomy.py` reads frame evidence from the GUI review cache
+BY KEY, and the key carries every transcribe setting; the persistence change
+moved every key, so no solo had a review and every miss the frame rules
+would have classified landed in `unclassified` — 1,265 of them, against a
+pin of 0 — while `too_short`, `tracked_other`, `dropped`, `unvoiced` and
+`gated` read as gone. The guard's paired verdicts on the other classes were
+right, and the scorecard's F1 was right; only the classification was
+hollow, and nothing said why (`load_evidence` logs a mismatched payload but
+not an absent one).
+
+The gap is structural: the review cache is the GUI's, written when the
+listener opens a track or the batch scores it, and neither happens because
+a config default moved. `scripts/wjazz_reviews.py` closes it — pass 2 of
+the batch alone, one CREPE pass per located span (74 solos, 71 minutes),
+verified note-for-note against run_eval's cache — and the recipe is now:
+`run_eval.py`, then `wjazz_reviews.py`, then `error_taxonomy.py`. Running
+`wjazz_batch.py` instead would have re-run CREPE over every WHOLE file for
+its locate pass, roughly six times the work. Open: `error_taxonomy.py`
+should refuse to classify, or at least say so in its header line, when
+fewer than all solos have frame evidence, rather than printing a Pareto
+whose largest class is "no evidence".
+
 ## Resolved
 
 ### R20 - Grace notes in the hand scores were counted as time
