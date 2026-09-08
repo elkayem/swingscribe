@@ -304,6 +304,33 @@ together (mean pitch F1; mean notation rhythm over trusted rows with its
 n; trusted count), plus the routing measure above. Nothing is promoted to
 a default on fewer than those.
 
+## The hand-scored ten on the Roformer (2026-09-08)
+
+The listener's own transcriptions had stayed on htdemucs variants after the
+default moved (the sheet's model column is the sidecar's). Switched tonight,
+pianists on `piano` and horns on `other`, separated over each sidecar's span
+(three needed a fresh set; eight had whole-file Roformer sets from the
+trial). Through run_eval, paired over the ten against the pin, with the
+same transcriber on both sides:
+
+| measure | htdemucs* | Roformer | up / down |
+|---|---|---|---|
+| pitch F1 (time-free) | 0.8485 | 0.8661 | 5 / 3 |
+| MuseScore note F1 | 0.5269 | 0.5393 | 6 / 2 |
+| notation rhythm | 0.7279 | 0.7348 | 6 / 3 |
+| notation value | 0.6569 | 0.6608 | 6 / 3 |
+
+The horns carry it: Confirmation pitch 0.779 -> 0.849, Someday My Prince
+0.864 -> 0.925, For Minors Only 0.864 -> 0.878, All The Things level. The
+pianists on the `piano` stem sit within 0.03 either way (Another You
+0.900 -> 0.933, Giant Steps 0.825 -> 0.816, Melody for C 0.836 -> 0.831),
+which is the trial's "level to up" again on the listener's own scores.
+Carl Perkins lost notation rhythm 0.800 -> 0.741 on a 17-second span.
+The 73 WJazzD keys did not move. Re-pinned. A pianist's sidecar that names
+the Roformer with stem `other` transcribes one note: the routing rule is in
+CLAUDE.md, and `benchmark_batch.py` now separates the span the way the
+Separate button does.
+
 ## Sources (first look, 2026-09-01)
 
 - python-audio-separator: https://github.com/nomadkaraoke/python-audio-separator

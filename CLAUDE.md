@@ -651,11 +651,14 @@ list of what is actually wrong; run everything with one command:
 - **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
   this notate the way a human notated it?" It charges the gap between
   performed timing and notated rhythm to the transcriber, so it reads lower
-  and always will. Currently mean note F1 0.527 over the 10 hand scores
-  (pitch-only F1 0.849 on the same ten — the gap between the two IS the
+  and always will. Currently mean note F1 0.539 over the 10 hand scores
+  (pitch-only F1 0.866 on the same ten — the gap between the two IS the
   notation charge). The ten changed on 2026-09-07: Birks Works joined
   (pitch F1 0.923) and Soul Station left, because the listener cleared its
-  score link in the GUI; relink the .mscz and it is scored again.
+  score link in the GUI; relink the .mscz and it is scored again. All ten
+  sidecars are on the Roformer since 2026-09-08 (pianists on `piano`,
+  horns on `other`): pitch F1 0.849 -> 0.866 paired over the ten, the horns
+  up to +0.070 (Confirmation), the pianists within 0.03; WJazzD untouched.
 
 Reading the second as a transcription failure is exactly the mistake that was
 made. Both are kept; neither subsumes the other.

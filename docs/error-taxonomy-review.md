@@ -464,7 +464,84 @@ notation rhythm 0.7348 → 0.7306 (se 0.0034, inside noise), readability
 the human's 1.2 per hundred. That is the price, on the record; the
 persistence change stays.
 
-**Not measured here.** The WJazzD spreadsheet (`wjazzd_benchmark_test.xlsx`)
-still carries the 09-02 rows: refreshing it through `wjazz_batch.py` would
-re-run the whole-file locate pass under the new config, and the located
-spans have not moved. `benchmark_test.xlsx` was refreshed.
+**The spreadsheets.** Both were refreshed the same night. `benchmark_test.xlsx`
+through `benchmark_batch.py`; `wjazzd_benchmark_test.xlsx` through
+`wjazz_batch.py --reuse-span --separation-model bsroformer_sw`, added for
+this — pass 1 (a whole-file CREPE pass per track under the new config,
+whose fit moving by a millisecond would orphan every Roformer span set on
+disk) is skipped wherever the sidecar holds the located span, and the fit is
+re-derived from the span's own notes. 74 rows in eight minutes, every one
+ok: mean pitch F1 0.886, notation rhythm 0.627 at coverage 0.861.
+
+## 8. The conditional floor, measured and refuted (2026-09-08)
+
+Section 7 left `squeezed` (1,145) and `too_short` (765) as the largest miss
+classes after the persistence change: reference notes of median 49-57 ms,
+55-66% under 60 ms, and 51-68% of them with a 4-5 frame run at the
+reference pitch in our trace — an excursion the segmenter now cuts and the
+60 ms floor then drops. Row F of the first sweep (floor 40, unconditional)
+was one-for-one with false notes. The hypothesis here was that a
+CONDITIONAL floor separates the two: keep a 40-59 ms note only when it is
+flanked — contiguous with a kept note on both sides (or one), at a pitch
+distinct from each — the shape of a passing tone or a grace note, not of a
+vibrato speck or a phrase-edge tail. Measured from the new cached traces
+(no CREPE) over the 68 horns, against the shipped configuration as the
+control (which reproduces the cached notes exactly on 31 solos and within a
+note or two on the rest):
+
+| configuration | mean F1 | Δ | se | up / down | P | R | notes | what grew |
+|---|---|---|---|---|---|---|---|---|
+| control (persist 40, floor 60) | 0.8553 | | | | 0.861 | 0.835 | 30,310 | |
+| floor 40, keep all | 0.8483 | −0.0069 | 0.0023 | 19 / 43 | 0.805 | 0.883 | 34,270 | fragment_neighbour 650 → 1,677 |
+| floor 40, flanked both sides (10 ms) | 0.8520 | −0.0032 | 0.0011 | 11 / 39 | 0.838 | 0.853 | 31,801 | fragment_neighbour → 1,215 |
+| floor 40, flanked one side | 0.8485 | −0.0067 | 0.0020 | 17 / 44 | 0.812 | 0.875 | 33,684 | fragment_neighbour → 1,572 |
+| floor 40, flanked both (30 ms) | 0.8529 | −0.0024 | 0.0014 | 22 / 35 | 0.833 | 0.860 | 32,261 | fragment_neighbour → 1,323 |
+| floor 50, flanked both | 0.8554 | +0.0001 | 0.0006 | 25 / 21 | 0.852 | 0.845 | 30,991 | nothing |
+| floor 50, keep all | 0.8562 | +0.0010 | 0.0013 | 28 / 29 | 0.838 | 0.861 | 32,135 | nothing |
+
+Refuted. The flanking condition does not select the annotator's short notes:
+what a 40 ms floor admits is overwhelmingly `fragment_neighbour` — a sliver
+cut off the edge of a real note at a neighbouring pitch — and the condition
+"contiguous with a kept note at another pitch" is exactly the shape of that
+sliver too. `too_short` falls 758 → 599 under the strictest variant while
+`fragment_neighbour` rises by 565; recall buys 0.018 and precision pays
+0.023. At 50 ms nothing moves either way. The 4-5 frame runs at the
+reference pitch that section 7 counted are inside our neighbouring notes,
+not free-standing excursions the floor is dropping; the segmenter is
+already cutting where it can.
+
+**What this closes.** Seven segmenter knobs are now measured on the cached
+traces — persistence, the floor (plain and conditional), the median kernel,
+the onset dip test, and their pairs — and the shipped setting is at or
+within noise of the best on every one. The remaining short-note misses
+(about 1,900, a quarter of all errors) are not a threshold's; they need a
+trace that resolves the note in the first place (CREPE's 10 ms hop and
+50 ms smoothing against notes of 50 ms), or an onset cue that marks it.
+
+**Where the evidence points next** (nothing here is measured yet):
+
+1. **Separation is still the larger lever.** htdemucs → Roformer moved WJazzD
+   note F1 0.790 → 0.858; every segmenter change since, combined, +0.003.
+   The ten hand scores moved to the Roformer tonight: pitch F1 0.849 →
+   0.866, the horns +0.016 to +0.070 (Confirmation, Someday My Prince).
+   A stronger separator, or an ensemble of two, is the one change with a
+   history of tenths.
+2. **`merged` (466) is the onset detector's recall** (D25: 49% of real
+   onsets marked, 5% false). The raw spectral flux is broadband; a flux on
+   the HARMONIC energy of the tracked pitch, or a superflux, would see a
+   soft re-articulation under comping that the broadband one misses. The
+   D25 instrument (`tax_onsets.py`'s recall against WJazzD's onsets) scores
+   a candidate detector from the stems with no CREPE.
+3. **`neighbour` (823) is a pitch that is a semitone off for the WHOLE
+   note** (no frame at the reference pitch), not a segmentation error. The
+   30 ms median filter was refuted; what is needed is a look at CREPE's
+   full salience under those notes — whether the reference pitch is a
+   second peak the decoder could take with a bleed-aware prior — which
+   needs CREPE re-run with activations kept, on a sample.
+4. **A 5 ms CREPE hop** for the short-note and timing populations (a
+   quarter and a tenth of the errors). Twice the CREPE cost; a sample of
+   ten solos would say whether the 49 ms notes appear at all at that
+   resolution.
+5. **The pianists have the headroom** (0.904 against the horns' 0.855, but
+   `squeezed` + `absorbed` are 62% of their errors and the line picker is
+   still a second take, not the default).
