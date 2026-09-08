@@ -127,6 +127,18 @@ of these has broken a tool at least once:
   in a log nobody reads). `piano._numba_free()` now stubs numba with
   pass-through decorators when the real one will not load — librosa only
   ever uses it to OPTIMIZE functions that run fine un-jitted.
+- **A blocked DLL HANGS a windowless process instead of raising**
+  (2026-09-08). From a console, Application Control's refusal of
+  `llvmlite.dll` arrives as `OSError: [WinError 4551]` and the shims above
+  catch it. From a process with no window — `Start-Process cmd /c
+  script.cmd -WindowStyle Hidden`, the way every overnight run is launched —
+  the same `ctypes.CDLL` call never returns: 8 CPU-seconds, 700 MB, no
+  output, forever (twice, both hops of the 5 ms experiment). Nothing in the
+  log says why; `faulthandler.dump_traceback_later` found it in
+  `llvmlite/binding/ffi.py:_load_lib`. For a detached script that reaches
+  torchcrepe, refuse the import first — `sys.modules["numba"] =
+  sys.modules["llvmlite"] = None` before importing swingscribe — so the
+  shim takes its ImportError path. The pipeline itself never wants numba.
 - **The CA bundle goes stale.** `uv`/Python downloads fail with
   `CERTIFICATE_VERIFY_FAILED` when the intercepting certs rotate; regenerate
   `%USERPROFILE%\.windows-ca-bundle.pem` from `Cert:\*\Root` and `Cert:\*\CA`
@@ -651,14 +663,21 @@ list of what is actually wrong; run everything with one command:
 - **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
   this notate the way a human notated it?" It charges the gap between
   performed timing and notated rhythm to the transcriber, so it reads lower
-  and always will. Currently mean note F1 0.539 over the 10 hand scores
-  (pitch-only F1 0.866 on the same ten — the gap between the two IS the
-  notation charge). The ten changed on 2026-09-07: Birks Works joined
-  (pitch F1 0.923) and Soul Station left, because the listener cleared its
-  score link in the GUI; relink the .mscz and it is scored again. All ten
-  sidecars are on the Roformer since 2026-09-08 (pianists on `piano`,
-  horns on `other`): pitch F1 0.849 -> 0.866 paired over the ten, the horns
-  up to +0.070 (Confirmation), the pianists within 0.03; WJazzD untouched.
+  and always will. Currently mean note F1 0.514 over the 11 hand scores
+  (0.539 over ten before Soul Station rejoined on 2026-09-08 — pitch-only
+  F1 0.866 on those ten; the gap between the two IS the notation charge).
+  The set changed on 2026-09-07: Birks Works joined (pitch F1 0.923) and
+  Soul Station left because the listener cleared its score link in the
+  GUI; relinked the next morning, it scores pitch F1 0.599 and note F1
+  0.263 (0.584/0.234 on htdemucs) — a third of its matched positions carry
+  the WRONG pitch, which is the line-selection problem (issue #8), not a
+  hearing problem, and its sidecar's `line: oracle` is the listener's
+  answer to it. The harness scores the CREPE line regardless: `run_eval`
+  and `benchmark_batch` never pass `line`, so the Score button on the
+  oracle take and the sheet's row are different takes. All eleven sidecars
+  are on the Roformer since 2026-09-08 (pianists on `piano`, horns on
+  `other`): pitch F1 0.849 -> 0.866 paired over the ten, the horns up to
+  +0.070 (Confirmation), the pianists within 0.03; WJazzD untouched.
 
 Reading the second as a transcription failure is exactly the mistake that was
 made. Both are kept; neither subsumes the other.
