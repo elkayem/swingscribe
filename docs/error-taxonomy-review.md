@@ -545,3 +545,106 @@ trace that resolves the note in the first place (CREPE's 10 ms hop and
 5. **The pianists have the headroom** (0.904 against the horns' 0.855, but
    `squeezed` + `absorbed` are 62% of their errors and the line picker is
    still a second take, not the default).
+
+## 9. Onset detectors, measured (2026-09-08)
+
+Item 2 above, done the same morning. The instrument runs any candidate
+detector on the cached stems over each solo's region, then scores it two
+ways: recall against WJazzD's onsets (a tick within 30 ms) with D25's
+false-rate control (a tick at 75% through a matched note of at least
+300 ms), and END TO END — the shipped segmenter re-run on the candidate's
+ticks from the cached trace, classified by the taxonomy, paired against the
+shipped detector. Horns and guitar only (69 solos, 31,669 reference onsets,
+1,853 same-pitch repeats); a pianist's notes pass through the oracle after
+the segmenter and cannot be re-derived from the trace. The control
+reproduces the cached tick set on all 69 solos and the cached F1 (0.8557).
+
+| detector | recall | same-pitch repeats | false | ticks/s | F1 | Δ | se | up / down | merged | split_sustain |
+|---|---|---|---|---|---|---|---|---|---|---|
+| shipped (flux → corroborate) | 0.453 | 0.669 | 0.055 | 2.44 | 0.8557 | | | | 471 | 579 |
+| raw broadband flux | 0.694 | 0.800 | 0.128 | 4.29 | 0.8156 | −0.0401 | 0.0026 | 1 / 67 | 172 | 2,035 |
+| superflux (log-magnitude, max-filtered) | 0.593 | 0.753 | 0.122 | 3.73 | 0.8341 | −0.0216 | 0.0031 | 8 / 60 | 212 | 1,498 |
+| superflux → corroborate | 0.409 | 0.617 | 0.053 | 2.38 | 0.8554 | −0.0003 | 0.0009 | 22 / 30 | 525 | 541 |
+| harmonic rise 3 dB | 0.416 | 0.663 | 0.076 | 2.98 | 0.8153 | −0.0405 | 0.0041 | 1 / 66 | 288 | 777 |
+| harmonic rise 6 dB | 0.272 | 0.511 | 0.016 | 1.72 | 0.8381 | −0.0176 | 0.0026 | 5 / 57 | 623 | 472 |
+| harmonic rise 9 dB | 0.180 | 0.385 | 0.004 | 1.07 | 0.8447 | −0.0111 | 0.0022 | 15 / 46 | 855 | 425 |
+| shipped ∪ harmonic 9 dB | 0.472 | 0.696 | 0.056 | 3.38 | 0.8467 | −0.0090 | 0.0015 | 3 / 47 | 459 | 585 |
+
+(The 3 and 6 dB unions lose more: −0.044 and −0.019.)
+
+**D25's open question is answered: the raw flux holds most of the missing
+half.** It marks 69% of real onsets and 80% of same-pitch repeats, against
+the corroborated set's 45% and 67% — corroboration discards a third of the
+real ticks along with the false ones. But it is not losing anything the
+segmenter could use: run on the raw set, `merged` falls 471 → 172 and
+`split_sustain` rises 579 → 2,035, and F1 loses 0.040 on 67 of 69 solos.
+Every detector here sits on the same curve — more ticks trade `merged` for
+`split_sustain` one-for-several — and none of them finds a better point on
+it than the shipped one. Superflux, the vibrato-immune variant, is a
+STRICTLY worse raw detector on this material (recall 0.593 at the same
+false rate) and, corroborated, lands exactly on the shipped point (−0.0003,
+se 0.0009, 22 up / 30 down). A rise in the tracked pitch's own harmonics
+is clean at 9 dB (false rate 0.4%) and nearly blind (18%), and even its
+UNION with the shipped ticks loses: a tick a frame or two off the true
+attack cuts the note there, and `timing_late` rises 345 → 525.
+
+**What this closes.** The onset detector is at its operating point, and
+the class it bounds is small: fixing every `merged` is worth 0.0097 of F1
+(D25), and the cheapest way to fix them buys each one with three
+`split_sustain`. The one direction not measured is a different
+CORROBORATION test rather than a different raw detector — the raw set has
+the ticks; the question is which of the third it discards are the 299
+`merged` and which are the 1,456 splits. The dip test (`onset_dip_db`) was
+the first attempt at that and went the other way — 3b.1 has it saving 145
+`split_sustain` for 469 `merged` (−0.0063) — so the discriminating cue, if
+one exists, is not the energy envelope around the tick. Item 2 is closed;
+item 4 (the 5 ms hop) is measured in section 10.
+
+## 10. The 5 ms CREPE hop, measured and refuted (2026-09-08)
+
+Item 4: at a 10 ms hop a 50 ms note is five frames and the 40 ms
+persistence window is four of them, so the hypothesis was that the
+`squeezed` + `too_short` population (1,910, a quarter of all errors) is a
+TIME-RESOLUTION limit and a 5 ms hop resolves it. Measured on a sample of
+13 solos chosen for the most `squeezed` + `too_short` errors (the ten worst
+horns, a pianist, a bebop head and a ballad as controls), with CREPE re-run
+at hop 80 samples through the shipped `transcribe.analyze` — every other
+setting in milliseconds and therefore unchanged in time — and two Viterbi
+decodes from the one inference, because the step cost is paid per jump
+while the evidence against it accumulates per frame:
+
+| configuration | mean F1 | Δ | se | up / down | P | R | squeezed | too_short | absorbed | fragment_neighbour |
+|---|---|---|---|---|---|---|---|---|---|---|
+| control (10 ms hop, step 0.2) | 0.8206 | | | | 0.866 | 0.782 | 505 | 349 | 93 | 101 |
+| 5 ms hop, step 0.2 | 0.8158 | −0.0049 | 0.0025 | 3 / 8 | 0.870 | 0.770 | 513 | 413 | 113 | 81 |
+| 5 ms hop, step 0.4 | 0.8155 | −0.0051 | 0.0024 | 3 / 7 | 0.871 | 0.769 | 524 | 412 | 113 | 80 |
+
+Refuted. `squeezed` does not move, `too_short` RISES 349 → 413 and
+`absorbed` 93 → 113; recall pays 0.012 for 0.004 of precision. The three
+solos that gained are the pianist (+0.005, through the oracle) and the two
+controls with the fewest short notes; every horn chosen for its short-note
+errors lost, the two Cherokees by 0.02. The step cost makes no difference
+at either resolution.
+
+**Why, and what it bounds.** The hop is not the resolution. CREPE's
+analysis window is 1,024 samples at 16 kHz — 64 ms — so a 50 ms note is
+never a clean frame at ANY hop: every frame that contains it also contains
+its neighbours, and the network reports the louder one. Halving the hop
+only samples that same 64 ms verdict twice as often, which is why the
+per-frame pitch trace resolves exactly the same notes and the segmenter,
+given twice the frames to find a persistent excursion in, cuts a few more
+that the 60 ms floor then drops. The 1,900 short-note misses are bounded
+by the pitch tracker's WINDOW, and no setting of this tracker reaches
+them: a shorter window means a different model (CREPE's is fixed by its
+training), or a different kind of evidence for a note — an onset the
+detector cannot mark either (section 9).
+
+**What this leaves.** Items 2 and 4 of section 8's list are closed the
+same morning, both negative, and together with sections 3, 3b and 8 they
+close the whole "hear the short notes better with this front end" line.
+What stands is item 1 (separation, the only lever with a history of
+tenths), item 3 (`neighbour`, 836 — CREPE's salience under a semitone-off
+note, still unmeasured) and item 5 (the pianists, where line selection
+rather than hearing is the problem: Soul Station rejoined the hand-scored
+set today at pitch F1 0.599 with a third of its matched positions at the
+wrong pitch).
