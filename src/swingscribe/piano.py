@@ -96,19 +96,13 @@ def _numba_free() -> None:
     import sys
     import types
 
-    try:
-        import resampy  # noqa: F401
-    except ImportError:
+    # A blocked DLL raises OSError, not ImportError: transcribe.BLOCKED_IMPORT.
+    from swingscribe.stages.transcribe import BLOCKED_IMPORT, _ensure_resampy
 
-        def _blocked(*_args, **_kwargs):
-            raise RuntimeError("resampy is unavailable here; resample with torchaudio instead")
-
-        stub = types.ModuleType("resampy")
-        stub.resample = _blocked
-        sys.modules["resampy"] = stub
+    _ensure_resampy()
     try:
         import numba  # noqa: F401
-    except ImportError:
+    except BLOCKED_IMPORT:
 
         def _passthrough(*args, **kwargs):
             if len(args) == 1 and callable(args[0]) and not kwargs:

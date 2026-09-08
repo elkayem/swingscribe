@@ -522,13 +522,21 @@ def refine_bins(probs, bins, window: int = 4):
     return out
 
 
-def _import_torchcrepe():
-    """Import torchcrepe with a stub for its unused resampy dependency —
-    resampy needs numba, which Application Control blocks on some machines.
-    We resample with torchaudio, so resampy is never actually called."""
+# A blocked compiled file does not raise ImportError. numba's llvmlite loads
+# `llvmlite.dll` through ctypes, and Application Control's refusal arrives as
+# `OSError: [WinError 4551]` (2026-09-08, from the Transcribe button); an
+# `except ImportError` let it straight through to the listener.
+BLOCKED_IMPORT = (ImportError, OSError)
+
+
+def _ensure_resampy() -> None:
+    """Make `import resampy` succeed, with a stub when the real one will not
+    load — resampy needs numba, which Application Control blocks on some
+    machines (CLAUDE.md: its verdict changes, so this is tested, not
+    remembered). We resample with torchaudio, so resampy is never called."""
     try:
         import resampy  # noqa: F401
-    except ImportError:
+    except BLOCKED_IMPORT:
         stub = types.ModuleType("resampy")
 
         def _blocked(*_args, **_kwargs):
@@ -536,6 +544,11 @@ def _import_torchcrepe():
 
         stub.resample = _blocked
         sys.modules["resampy"] = stub
+
+
+def _import_torchcrepe():
+    """Import torchcrepe with a stub for its unused resampy dependency."""
+    _ensure_resampy()
     import torchcrepe
 
     return torchcrepe

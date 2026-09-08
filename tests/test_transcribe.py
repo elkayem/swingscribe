@@ -818,3 +818,59 @@ def test_the_line_fields_survive_a_round_trip_through_config():
     assert Config.model_validate(config.model_dump()).transcribe.piano_line == "oracle"
     assert Config().stage_config("transcribe").get("piano_line") is None
     assert Config().transcribe.piano_line == "crepe"
+
+
+class _RefusesImport:
+    """A meta-path finder standing in for Application Control: the named
+    modules raise the OSError a blocked DLL raises, from inside the import."""
+
+    def __init__(self, names, error):
+        self.names = set(names)
+        self.error = error
+
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in self.names:
+            raise self.error
+        return None
+
+
+def _block_imports(monkeypatch, *names):
+    import sys
+
+    for name in list(sys.modules):
+        if name.split(".")[0] in names:
+            monkeypatch.delitem(sys.modules, name)
+    error = OSError(4551, "An Application Control policy has blocked this file")
+    monkeypatch.setattr(sys, "meta_path", [_RefusesImport(names, error)] + sys.meta_path)
+
+
+def test_a_blocked_resampy_dll_is_stubbed_not_raised(monkeypatch):
+    """Application Control refuses a compiled file with OSError 4551, not
+    ImportError. On 2026-09-08 numba's llvmlite.dll was refused that way and
+    the Transcribe button showed the listener the raw OSError."""
+    import sys
+
+    from swingscribe.stages import transcribe
+
+    _block_imports(monkeypatch, "resampy", "numba", "llvmlite")
+    transcribe._ensure_resampy()
+    stub = sys.modules["resampy"]
+    with pytest.raises(RuntimeError, match="torchaudio"):
+        stub.resample()
+
+
+def test_the_piano_oracle_gets_a_passthrough_numba_when_its_dll_is_blocked(monkeypatch):
+    import sys
+
+    from swingscribe import piano
+
+    _block_imports(monkeypatch, "resampy", "numba", "llvmlite")
+    piano._numba_free()
+    numba = sys.modules["numba"]
+
+    @numba.jit(nopython=True)
+    def twice(x):
+        return 2 * x
+
+    assert twice(21) == 42
+    assert numba.njit(twice) is twice
