@@ -104,7 +104,13 @@ of these has broken a tool at least once:
     `uv run swingscribe` and `swingscribe gui` cannot work here, and no pin
     fixes it. A `.cmd` is a script rather than a PE binary, so no
     code-integrity policy applies to it; `swingscribe/__main__.py` is what
-    both routes actually reach.
+    both routes actually reach. (2026-09-07: the stub built on 09-02 loaded
+    from PowerShell AND Git Bash, and `uv run swingscribe` worked — so
+    "permanently" is a policy, not a measurement. The same morning `uv run
+    python -m swingscribe gui` raised the SAC dialog ONCE and loaded on the
+    retry with nothing in the CodeIntegrity or AppLocker logs. A first
+    launch can fail on the reputation lookup and pass on the second; retry
+    before diagnosing, and keep the `.cmd` as the route that never asks.)
 - **numba is blocked again** (2026-08-30): `numba/experimental/jitclass/
   _box.cp311-win_amd64.pyd` raises WinError 4551, so a bare `import
   torchcrepe` fails — it pulls librosa, which pulls numba. This does NOT
