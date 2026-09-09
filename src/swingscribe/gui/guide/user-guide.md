@@ -91,8 +91,8 @@ Detail pans.
   while dragging or tapping — but never on a nudge, since the small nudges
   are exactly how you correct the grid's own small errors.
 
-**Transport:** the play button, <kbd>Space</kbd> to play/pause, and
-playback rate chips (1×, ¾×, ½×) for checking a fast line by ear. **Loop
+**Transport:** the play button, <kbd>Space</kbd> to play/pause, and the
+**speed control** for checking a fast line by ear (see below). **Loop
 A/B** (<kbd>L</kbd>) confines playback to the selection and loops it; switch
 it off to listen around the span — before it, after it — without moving A or
 B. **⇤ Start** (<kbd>Enter</kbd>) plays from the start: of the selection
@@ -117,7 +117,10 @@ quantize against, so it's worth checking before you spend time downstream.
 - The time-signature menu and the **2× time** toggle (for notating a ballad
   at twice the pulse) apply to the whole tune.
 - **Chorus length** (8/12/16/24/32 bars, or none) draws a heavier line every
-  N bars, for a solo that's a whole number of choruses.
+  N bars, for a solo that's a whole number of choruses. Pick **custom…** for a
+  form the menu doesn't list — a 20-bar tune, a 16-bar blues — and type the
+  number beside it; Enter applies it, Esc puts the menu back. It joins the menu
+  and is remembered with the track.
 
 ## Step 2: Isolate & audition
 
@@ -164,7 +167,18 @@ A/B toggle switches between **Isolated**, **Original**, and **Both**, and
 switching mid-phrase is sample-locked — you're comparing the exact same
 instant either way. **Click** (<kbd>C</kbd>) mixes a metronome on the bar
 grid into the audition, which is a fast way to hear whether the downbeat is
-right. The rate chips (1×, ¾×, ½×) slow playback without changing pitch.
+right. The speed control slows playback without changing pitch; here and
+in section 3 the audio is stretched on the server and reloaded, so a new
+speed takes a moment to arrive.
+
+**Speed:** every transport has the same control — preset chips (1×, ¾×,
+½×, ¼×), a slider from 20% to 200%, **−** / **+** for one percent at a
+time (shift-click for five), and a readout you can click and type into:
+`43` or `43%`, then <kbd>Enter</kbd>. Scrolling over the slider or the
+readout moves it one percent, and <kbd>,</kbd> / <kbd>.</kbd> step the
+speed of whichever section is playing by five percent (with
+<kbd>Shift</kbd>, one). The pitch never moves. In section 1 the change is
+instant; in sections 2 and 3 the slider takes effect when you let go.
 
 The **mixer** below lets you solo/mute and adjust the level of every stem
 from this separation. **Download isolated span** saves the isolated stem as
@@ -294,6 +308,8 @@ track loaded.
   (add <kbd>Shift</kbd> for 0.01s)
 - <kbd>←</kbd> / <kbd>→</kbd> — seek −2s / +2s (add <kbd>Shift</kbd> for
   0.1s)
+- <kbd>,</kbd> / <kbd>.</kbd> — playback speed −5% / +5% in the active
+  section (add <kbd>Shift</kbd> for 1%)
 - <kbd>Ctrl+Z</kbd> — undo an edit
 - <kbd>Ctrl+Shift+Z</kbd> (or <kbd>Ctrl+Y</kbd>) — redo
 

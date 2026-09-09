@@ -191,6 +191,19 @@ select:disabled, .chip-select:disabled { opacity: 0.38; cursor: default; box-sha
   text-transform: none; letter-spacing: normal;
 }
 
+/* The chorus menu's "custom…" field: same chip as the menu it stands in for,
+   minus the arrow. Sized for three digits; the spinners are dropped because
+   they double the width for a value people type. */
+.chip-input {
+  font: 500 12px var(--mono); padding: 3px 8px; border-radius: var(--radius-sm);
+  width: 62px; color: var(--text); background: var(--panel-2);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: var(--edge-light), 0 1px 1px rgba(0, 0, 0, 0.35);
+}
+.chip-input::-webkit-outer-spin-button,
+.chip-input::-webkit-inner-spin-button { appearance: none; -webkit-appearance: none; margin: 0; }
+.chip-input { -moz-appearance: textfield; appearance: textfield; }
+
 /* ── track picker ───────────────────────────────────────────────────────── */
 .picker {
   position: fixed; inset: 0; z-index: 40;
@@ -403,6 +416,36 @@ main { padding: 20px; display: flex; flex-direction: column; gap: 18px; max-widt
 }
 .tool-group button.active[data-tool="erase"] { color: var(--accent); }
 
+/* the speed control: presets, ± at one percent, a slider, a typed readout */
+.rate-control { display: flex; align-items: center; gap: 6px; }
+.rate-control .rate-group { margin-right: 4px; }
+.rate-step {
+  width: 24px; height: 24px; padding: 0; border-radius: 50%;
+  font: 500 14px var(--font); line-height: 1; color: var(--text-2);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.rate-slider {
+  -webkit-appearance: none; appearance: none; width: 120px; height: 4px; margin: 0;
+  border-radius: 2px; outline: none; cursor: pointer;
+  background: linear-gradient(to right, var(--accent) var(--fill, 0%), rgba(255, 255, 255, 0.12) var(--fill, 0%));
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.5);
+}
+.rate-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.2);
+  transition: transform var(--ease);
+}
+.rate-slider::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+.rate-slider:hover::-webkit-slider-thumb, .rate-slider:active::-webkit-slider-thumb { transform: scale(1.15); }
+.rate-slider:focus-visible { box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.5), 0 0 0 3px var(--accent-ring); }
+input.rate-value[type=text] {
+  width: 52px; padding: 4px 6px; text-align: center;
+  font: 500 13px var(--mono); font-variant-numeric: tabular-nums; color: var(--accent);
+}
+
 .edge { display: flex; align-items: center; gap: 5px; }
 .edge .tap { font-size: 12px; padding: 5px 10px; }
 .edge-time { font: 500 13px var(--mono); font-variant-numeric: tabular-nums; min-width: 68px; text-align: center; color: var(--accent); }
@@ -411,6 +454,11 @@ main { padding: 20px; display: flex; flex-direction: column; gap: 18px; max-widt
    invisible state, which is exactly the wrong feel for a precision control. */
 .edge { padding: 3px 6px; border: 1px solid transparent; border-radius: var(--radius); transition: background var(--ease), border-color var(--ease); }
 .edge.focused { border-color: rgba(240, 168, 72, 0.4); background: var(--accent-dim); }
+/* The edges and the span readout travel as one group, pushed to the right.
+   When the transport is too narrow for everything — the speed control took
+   the slack — the whole group drops to a second row, still right-aligned,
+   rather than the readout alone falling under the play button. */
+.edges { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 .span-readout { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
 .span-readout span:first-child { font: 500 15px var(--mono); color: var(--accent); font-variant-numeric: tabular-nums; }
 .span-readout .muted { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }

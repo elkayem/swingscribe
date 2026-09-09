@@ -35,7 +35,9 @@ STEREO_LIMIT_SECONDS = 180.0
 STFT_SIZE = 2048
 STFT_HOP = 512
 
-MIN_RATE = 0.25
+# A fifth of the speed is the floor: the phase vocoder smears past that, and
+# the GUI's speed slider (static/rate.js) stops at the same place.
+MIN_RATE = 0.2
 MAX_RATE = 2.0
 
 

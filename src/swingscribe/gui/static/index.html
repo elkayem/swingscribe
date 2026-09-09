@@ -84,7 +84,10 @@
           <option value="16">16-bar</option>
           <option value="24">24-bar</option>
           <option value="32">32-bar</option>
+          <option value="custom">custom…</option>
         </select>
+        <input class="chip-input" id="chorus-custom" type="number" min="2" max="512" step="1" hidden
+               title="Bars per chorus, for a form the menu does not list — a 20-bar tune, a 64-bar AABA counted in halves. Enter applies it, Esc cancels.">
         <button class="chip" id="snap-toggle" disabled title="When placing A or B, snap to the nearest beat or bar line. The nudge buttons never snap, so you can still fine-tune afterwards. (S)">Snap: off</button>
         <button class="chip" id="form-reset" hidden title="Clear the form start. Bar 1 goes back to the first bar line of the track.">bar 1 set ✕</button>
         <button class="chip" data-focus="fit" title="Zoom the detail view to the whole selection, with a little room either side.">Fit selection</button>
@@ -101,12 +104,8 @@
       <button class="restart" id="restart" title="Play from the start: of the selection while Loop A/B is on, of the track when it is off. (Enter)">⇤ Start</button>
       <div class="time"><span id="time-now">0:00.00</span><span class="sep">/</span><span id="time-total">0:00</span></div>
       <button class="toggle" id="loop" title="Play only the A/B selection, looped. Switch it off to play the whole track freely and listen around the span without moving it. (L)">Loop A/B</button>
-      <div class="rate-group" id="mix-rate">
-        <button class="chip" data-rate="1" title="Play at full speed.">1×</button>
-        <button class="chip" data-rate="0.75" title="Play at three-quarter speed, pitch unchanged. Slow a fast line down to hear where a phrase starts.">¾×</button>
-        <button class="chip" data-rate="0.5" title="Play at half speed, pitch unchanged.">½×</button>
-      </div>
-      <span class="spacer"></span>
+      <div id="mix-rate"></div>
+      <div class="edges">
       <div class="edge" id="edge-a">
         <button class="tap" data-set="a" title="Set A, the start of the selection, at the playhead. Tap it while the track plays, then nudge. (A)">Set A</button>
         <span class="edge-time" id="a-time">0:00.00</span>
@@ -123,6 +122,7 @@
         <span id="span-length">—</span>
         <span class="muted">span</span>
         <span class="muted" id="span-bars" hidden></span>
+      </div>
       </div>
     </div>
   </section>
@@ -178,11 +178,7 @@
           <button data-ab="both" title="Hear the stem and the original together.">Both</button>
         </div>
         <button class="chip" id="click-toggle" title="Mix a metronome on the bar grid into the audition: a tick on every beat, a high tick on bar lines, higher still at a chorus start. A wrong downbeat is obvious against it. (C)">Click</button>
-        <div class="rate-group" id="stem-rate">
-          <button class="chip" data-rate="1" title="Play at full speed.">1×</button>
-          <button class="chip" data-rate="0.75" title="Play at three-quarter speed, stretched without changing pitch.">¾×</button>
-          <button class="chip" data-rate="0.5" title="Play at half speed, stretched without changing pitch.">½×</button>
-        </div>
+        <div id="stem-rate"></div>
         <span class="spacer"></span>
         <span class="hint">Sample-locked — switching mid-phrase compares the same instant</span>
       </div>
@@ -285,11 +281,7 @@
           <button data-rab="transcription" title="Hear the transcription rendered as plain tones, silenced notes left out, so a wrong note stands out.">Transcription</button>
           <button data-rab="both" title="Hear the recording and the rendered transcription together.">Both</button>
         </div>
-        <div class="rate-group" id="review-rate">
-          <button class="chip" data-rrate="1" title="Play at full speed.">1×</button>
-          <button class="chip" data-rrate="0.75" title="Play at three-quarter speed, pitch unchanged.">¾×</button>
-          <button class="chip" data-rrate="0.5" title="Play at half speed, pitch unchanged.">½×</button>
-        </div>
+        <div id="review-rate"></div>
         <span class="spacer"></span>
         <span class="hint">A wrong downbeat is obvious against the bar lines; open issue #1 shows as repeated same-pitch fragments.</span>
       </div>

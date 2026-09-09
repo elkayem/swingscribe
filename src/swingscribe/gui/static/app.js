@@ -11,6 +11,7 @@ import { MixEngine, StemEngine } from './engine.js';
 import { CLASSES, PianoRoll } from './review.js';
 import { initStorage } from './storage.js';
 import { playPitch } from './tone.js';
+import { RateControl } from './rate.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -700,8 +701,13 @@ function applyBeats() {
   }
   if (state.beats) menu.value = state.beats.time_signature;
   menu.disabled = !state.beats;
-  $('chorus-bars').disabled = !state.beats;
-  $('chorus-bars').value = String(state.barsPerChorus || 0);
+  const chorusMenu = $('chorus-bars');
+  chorusMenu.disabled = !state.beats;
+  ensureChorusOption(state.barsPerChorus);
+  chorusMenu.value = String(state.barsPerChorus || 0);
+  const custom = $('chorus-custom');
+  custom.disabled = !state.beats;
+  if (document.activeElement !== custom) custom.hidden = true;
 
   const snap = $('snap-toggle');
   snap.disabled = !state.beats;
@@ -712,6 +718,25 @@ function applyBeats() {
   doubleTime.textContent = `2× time: ${state.doubleTime ? 'on' : 'off'}`;
   doubleTime.classList.toggle('active', Boolean(state.doubleTime));
   updateBars();
+}
+
+/* A form the menu does not list becomes an option in it, in order, so the
+   chip reads "20-bar" rather than falling blank. A sidecar can arrive with any
+   number in it — the setting has always been a plain int, and the menu was the
+   only thing that ever said otherwise — so this runs on every render, not just
+   when the listener types one. */
+function ensureChorusOption(bars) {
+  const menu = $('chorus-bars');
+  const value = Number(bars) || 0;
+  if (value < 2) return;
+  if ([...menu.options].some((option) => Number(option.value) === value)) return;
+  const option = document.createElement('option');
+  option.value = String(value);
+  option.textContent = `${value}-bar`;
+  const after = [...menu.options].find(
+    (existing) => Number(existing.value) > value || existing.value === 'custom',
+  );
+  menu.insertBefore(option, after ?? null);
 }
 
 /* "16 bars" under the span readout. Counting bar lines rather than seconds is
@@ -2605,29 +2630,41 @@ for (const button of document.querySelectorAll('[data-zoom]')) {
   });
 }
 
-for (const button of $('mix-rate').querySelectorAll('button')) {
-  button.addEventListener('click', () => {
-    state.mixRate = Number(button.dataset.rate);
-    mix.engine?.setRate(state.mixRate);
-    for (const other of $('mix-rate').querySelectorAll('button')) {
-      other.classList.toggle('active', other === button);
-    }
-  });
-}
-$('mix-rate').querySelector('[data-rate="1"]').classList.add('active');
+// Speed, one control per section (rate.js). The mix plays through a media
+// element, so its slider is live; the other two are stretched on the server
+// and reloaded, so they follow the slider on release.
+const rateControls = {
+  mix: new RateControl($('mix-rate'), {
+    live: true,
+    onChange: (rate) => {
+      state.mixRate = rate;
+      mix.engine?.setRate(rate);
+    },
+  }),
+  stem: new RateControl($('stem-rate'), {
+    pitchNote: 'stretched without changing pitch',
+    onChange: async (rate) => {
+      state.stemRate = rate;
+      // Stretched server-side, so every source stays at rate 1.0 and
+      // therefore still sample-locked to the others. Costs a reload.
+      await loadAudition();
+    },
+  }),
+  review: new RateControl($('review-rate'), {
+    pitchNote: 'stretched without changing pitch',
+    onChange: async (rate) => {
+      state.reviewRate = rate;
+      // Stretched server-side, so mix and transcription stay sample-locked.
+      if (state.review) await loadReviewAudio();
+    },
+  }),
+};
 
-for (const button of $('stem-rate').querySelectorAll('button')) {
-  button.addEventListener('click', async () => {
-    state.stemRate = Number(button.dataset.rate);
-    for (const other of $('stem-rate').querySelectorAll('button')) {
-      other.classList.toggle('active', other === button);
-    }
-    // Stretched server-side, so every source stays at rate 1.0 and therefore
-    // still sample-locked to the others. Costs a reload; keeps the pitch.
-    await loadAudition();
-  });
+/* Comma and period step the speed of whichever section is playing (or was
+   last played), the way < and > scrub speed in an editor. */
+function stepRate(delta) {
+  rateControls[state.active]?.step(delta);
 }
-$('stem-rate').querySelector('[data-rate="1"]').classList.add('active');
 
 for (const button of $('ab-toggle').querySelectorAll('button')) {
   button.addEventListener('click', () => { state.abMode = button.dataset.ab; applyAbMode(); renderMixer(); });
@@ -2663,18 +2700,6 @@ for (const button of $('review-ab').querySelectorAll('button')) {
     applyReviewMode();
   });
 }
-
-for (const button of $('review-rate').querySelectorAll('button')) {
-  button.addEventListener('click', async () => {
-    state.reviewRate = Number(button.dataset.rrate);
-    for (const other of $('review-rate').querySelectorAll('button')) {
-      other.classList.toggle('active', other === button);
-    }
-    // Stretched server-side, so mix and transcription stay sample-locked.
-    if (state.review) await loadReviewAudio();
-  });
-}
-$('review-rate').querySelector('[data-rrate="1"]').classList.add('active');
 
 $('beats-toggle').addEventListener('click', toggleBeats);
 $('second-voice-toggle').addEventListener('click', toggleSecondVoice);
@@ -2720,9 +2745,65 @@ $('double-time').addEventListener('click', () => {
 });
 
 $('chorus-bars').addEventListener('change', async (event) => {
+  if (event.target.value === 'custom') {
+    // Don't commit anything yet: the menu is showing "custom…", and the number
+    // beside it is what the setting will be. Escape puts the menu back.
+    const field = $('chorus-custom');
+    field.hidden = false;
+    field.value = state.barsPerChorus > 1 ? String(state.barsPerChorus) : '';
+    field.focus();
+    field.select();
+    return;
+  }
   state.barsPerChorus = Number(event.target.value);
+  $('chorus-custom').hidden = true;
   await maybeLoadBeats();
   persist();
+});
+
+/* `insist` is the Enter path: a bad number is worth a complaint and the caret
+   back. On blur it is not — refocusing from a blur handler is a loop — so
+   clicking away from something unusable simply puts the menu back. */
+async function applyCustomChorus(insist) {
+  const field = $('chorus-custom');
+  const bars = Math.round(Number(field.value));
+  if (!Number.isFinite(bars) || bars < 2 || bars > 512) {
+    if (!insist) {
+      field.hidden = true;
+      $('chorus-bars').value = String(state.barsPerChorus || 0);
+      return;
+    }
+    toast('Bars per chorus must be a whole number from 2 to 512', true);
+    field.focus();
+    field.select();
+    return;
+  }
+  field.hidden = true;
+  state.barsPerChorus = bars;
+  ensureChorusOption(bars);
+  $('chorus-bars').value = String(bars);
+  await maybeLoadBeats();
+  persist();
+}
+
+$('chorus-custom').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    applyCustomChorus(true);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    $('chorus-custom').hidden = true;
+    $('chorus-bars').value = String(state.barsPerChorus || 0);
+    $('chorus-bars').focus();
+  }
+});
+
+// Clicking away is a commit, not a cancel — the field only ever appears
+// because the listener asked for it, and a number they typed and then clicked
+// away from is still the number they meant.
+$('chorus-custom').addEventListener('blur', () => {
+  if ($('chorus-custom').hidden) return;
+  applyCustomChorus(false);
 });
 
 $('copy-cmd').addEventListener('click', async () => {
@@ -2822,6 +2903,12 @@ document.addEventListener('keydown', (event) => {
       break;
     case ']':
       nudge(state.focusEdge, shift ? 0.01 : 0.1);
+      break;
+    case ',':
+      stepRate(shift ? -1 : -5);
+      break;
+    case '.':
+      stepRate(shift ? 1 : 5);
       break;
     case 'arrowleft':
       event.preventDefault();

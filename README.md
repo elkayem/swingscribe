@@ -23,8 +23,9 @@ runs on your own machine. Nothing is uploaded anywhere.
 Open a track and the whole recording is in front of you. Drag out the solo
 on the overview, then place the edges precisely on the detail view: tap
 <kbd>A</kbd> and <kbd>B</kbd> while it plays, nudge by a tenth of a second,
-or snap to the nearest beat or bar. Loop it, slow it to half speed without
-changing the pitch, and listen until the boundaries are right.
+or snap to the nearest beat or bar. Loop it, slow it to any speed down to
+a fifth without changing the pitch, and listen until the boundaries are
+right.
 
 The bar grid is drawn over the waveform before you transcribe anything —
 a tick per beat, a numbered dot per bar, a gold mark at every chorus — so a
