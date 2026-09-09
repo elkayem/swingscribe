@@ -74,6 +74,7 @@ export class PianoRoll {
     this.diag = null;
     this.beats = null;
     this.selected = -1;
+    this.selectedCandidate = -1;               // index into `candidates`, or -1
     this.playhead = null;
     this.ground = null;                        // the aligned hand transcription, if any
     this.visible = new Set(CLASSES);           // which alignment classes to draw
@@ -120,6 +121,7 @@ export class PianoRoll {
     this.diag = review ? review.diagnostics : null;
     this.beats = beats;
     this.selected = -1;
+    this.selectedCandidate = -1;
     this._range();
     this.draw();
     if (this.opts.onView) this.opts.onView(this.view, this.spanWidth);
@@ -481,7 +483,16 @@ export class PianoRoll {
         if (x1 < 0 || x0 > w) return;
         const width = Math.max(2, x1 - x0);
         const y = this.pitchToY(n.pitch, h) - noteH / 2;
-        if (on) {
+        if (i === this.selectedCandidate) {
+          // Inspected: the same accent a selected line note wears, so the
+          // eye finds it whichever layer it came from.
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = this._css('--accent', '#f0a848');
+          ctx.fillRect(x0, y, width, noteH - 1);
+          ctx.strokeStyle = this._css('--accent', '#f0a848');
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x0 - 1, y - 1, width + 2, noteH + 1);
+        } else if (on) {
           ctx.globalAlpha = 0.95;
           ctx.fillStyle = this._css('--added', '#9fd66a');
           ctx.fillRect(x0, y, width, noteH - 1);
@@ -840,13 +851,14 @@ export class PianoRoll {
   }
 
   _select(event) {
-    if (!this.notes.length) return;
+    if (!this.notes.length && !this.candidates.length) return;
     const rect = this.rollEl.getBoundingClientRect();
-    // Both layers are candidates, judged the same way, and the vertically
-    // nearer one wins. Searching ours first and only then falling back would
-    // make a missed note unclickable whenever any note of ours overlaps it in
-    // time — which in a busy passage is most of them, and a missed note is
-    // exactly the case with nothing of ours to click instead.
+    // All three layers are candidates, judged the same way, and the
+    // vertically nearer one wins. Searching ours first and only then falling
+    // back would make a missed note unclickable whenever any note of ours
+    // overlaps it in time — which in a busy passage is most of them, and a
+    // missed note is exactly the case with nothing of ours to click instead.
+    // Ties go to the line: it is drawn on top, so it is what the eye hit.
     const ours = this._hit(this.notes, event, rect, (n) => n.onset, (n, i) =>
       this.visible.has(this.classOf(i) ?? 'matched'),
     );
@@ -855,14 +867,28 @@ export class PianoRoll {
           this.visible.has(n.cls),
         )
       : { index: -1, distance: Infinity };
+    // What the piano model offered, while it is shown (a switched-on note is
+    // always shown). The same rule the Edit tool uses to find one.
+    const offered = this._hit(this.candidates, event, rect, (n) => n.onset, (n, i) =>
+      this.showSecond || this.added.has(i),
+    );
 
-    if (notated.index >= 0 && notated.distance < ours.distance) {
+    if (notated.index >= 0 && notated.distance < ours.distance && notated.distance < offered.distance) {
       this.selected = -1;
+      this.selectedCandidate = -1;
       this.draw();
       if (this.opts.onSelectReference) this.opts.onSelectReference(notated.index);
       return;
     }
+    if (offered.index >= 0 && offered.distance < ours.distance) {
+      this.selected = -1;
+      this.selectedCandidate = offered.index;
+      this.draw();
+      if (this.opts.onSelectCandidate) this.opts.onSelectCandidate(offered.index);
+      return;
+    }
     this.selected = ours.index;
+    this.selectedCandidate = -1;
     this.draw();
     if (this.opts.onSelect) {
       this.opts.onSelect(ours.index >= 0 ? this.notes[ours.index] : null, ours.index);
@@ -897,6 +923,7 @@ export class PianoRoll {
 
   selectIndex(i) {
     this.selected = i;
+    this.selectedCandidate = -1;
     this.draw();
   }
 }

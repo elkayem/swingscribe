@@ -200,7 +200,9 @@ threshold, with energy-gate failures shaded).
   plain tone at that note's pitch, and shows the frames that produced it in
   the inspector panel below (with a **♪ Play** button to hear it again).
   This works on ground-truth notes too, once a hand transcription is loaded
-  — click any matched, wrong, or missed note to inspect and hear it.
+  — click any matched, wrong, or missed note to inspect and hear it — and
+  on the piano model's candidates while they are shown: the inspector says
+  how loud the model heard the note and whether it is on the page.
   Dragging on the roll pans.
 - **Edit** (<kbd>E</kbd> toggles between the two tools) — clicking a note
   silences it; clicking a faint magenta piano-model candidate switches it

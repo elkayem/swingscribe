@@ -158,6 +158,10 @@ const pianoRoll = new PianoRoll($('pianoroll'), $('lane-f0'), $('lane-gate'), {
     renderReferenceInspector(index);
     sound(state.ground?.reference_notes[index]);
   },
+  onSelectCandidate: (index) => {
+    renderCandidateInspector(index);
+    sound(state.review?.candidates[index]);
+  },
   onSeek: (t) => seekReviewTo(t),
   onView: (view, spanWidth) => renderRollRange(view, spanWidth),
   onToggleSilence: (index) => toggleSilence(index),
@@ -787,7 +791,7 @@ function renderRollLegend() {
   const second = (state.review.second_voice || []).length;
   if (candidates) {
     item('piano model heard', '--candidate', '', !state.showSecond,
-      'Every note the piano model heard that the line left out; brighter is louder. Edit tool: click to add it');
+      'Every note the piano model heard that the line left out; brighter is louder. Inspect tool: click to hear it. Edit tool: click to add it');
     item('added to page', '--added', '', false,
       'A piano-model note switched on: it sounds in the ear test and is written, as a chord if it strikes with a line note');
   }
@@ -2085,6 +2089,47 @@ function renderReferenceInspector(index) {
     );
   }
   remarks.push('Its horizontal position comes from the alignment, so do not read it as a timing.');
+  body.querySelector('.inspector-note').textContent = remarks.join(' ');
+}
+
+/* A piano-model candidate has no frames behind it either — it is what the
+   polyphonic model heard, not what the pitch tracker did — so its inspector
+   says what the model heard, how loud, and whether it is on the page. */
+function renderCandidateInspector(index) {
+  const note = state.review?.candidates?.[index];
+  if (!note) return;
+  $('inspector-empty').hidden = true;
+  const body = $('inspector-body');
+  body.hidden = false;
+  const on = state.added.has(index);
+  body.innerHTML =
+    `<div class="inspector-head">` +
+    `<span class="pitch">${midiName(note.pitch)} <span class="muted">(${note.pitch})</span></span>` +
+    `<span class="timing">piano model · ${clock(note.onset)} · ${(note.duration * 1000).toFixed(0)}ms · velocity ${note.velocity}</span>` +
+    playButtonHtml() +
+    `</div><div class="inspector-why"></div><div class="inspector-note"></div>`;
+  bindPlayButton(body, note);
+  const why = body.querySelector('.inspector-why');
+  const chip = (text, kind) => {
+    const el = document.createElement('span');
+    el.className = `why-chip ${kind || ''}`;
+    el.textContent = text;
+    why.appendChild(el);
+  };
+  chip('piano model heard');
+  chip(on ? 'added to page' : 'not on the page', on ? 'ok' : '');
+  if (note.velocity < 60) chip('soft', 'flag');
+
+  const remarks = [
+    'Heard by the piano model and left out of the transcribed line. Its velocity is the model’s estimate of how hard the key was struck; louder notes are more often the melody.',
+  ];
+  if (on) {
+    remarks.push(
+      'Switched on: it sounds in the ear test and is written on the page — as a chord if it strikes with a line note. Click it with the Edit tool to switch it off.',
+    );
+  } else {
+    remarks.push('Click it with the Edit tool to add it to the transcription.');
+  }
   body.querySelector('.inspector-note').textContent = remarks.join(' ');
 }
 
