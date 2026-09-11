@@ -134,3 +134,44 @@ WJazzD pianists it read note F1 0.8949 → 0.9042, all four up (with
 `pitch_persist_ms` 40 landing in the same run; the horns moved +0.0030), and
 `absorbed` + `squeezed` on the pianists went 222 → 187. See
 docs/error-taxonomy-review.md section 7.
+
+## The notation side, measured (2026-09-10)
+
+The reason the oracle take stayed a second take was that only the pitch
+question had been measured. The harness now transcribes every pianist on
+BOTH lines (`run_eval.py`: the oracle take is keyed `<track> [line=oracle]`,
+pinned per track, and summarised paired over the same tracks), so the
+notation question is measured too — against the hand scores as notation,
+with the matched count beside every rhythm number. Seven pianists with hand
+scores (Red Garland's Billy Boy joined the same day), all on the Roformer's
+`piano` stem, the default take's keys untouched:
+
+| pianist | pitch F1 crepe / oracle | note F1 crepe / oracle | rhythm crepe / oracle (matched) |
+|---|---|---|---|
+| Carl Perkins, For Minors Only | 0.816 / 0.854 | 0.397 / 0.330 | 0.741 / 0.762 (79 / 86) |
+| Oscar Peterson, Lover Come Back | 0.791 / 0.845 | 0.370 / 0.399 | 0.722 / 0.808 (363 / 392) |
+| Red Garland, Billy Boy | 0.730 / 0.768 | 0.569 / 0.605 | 0.818 / 0.852 (329 / 394) |
+| Sonny Clark, Melody for C | 0.831 / 0.876 | 0.527 / 0.562 | 0.755 / 0.774 (516 / 548) |
+| Sonny Clark, There Will Never Be | 0.932 / 0.922 | 0.664 / 0.700 | 0.785 / 0.897 (303 / 299) |
+| Tommy Flanagan, Giant Steps | 0.816 / 0.895 | 0.614 / 0.679 | 0.848 / 0.859 (268 / 298) |
+| Wynton Kelly, Soul Station | 0.599 / 0.707 | 0.263 / 0.333 | 0.795 / 0.818 (125 / 157) |
+| **mean over 7** | **0.788 / 0.838** | **0.486 / 0.515** | **0.780 / 0.824** |
+
+The oracle take wins pitch on six of seven (the exception is the one
+Sonny Clark solo already at 0.93), note F1 on six (Carl Perkins' 17-second
+span is the exception), and notated rhythm on all seven, with more notes
+lined up on every one but that same Sonny Clark. Audio against audio it is
+level: WJazzD note F1 0.904 → 0.898 over the four WJazzD pianists, which is
+the onset lead of the section above, corrected. Soul Station is the
+clearest case of what the picker fixes: a third of its matched positions
+were at the wrong pitch on the CREPE line (the left hand), and the oracle
+take moves its pitch F1 0.599 → 0.707.
+
+**What this decides.** Every question that was open when the picker shipped
+as a second take is now measured, and it wins or ties on each. Making
+`piano_line = "oracle"` the pianist default is a pipeline default change:
+it re-fingerprints every piano transcription (the oracle take's keys
+already exist in both caches, so the cost is the sidecars' and the
+baselines', not CREPE's), moves the pinned piano numbers, and changes what
+the Transcribe button produces for a trio. It is not taken here; it is the
+listener's call, on this table.

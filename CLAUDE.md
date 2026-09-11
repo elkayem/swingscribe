@@ -663,21 +663,33 @@ list of what is actually wrong; run everything with one command:
 - **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
   this notate the way a human notated it?" It charges the gap between
   performed timing and notated rhythm to the transcriber, so it reads lower
-  and always will. Currently mean note F1 0.514 over the 11 hand scores
-  (0.539 over ten before Soul Station rejoined on 2026-09-08 — pitch-only
-  F1 0.866 on those ten; the gap between the two IS the notation charge).
-  The set changed on 2026-09-07: Birks Works joined (pitch F1 0.923) and
-  Soul Station left because the listener cleared its score link in the
-  GUI; relinked the next morning, it scores pitch F1 0.599 and note F1
-  0.263 (0.584/0.234 on htdemucs) — a third of its matched positions carry
-  the WRONG pitch, which is the line-selection problem (issue #8), not a
-  hearing problem, and its sidecar's `line: oracle` is the listener's
-  answer to it. The harness scores the CREPE line regardless: `run_eval`
-  and `benchmark_batch` never pass `line`, so the Score button on the
-  oracle take and the sheet's row are different takes. All eleven sidecars
-  are on the Roformer since 2026-09-08 (pianists on `piano`, horns on
-  `other`): pitch F1 0.849 -> 0.866 paired over the ten, the horns up to
-  +0.070 (Confirmation), the pianists within 0.03; WJazzD untouched.
+  and always will. Currently mean note F1 0.519 over the 12 hand scores
+  (2026-09-10, Red Garland's Billy Boy joined at pitch F1 0.730; 0.514 over
+  11 and 0.539 over ten before that — pitch-only F1 0.866 on those ten; the
+  gap between the two IS the notation charge). The set changed on
+  2026-09-07: Birks Works joined (pitch F1 0.923) and Soul Station left
+  because the listener cleared its score link in the GUI; relinked the next
+  morning, it scores pitch F1 0.599 and note F1 0.263 (0.584/0.234 on
+  htdemucs) — a third of its matched positions carry the WRONG pitch, which
+  is the line-selection problem (issue #8), not a hearing problem. All
+  twelve sidecars are on the Roformer since 2026-09-08 (pianists on
+  `piano`, horns on `other`): pitch F1 0.849 -> 0.866 paired over the ten,
+  the horns up to +0.070 (Confirmation), the pianists within 0.03; WJazzD
+  untouched.
+- **A pianist is scored on BOTH lines** (2026-09-10). `run_eval` transcribes
+  every oracle-routed sidecar twice — the default take, and the oracle take
+  keyed `<track> [line=oracle]` (`ORACLE_TAKE`; `track_of`/`take_of`/
+  `pin_name` keep the track and the pinned name apart) — pins the second
+  per track under its own keys, keeps every mean over the default take,
+  and summarises the pair over the same tracks (`summary/pianist_*`,
+  `*_oracle`, `*_n`). Seven pianists with hand scores: pitch F1 0.788 ->
+  0.838 (6 of 7 up), note F1 0.486 -> 0.515, notated rhythm 0.780 -> 0.824
+  (7 of 7, more notes lined up on six); WJazzD note F1 level, 0.904 ->
+  0.898 over the four (docs/issue8-line-selection.md). That is the
+  measurement the picker was waiting for to become the pianist default; it
+  is the listener's call. `benchmark_batch.py` sends the sidecar's `line`
+  the way the frontend does (a `line` column), so a sheet row IS the Score
+  button's take; `run_eval` reads no sidecar `line` and scores both.
 
 Reading the second as a transcription failure is exactly the mistake that was
 made. Both are kept; neither subsumes the other.

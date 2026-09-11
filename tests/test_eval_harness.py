@@ -235,6 +235,80 @@ def test_the_melid_is_invisible_to_the_gui_name_matcher():
     assert ground_truth._tokens(stem) == ground_truth._tokens("Joe Henderson In n Out")
 
 
+# -- a pianist is scored on both lines; the take lives in the run's key ----
+
+
+def _cached_takes(sidecar_path: Path, names: list[str]) -> dict:
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    out = {}
+    for name in names:
+        line = run_eval.take_of(name)
+        out[name] = {"fingerprint": run_eval.transcribe_fingerprint(sidecar, 0.2, 0.0, line)}
+        out[name]["notes"] = []
+    return out
+
+
+def test_a_pianist_gets_an_oracle_take_and_a_horn_does_not(tmp_path, monkeypatch):
+    """The Line picker exists in the GUI and two sidecars ask for it, so the
+    harness must score that take too — but only where the picker reads
+    something: a piano model asked about a saxophone vouches for nothing."""
+    monkeypatch.setattr(run_eval, "BENCH", tmp_path)
+    piano = write_sidecar(tmp_path, "Piano.m4a", ensemble="trio", stem="piano")
+    horn = write_sidecar(tmp_path, "Horn.m4a")
+    cache = tmp_path / "notes.json"
+    cached = _cached_takes(piano, ["Piano.m4a", "Piano.m4a [line=oracle]"])
+    cached |= _cached_takes(horn, ["Horn.m4a", "Horn.m4a [line=oracle]"])
+    cache.write_text(json.dumps(cached), encoding="utf-8")
+    runs = run_eval.transcribe_all(cache, step_cost=0.2, dip_db=0.0, log=lambda *_a: None)
+    # The horn's stale oracle entry is an orphan like any renamed track's.
+    assert set(runs) == {"Piano.m4a", "Piano.m4a [line=oracle]", "Horn.m4a"}
+
+
+def test_the_take_is_its_own_fingerprint_and_the_default_is_unchanged():
+    sidecar = {"file": "P.m4a", "region": [0.0, 10.0], "model": "m", "ensemble": "trio"}
+    default = run_eval.transcribe_fingerprint(sidecar, 0.2, 0.0)
+    assert run_eval.transcribe_fingerprint(sidecar, 0.2, 0.0, None) == default
+    assert run_eval.transcribe_fingerprint(sidecar, 0.2, 0.0, "oracle") != default
+    assert run_eval.transcribe_settings(sidecar, 0.2, 0.0, "oracle").piano_line == "oracle"
+
+
+def test_the_take_rides_in_the_key_and_the_track_comes_back_out():
+    key = run_eval.oracle_key("wjazzd/Solo.m4a")
+    assert key == "wjazzd/Solo.m4a [line=oracle]"
+    assert run_eval.track_of(key) == "wjazzd/Solo.m4a"
+    assert run_eval.take_of(key) == "oracle"
+    assert run_eval.take_of("wjazzd/Solo.m4a") is None
+    # A file holding several solos keeps its performer suffix after the take.
+    assert (
+        run_eval.oracle_key("Two.m4a [Herbie Hancock]") == "Two.m4a [line=oracle] [Herbie Hancock]"
+    )
+    assert run_eval.track_of("Two.m4a [line=oracle] [Herbie Hancock]") == "Two.m4a"
+
+
+def test_pinned_names_keep_the_two_takes_apart():
+    """`Path(key).stem` folded "X.m4a [line=oracle]" onto "X", so the oracle
+    take would have overwritten the default's pinned numbers."""
+    assert run_eval.pin_name("X.m4a") == "X"
+    assert run_eval.pin_name("wjazzd/X.m4a") == "X"
+    assert run_eval.pin_name("X.m4a [line=oracle]") == "X [line=oracle]"
+    assert run_eval.pin_name("X.m4a [Herbie Hancock]") == "X [Herbie Hancock]"
+
+
+def test_the_summary_means_are_over_the_default_take_and_the_pair_is_paired():
+    section = {
+        "A.m4a": {"pitch_f1": 0.8},
+        "A.m4a [line=oracle]": {"pitch_f1": 0.9},
+        "B.m4a": {"pitch_f1": 0.6},  # no oracle take: a horn, or not yet run
+        "C.m4a [line=oracle]": {"pitch_f1": 0.5},  # no default: never paired
+    }
+    default, oracle = run_eval.paired_takes(section, "pitch_f1")
+    assert (default, oracle) == ([0.8], [0.9])
+    card = {
+        "notation": {"A.m4a": {"readability": 0.9}, "A.m4a [line=oracle]": {"readability": 0.1}}
+    }
+    assert list(run_eval.readable_pages(card)) == ["A.m4a"]
+
+
 def test_every_wjazzd_name_is_unique_over_the_whole_database():
     """The property that matters is over the SET, not the pair: a unique-looking
     scheme that still collides once in 456 loses a solo silently."""

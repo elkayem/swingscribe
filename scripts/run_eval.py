@@ -84,10 +84,51 @@ def sidecar_name(sidecar_path: Path, sidecar: dict) -> str:
     return name if folder == Path(".") else f"{folder.as_posix()}/{name}"
 
 
-def transcribe_settings(sidecar: dict, step_cost: float, dip_db: float):
+# A pianist is scored TWICE: on the pipeline's default line (CREPE, corrected
+# by the piano model) and on the oracle take (the line picked from the piano
+# model's full output, issue #8). The GUI has offered the second as a "Line"
+# picker since it was measured on pitch alone, and two listeners' sidecars
+# now ask for it — but the harness scored only the default, so the Score
+# button and the sheet were describing different takes with nothing saying
+# so. The take rides in the run's KEY, after the track's name, so every
+# consumer that is keyed by track (grids, sidecars, scores on disk) looks up
+# the track and every pinned number stays distinct. The default take's keys
+# are exactly what they were; the oracle take's are new.
+ORACLE_TAKE = " [line=oracle]"
+
+
+def track_of(key: str) -> str:
+    """The audio file a run key names, without any take or performer suffix."""
+    return key.split(" [")[0]
+
+
+def take_of(key: str) -> str | None:
+    """Which line a run key transcribed: None for the default, "oracle" for
+    the oracle take."""
+    return "oracle" if ORACLE_TAKE in key else None
+
+
+def oracle_key(key: str) -> str:
+    """The oracle take's key for a default-take key, whatever other suffix
+    (a performer, for a file holding several solos) it carries."""
+    track = track_of(key)
+    return track + ORACLE_TAKE + key[len(track) :]
+
+
+def pin_name(key: str) -> str:
+    """A run key as it is spelled in the baselines: the file's stem, keeping
+    every bracketed suffix. `Path(key).stem` alone folded "X.m4a [line=oracle]"
+    onto "X"."""
+    track, *suffixes = key.split(" [")
+    return Path(track).stem + "".join(" [" + s for s in suffixes)
+
+
+def transcribe_settings(sidecar: dict, step_cost: float, dip_db: float, line: str | None = None):
     """The exact TranscribeConfig this sidecar asks for. One definition, used
     both to fingerprint a cached run and to compute a fresh one, so the two can
-    never drift apart."""
+    never drift apart. `line` names a pianist's take (ORACLE_TAKE); None is the
+    pipeline's default, and leaves the config's serialization exactly as it was
+    so no default-take fingerprint moves."""
     from swingscribe.config import Config
 
     base = Config()
@@ -96,18 +137,21 @@ def transcribe_settings(sidecar: dict, step_cost: float, dip_db: float):
     # stem: it falls back to the default exactly as `ensemble` does. Without
     # this it reached the filesystem as "None.wav" and the track was skipped -
     # which went unnoticed for as long as a cached run kept answering for it.
-    return base.transcribe.model_copy(
-        update={
-            "stem": sidecar.get("stem") or base.transcribe.stem,
-            "region": (low, high),
-            "pitch_step_cost": step_cost,
-            "onset_dip_db": dip_db,
-            "ensemble": sidecar.get("ensemble") or base.transcribe.ensemble,
-        }
-    )
+    update = {
+        "stem": sidecar.get("stem") or base.transcribe.stem,
+        "region": (low, high),
+        "pitch_step_cost": step_cost,
+        "onset_dip_db": dip_db,
+        "ensemble": sidecar.get("ensemble") or base.transcribe.ensemble,
+    }
+    if line is not None:
+        update["piano_line"] = line
+    return base.transcribe.model_copy(update=update)
 
 
-def transcribe_fingerprint(sidecar: dict, step_cost: float, dip_db: float) -> str:
+def transcribe_fingerprint(
+    sidecar: dict, step_cost: float, dip_db: float, line: str | None = None
+) -> str:
     """A cached run is reusable only if the transcriber would read the same
     settings AND is the same transcriber. Mirrors pipeline._cache_name: the
     stage's CACHE_VERSION is folded in, so a behaviour change with no config
@@ -115,7 +159,7 @@ def transcribe_fingerprint(sidecar: dict, step_cost: float, dip_db: float) -> st
     from swingscribe.cache import canonical_json
     from swingscribe.stages import transcribe
 
-    settings = transcribe_settings(sidecar, step_cost, dip_db)
+    settings = transcribe_settings(sidecar, step_cost, dip_db, line)
     payload = {
         "version": getattr(transcribe, "CACHE_VERSION", 1),
         "model": sidecar["model"],
@@ -136,74 +180,85 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
         name = sidecar_name(sidecar_path, sidecar)
         if not (BENCH / name).is_file():
             continue
-        live.add(name)
-        # Re-transcribe when ANYTHING the transcriber reads has changed. The
-        # cache filename carries only the two decode settings the sweep varies,
-        # so for a long time a change to the stage itself -- a new default, a
-        # new step like the piano gap-fill -- silently kept serving notes
-        # computed by the old code. That is exactly the staleness hole the
-        # pipeline's chained keys exist to close (CLAUDE.md), reintroduced in
-        # the harness because this cache is keyed by filename.
-        #
-        # So the fingerprint is the whole resolved TranscribeConfig plus the
-        # stage's CACHE_VERSION, canonicalised the same way the real cache
-        # keys are. An entry without one is pre-fingerprint and re-runs once.
-        cached_run = runs.get(name)
-        wanted = transcribe_fingerprint(sidecar, step_cost, dip_db)
-        if cached_run is not None:
-            if cached_run.get("fingerprint") == wanted:
-                continue
-            why = "settings" if cached_run.get("fingerprint") else "no fingerprint"
-            log(f"  {name}: {why} differs from cache -- re-transcribing")
-            runs.pop(name)
-        base = eval_config()
-        low, high = sidecar["region"]
-        settings = transcribe_settings(sidecar, step_cost, dip_db)
-        # The region rides in the config too, so a span-scoped stem set that
-        # covers this solo resolves (library.span_for) — a whole-file set
-        # still answers first.
-        config = base.model_copy(
-            update={
-                "separate": base.separate.model_copy(update={"model": sidecar["model"]}),
-                "transcribe": settings,
-            }
-        )
-        document = library.ingested_document(BENCH / name, config)
-        # Through library.resolve_stem, the same resolver the GUI uses: a
-        # composite like "other+vocals" (Oleo's fix, R16) is summed on demand
-        # beside its parts. Building the path by hand skipped every track the
-        # listener had routed to a composite stem.
-        stem = library.resolve_stem(document, config, sidecar["model"], settings.stem)
-        if stem is None:
-            log(f"  {name}: no {settings.stem!r} stem for {sidecar['model']} — skipped")
-            continue
-        # `ensemble` is a per-track human judgement about the recording, so it
-        # lives in the sidecar beside the audio like the span does. It routes
-        # the piano oracle (M7b): a span with a horn anywhere in it must stay
-        # horn-led, because a piano model asked about a saxophone vouches for
-        # nothing and rejection would delete the line.
-        ensemble = settings.ensemble
-        started = time.time()
-        notes, diagnostics = transcribe.analyze(str(stem), settings)
-        log(f"  {name}: {len(notes)} notes in {time.time() - started:.0f}s")
-        runs[name] = {
-            "model": sidecar["model"],
-            "stem": settings.stem,
-            "ensemble": ensemble,
-            "fingerprint": transcribe_fingerprint(sidecar, step_cost, dip_db),
-            "region": [low, high],
-            "voiced_fraction": diagnostics.voiced_fraction,
-            "notes": [
-                {
-                    "onset": n.onset,
-                    "duration": n.duration,
-                    "pitch": n.pitch,
-                    "confidence": n.confidence,
+        # A pianist is transcribed on both lines (ORACLE_TAKE); a horn has no
+        # second take, because the picker reads the piano model and a piano
+        # model asked about a saxophone vouches for nothing.
+        takes = [(name, None)]
+        if transcribe_settings(sidecar, step_cost, dip_db).uses_piano_oracle:
+            takes.append((oracle_key(name), "oracle"))
+        for key, line in takes:
+            live.add(key)
+            # Re-transcribe when ANYTHING the transcriber reads has changed.
+            # The cache filename carries only the two decode settings the
+            # sweep varies, so for a long time a change to the stage itself --
+            # a new default, a new step like the piano gap-fill -- silently
+            # kept serving notes computed by the old code. That is exactly the
+            # staleness hole the pipeline's chained keys exist to close
+            # (CLAUDE.md), reintroduced in the harness because this cache is
+            # keyed by filename.
+            #
+            # So the fingerprint is the whole resolved TranscribeConfig plus
+            # the stage's CACHE_VERSION, canonicalised the same way the real
+            # cache keys are. An entry without one is pre-fingerprint and
+            # re-runs once.
+            cached_run = runs.get(key)
+            wanted = transcribe_fingerprint(sidecar, step_cost, dip_db, line)
+            if cached_run is not None:
+                if cached_run.get("fingerprint") == wanted:
+                    continue
+                why = "settings" if cached_run.get("fingerprint") else "no fingerprint"
+                log(f"  {key}: {why} differs from cache -- re-transcribing")
+                runs.pop(key)
+            base = eval_config()
+            low, high = sidecar["region"]
+            settings = transcribe_settings(sidecar, step_cost, dip_db, line)
+            # The region rides in the config too, so a span-scoped stem set
+            # that covers this solo resolves (library.span_for) — a whole-file
+            # set still answers first.
+            config = base.model_copy(
+                update={
+                    "separate": base.separate.model_copy(update={"model": sidecar["model"]}),
+                    "transcribe": settings,
                 }
-                for n in notes
-            ],
-        }
-        cache.write_text(json.dumps(runs), encoding="utf-8")
+            )
+            document = library.ingested_document(BENCH / name, config)
+            # Through library.resolve_stem, the same resolver the GUI uses: a
+            # composite like "other+vocals" (Oleo's fix, R16) is summed on
+            # demand beside its parts. Building the path by hand skipped every
+            # track the listener had routed to a composite stem.
+            stem = library.resolve_stem(document, config, sidecar["model"], settings.stem)
+            if stem is None:
+                log(f"  {key}: no {settings.stem!r} stem for {sidecar['model']} — skipped")
+                continue
+            # `ensemble` is a per-track human judgement about the recording,
+            # so it lives in the sidecar beside the audio like the span does.
+            # It routes the piano oracle (M7b): a span with a horn anywhere in
+            # it must stay horn-led, because a piano model asked about a
+            # saxophone vouches for nothing and rejection would delete the
+            # line.
+            ensemble = settings.ensemble
+            started = time.time()
+            notes, diagnostics = transcribe.analyze(str(stem), settings)
+            log(f"  {key}: {len(notes)} notes in {time.time() - started:.0f}s")
+            runs[key] = {
+                "model": sidecar["model"],
+                "stem": settings.stem,
+                "ensemble": ensemble,
+                "line": line,
+                "fingerprint": wanted,
+                "region": [low, high],
+                "voiced_fraction": diagnostics.voiced_fraction,
+                "notes": [
+                    {
+                        "onset": n.onset,
+                        "duration": n.duration,
+                        "pitch": n.pitch,
+                        "confidence": n.confidence,
+                    }
+                    for n in notes
+                ],
+            }
+            cache.write_text(json.dumps(runs), encoding="utf-8")
     # Only what is on disk NOW. The cache is keyed by track name and is only
     # ever added to, so a renamed or deleted track leaves its old entry behind
     # -- and everything downstream iterates these keys rather than the
@@ -270,19 +325,24 @@ def wjazz_scores(db_path: Path, runs: dict, grids: dict) -> dict:
     db = sqlite3.connect(db_path)
     out = {}
     for name, run in sorted(runs.items()):
+        track = track_of(name)
         onsets = np.array([n["onset"] for n in run["notes"]])
         pitches = np.array([int(n["pitch"]) for n in run["notes"]])
         order = np.argsort(onsets)
         onsets, pitches = onsets[order], pitches[order]
         ordered = [run["notes"][i] for i in order]
 
-        found, why = identify_all(db, name, onsets, pitches, run["region"])
+        found, why = identify_all(db, track, onsets, pitches, run["region"])
         if not found:
             out[name] = {"skipped": why}
             continue
         for solo in found:
             result = score(solo, onsets, ordered)
             entry = {
+                # The run these numbers came from: the notation scorer needs
+                # its notes and grid, and cannot get the key back from a row
+                # keyed "file [take] [performer]" by splitting.
+                "run": name,
                 "performer": solo["performer"],
                 "instrument": solo["instrument"],
                 "tempo": solo["tempo"],
@@ -299,9 +359,9 @@ def wjazz_scores(db_path: Path, runs: dict, grids: dict) -> dict:
                 "note_recall": round(result["note_recall"], 4),
                 "onset_f1": round(result["onset_f1"], 4),
             }
-            if name in grids:
+            if track in grids:
                 beats = score_beats(
-                    db, solo["melid"], grids[name]["beats"], solo["offset"], solo["rate"]
+                    db, solo["melid"], grids[track]["beats"], solo["offset"], solo["rate"]
                 )
                 if beats:
                     entry["beat_f1"] = round(beats["f_measure"], 4)
@@ -320,7 +380,7 @@ def mscz_scores(runs: dict) -> dict:
     by_audio = {audio: key for key, (audio, *_rest) in score_benchmark.TUNES.items()}
     out = {}
     for name, run in sorted(runs.items()):
-        key = by_audio.get(name)
+        key = by_audio.get(track_of(name))
         if key is None:
             continue
         scored = score_benchmark.score_tune(key, run)
@@ -352,13 +412,14 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
     from swingscribe.model import NoteEvent
     from swingscribe.notation import notation_for_span
 
-    sidecar_path = BENCH / f"{name}.swingscribe.json"  # name carries any subfolder
+    track = track_of(name)  # the key may carry a take; the sidecar is the track's
+    sidecar_path = BENCH / f"{track}.swingscribe.json"  # name carries any subfolder
     sidecar = {}
     if sidecar_path.is_file():
         sidecar = _json.loads(sidecar_path.read_text(encoding="utf-8"))
 
     return notation_for_span(
-        str(BENCH / name),
+        str(BENCH / track),
         [
             NoteEvent(
                 onset=n["onset"],
@@ -397,12 +458,13 @@ def notation_scores(runs: dict, grids: dict) -> dict:
     by_audio = {audio: mscz_name for audio, mscz_name, *_ in score_benchmark.TUNES.values()}
     out = {}
     for name, run in sorted(runs.items()):
-        if name not in by_audio or name not in grids:
+        track = track_of(name)
+        if track not in by_audio or track not in grids:
             continue
-        notation = notate_run(name, run, grids[name])
+        notation = notate_run(name, run, grids[track])
         if notation is None or not notation.bars:
             continue
-        result = score_against_notation(notation, mscz.parse(BENCH / by_audio[name]))
+        result = score_against_notation(notation, mscz.parse(BENCH / by_audio[track]))
         if not result["n_matched"]:
             continue
         out[name] = {
@@ -441,16 +503,18 @@ def wjazz_notation_scores(db_path: Path, card_wjazz: dict, runs: dict, grids: di
         if "melid" not in entry:
             continue
         # The row may be keyed "file [performer]" when one file holds several
-        # annotated solos; the notes and grid are the file's.
-        name = key.split(" [")[0]
-        if name not in runs or name not in grids:
+        # annotated solos, and "file [line=oracle]" for a pianist's second
+        # take; the notes are the run's and the grid is the file's.
+        name = entry.get("run") or key.split(" [")[0]
+        track = track_of(name)
+        if name not in runs or track not in grids:
             continue
         # Notate ONLY the located solo, not the whole track. The alignment
         # underneath is global on purpose (both sides are meant to cover the
         # same music), so handing it a five-minute notation against a
         # one-chorus annotation measures nothing about notation.
         window = (entry["solo_start"] - SOLO_MARGIN_S, entry["solo_end"] + SOLO_MARGIN_S)
-        notation = notate_run(name, runs[name], grids[name], region=window)
+        notation = notate_run(name, runs[name], grids[track], region=window)
         if notation is None or not notation.bars:
             continue
         # Readability is a property of OUR page and needs no reference, so it
@@ -484,7 +548,11 @@ def readable_pages(card: dict) -> dict:
     pages = {}
     for section, prefix in (("notation", ""), ("wjazz_notation", "wjazz:")):
         for name, entry in card.get(section, {}).items():
-            if "readability" in entry:
+            # The oracle take's pages are pinned per track but kept out of the
+            # mean, which is a mean over what SHIPS by default; folding a
+            # second page per pianist in would move it without the pipeline
+            # having changed.
+            if "readability" in entry and take_of(name) is None:
                 pages[prefix + name] = entry
     return pages
 
@@ -589,6 +657,59 @@ def render(card: dict) -> None:
     if card["mscz"]:
         print(f"\n  mean note F1 {card['summary']['mscz_note_f1']:.3f}")
 
+    takes = sorted(k for k in card["mscz"] if take_of(k) is None and oracle_key(k) in card["mscz"])
+    if takes:
+        print("\n== Pianists: the default line against the oracle take (issue #8) ==")
+        print("  (crepe / oracle; rhythm with its matched count, hand score as notation)")
+        header = f"  {'tune':<30s} {'pitch':>15s} {'note':>15s} {'rhythm':>17s}"
+        print(header)
+        print("  " + "-" * (len(header) - 2))
+        for name in takes:
+            a, b = card["mscz"][name], card["mscz"][oracle_key(name)]
+            na = card.get("notation", {}).get(name)
+            nb = card.get("notation", {}).get(oracle_key(name))
+            rhythm = "-"
+            if na and nb:
+                matched = f"({int(na['n_matched'])}/{int(nb['n_matched'])})"
+                rhythm = f"{na['rhythm']:.3f}/{nb['rhythm']:.3f} {matched}"
+            print(
+                f"  {Path(name).stem[:30]:<30s} {a['pitch_f1']:7.3f}/{b['pitch_f1']:<7.3f} "
+                f"{a['note_f1']:7.3f}/{b['note_f1']:<7.3f} {rhythm:>17s}"
+            )
+        s = card["summary"]
+        if "pianist_pitch_f1" in s:
+            pitch = f"{s['pianist_pitch_f1']:.3f} / {s['pianist_pitch_f1_oracle']:.3f}"
+            note = f"{s['pianist_note_f1']:.3f} / {s['pianist_note_f1_oracle']:.3f}"
+            print(
+                f"\n  mean pitch F1 {pitch}   note F1 {note}"
+                f"   over {int(s['pianist_pitch_f1_n'])} pianists"
+            )
+        if "pianist_rhythm" in s:
+            print(
+                f"  mean rhythm {s['pianist_rhythm']:.3f} / {s['pianist_rhythm_oracle']:.3f}"
+                f" over {int(s['pianist_rhythm_n'])}"
+            )
+        if "wjazz_pianist_note_f1" in s:
+            print(
+                f"  WJazzD note F1 {s['wjazz_pianist_note_f1']:.3f} / "
+                f"{s['wjazz_pianist_note_f1_oracle']:.3f} over {int(s['wjazz_pianist_note_f1_n'])}"
+            )
+
+
+def paired_takes(section: dict, field: str) -> tuple[list[float], list[float]]:
+    """`field` for every default-take row whose oracle take is also in
+    `section` and carries the field: (default values, oracle values), aligned."""
+    default, oracle = [], []
+    for key, entry in sorted(section.items()):
+        if take_of(key) is not None or field not in entry:
+            continue
+        other = section.get(oracle_key(key))
+        if other is None or field not in other:
+            continue
+        default.append(float(entry[field]))
+        oracle.append(float(other[field]))
+    return default, oracle
+
 
 def flatten(card: dict) -> dict[str, float]:
     """Every number the baselines pin, as one flat name -> value mapping."""
@@ -596,18 +717,18 @@ def flatten(card: dict) -> dict[str, float]:
     for name, entry in card["wjazz"].items():
         for field, value in entry.items():
             if isinstance(value, (int, float)):
-                flat[f"wjazz/{Path(name).stem}/{field}"] = float(value)
+                flat[f"wjazz/{pin_name(name)}/{field}"] = float(value)
     for name, entry in card["mscz"].items():
         for field, value in entry.items():
-            flat[f"mscz/{Path(name).stem}/{field}"] = float(value)
+            flat[f"mscz/{pin_name(name)}/{field}"] = float(value)
     for name, entry in card.get("notation", {}).items():
         for field, value in entry.items():
             if isinstance(value, (int, float)):
-                flat[f"notation/{Path(name).stem}/{field}"] = float(value)
+                flat[f"notation/{pin_name(name)}/{field}"] = float(value)
     for name, entry in card.get("wjazz_notation", {}).items():
         for field, value in entry.items():
             if isinstance(value, (int, float)):
-                flat[f"wjazz-notation/{Path(name).stem}/{field}"] = float(value)
+                flat[f"wjazz-notation/{pin_name(name)}/{field}"] = float(value)
     for field, value in card["summary"].items():
         flat[f"summary/{field}"] = float(value)
     return flat
@@ -684,7 +805,9 @@ def main() -> None:
         ),
         "summary": {},
     }
-    scored = [e for e in card["wjazz"].values() if "skipped" not in e]
+    # Every mean below is over the DEFAULT take: it describes what ships. The
+    # oracle take is pinned per track and summarised paired, further down.
+    scored = [e for k, e in card["wjazz"].items() if "skipped" not in e and take_of(k) is None]
     if scored:
         card["summary"]["wjazz_note_f1"] = round(statistics.fmean(e["note_f1"] for e in scored), 4)
         card["summary"]["wjazz_note_n"] = float(len(scored))
@@ -703,11 +826,25 @@ def main() -> None:
             statistics.fmean(e["readability"] for e in pages.values()), 4
         )
         card["summary"]["readability_n"] = float(len(pages))
-    if card["mscz"]:
+    default_mscz = [e for k, e in card["mscz"].items() if take_of(k) is None]
+    if default_mscz:
         card["summary"]["mscz_note_f1"] = round(
-            statistics.fmean(e["note_f1"] for e in card["mscz"].values()), 4
+            statistics.fmean(e["note_f1"] for e in default_mscz), 4
         )
-        card["summary"]["mscz_note_n"] = float(len(card["mscz"]))
+        card["summary"]["mscz_note_n"] = float(len(default_mscz))
+    # The pianists on both lines, PAIRED: the same tracks under each mean, so
+    # the difference is the take's and not the population's.
+    for section, field, label in (
+        ("mscz", "pitch_f1", "pianist_pitch_f1"),
+        ("mscz", "note_f1", "pianist_note_f1"),
+        ("notation", "rhythm", "pianist_rhythm"),
+        ("wjazz", "note_f1", "wjazz_pianist_note_f1"),
+    ):
+        default, oracle = paired_takes(card.get(section, {}), field)
+        if default:
+            card["summary"][label] = round(statistics.fmean(default), 4)
+            card["summary"][f"{label}_oracle"] = round(statistics.fmean(oracle), 4)
+            card["summary"][f"{label}_n"] = float(len(default))
 
     render(card)
     if args.json:

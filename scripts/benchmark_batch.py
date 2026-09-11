@@ -78,6 +78,7 @@ HEADERS = [
     "separation_model",
     "ensemble",
     "stem",
+    "line",
     "erasures_silenced",
     "musicxml_written_at",
     "notes",
@@ -117,10 +118,12 @@ def wait_for_job(client, job: dict, log) -> dict:
     return job
 
 
-def run_job(client, path: str, kind: str, model: str, stem=None, span=None, log=print) -> dict:
+def run_job(
+    client, path: str, kind: str, model: str, stem=None, span=None, line=None, log=print
+) -> dict:
     body = {"path": path, "kind": kind, "model": model}
     if kind == "transcribe":
-        body |= {"stem": stem, "start": span[0], "end": span[1]}
+        body |= {"stem": stem, "start": span[0], "end": span[1], "line": line}
     elif kind == "separate" and span is not None:
         # The Separate button sends the selection: a span-scoped set (stems
         # full-length, silent outside it) is minutes where a whole file on
@@ -154,15 +157,22 @@ def process_track(client, audio_path: Path, log=print) -> dict:
         row["status"] = "no span in the sidecar — open the track and select the solo by ear"
         return row
     span = (region[0], region[1])
+    # The listener's Line picker (a pianist's "oracle" take, issue #8) rides
+    # in the sidecar and the frontend sends it with every request; so does
+    # this row, or the sheet describes a take the Score button never shows.
+    line = state.get("line") or None
     row.update(
         span_start=round(span[0], 3),
         span_end=round(span[1], 3) if span[1] is not None else "",
         separation_model=model,
         ensemble=state.get("ensemble") or "",
         stem=stem,
+        line=line or "",
     )
 
     params = {"model": model, "stem": stem, "start": span[0], "end": span[1]}
+    if line:
+        params["line"] = line
 
     review = client.get(f"/api/tracks/{track_id}/review", params=params).json()
     if not review.get("ready"):
@@ -178,7 +188,9 @@ def process_track(client, audio_path: Path, log=print) -> dict:
         ).json()
         if stem not in stems.get("stems", []):
             run_job(client, str(audio_path), "separate", model, span=span, log=log)
-        job = run_job(client, str(audio_path), "transcribe", model, stem=stem, span=span, log=log)
+        job = run_job(
+            client, str(audio_path), "transcribe", model, stem=stem, span=span, line=line, log=log
+        )
         if job["state"] != "done":
             row["status"] = f"transcribe failed: {job.get('error') or job['state']}"
             return row
