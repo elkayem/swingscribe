@@ -128,11 +128,67 @@ def reference_pulse(intervals: list[float]) -> list[float]:
     return _rolling_median(implied, REFERENCE_WINDOW)
 
 
+# A doubled beat: one the tracker put between two real ones. Each of its two
+# intervals is under this fraction of the reference pulse, the two together
+# make at most this many pulses, and the intervals either side of the pair are
+# ordinary — so a genuine double-time run, whose short intervals come in a
+# row, is never thinned. Measured need: Red Garland's Billy Boy, bar 107
+# (0.200, 0.140, 0.140, 0.220 s on a 0.220 s pulse), and 306 more of the
+# same shape across the 122 cached grids (docs/benchmark-deficiencies.md D28).
+DOUBLED_SHORT = 0.75
+DOUBLED_PAIR_MAX = 1.4
+
+
+def drop_doubled_beats(beats: list[float], tolerance: float) -> list[float]:
+    """Remove the middle beat of an isolated short pair.
+
+    The mirror of the insertion below, and the same harm: a beat the tracker
+    doubled makes its bar a beat short and shifts every bar line after it by
+    one beat for the rest of the tune. A doubled beat cannot be seen one
+    interval at a time — each of its two short intervals rounds to one pulse
+    on its own — so it is judged as a pair against the reference pulse, and
+    only when the intervals on both sides of the pair are ordinary.
+    """
+    if len(beats) < 4:
+        return list(beats)
+    intervals = [b - a for a, b in zip(beats, beats[1:], strict=False)]
+    reference = reference_pulse(intervals)
+    kept = [beats[0]]
+    skip = False
+    for i in range(1, len(beats) - 1):
+        if skip:  # the beat after a dropped one: its left interval is the merged one
+            skip = False
+            kept.append(beats[i])
+            continue
+        pulse = reference[i]
+        before, after = intervals[i - 1], intervals[i]
+        outer_ok = (
+            i >= 2
+            and i + 1 < len(intervals)
+            and abs(intervals[i - 2] - pulse) <= tolerance * pulse
+            and abs(intervals[i + 1] - pulse) <= tolerance * pulse
+        )
+        if (
+            pulse > 0
+            and outer_ok
+            and before < DOUBLED_SHORT * pulse
+            and after < DOUBLED_SHORT * pulse
+            and before + after <= DOUBLED_PAIR_MAX * pulse
+        ):
+            skip = True  # drop beats[i]; beats[i + 1] is kept as is
+            continue
+        kept.append(beats[i])
+    kept.append(beats[-1])
+    return kept
+
+
 def repair_beats(beats: list[float], config: MeterConfig) -> list[Beat]:
-    """Insert beats the tracker dropped, so the bar count stays true.
+    """Insert beats the tracker dropped, and drop the ones it doubled, so the
+    bar count stays true.
 
     This is correctness, not cosmetics: a single missed beat shifts every bar
-    line after it by one beat for the rest of the tune.
+    line after it by one beat for the rest of the tune — and so does a single
+    doubled one, in the other direction (drop_doubled_beats).
 
     How many to insert comes from the reference pulse; *where* they go is an
     even subdivision of the observed gap. That split matters — deriving the
@@ -145,6 +201,7 @@ def repair_beats(beats: list[float], config: MeterConfig) -> list[Beat]:
     if not config.repair_beats:
         return [Beat(t) for t in beats]
 
+    beats = drop_doubled_beats(beats, config.stability_tolerance)
     intervals = [b - a for a, b in zip(beats, beats[1:], strict=False)]
     reference = reference_pulse(intervals)
 

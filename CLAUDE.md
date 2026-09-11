@@ -281,6 +281,19 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   `index.html` renders it client-side with a small Markdown subset, served
   at `/guide/` behind the Help button. Write the guide within that subset;
   no Markdown library, no build step.
+- **The grid repair mends BOTH tracker mistakes** (2026-09-10). A dropped
+  beat and a doubled beat each shift every bar line after them by one
+  beat; `repair_beats` inserted for the first and ignored the second until
+  Billy Boy's bar 107 came up three beats where two belong.
+  `meter.drop_doubled_beats` takes the middle beat of an isolated short
+  pair (each interval under 0.75 of the reference pulse, together at most
+  1.4 of it, ordinary intervals either side — so a double-time run is never
+  thinned). 382 beats on 62 of the 122 cached grids; the page's rhythm
+  measure barely moves (WJazzD 0.6268 -> 0.6272 over 74, 14 up / 5 down)
+  because it is gap-based and cannot see a bar count. A half-rate grid
+  with the true pulse surfacing (Brother Hubbard) is NOT this defect and
+  reads worse after it; that is the octave error's, still open (R21). The
+  harness never sees any of it: `run_eval` notates on the raw grid (D27).
 - Bar lines are derived by counting beats from an anchor. The beat tracker's
   detected downbeat layer is noise (open-issue #5) and must not be drawn or
   trusted; only its pulse layer is reliable.

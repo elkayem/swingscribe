@@ -113,6 +113,50 @@ def test_repair_can_be_switched_off():
     assert len(beats) == 39
 
 
+def test_single_doubled_beat_is_dropped():
+    """The mirror of the dropped beat, and the same harm: Billy Boy's bar 107
+    held three tracked beats where two belong, and every bar after it started a
+    beat early. Each short interval rounds to one pulse on its own, so the pair
+    has to be judged together."""
+    times = steady(40)
+    times.insert(21, 10.25)  # between 10.0 and 10.5
+    beats = meter.repair_beats(times, MeterConfig())
+    assert [b.time for b in beats] == steady(40)
+    assert not any(b.implied for b in beats)
+
+
+def test_the_billy_boy_bar_is_repaired_to_four_beats():
+    """The measured shape: 0.200, 0.140, 0.140, 0.220 s on a 0.220 s pulse."""
+    head = steady(20, ibi=0.22)
+    bar_start = head[-1]
+    bar = [round(bar_start + t, 6) for t in (0.200, 0.340, 0.480, 0.700)]  # five beats, 0.70 s
+    tail = steady(9, ibi=0.22, start=round(bar[-1] + 0.22, 6))
+    times = head + bar + tail
+    beats = meter.repair_beats(times, MeterConfig())
+    intervals = [b.time - a.time for a, b in zip(beats, beats[1:], strict=False)]
+    assert len(beats) == len(times) - 1
+    assert not any(b.implied for b in beats)
+    assert max(intervals) < 0.30 and min(intervals) > 0.19
+
+
+def test_a_genuine_double_time_run_is_not_thinned():
+    """Eight intervals at half the pulse in a row are a passage, not a doubled
+    beat: only an ISOLATED short pair, with ordinary intervals either side,
+    is a tracker's mistake."""
+    times = steady(21) + [10.0 + 0.25 * k for k in range(1, 8)] + steady(20, start=12.0)
+    beats = meter.repair_beats(times, MeterConfig())
+    assert len(beats) == len(times)
+
+
+def test_a_short_pair_in_a_ragged_passage_is_left_alone():
+    """Without ordinary intervals on both sides there is no pulse to say the
+    pair is wrong, and a rubato passage must not be edited into steadiness."""
+    times = [0.0, 0.5, 1.0, 1.4, 1.65, 1.9, 2.2, 2.9, 3.4, 3.9]
+    beats = meter.repair_beats(times, MeterConfig())
+    assert 1.65 in [b.time for b in beats]
+    assert 1.9 in [b.time for b in beats]
+
+
 # ── metrical spans ──────────────────────────────────────────────────────────
 
 

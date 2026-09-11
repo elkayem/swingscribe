@@ -940,7 +940,63 @@ should refuse to classify, or at least say so in its header line, when
 fewer than all solos have frame evidence, rather than printing a Pareto
 whose largest class is "no evidence".
 
+### D27 - The harness notates on the raw tracked beats; the GUI on the repaired grid
+
+`notation_for_span` deliberately does not call `stages/meter.py` (its
+docstring says why: over a span the listener selected, meter derivation
+has nothing left to decide), and `run_eval.notate_run` hands it
+`grid["beats"]` straight from the beat cache. The GUI's Export goes through
+`gui/musicxml.bar_grid`, which is `meter.bar_grid`: the same beats
+REPAIRED (`repair_beats` inserts the beats the tracker dropped) and
+extended to the edges. So the page the listener scores with the Score
+button and the page the harness scores are built on different grids
+wherever the tracker dropped a beat — and across the 122 cached grids
+`repair_beats` fills 1,492 such gaps. A dropped beat left unrepaired makes
+one beat two beats long under quantize and shifts every bar after it, so
+the harness's `rhythm` and `value` numbers carry a defect the listener's
+page does not, and CLAUDE.md's "the Score button's numbers ARE the sheet's"
+is true of `benchmark_batch.py` (which goes through the GUI) but not of
+`run_eval.py`. Found 2026-09-10 while diagnosing R21. Not yet measured: the
+fix is to notate on `meter.bar_grid`'s beats in `notate_run` and re-score,
+which is arithmetic, and to say what moved.
+
 ## Resolved
+
+### R21 - `repair_beats` mended a dropped beat and never a doubled one
+
+Red Garland's Billy Boy, bar 107 (159.0 s at 273 bpm): the tracker put
+three beats where two belong -- intervals 0.200, 0.140, 0.140, 0.220 s
+against a 0.220 s pulse -- so the bar was 0.70 s long where every other is
+0.90, and since bars are counted from the anchor, every bar from 108 on
+started a beat early. The listener saw it on the roll. `repair_beats`'
+docstring names exactly this harm for the mirror case ("a single missed
+beat shifts every bar line after it by one beat for the rest of the tune")
+and inserted beats for it; a doubled beat was left alone, because each of
+its two short intervals rounds to one pulse on its own.
+
+`meter.drop_doubled_beats` now runs first: the middle beat of a pair of
+intervals each under 0.75 of the reference pulse, together at most 1.4 of
+it, with an ordinary interval on both sides of the pair, is dropped. The
+outer test is what keeps a genuine double-time run whole -- its short
+intervals come in a row, so no pair in it is isolated -- and a ragged
+passage unedited. Over the 122 cached grids it removes 382 beats on 62 of
+them (the shipped insertion mends 1,492 gaps). Four cases read by hand:
+Coltrane's My Favorite Things has a beat 80 ms before three real ones,
+Nothing Personal and My Little Suede Shoes a beat on the half-beat; all
+removed. Kenny Garrett's Brother Hubbard is the one that is NOT a doubled
+beat: its grid is tracked at half rate (0.82 s on a 143 bpm tune) and the
+0.40 + 0.42 "pairs" are the true pulse surfacing -- the octave error is the
+defect there, and removing its true beats makes a wrong grid differently
+wrong. That is `beats.correct_octave`'s job with a tempo hint, and open.
+
+What it moved, through the page (the harness notates on the raw grid, D27,
+so `run_eval` saw nothing): the hand-score sheet moved on one of eleven
+tracks, Confirmation, rhythm 0.742 -> 0.754; the WJazzD sheet on 20 of 74,
+rhythm 14 up / 5 down, mean 0.6268 -> 0.6272 at coverage 0.860, the two
+Brother Hubbard solos and Nothing Personal the losers. Small by design: the
+rhythm measure compares onset gaps and is immune to a constant shift, so a
+bar-count error, which is what the listener saw, is exactly what it cannot
+see. Bar 107 of Billy Boy is four beats long. Tests in tests/test_meter.py.
 
 ### R20 - Grace notes in the hand scores were counted as time
 
