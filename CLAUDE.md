@@ -648,7 +648,18 @@ Results and limits: `docs/m6-notate.md`.
   moves with it, or the part sounds right and is covered in accidentals.
 - **A tuplet is allowed inside one beat and no wider.** Quantize chooses its
   grid one beat at a time, and a third of a beat is not a note value: without
-  `NotatedNote.tuplet`, 57 of Confirmation's 129 bars did not add up.
+  `NotatedNote.tuplet`, 57 of Confirmation's 129 bars did not add up. The
+  ONE exception is the quarter-note triplet (2026-09-11, D28): notate writes
+  a 3:2 over a half-note unit whose onsets sit on 0, 2/3, 4/3 of it
+  (`quarter_triplet_halves`) and export brackets it by the group's own
+  length, not the beat line -- but nothing produces those positions yet.
+  `QuantizeConfig.quarter_triplets` is OFF because the reading is not
+  identifiable from onset timing: on the twelve hand scores the best rule
+  adopts 9 pairs of which 3 are the human's, and the lattice version cost
+  hand-score rhythm 0.773 -> 0.704. The human writes ONE dotted-eighth +
+  sixteenth pair in 4,234 notes; we write 2.5 per hundred, and that IS the
+  unread quarter-note triplet. Do not turn the flag on for a number; build
+  the truth from WJazzD's tatum positions first.
 - **24 divisions per quarter** in MusicXML — the smallest divisible by 8 (a
   thirty-second) and 3 (a triplet).
 - **Never read more resolution out of a beat than its notes demonstrate.**

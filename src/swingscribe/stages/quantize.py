@@ -40,9 +40,34 @@ from swingscribe.model import Document, MeterSection, QuantizedNote, SwingSpan
 
 # Bump when this stage's behavior changes without a config change (see
 # pipeline._cache_name).
-CACHE_VERSION = 1
+CACHE_VERSION = 2  # 2: the quarter-note triplet over a beat pair (D28)
 
 STRAIGHT_PHASE = 0.5
+
+# The quarter-note triplet: three equal notes over a half note, at 0, 2/3
+# and 4/3 of a beat pair. Read one beat at a time it is invisible -- the
+# first beat holds two onsets, which cannot vote a tuplet, and the second
+# holds one at a third -- so it comes out as a dotted eighth and a sixteenth
+# or, under the swing warp, as an eighth pair (D28: 48 of the 68 ternary
+# notes the hand scores write in beats of fewer than three onsets are these,
+# 19 of them in Flanagan's Giant Steps).
+#
+# `quarter_triplet_pairs` reads the pair as one unit, and what it looks for
+# is EQUAL SPACING, not the lattice. Measured against the twelve hand scores
+# (2026-09-11, the truth being our notes aligned to the human's and the
+# human's two-thirds-long notes among them): the figures a human wrote as
+# quarter-note triplets sit in our raw onsets at intervals of 0.58-0.78 of a
+# beat, starting up to a quarter of a beat late, and none on 0, 2/3, 4/3 --
+# a lattice rule adopted 108 pairs of which 3 were real. The interval rule
+# below adopts 9 of which 3 are real: the perfect 0.667/0.667 figures the
+# human wrote as eighths look exactly like the ones written as triplets, so
+# on onset timing alone the figure is not identifiable. That is why
+# `QuantizeConfig.quarter_triplets` ships OFF. The writing side (notate,
+# export) is complete for when a reading exists.
+QUARTER_TRIPLET_INTERVAL = (0.58, 0.80)  # beats, each of the figure's two gaps
+QUARTER_TRIPLET_RATIO_MAX = 1.25  # longer gap over shorter: equal spacing
+QUARTER_TRIPLET_FIRST_MAX = 0.25  # how late the figure may start, in beats
+QUARTER_TRIPLET_NEXT = 1.8  # from here on an onset is the next downbeat, early
 
 # How sharply the no-swing floor relaxes as confidence rises. Cubic, not
 # linear: real solos read at confidence 0.25-0.32, which is precisely where
@@ -250,6 +275,66 @@ def _keeps_apart(offsets: list[float], divisions: int) -> bool:
     return len(snapped) == len(offsets)
 
 
+def has_half_units(pulses_per_bar: int) -> bool:
+    """Does a bar of this many pulses hold two-beat units a tuplet can be
+    written over? Notate halves a binary bar down to the beat (2, 4, 8) and
+    cuts a bar of three binary units in three (6); 3/4 and 5/4 have no
+    half-note unit, so a quarter-note triplet cannot be written in them."""
+    return pulses_per_bar in (2, 4, 6, 8)
+
+
+def _pulses_at(index: int, beats: list[float], sections: list[MeterSection]) -> int:
+    time = beats[index]
+    for section in sections:
+        if section.start <= time <= section.end:
+            return max(1, section.pulses_per_bar)
+    return 4
+
+
+def quarter_triplet_pairs(
+    per_beat_raw: dict[int, list[float]],
+    beats: list[float],
+    sections: list[MeterSection],
+) -> list[int]:
+    """Beat indices that begin a pair read as a quarter-note triplet.
+
+    A pair is the first two or last two beats of a bar that has half-note
+    units (has_half_units). In RAW time -- the swing warp is a hypothesis
+    about binary beats -- the pair must hold exactly three onsets before
+    QUARTER_TRIPLET_NEXT (anything later is the next downbeat played early),
+    the first within QUARTER_TRIPLET_FIRST_MAX of the unit's start, the two
+    gaps between them each inside QUARTER_TRIPLET_INTERVAL and within
+    QUARTER_TRIPLET_RATIO_MAX of each other. Equal spacing is what separates
+    the figure from a swung "one, and, and" (gaps of 2/3 then 1) and from
+    straight eighths (1/2 then 1/2); the numbers are where the hand scores'
+    figures sit in our onsets (see the constants). Precision on those
+    scores is 3 of 9, which is why the caller ships this off.
+    """
+    pairs = []
+    low, high = QUARTER_TRIPLET_INTERVAL
+    for index in sorted(per_beat_raw):
+        if index + 1 >= len(beats):
+            continue
+        pulses = _pulses_at(index, beats, sections)
+        _bar, beat_in_bar = bar_and_beat(float(index), beats, sections)
+        first = int(round(beat_in_bar))
+        if first % 2 or first + 2 > pulses or not has_half_units(pulses):
+            continue
+        positions = sorted(
+            list(per_beat_raw[index]) + [1.0 + r for r in per_beat_raw.get(index + 1, [])]
+        )
+        figure = [p for p in positions if p < QUARTER_TRIPLET_NEXT]
+        if len(figure) != 3 or figure[0] > QUARTER_TRIPLET_FIRST_MAX:
+            continue
+        gaps = [b - a for a, b in zip(figure, figure[1:], strict=False)]
+        if (
+            all(low <= gap <= high for gap in gaps)
+            and max(gaps) / min(gaps) <= QUARTER_TRIPLET_RATIO_MAX
+        ):
+            pairs.append(index)
+    return pairs
+
+
 def _anchor_index(section: MeterSection, beats: list[float]) -> int:
     if not beats:
         return 0
@@ -294,6 +379,7 @@ def quantize_notes(
     min_onsets_for_tuplet: int = 3,
     grid_slack_s: float = 0.02,
     chords: list[list[int]] | None = None,
+    quarter_triplets: bool = False,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -372,6 +458,13 @@ def quantize_notes(
             grid_slack_s / _beat_length(beats, index),
             raw_offsets=per_beat_raw[index],
         )
+    if allow_triplets and quarter_triplets:
+        # A beat pair that reads as a quarter-note triplet is two ternary
+        # beats: the figure's raw thirds snap per beat to 0 and 2/3 on the
+        # first and 1/3 on the second, which notate reads back as the half
+        # unit's thirds (notate.quarter_triplet_halves).
+        for index in quarter_triplet_pairs(per_beat_raw, beats, sections):
+            grids[index] = grids[index + 1] = 3
 
     out, positions = [], []
     for index, position, duration, pitch, raw, chord in warped:
@@ -479,6 +572,7 @@ def run(document: Document, config: Config) -> Document:
         min_onsets_for_tuplet=qc.min_onsets_for_tuplet,
         grid_slack_s=qc.grid_slack_s,
         chords=[list(n.chord) for n in notes],
+        quarter_triplets=qc.quarter_triplets,
     )
 
     by_beat, track = pooled_phase(document.swing, qc.straight_bur_ceiling)

@@ -420,6 +420,15 @@ class QuantizeConfig(BaseModel):
     # plan §5's own 20ms round-trip criterion: the coarsening allowance is
     # exactly what the round trip is allowed to cost, at every tempo.
     grid_slack_s: float = 0.02
+    # Read a beat pair whose three onsets are equally spaced at 0.58-0.80 of
+    # a beat as a quarter-note triplet (quantize.quarter_triplet_pairs), so
+    # notate can write it under one 3:2 over the half note. OFF, measured:
+    # against the twelve hand scores the rule adopts 9 pairs of which 3 are
+    # the human's, because a figure played at exactly 2/3, 2/3 is written as
+    # eighths as often as as a triplet -- onset timing alone does not
+    # identify it (docs/benchmark-deficiencies.md D28). The page CAN write
+    # the figure; what is missing is a reading that deserves to be trusted.
+    quarter_triplets: bool = False
 
 
 class NotateConfig(BaseModel):

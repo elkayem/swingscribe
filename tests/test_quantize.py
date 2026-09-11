@@ -516,3 +516,117 @@ def test_a_chord_rides_through_quantize_on_its_head_note():
     assert [n.chord for n in quantized] == [[], [72, 76], []]
     plain, _ = quantize_notes(onsets, [0.2, 0.2, 0.2], [60, 64, 67], beats, [], [])
     assert [n.chord for n in plain] == [[], [], []]
+
+
+# -- the quarter-note triplet, read over a beat pair (D28) -------------------
+
+
+def _pair_figure(beats, first: int, period: float, extra=()):
+    """Three onsets at 0, 2/3 and 4/3 of the pair starting at beat `first`,
+    plus the next downbeat, plus any extras (in beats from `first`)."""
+    fractions = [0.0, 2 / 3, 4 / 3, 2.0, *extra]
+    return sorted(beats[first] + f * period for f in fractions)
+
+
+def test_a_quarter_note_triplet_is_read_over_the_beat_pair():
+    """Beat by beat the figure is invisible: two onsets in the first beat
+    (which cannot vote a tuplet) and one at a third in the second. Read as a
+    pair against the 0, 2/3, 4/3 lattice it is what a human writes -- 48 of
+    the hand scores' ternary notes in under-three-onset beats are this."""
+    period = 0.4
+    beats = [i * period for i in range(9)]
+    spans = [SwingSpan(start_beat=0, end_beat=8, bur=2.0, confidence=0.95, is_swung=True)]
+    onsets = _pair_figure(beats, 2, period)
+    quantized, _ = quantize_notes(
+        onsets, [0.05] * 4, [60, 62, 64, 65], beats, spans, [], quarter_triplets=True
+    )
+    assert [q.beat for q in quantized] == pytest.approx([2.0, 2 + 2 / 3, 3 + 1 / 3, 4.0])
+
+
+def test_a_swung_pair_and_a_downbeat_are_not_a_quarter_note_triplet():
+    """The same three onsets a beat apart: a swung eighth pair on the first
+    beat (its offbeat at 2/3, which IS swing) and the second beat's downbeat.
+    The downbeat sits a third from any lattice point, so the pair reading
+    loses and the page writes eighths."""
+    period = 0.4
+    beats = [i * period for i in range(9)]
+    spans = [SwingSpan(start_beat=0, end_beat=8, bur=2.0, confidence=0.95, is_swung=True)]
+    onsets = sorted(beats[2] + f * period for f in (0.0, 0.66, 1.0, 1.66, 2.0))
+    quantized, _ = quantize_notes(
+        onsets, [0.05] * 5, [60] * 5, beats, spans, [], quarter_triplets=True
+    )
+    assert [q.beat for q in quantized] == pytest.approx([2.0, 2.5, 3.0, 3.5, 4.0])
+
+
+def test_the_pair_must_start_on_a_half_note_unit():
+    """Beats 2 and 3 of a bar (0-based 1 and 2) are not a unit notate can
+    bracket -- the bar halves at beat 3 -- so the figure there keeps its
+    beat-level reading, a sixteenth after the second beat's downbeat."""
+    period = 0.4
+    beats = [i * period for i in range(9)]
+    spans = [SwingSpan(start_beat=0, end_beat=8, bur=2.0, confidence=0.95, is_swung=True)]
+    onsets = _pair_figure(beats, 1, period)
+    quantized, _ = quantize_notes(
+        onsets, [0.05] * 4, [60, 62, 64, 65], beats, spans, [], quarter_triplets=True
+    )
+    assert [q.beat for q in quantized] == pytest.approx([1.0, 1.5, 2.25, 3.0])
+
+
+def test_a_three_four_bar_has_no_half_note_unit():
+    period = 0.4
+    beats = [i * period for i in range(13)]
+    section = MeterSection(
+        start=0.0,
+        end=beats[-1],
+        pulses_per_bar=3,
+        time_signature=(3, 4),
+        anchor=0.0,
+        first_bar=1,
+        origin="user",
+    )
+    spans = [SwingSpan(start_beat=0, end_beat=12, bur=2.0, confidence=0.95, is_swung=True)]
+    onsets = _pair_figure(beats, 3, period)  # beats 1-2 of bar 2, in 3/4
+    quantized, _ = quantize_notes(
+        onsets, [0.05] * 4, [60] * 4, beats, spans, [section], quarter_triplets=True
+    )
+    fractions = [q.beat - int(q.beat) for q in quantized]
+    assert fractions == pytest.approx([0.0, 0.5, 0.25, 0.0])
+
+
+def test_the_pair_reading_needs_the_whole_figure():
+    """Two of the three (a downbeat and the note at 2/3) are a swung pair by
+    the convention; the figure has to show three equally spaced onsets."""
+    from swingscribe.stages.quantize import quarter_triplet_pairs
+
+    beats = [i * 0.4 for i in range(9)]
+    assert quarter_triplet_pairs({2: [0.0, 2 / 3], 3: []}, beats, []) == []
+    assert quarter_triplet_pairs({2: [0.0, 2 / 3], 3: [1 / 3]}, beats, []) == [2]
+
+
+def test_the_pair_reading_wants_equal_spacing_not_the_lattice():
+    """Measured against the hand scores, the human's quarter-note triplets sit
+    in our onsets at gaps of 0.58-0.78 of a beat starting late, none on 0,
+    2/3, 4/3 -- and a swung "one, and, and" has gaps of 2/3 then 1."""
+    from swingscribe.stages.quantize import quarter_triplet_pairs
+
+    beats = [i * 0.4 for i in range(9)]
+    late_but_even = {2: [0.09, 0.865], 3: [0.643]}  # gaps 0.775, 0.778
+    assert quarter_triplet_pairs(late_but_even, beats, []) == [2]
+    one_and_and = {2: [0.0, 0.667], 3: [0.667]}  # gaps 0.667, 1.0
+    assert quarter_triplet_pairs(one_and_and, beats, []) == []
+    with_a_fourth = {2: [0.0, 0.5, 0.667], 3: [0.333]}
+    assert quarter_triplet_pairs(with_a_fourth, beats, []) == []
+    early_downbeat_after = {2: [0.0, 0.667], 3: [0.333, 0.9]}  # 1.9: the next downbeat, early
+    assert quarter_triplet_pairs(early_downbeat_after, beats, []) == [2]
+
+
+def test_the_reading_is_off_unless_asked_for():
+    """The flag ships off (config.py says why): the same figure is written
+    beat by beat -- an eighth pair and a sixteenth after the downbeat."""
+    period = 0.4
+    beats = [i * period for i in range(9)]
+    spans = [SwingSpan(start_beat=0, end_beat=8, bur=2.0, confidence=0.95, is_swung=True)]
+    onsets = _pair_figure(beats, 2, period)
+    quantized, _ = quantize_notes(onsets, [0.05] * 4, [60, 62, 64, 65], beats, spans, [])
+    assert [q.beat for q in quantized] == pytest.approx([2.0, 2.5, 3.25, 4.0])
+    assert Config().quantize.quarter_triplets is False

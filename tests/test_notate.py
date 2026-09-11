@@ -624,3 +624,102 @@ def test_a_chord_is_written_on_every_tie_segment_of_its_head():
     ]
     rests = [n for bar in notation.bars for n in bar.notes if n.is_rest]
     assert all(n.chord == [] for n in rests)
+
+
+# -- the quarter-note triplet over a half-note unit (D28) --------------------
+
+TWO_THIRDS = 2.0 / 3.0
+
+
+def test_a_quarter_note_triplet_member_crossing_the_beat_is_one_symbol_in_a_marked_half():
+    """The middle note of a quarter-note triplet runs from 2/3 to 4/3 -- across
+    the beat line. Unmarked, the beat rule ties two triplet eighths across it;
+    in a half quantize read as the figure it is one quarter under a 3:2."""
+    tied = split_for_meter(TWO_THIRDS, TWO_THIRDS, 4.0)
+    assert [t for _s, _d, t in tied] == [(3, 2), (3, 2)]
+    assert [d for _s, d, _t in tied] == pytest.approx([1 / 3, 1 / 3])
+    whole = split_for_meter(TWO_THIRDS, TWO_THIRDS, 4.0, triplet_halves={0.0})
+    assert whole == [(pytest.approx(TWO_THIRDS), pytest.approx(TWO_THIRDS), (3, 2))]
+    assert notate.tuplet_value(TWO_THIRDS, (3, 2)) == pytest.approx(1.0)  # written as a quarter
+
+
+def test_the_mark_names_a_half_and_leaves_the_other_alone():
+    """The second half of the bar is not the first: a note across the beat
+    line at 2 + 2/3 still ties unless ITS half is marked."""
+    other = split_for_meter(2.0 + TWO_THIRDS, TWO_THIRDS, 4.0, triplet_halves={0.0})
+    assert len(other) == 2
+    own = split_for_meter(2.0 + TWO_THIRDS, TWO_THIRDS, 4.0, triplet_halves={2.0})
+    assert len(own) == 1 and own[0][2] == (3, 2)
+
+
+def test_a_beat_level_triplet_inside_a_marked_half_is_still_a_beat_level_triplet():
+    """A third of a beat is not on the half's thirds, so the mark does not
+    reach it: it is written as a triplet eighth inside its beat as before."""
+    pieces = split_for_meter(1.0 / 3.0, 1.0 / 3.0, 4.0, triplet_halves={0.0})
+    assert pieces == [(pytest.approx(1 / 3), pytest.approx(1 / 3), (3, 2))]
+
+
+def test_quarter_triplet_halves_are_inferred_from_the_lattice():
+    bars = notate._Bars([], 1, 2)
+    figure = [
+        (1, 0.0, TWO_THIRDS, 60),
+        (1, TWO_THIRDS, TWO_THIRDS, 62),
+        (1, 2 * TWO_THIRDS, TWO_THIRDS, 64),
+    ]
+    assert notate.quarter_triplet_halves(figure + [(1, 2.0, 1.0, 65)], bars) == {1: {0.0}}
+    later = [(1, 2.0 + b, d, p) for _bar, b, d, p in figure]
+    assert notate.quarter_triplet_halves([(1, 0.0, 2.0, 60)] + later, bars) == {1: {2.0}}
+    beat_level = [(1, 0.0, 1 / 3, 60), (1, 1 / 3, 1 / 3, 62), (1, 2 / 3, 1 / 3, 64)]
+    assert notate.quarter_triplet_halves(beat_level, bars) == {}
+    # The second beat's downbeat is not on the half's thirds either.
+    assert notate.quarter_triplet_halves(figure[:2] + [(1, 1.0, 1.0, 65)], bars) == {}
+    # A lone half note has nothing off the beat to bracket.
+    assert notate.quarter_triplet_halves([(1, 0.0, 2.0, 60)], bars) == {}
+
+
+def test_a_three_four_bar_has_no_half_to_mark():
+    section = MeterSection(
+        start=0.0, end=100.0, pulses_per_bar=3, time_signature=(3, 4), anchor=0.0, first_bar=1
+    )
+    bars = notate._Bars([section], 1, 2)
+    figure = [
+        (1, 0.0, TWO_THIRDS, 60),
+        (1, TWO_THIRDS, TWO_THIRDS, 62),
+        (1, 2 * TWO_THIRDS, TWO_THIRDS, 64),
+    ]
+    assert notate.quarter_triplet_halves(figure, bars) == {}
+
+
+def test_a_rest_inside_a_quarter_note_triplet_is_a_tuplet_rest():
+    notes = [
+        NotatedNote(beat=0.0, duration=TWO_THIRDS, pitch=60),
+        NotatedNote(beat=2 * TWO_THIRDS, duration=TWO_THIRDS, pitch=64),
+        NotatedNote(beat=2.0, duration=2.0, pitch=65),
+    ]
+    filled = fill_rests(notes, 4.0, triplet_halves={0.0})
+    rests = [n for n in filled if n.is_rest]
+    assert len(rests) == 1
+    assert rests[0].beat == pytest.approx(TWO_THIRDS)
+    assert rests[0].duration == pytest.approx(TWO_THIRDS)
+    assert rests[0].tuplet == (3, 2)
+
+
+def test_build_writes_a_quarter_note_triplet_whole():
+    """End to end from quantized notes: three quarters under one 3:2, no
+    ties, and the bar still adds up."""
+    quantized = [
+        QuantizedNote(bar=1, beat=0.0, duration_beats=TWO_THIRDS, pitch=60, timing_residual=0.0),
+        QuantizedNote(
+            bar=1, beat=TWO_THIRDS, duration_beats=TWO_THIRDS, pitch=62, timing_residual=0.0
+        ),
+        QuantizedNote(
+            bar=1, beat=2 * TWO_THIRDS, duration_beats=TWO_THIRDS, pitch=64, timing_residual=0.0
+        ),
+        QuantizedNote(bar=1, beat=2.0, duration_beats=2.0, pitch=65, timing_residual=0.0),
+    ]
+    notation = notate.build(quantized, [], swing=True, transpose=0)
+    bar = notation.bars[0]
+    sounding = [n for n in bar.notes if not n.is_rest]
+    assert [n.tuplet for n in sounding] == [(3, 2), (3, 2), (3, 2), None]
+    assert not any(n.tie_start or n.tie_stop for n in sounding)
+    assert sum(n.duration for n in bar.notes) == pytest.approx(4.0)

@@ -204,7 +204,10 @@ def spell(pitch: int, key_fifths: int) -> tuple[str, int, int]:
 
 
 def split_for_meter(
-    start: float, duration: float, bar_length: float
+    start: float,
+    duration: float,
+    bar_length: float,
+    triplet_halves: frozenset[float] | set[float] = frozenset(),
 ) -> list[tuple[float, float, tuple[int, int] | None]]:
     """One note's span → the tied pieces it must be written as.
 
@@ -218,9 +221,13 @@ def split_for_meter(
 
     Deliberately conservative. Given a choice between one symbol that could be
     misread and two tied symbols that cannot, this takes the tie.
+
+    `triplet_halves` names the half-note units of this bar (by their start)
+    that quantize read as a quarter-note triplet (quarter_triplet_halves): in
+    those, and only those, a 3:2 tuplet may span the two beats.
     """
     pieces: list[tuple[float, float, tuple[int, int] | None]] = []
-    _subdivide(start, start + duration, 0.0, bar_length, pieces)
+    _subdivide(start, start + duration, 0.0, bar_length, pieces, triplet_halves)
     return pieces
 
 
@@ -297,7 +304,14 @@ def _symmetric_syncopation(a: float, length: float, unit_start: float) -> bool:
     return False
 
 
-def _subdivide(a: float, b: float, unit_start: float, unit_end: float, out: list) -> None:
+def _subdivide(
+    a: float,
+    b: float,
+    unit_start: float,
+    unit_end: float,
+    out: list,
+    triplet_halves: frozenset[float] | set[float] = frozenset(),
+) -> None:
     if b - a <= TICK:
         return
     length = b - a
@@ -314,10 +328,23 @@ def _subdivide(a: float, b: float, unit_start: float, unit_end: float, out: list
     ):
         out.append((a, length, None))
         return
-    # A tuplet is allowed to live inside one beat and no larger unit. Wider
-    # than that and a triplet figure would be written across a beat boundary,
-    # which is unreadable and is not what quantize found either — it chooses
-    # the grid per beat.
+    # The one tuplet wider than a beat: a quarter-note triplet over a half
+    # note, in a half-note unit quantize read as one (D28). Its members sit on
+    # thirds of the HALF -- 0, 2/3, 4/3 -- which no beat-level triplet does,
+    # and are written as quarters (or a half) under a 3:2 bracket.
+    if (
+        _close(unit_end - unit_start, 2 * QUARTER)
+        and any(_close(unit_start, half) for half in triplet_halves)
+        and tuplet_value(length, (3, 2)) is not None
+        and _on_thirds(a, unit_start, unit_end)
+        and _on_thirds(b, unit_start, unit_end)
+    ):
+        out.append((a, length, (3, 2)))
+        return
+    # Otherwise a tuplet is allowed to live inside one beat and no larger
+    # unit. Wider than that and a triplet figure would be written across a
+    # beat boundary, which is unreadable and is not what quantize found
+    # either — it chooses the grid per beat.
     if unit_end - unit_start <= QUARTER + TICK:
         for ratio in TUPLET_RATIOS:
             actual, _normal = ratio
@@ -336,7 +363,7 @@ def _subdivide(a: float, b: float, unit_start: float, unit_end: float, out: list
     bounds = [unit_start, *points, unit_end]
     for lo, hi in zip(bounds, bounds[1:], strict=False):
         if a >= lo - TICK and b <= hi + TICK:
-            _subdivide(a, b, lo, hi, out)
+            _subdivide(a, b, lo, hi, out, triplet_halves)
             return
     # Straddles a division: cut at the first one crossed. The head lands inside
     # the sub-unit ending there; the tail is re-divided against everything still
@@ -350,25 +377,69 @@ def _subdivide(a: float, b: float, unit_start: float, unit_end: float, out: list
         out.append((a, length, None))
         return
     head_start = max((lo for lo in bounds if lo <= a + TICK), default=unit_start)
-    _subdivide(a, cut, head_start, cut, out)
-    _subdivide(cut, b, cut, unit_end, out)
+    _subdivide(a, cut, head_start, cut, out, triplet_halves)
+    _subdivide(cut, b, cut, unit_end, out, triplet_halves)
 
 
-def fill_rests(notes: list[NotatedNote], bar_length: float) -> list[NotatedNote]:
+def fill_rests(
+    notes: list[NotatedNote],
+    bar_length: float,
+    triplet_halves: frozenset[float] | set[float] = frozenset(),
+) -> list[NotatedNote]:
     """Insert rests so the bar adds up. A bar that does not sum to its time
     signature is what makes a notation program refuse to open a file."""
     filled: list[NotatedNote] = []
     cursor = 0.0
     for note in sorted(notes, key=lambda n: n.beat):
         if note.beat > cursor + TICK:
-            for start, length, tuplet in split_for_meter(cursor, note.beat - cursor, bar_length):
+            for start, length, tuplet in split_for_meter(
+                cursor, note.beat - cursor, bar_length, triplet_halves
+            ):
                 filled.append(NotatedNote(beat=start, duration=length, is_rest=True, tuplet=tuplet))
         filled.append(note)
         cursor = max(cursor, note.beat + note.duration)
     if cursor < bar_length - TICK:
-        for start, length, tuplet in split_for_meter(cursor, bar_length - cursor, bar_length):
+        for start, length, tuplet in split_for_meter(
+            cursor, bar_length - cursor, bar_length, triplet_halves
+        ):
             filled.append(NotatedNote(beat=start, duration=length, is_rest=True, tuplet=tuplet))
     return filled
+
+
+def _has_half_units(bar_length: float) -> bool:
+    """Mirror of quantize.has_half_units in quarter notes: a bar halved down
+    to the beat, or three such halves (6/4), has two-beat units."""
+    return any(_close(bar_length, v) for v in (2.0, 4.0, 6.0, 8.0))
+
+
+def quarter_triplet_halves(
+    events: list[tuple[int, float, float, int]], bars_index
+) -> dict[int, set[float]]:
+    """bar -> starts of the half-note units quantize read as a quarter-note
+    triplet: every onset in the unit on 0, 2/3 or 4/3 of it and at least one
+    off the beat. Inferred from the positions the way `ternary_beats` infers
+    the beat grid -- quantize's decision is exact in them. A beat-level
+    triplet cannot pass: its 1/3 (or the second beat's downbeat, 1.0) is not
+    on the half's thirds; and without the pair reading no onset lands on 4/3
+    at all, because a lone onset at a raw third of a beat goes to the
+    sixteenth grid."""
+    offsets: dict[tuple[int, float], list[float]] = {}
+    for bar, beat, _duration, _pitch in events:
+        bar_length = bars_index.length.get(bar, 4.0)
+        if not _has_half_units(bar_length):
+            continue
+        unit = 2.0 * math.floor(beat / 2.0 + TICK)
+        if unit + 2.0 > bar_length + TICK:
+            continue
+        offsets.setdefault((bar, unit), []).append(beat - unit)
+    halves: dict[int, set[float]] = {}
+    for (bar, unit), within in offsets.items():
+        thirds = [offset * 1.5 for offset in within]
+        on_lattice = all(abs(t - round(t)) < 1e-4 for t in thirds)
+        off_beat = any(round(t) in (1, 2) for t in thirds)
+        if on_lattice and off_beat:
+            halves.setdefault(bar, set()).add(unit)
+    return halves
 
 
 # The shortest rest anyone writes in this music. Below an EIGHTH, a gap
@@ -735,6 +806,8 @@ def build(
     # above works on (bar, beat, duration, pitch) and none of them moves an
     # onset, so the quantized note's own position still names it here.
     chord_of = {(n.bar, n.beat, n.pitch): sorted(set(n.chord)) for n in quantized if n.chord}
+    # The half-note units written as quarter-note triplets (D28), per bar.
+    halves = quarter_triplet_halves(events, bars_index)
     by_bar: dict[int, list[NotatedNote]] = {}
     for bar_number, beat, duration, pitch in events:
         step, alter, octave = spell(pitch, key_fifths)
@@ -746,7 +819,7 @@ def build(
             here = min(remaining, bar_length - start)
             if here <= TICK:
                 break
-            pieces = split_for_meter(start, here, bar_length)
+            pieces = split_for_meter(start, here, bar_length, halves.get(bar, frozenset()))
             for index, (piece_start, piece_length, tuplet) in enumerate(pieces):
                 last_piece = index == len(pieces) - 1 and _close(here, remaining)
                 by_bar.setdefault(bar, []).append(
@@ -776,7 +849,9 @@ def build(
             NotatedBar(
                 number=number,
                 time_signature=signature,
-                notes=fill_rests(by_bar.get(number, []), bar_length),
+                notes=fill_rests(
+                    by_bar.get(number, []), bar_length, halves.get(number, frozenset())
+                ),
             )
         )
     return Notation(bars=bars, key_fifths=key_fifths, swing=swing, transpose=transpose, title=title)

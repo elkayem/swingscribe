@@ -967,8 +967,63 @@ convention (D12) and must stay for beat-level triplets; what is missing is
 a HALF-NOTE unit hypothesis -- three onsets at 0, 2/3 and 4/3 over two
 beats -- which needs quantize to choose a grid over a beat pair and notate
 to allow a tuplet over a two-beat unit. None of the open items above
-addresses it. Not yet attempted; the 48 quarter-note triplets, and the 383
-three-onset ternary notes we already write, are the yardstick.
+addresses it.
+
+**Attempted 2026-09-11. The page can now WRITE the figure; the READING is
+measured and ships off.**
+
+The writing side is in and tested: `notate.quarter_triplet_halves` infers,
+from the positions quantize snapped, the half-note units whose onsets sit
+on 0, 2/3 and 4/3 of the unit, `split_for_meter` takes those halves and
+writes a 3:2 across the two beats (quarters, or a half, under one bracket;
+rests included), and `export.tuplet_groups` closes a bracket on the
+group's own length rather than at the beat line, so the three quarters are
+one group. `QuantizedNote` did not change; nothing in the model moved.
+
+The reading, `quantize.quarter_triplet_pairs`, was tried two ways and
+measured against a truth built for it: our notes aligned to the human's
+melody the way `score_tune` aligns them (pitch sequence, no timing), a
+candidate beat pair TRUE when a matched note inside it is one the human
+wrote two thirds of a beat long. The human's 17 quarter-note-triplet
+half-units (Giant Steps 6, Melody for C 4, Confirmation 3, Billy Boy 3,
+Soul Station 1; none in the other seven scores) reach 13 candidate pairs
+through matched notes, among 856 pairs of three to six onsets on half-note
+units.
+
+1. *A lattice rule* -- every onset within slack of 0, 2/3, 4/3 in raw
+   time, mean error against the two beats' own grids, coarser wins a tie
+   as in `choose_grid` -- adopted 108 pairs, of which 3 were the human's.
+   On the twelve pages it wrote 755 tuplet notes (16.0%) against the
+   human's 10.7%, 155 two-thirds notes against 48, and 13 and 12 on Art
+   Pepper's two solos, which have none. Through the harness, paired against
+   the R22 pin: hand-score rhythm 0.7730 -> 0.7043 (0 up, 15 down of 19),
+   value 0.6935 -> 0.6305; WJazzD rhythm 0.6321 -> 0.5914 (9 up, 54 down
+   of 77). What it adopted was laid-back eighth-note lines at speed --
+   downbeats 0.1-0.2 late, offbeats at 0.65-0.9 -- which fit neither
+   lattice well, so the coarser one won.
+2. *An equal-spacing rule*, fitted to where the human's figures actually
+   sit in our onsets: gaps of 0.58-0.78 of a beat, the first onset 0.09 to
+   0.42 late, none on the lattice. Exactly three onsets before 1.8 of the
+   pair, first within 0.25, both gaps in [0.58, 0.80] and within a ratio of
+   1.25: 9 adopted, 3 true. Wider, [0.55, 0.85] and 1.3: 17 and 4; [0.5,
+   0.9] and 1.4: 48 and 5. The failures are not near misses: Melody for C
+   and Billy Boy each hold a figure at 0.667 / 0.667 the human wrote as
+   eighths, beside one at 0.778 / 0.778 written as a triplet.
+
+So on onset timing alone the figure is not identifiable, on this data.
+Six of the 13 reachable human units also begin with a rest (first sounding
+onset 0.31-0.42 into the unit), which no three-onset rule sees at all.
+`QuantizeConfig.quarter_triplets` ships False and CACHE_VERSION moved to 2.
+What a reading would need, in order: (a) truth at scale -- WJazzD stores
+tatum positions, so a quarter-note triplet is a note at tatum 3 of 3 on one
+beat followed by tatum 2 of 3 on the next, and `wjazz.notated_positions`
+can label every one of them across 456 solos where the hand scores give
+17; (b) evidence beyond the three onsets -- what follows the figure, the
+notes' held lengths, the phrase; or (c) the listener marking the half on
+the roll, since the page can write it now. The truth instrument (a
+monkeypatch over `quarter_triplet_pairs` that records every candidate pair
+and its truth) lives with this session's scratch scripts; its method is
+above.
 
 ## Resolved
 

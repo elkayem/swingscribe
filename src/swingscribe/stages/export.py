@@ -85,11 +85,13 @@ def tuplet_groups(notes: list[NotatedNote]) -> dict[int, str]:
     number from `<notations><tuplet>`, and without it reads a bare run of
     time-modified notes as a measure it has to repair.
 
-    A run ends at a beat boundary as well as at the first non-tuplet note: two
-    consecutive triplet beats are two triplets, not one six-note group. It also
-    ends at a change of ratio — a triplet followed directly by a quintuplet in
-    the same beat is two groups, not one bracket claiming a ratio that fits
-    neither.
+    A run ends when it has filled a whole number of beats, as well as at the
+    first non-tuplet note: two consecutive triplet beats are two triplets, not
+    one six-note group. A quarter-note triplet (notate, D28) fills TWO beats
+    and passes the beat line at four thirds, so the beat line itself is not
+    the boundary -- the group's own length is. It also ends at a change of
+    ratio — a triplet followed directly by a quintuplet in the same beat is
+    two groups, not one bracket claiming a ratio that fits neither.
     """
     marks: dict[int, str] = {}
     run: list[int] = []
@@ -100,21 +102,22 @@ def tuplet_groups(notes: list[NotatedNote]) -> dict[int, str]:
             marks[run[-1]] = "stop"
             run.clear()
 
-    position = 0.0
-    beat = 0
+    filled = 0.0
     ratio: tuple[int, int] | None = None
     for index, note in enumerate(notes):
         if note.tuplet is None:
             close()
-        else:
-            here = int(position / QUARTER + 1e-9)
-            if run and (here != beat or note.tuplet != ratio):
-                close()
-            if not run:
-                beat = here
-                ratio = note.tuplet
-            run.append(index)
-        position += note.duration
+            continue
+        if run and note.tuplet != ratio:
+            close()
+        if not run:
+            ratio = note.tuplet
+            filled = 0.0
+        run.append(index)
+        filled += note.duration
+        whole = filled / QUARTER
+        if abs(whole - round(whole)) < 1e-6 and round(whole) >= 1:
+            close()
     close()
     return marks
 

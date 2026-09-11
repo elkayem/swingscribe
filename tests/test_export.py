@@ -331,3 +331,25 @@ def test_our_chord_reads_back_through_the_musicxml_reader(tmp_path):
     score = mscz.parse_musicxml(path)
     assert sorted((n.position, n.pitch) for n in score.notes) == [(0.0, 78), (0.0, 84), (1.0, 75)]
     assert [n.pitch for n in score.melody] == [84, 75]
+
+
+def test_a_quarter_note_triplet_is_one_bracket_over_two_beats():
+    """The group passes the beat line at four thirds; its own length, not
+    the beat line, closes it. The beat-level triplet after it is its own."""
+    two_thirds = 2.0 / 3.0
+    third = 1.0 / 3.0
+    notes = [
+        note(0.0, two_thirds, tuplet=(3, 2)),
+        note(two_thirds, two_thirds, tuplet=(3, 2)),
+        note(2 * two_thirds, two_thirds, tuplet=(3, 2)),
+        note(2.0, third, tuplet=(3, 2)),
+        note(2.0 + third, third, tuplet=(3, 2)),
+        note(2.0 + 2 * third, third, tuplet=(3, 2)),
+    ]
+    assert tuplet_groups(notes) == {0: "start", 2: "stop", 3: "start", 5: "stop"}
+
+
+def test_two_triplet_beats_are_still_two_brackets():
+    third = 1.0 / 3.0
+    notes = [note(k * third, third, tuplet=(3, 2)) for k in range(6)]
+    assert tuplet_groups(notes) == {0: "start", 2: "stop", 3: "start", 5: "stop"}
