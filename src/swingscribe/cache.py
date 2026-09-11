@@ -16,11 +16,46 @@ import hashlib
 import json
 import os
 import tempfile
+import time
+import warnings
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 _HEX_DIGITS = set("0123456789abcdef")
+
+# How many times, and how long apart, to retry replacing an entry Windows
+# calls locked. OneDrive holds a file it is syncing for a moment and answers
+# WinError 5 (the machine section of CLAUDE.md); a rewrite of an existing
+# entry is the case that meets it.
+REPLACE_ATTEMPTS = 5
+RETRY_DELAY_S = 0.2
+
+
+def _replace(tmp: str, path: Path) -> None:
+    """`os.replace`, retried while the target is locked.
+
+    An entry that still cannot be replaced is left as it was and the write is
+    REPORTED rather than raised: the caller's Document is right either way,
+    and the pipeline never trusts an entry it cannot verify -- a cached
+    Document whose wav is gone is a miss (pipeline._run_stages) -- so a
+    stale entry costs a re-run, not a wrong answer. Raising here killed an
+    eval run three seconds in, over a 377-byte ingest record it had just
+    rebuilt byte for byte.
+    """
+    for attempt in range(REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError as exc:
+            if attempt == REPLACE_ATTEMPTS - 1:
+                warnings.warn(
+                    f"cache entry {path} is locked and was left as it was: {exc}",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+                return
+            time.sleep(RETRY_DELAY_S * (attempt + 1))
 
 
 def canonical_json(config: Mapping[str, Any]) -> str:
@@ -74,7 +109,7 @@ class StageCache:
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(payload)
-            os.replace(tmp, path)
+            _replace(tmp, path)
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)

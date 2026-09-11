@@ -144,11 +144,19 @@ def _run_stages(
     for name, stage in stages:
         key = stage_key(key, _cache_name(name, stage), config.stage_config(name))
         cached = cache.get(key)
-        if cached is not None:
+        hit = _for_path(cached, audio_path) if cached is not None else None
+        if hit is not None and hit.audio is not None and not Path(hit.audio.path).is_file():
+            # The ingest wav was deleted out from under the entry -- the cache
+            # panel does exactly that (gui/storage.py), and the GUI re-ingests
+            # around it at the app level. A Document pointing at nothing is
+            # not a hit: running the stage again writes the same digest-named
+            # wav back, and every entry below it is whole again.
+            hit = None
+        if hit is not None:
             # Report cache hits too: a UI must be able to tell "finished in
             # 20ms because it was cached" from "still thinking".
             progress.report(name, 1.0, "cached", cached=True)
-            doc = _for_path(cached, audio_path)
+            doc = hit
         else:
             progress.report(name, 0.0, "started")
             doc = stage(doc, config)

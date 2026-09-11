@@ -321,3 +321,113 @@ def test_every_wjazzd_name_is_unique_over_the_whole_database():
     ]
     names = {wjazz_score.score_name(*row) for row in rows}
     assert len(names) == len(rows)
+
+
+# -- the page the harness scores is the page the Score button scores (D27) --
+
+
+def _grid_and_run(beats: list[float], region: list[float]) -> tuple[dict, dict]:
+    """One quarter note on every true beat, so every bar is full."""
+    grid = {"beats": beats, "downbeats": [], "duration": region[1]}
+    run = {
+        "notes": [
+            {"onset": t, "duration": 0.4, "pitch": 60, "confidence": 1.0}
+            for t in beats
+            if t < region[1]
+        ],
+        "region": region,
+        "stem": "other",
+    }
+    return grid, run
+
+
+def _full_bars(notation) -> dict[int, int]:
+    """Bar number -> sounding notes, for the bars that hold any."""
+    counts = {bar.number: sum(1 for note in bar.notes if not note.is_rest) for bar in notation.bars}
+    return {number: count for number, count in counts.items() if count}
+
+
+def test_the_harness_notates_on_the_repaired_grid(tmp_path, monkeypatch):
+    """A doubled beat left in the grid makes one bar three beats long and
+    moves every bar after it (R21). The Score button's page is built on the
+    repaired grid; the harness's used to be built on the raw one, so its
+    rhythm numbers carried a defect the listener's page did not."""
+    monkeypatch.setattr(run_eval, "BENCH", tmp_path)
+    write_sidecar(tmp_path, "Solo.m4a", region=[0.0, 20.0], anchor=0.0)
+    true_beats = [i * 0.5 for i in range(41)]  # 0 .. 20 s: ten bars of 4/4
+    grid, run = _grid_and_run(true_beats, [0.0, 20.0])
+    grid["beats"] = sorted(true_beats + [10.25])  # the tracker doubled one
+    notation = run_eval.notate_run("Solo.m4a", run, grid)
+    assert notation is not None
+    full = _full_bars(notation)
+    assert set(full) == set(range(1, 11))
+    assert set(full.values()) == {4}
+
+
+def test_the_sidecars_time_signature_reaches_the_harness_page(tmp_path, monkeypatch):
+    """One hand score and four WJazzD solos are in 3/4 or 6/4; the harness
+    barred every one of them in 4/4 while the Score button did not."""
+    monkeypatch.setattr(run_eval, "BENCH", tmp_path)
+    write_sidecar(tmp_path, "Waltz.m4a", region=[0.0, 15.0], time_signature="3/4")
+    grid, run = _grid_and_run([i * 0.5 for i in range(31)], [0.0, 15.0])
+    notation = run_eval.notate_run("Waltz.m4a", run, grid)
+    assert notation is not None
+    assert {bar.time_signature for bar in notation.bars} == {(3, 4)}
+    full = _full_bars(notation)
+    assert len(full) == 10
+    assert set(full.values()) == {3}
+
+
+def _fake_tracker(monkeypatch, beats: list[float]):
+    from swingscribe.gui import library
+    from swingscribe.model import AudioRef, BeatGrid, Document
+    from swingscribe.stages import beats as beats_stage
+
+    def fake_ingest(path, config):
+        audio = AudioRef(path="x.wav", sample_rate=44100, channels=2, duration=12.5)
+        return Document(audio_path=str(path), sample_rate=44100, audio=audio)
+
+    def fake_track(document, config):
+        grid = BeatGrid(beats=beats, downbeats=[beats[0]], beats_per_bar=4, source="mix")
+        return document.model_copy(update={"beat_grid": grid})
+
+    monkeypatch.setattr(library, "ingested_document", fake_ingest)
+    monkeypatch.setattr(beats_stage, "run", fake_track)
+
+
+def test_a_grid_cached_without_its_length_is_backfilled(tmp_path, monkeypatch):
+    """Grids cached before D27 hold beats only. The repaired bar grid also
+    wants the downbeat layer and the track's length, so such an entry is
+    tracked once more -- and keeps the beats the pinned numbers stand on."""
+    monkeypatch.setattr(run_eval, "BENCH", tmp_path)
+    write_sidecar(tmp_path, "Solo.m4a")
+    cache = tmp_path / "grids.json"
+    cache.write_text(
+        json.dumps({"Solo.m4a": {"beats": [0.0, 0.5, 1.0], "source": "mix"}}), encoding="utf-8"
+    )
+    _fake_tracker(monkeypatch, [0.0, 0.5, 1.0])
+    grids = run_eval.beat_grids(cache, log=lambda *_a: None)
+    expected = {"beats": [0.0, 0.5, 1.0], "downbeats": [0.0], "duration": 12.5, "source": "mix"}
+    assert grids["Solo.m4a"] == expected
+    assert json.loads(cache.read_text(encoding="utf-8"))["Solo.m4a"] == expected
+
+
+def test_a_re_tracked_grid_that_disagrees_keeps_the_cached_beats(tmp_path, monkeypatch):
+    """The pinned numbers stand on the cached beats. A tracker that no longer
+    reproduces them is reported, not silently adopted."""
+    monkeypatch.setattr(run_eval, "BENCH", tmp_path)
+    write_sidecar(tmp_path, "Solo.m4a")
+    cache = tmp_path / "grids.json"
+    cache.write_text(
+        json.dumps({"Solo.m4a": {"beats": [0.0, 0.5, 1.0], "source": "mix"}}), encoding="utf-8"
+    )
+    _fake_tracker(monkeypatch, [0.0, 0.6, 1.2])
+    said = []
+    grids = run_eval.beat_grids(cache, log=said.append)
+    assert grids["Solo.m4a"] == {
+        "beats": [0.0, 0.5, 1.0],
+        "downbeats": [],
+        "duration": 12.5,
+        "source": "mix",
+    }
+    assert any("keeping the cached grid" in line for line in said)

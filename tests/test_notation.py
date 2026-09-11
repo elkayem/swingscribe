@@ -12,6 +12,7 @@ from swingscribe.config import Config
 from swingscribe.model import NoteEvent
 from swingscribe.notation import (
     MIN_BEATS,
+    bar_grid_for_settings,
     meter_from_settings,
     notation_for_span,
     section_for,
@@ -398,6 +399,35 @@ def test_span_anchor_picks_the_in_phase_beat_nearest_the_start():
     assert span_anchor(beats, kept, 1.0, 4, 9.4) == 9.0  # index 18 is now nearer
     assert span_anchor(beats, kept, 1.0, 4, 10.0) == 9.0  # a dead tie: the earlier one
     assert span_anchor(beats, kept, None, 4, 10.2) == 10.0  # no phase to keep
+
+
+# ── the repaired grid the roll draws (D27) ──────────────────────────────────
+
+
+def test_the_repaired_grid_mends_both_tracker_mistakes_and_keeps_the_anchor():
+    """A dropped beat comes back at the midpoint of its gap and a doubled one
+    goes; the listener's downbeat is the beat bars are counted from. This is
+    the grid the roll draws and the Export button counts on, and the harness
+    scores against the same one now -- it used to notate the raw beats."""
+    beats = grid(count=61, start=0.0)  # 0.0 .. 30.0
+    tracked = sorted([b for b in beats if b != 10.0] + [20.25])  # one dropped, one doubled
+    repaired, anchor = bar_grid_for_settings(
+        tracked, [], {"anchor": 0.5, "time_signature": "3/4"}, Config(), 30.0
+    )
+    assert repaired == pytest.approx(beats)
+    assert anchor == 0.5
+
+
+def test_without_a_downbeat_the_repaired_grid_anchors_where_the_roll_does():
+    """No sidecar downbeat and no downbeat layer: the first beat of the grid
+    as `meter.bar_grid` gives it to the roll -- the steady edge pulse
+    continued out to the track's ends, so the tracker's late start is not
+    the page's. The harness passes this on so its bar 1 is the roll's bar 1
+    rather than a phase of its own choosing."""
+    beats = grid(count=40, start=1.0)  # 1.0 .. 20.5 of a 25 s track
+    repaired, anchor = bar_grid_for_settings(beats, [], {}, Config(), 25.0)
+    assert repaired == pytest.approx(grid(count=51, start=0.0))
+    assert anchor == 0.0
 
 
 # ── chords from the listener's enabled candidates ───────────────────────────

@@ -942,25 +942,75 @@ whose largest class is "no evidence".
 
 ### D27 - The harness notates on the raw tracked beats; the GUI on the repaired grid
 
-`notation_for_span` deliberately does not call `stages/meter.py` (its
-docstring says why: over a span the listener selected, meter derivation
-has nothing left to decide), and `run_eval.notate_run` hands it
-`grid["beats"]` straight from the beat cache. The GUI's Export goes through
-`gui/musicxml.bar_grid`, which is `meter.bar_grid`: the same beats
-REPAIRED (`repair_beats` inserts the beats the tracker dropped) and
-extended to the edges. So the page the listener scores with the Score
-button and the page the harness scores are built on different grids
-wherever the tracker dropped a beat — and across the 122 cached grids
-`repair_beats` fills 1,492 such gaps. A dropped beat left unrepaired makes
-one beat two beats long under quantize and shifts every bar after it, so
-the harness's `rhythm` and `value` numbers carry a defect the listener's
-page does not, and CLAUDE.md's "the Score button's numbers ARE the sheet's"
-is true of `benchmark_batch.py` (which goes through the GUI) but not of
-`run_eval.py`. Found 2026-09-10 while diagnosing R21. Not yet measured: the
-fix is to notate on `meter.bar_grid`'s beats in `notate_run` and re-score,
-which is arithmetic, and to say what moved.
+Resolved 2026-09-11, see R22.
+
+### D28 - Quarter-note triplets and two-note triplet figures cannot be written, and come out as eighths and dotted eighths
+
+The listener's complaint (2026-09-11): jazz uses triplets constantly, and
+the page approximates some of them with eighths and dotted eighths.
+Counted over the twelve hand scores (4,234 melody notes): 10.7% are ternary
+(451 notes on thirds of a beat, or a third or two thirds of a beat long).
+Of those, 68 (15.1%) sit in a beat holding fewer than three onsets -- the
+gate `choose_grid` applies before a ternary grid may be chosen -- and 48 of
+the 68 are quarter-note triplets, 19 of them in Flanagan's Giant Steps
+alone; 19 cross a beat line, which `notate._subdivide` never lets a tuplet
+do. The human writes ONE dotted-eighth + sixteenth pair in 4,234 notes; our
+pages of the same twelve solos (through `run_eval.notate_run`) hold 115 in
+4,653 -- 2.5 per hundred notes -- and 7.2% tuplet notes against the human's
+10.7%.
+
+That is the mechanism. Two onsets at 0 and 2/3 of a beat cannot vote a
+tuplet, so either the sixteenth grid takes them (dotted eighth plus
+sixteenth) or the swing warp pulls the second to 0.5 and they are written
+as an eighth pair. The three-onset gate is load-bearing for the swung-pair
+convention (D12) and must stay for beat-level triplets; what is missing is
+a HALF-NOTE unit hypothesis -- three onsets at 0, 2/3 and 4/3 over two
+beats -- which needs quantize to choose a grid over a beat pair and notate
+to allow a tuplet over a two-beat unit. None of the open items above
+addresses it. Not yet attempted; the 48 quarter-note triplets, and the 383
+three-onset ternary notes we already write, are the yardstick.
 
 ## Resolved
+
+### R22 - The harness notated on the raw tracked beats, in 4/4, anchored on its own choice (was D27)
+
+`run_eval.notate_run` handed `notation_for_span` the beat cache's raw
+beats, the default 4/4 and the sidecar's anchor alone, while the Score
+button's page came from `gui/musicxml.bar_grid`: `meter.bar_grid`'s
+repaired grid (a dropped beat inserted, a doubled one removed, the edge
+pulse extended) under the sidecar's time signature, pulse count and
+downbeat, with the downbeat layer's phase where the sidecar has none.
+`notation.bar_grid_for_settings` is now that derivation in the package and
+the harness builds its page through it; the grid cache carries the downbeat
+layer and the track length it needs (backfilled once: 86 tracks re-tracked,
+every one reproducing its cached beats). One hand score (Someday My Prince
+Will Come) and four WJazzD solos (This Here, both My Favorite Things,
+Footprints) are in 3/4 or 6/4 and had been barred in 4/4.
+
+What moved, paired against the pinned card. Transcription: nothing (`wjazz`
+and `mscz` untouched). Hand-score pages, 19 rows (12 tracks, 7 oracle
+takes): rhythm 0.7753 -> 0.7730 (3 up / 6 down), value 0.6947 -> 0.6935;
+Someday My Prince 49 -> 64 bars, now in 3/4; Carl Perkins the biggest
+loser (0.741 -> 0.722, oracle 0.762 -> 0.730), Confirmation +0.012, Giant
+Steps oracle +0.013; pinned `pianist_rhythm` 0.7805 -> 0.7781 and its
+oracle 0.8243 -> 0.8201. WJazzD pages, 77 rows: rhythm 0.6311 -> 0.6321
+(21 up / 12 down) at coverage 0.864, Brother Hubbard 256 +0.041, Wayne
+Shorter's Orbits +0.031; the two My Favorite Things solos gain about 45
+events each in 3/4 and solo 228 loses 0.021. Small, as R21's measurement
+predicted: rhythm is gap-based. Parity with the sheet: on all twelve
+hand-scored tracks the harness rhythm is within 0.05 of the Score button's
+row (Confirmation 0.750 against 0.754, Soul Station 0.818 against 0.811);
+what remains is the NOTES, not the grid -- the sheet's come from the review
+with the listener's erasures and count differently on every track. Tests:
+tests/test_notation.py (`bar_grid_for_settings`), tests/test_eval_harness.py
+(the repaired grid, the time signature, the backfill).
+
+Two machine faults surfaced on the way and are fixed in the package: the
+cache panel had deleted every ingest wav while the pipeline went on serving
+the cached Documents that point at them, so re-tracking died inside
+beat_this (`pipeline._run_stages` treats such a Document as a miss now and
+re-ingests); and OneDrive refused the rewrite of the re-ingested entry with
+WinError 5 (`cache._replace` retries, then warns and keeps the old one).
 
 ### R21 - `repair_beats` mended a dropped beat and never a doubled one
 
@@ -1056,8 +1106,9 @@ Station's export against the hand score after R20: bars 1, 2, 9 and 10
 agree position for position, the only differences being the grid (a triplet
 where the hand has sixteenths) and the pitch at the chord tops (D24).
 
-`run_eval` has no roll and passes the sidecar's anchor alone; its rhythm
-number is gap-based and phase-immune, and the deltas are in the commit that
+`run_eval` has no roll and passed the sidecar's anchor alone (until R22, when
+it took the roll's grid and anchor as well); its rhythm number is gap-based
+and phase-immune, and the deltas are in the commit that
 carries this: every hand score lost one or two bars (the empty margin bar,
 and Art Pepper's and Giant Steps' two), notation rhythm moved within +-0.03
 per score in both directions (bar lines decide where ties split and which

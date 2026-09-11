@@ -10,6 +10,7 @@ import pytest
 
 from swingscribe import pipeline
 from swingscribe.config import Config
+from swingscribe.model import AudioRef, BeatGrid
 
 
 def make_config(tmp_path) -> Config:
@@ -243,3 +244,37 @@ def test_cached_document_peeks_without_executing(tmp_path):
 
 def test_cached_document_with_no_stages_is_none(tmp_path):
     assert pipeline.cached_document(write_audio(tmp_path), make_config(tmp_path), []) is None
+
+
+def test_a_cached_document_whose_wav_is_gone_is_not_a_hit(tmp_path):
+    """The cache panel deletes ingest wavs (gui/storage.py). A cached Document
+    that points at a deleted wav must run its stage again -- which writes the
+    same digest-named wav back -- rather than hand every stage below it a
+    path to nothing. The stages below are whole again once the wav is."""
+    calls = []
+    wav = tmp_path / "cache" / "audio" / "digest-44100.wav"
+
+    def ingest(doc, config):
+        calls.append("ingest")
+        wav.parent.mkdir(parents=True, exist_ok=True)
+        wav.write_bytes(b"wav")
+        audio = AudioRef(path=str(wav), sample_rate=44100, channels=2, duration=1.0)
+        return doc.model_copy(update={"audio": audio})
+
+    def beats(doc, config):
+        calls.append("beats")
+        grid = BeatGrid(beats=[0.0], downbeats=[], beats_per_bar=4)
+        return doc.model_copy(update={"beat_grid": grid})
+
+    stages = [("ingest", ingest), ("beats", beats)]
+    audio = write_audio(tmp_path)
+    config = make_config(tmp_path)
+
+    pipeline.run(audio, config, stages=stages)
+    wav.unlink()
+    document = pipeline.run(audio, config, stages=stages)
+
+    assert wav.is_file()
+    assert document.audio is not None and Path(document.audio.path) == wav
+    assert document.beat_grid is not None
+    assert calls == ["ingest", "beats", "ingest"]

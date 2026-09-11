@@ -33,11 +33,14 @@ score writes them. Before this, with no downbeat in the sidecar, export
 anchored on the first beat of its two-second margin, and Soul Station's page
 sat one beat off the bar lines drawn on the roll.
 
-This deliberately does not call `stages/meter.py`. Meter derivation exists to
-find where a steady pulse starts and stops across a whole track, and to repair
-and extrapolate around the tracker's gaps; over a span the user has already
-selected by ear, with a downbeat they have already placed by hand, there is
-nothing left for it to decide.
+`notation_for_span` deliberately does not call `stages/meter.py`. Meter
+derivation exists to find where a steady pulse starts and stops across a whole
+track, and to repair and extrapolate around the tracker's gaps; over a span
+the user has already selected by ear, with a downbeat they have already placed
+by hand, there is nothing left for it to decide. That work is done BEFORE the
+span is trimmed, over the whole tracked grid, by `bar_grid_for_settings` --
+the one derivation the roll, the Export button and the eval harness share, so
+the page the harness scores is the page the listener sees.
 """
 
 from swingscribe.config import Config
@@ -171,6 +174,43 @@ def meter_from_settings(
         if value is not None
     }
     return meter.resolve_meter(config.meter.model_copy(update=overrides))
+
+
+def bar_grid_for_settings(
+    beats: list[float],
+    downbeats: list[float],
+    settings: dict,
+    config: Config,
+    duration: float,
+) -> tuple[list[float], float | None]:
+    """The beat grid AS THE ROLL DRAWS IT, and the beat it counts bars from.
+
+    The tracked beats through `meter.bar_grid` -- repaired (a dropped beat
+    inserted, a doubled one removed) and extended to the track's ends --
+    under the listener's per-track settings: their time signature, pulse
+    count and downbeat if they set them, the downbeat layer's best phase if
+    not. The Export button and the eval harness both build their page from
+    this. The harness used to notate the raw tracked beats, so every bar
+    after an unrepaired drop or double sat a beat off the listener's page and
+    its rhythm numbers carried a defect the Score button's did not (D27).
+
+    Whole-track, before the span is trimmed: the repair needs the pulse
+    either side of a gap, and the anchor's phase is read off the full grid
+    (`span_anchor`).
+    """
+    overrides = {
+        key: value
+        for key, value in {
+            "time_signature": settings.get("time_signature"),
+            "pulses_per_bar": settings.get("pulses_per_bar"),
+            "anchor": settings.get("anchor"),
+        }.items()
+        if value is not None
+    }
+    meter_config = config.meter.model_copy(update=overrides)
+    repaired, sections = meter.bar_grid(beats, downbeats, meter_config, duration)
+    anchor = sections[0].anchor if sections else settings.get("anchor")
+    return [beat.time for beat in repaired], anchor
 
 
 def notation_for_span(

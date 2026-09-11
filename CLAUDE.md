@@ -151,6 +151,17 @@ of these has broken a tool at least once:
   error, delete it, retry. Three passes was typical. A partial sync leaves
   packages UNINSTALLED (openpyxl went missing this way), so re-run until it
   reports success rather than assuming the first error was cosmetic.
+- **OneDrive locks a cache entry being REWRITTEN, too** (2026-09-11):
+  `os.replace(tmp, existing.bin)` in `cache.put` raised WinError 5 over a
+  377-byte ingest record and killed an eval run three seconds in.
+  `cache._replace` retries and then warns and leaves the old entry -- the
+  caller's Document is right either way. What was rewriting it: the cache
+  panel had deleted every ingest wav (its job) while the pipeline went on
+  serving the cached Documents that point at them, so `beats.run` died in
+  beat_this with a `LibsndfileError` "System error" on a path that no
+  longer existed. `pipeline._run_stages` now treats a cached Document
+  whose wav is gone as a miss; re-running ingest writes the same
+  digest-named wav back and every entry below is whole again.
 - **Application Control still blocks other things** (checked 2026-08-30): the
   numba lift above is about numba specifically, not AC in general.
   `uv run swingscribe <command>` fails with `error: Failed to spawn:
@@ -293,7 +304,11 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   because it is gap-based and cannot see a bar count. A half-rate grid
   with the true pulse surfacing (Brother Hubbard) is NOT this defect and
   reads worse after it; that is the octave error's, still open (R21). The
-  harness never sees any of it: `run_eval` notates on the raw grid (D27).
+  harness sees it since 2026-09-11 (R22): `run_eval` builds its page
+  through `notation.bar_grid_for_settings`, the same repaired grid under
+  the same sidecar meter the Export button uses, and its rhythm is within
+  0.05 of the Score button's row on every hand-scored track -- the
+  remainder is the notes (the review's, with erasures), not the grid.
 - Bar lines are derived by counting beats from an anchor. The beat tracker's
   detected downbeat layer is noise (open-issue #5) and must not be drawn or
   trusted; only its pulse layer is reliable.
@@ -322,8 +337,9 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   against the bars on screen and left bar 1 empty. `notation.span_anchor`
   reads the anchor's PHASE off the whole grid (the anchor is usually minutes
   before the span) and makes bar 1 the bar line nearest the span start; notes
-  before it are a pickup in bar 0. `run_eval` has no roll and passes the
-  sidecar's anchor only; its rhythm number is gap-based and phase-immune.
+  before it are a pickup in bar 0. `run_eval` has no roll but takes the
+  anchor `meter.bar_grid` gives the roll (R22); its rhythm number is
+  gap-based and phase-immune either way.
 - **`ensemble` and `transposition` are per-track sidecar fields with menus
   built from `config.ENSEMBLES`/`TRANSPOSITIONS`.** Neither is inferable from
   the signal — one says who is playing, the other which horn — so both can only

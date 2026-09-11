@@ -2,6 +2,7 @@
 
 import pytest
 
+from swingscribe import cache as cache_module
 from swingscribe.cache import StageCache, canonical_json, root_key, stage_key
 
 
@@ -85,3 +86,49 @@ def test_rejects_malformed_key(tmp_path):
         cache.get("not-a-sha256-key")
     with pytest.raises(ValueError):
         cache.put("../escape", b"payload")
+
+
+# -- a locked entry (OneDrive holds a file it is syncing) --------------------
+
+KEY = "a" * 64
+
+
+def _locked_replace(monkeypatch, failures: int):
+    """os.replace that answers WinError 5 `failures` times, then works."""
+    import os
+
+    real = os.replace
+    seen = []
+
+    def replace(src, dst):
+        seen.append(dst)
+        if len(seen) <= failures:
+            raise PermissionError(5, "Access is denied")
+        return real(src, dst)
+
+    monkeypatch.setattr(cache_module.os, "replace", replace)
+    monkeypatch.setattr(cache_module, "RETRY_DELAY_S", 0.0)
+    return seen
+
+
+def test_a_briefly_locked_entry_is_written_on_retry(tmp_path, monkeypatch):
+    cache = StageCache(tmp_path)
+    cache.put(KEY, b"old")
+    seen = _locked_replace(monkeypatch, failures=2)
+    cache.put(KEY, b"new")
+    assert cache.get(KEY) == b"new"
+    assert len(seen) == 3
+    assert not list(tmp_path.rglob("*.tmp"))
+
+
+def test_an_entry_locked_for_good_is_left_as_it_was_and_reported(tmp_path, monkeypatch):
+    """The caller's Document is right either way; the pipeline re-checks what
+    an entry points at rather than trusting the write, so a stale entry costs
+    a re-run, never a wrong answer. Raising killed an eval run over it."""
+    cache = StageCache(tmp_path)
+    cache.put(KEY, b"old")
+    _locked_replace(monkeypatch, failures=cache_module.REPLACE_ATTEMPTS)
+    with pytest.warns(RuntimeWarning, match="locked"):
+        cache.put(KEY, b"new")
+    assert cache.get(KEY) == b"old"
+    assert not list(tmp_path.rglob("*.tmp"))

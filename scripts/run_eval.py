@@ -299,7 +299,13 @@ def beat_grids(cache: Path = GRIDS_CACHE, log=print) -> dict:
         # the exact "scores a subset without saying so" failure this docstring
         # is about, reintroduced by making two of three globs recursive.
         name = sidecar_name(sidecar_path, json.loads(sidecar_path.read_text(encoding="utf-8")))
-        if name in grids or not (BENCH / name).is_file():
+        cached = grids.get(name)
+        # A grid cached before D27 holds the beats alone. The repaired bar
+        # grid the harness notates on now also wants the downbeat layer (the
+        # auto anchor's phase, when the sidecar has no downbeat) and the
+        # track's length (how far the edge pulse may be extended), so such an
+        # entry is tracked once more and keeps its beats.
+        if (cached is not None and "duration" in cached) or not (BENCH / name).is_file():
             continue
         config = eval_config()
         document = library.ingested_document(BENCH / name, config)
@@ -307,8 +313,23 @@ def beat_grids(cache: Path = GRIDS_CACHE, log=print) -> dict:
         # No stems on the document: the mix is the source, and handing this
         # stage a drum stem would measure a grid the pipeline does not build.
         grid = beats.run(document, config).beat_grid
-        log(f"  {name}: {len(grid.beats)} beats in {time.time() - started:.0f}s")
-        grids[name] = {"beats": [round(float(b), 4) for b in grid.beats], "source": grid.source}
+        entry = {
+            "beats": [round(float(b), 4) for b in grid.beats],
+            "downbeats": [round(float(b), 4) for b in grid.downbeats],
+            "duration": round(float(document.audio.duration), 3),
+            "source": grid.source,
+        }
+        if cached is not None and cached["beats"] != entry["beats"]:
+            # The pinned numbers stand on the cached beats; a tracker that no
+            # longer reproduces them is a finding to report, not a reason to
+            # move them quietly. Its downbeats belong to the other grid.
+            log(
+                f"  {name}: re-tracked {len(entry['beats'])} beats against "
+                f"{len(cached['beats'])} cached; keeping the cached grid, no downbeat layer"
+            )
+            entry.update(beats=cached["beats"], downbeats=[], source=cached.get("source", ""))
+        log(f"  {name}: {len(entry['beats'])} beats in {time.time() - started:.0f}s")
+        grids[name] = entry
         cache.write_text(json.dumps(grids), encoding="utf-8")
     return grids
 
@@ -410,7 +431,7 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
     import json as _json
 
     from swingscribe.model import NoteEvent
-    from swingscribe.notation import notation_for_span
+    from swingscribe.notation import bar_grid_for_settings, meter_from_settings, notation_for_span
 
     track = track_of(name)  # the key may carry a take; the sidecar is the track's
     sidecar_path = BENCH / f"{track}.swingscribe.json"  # name carries any subfolder
@@ -418,6 +439,20 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
     if sidecar_path.is_file():
         sidecar = _json.loads(sidecar_path.read_text(encoding="utf-8"))
 
+    config = eval_config()
+    # The page the Score button scores is built on the REPAIRED grid, under
+    # the sidecar's meter settings (gui/musicxml.bar_grid). Until D27 this
+    # notated the raw tracked beats in 4/4, so every bar after a dropped or
+    # doubled beat sat a beat off the listener's page. A grid cached before
+    # then carries no length; its last beat stands in, which only forgoes the
+    # extension past it.
+    raw = grid["beats"]
+    beats, anchor = bar_grid_for_settings(
+        raw, grid.get("downbeats", []), sidecar, config, grid.get("duration") or raw[-1]
+    )
+    signature, pulses = meter_from_settings(
+        sidecar.get("time_signature"), sidecar.get("pulses_per_bar"), config
+    )
     return notation_for_span(
         str(BENCH / track),
         [
@@ -434,11 +469,14 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
             # notes have to be cut to it as well as the beat grid.
             if region is None or region[0] <= n["onset"] <= region[1]
         ],
-        grid["beats"],
+        beats,
         region or tuple(run["region"]),
         stem=run["stem"],
-        config=eval_config(),
-        anchor=sidecar.get("anchor"),
+        config=config,
+        anchor=anchor,
+        time_signature=signature,
+        pulses_per_bar=pulses,
+        double_time=bool(sidecar.get("double_time")),
     )
 
 
