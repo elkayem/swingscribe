@@ -29,7 +29,7 @@ def _add_common(parser: argparse.ArgumentParser, *, region: bool = False) -> Non
     parser.add_argument(
         "--config",
         default=str(DEFAULT_CONFIG_PATH),
-        help="Path to a YAML config file (default: config/default.yaml)",
+        help="Path to a YAML config file (default: the packaged default-config.yaml)",
     )
     if region:
         parser.add_argument(
@@ -74,6 +74,8 @@ def _add_tempo_hint(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="swingscribe",
+        # ASCII only in anything printed: a Windows console is often cp1252,
+        # and one arrow made `--help` die with UnicodeEncodeError (2026-09-13).
         description="Jazz audio in -> instrument-separated, swing-aware notation out",
     )
     parser.add_argument("--version", action="version", version=f"swingscribe {__version__}")
@@ -141,7 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
     gui_parser.add_argument(
         "--config",
         default=str(DEFAULT_CONFIG_PATH),
-        help="Path to a YAML config file (default: config/default.yaml)",
+        help="Path to a YAML config file (default: the packaged default-config.yaml)",
     )
     gui_parser.add_argument(
         "--library", default=None, help="Directory the track picker lists (default: cwd)"
@@ -178,7 +180,7 @@ def build_parser() -> argparse.ArgumentParser:
     cache_parser.add_argument(
         "--config",
         default=str(DEFAULT_CONFIG_PATH),
-        help="Path to a YAML config file (default: config/default.yaml)",
+        help="Path to a YAML config file (default: the packaged default-config.yaml)",
     )
     return parser
 

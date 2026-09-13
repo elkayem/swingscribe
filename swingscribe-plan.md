@@ -175,11 +175,10 @@ swingscribe/
 ├── pyproject.toml
 ├── CLAUDE.md                    # working notes for Claude Code (see §9)
 ├── README.md
-├── config/
-│   └── default.yaml
 ├── src/swingscribe/
 │   ├── model.py                 # pydantic document + stage types
 │   ├── config.py
+│   ├── default-config.yaml      # the default Config, shipped in the package
 │   ├── cache.py
 │   ├── cli.py
 │   ├── pipeline.py              # orchestration only, no logic

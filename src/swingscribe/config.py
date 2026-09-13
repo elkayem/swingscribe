@@ -1,6 +1,6 @@
 """Configuration: one object threaded through the pipeline (plan §2).
 
-Loaded from config/default.yaml (or a user-supplied YAML); individual values
+Loaded from the packaged default-config.yaml (or a user-supplied YAML); values
 can be overridden via SWINGSCRIBE_* environment variables, e.g.
 SWINGSCRIBE_TRANSCRIBE__ENSEMBLE=solo-piano.
 
@@ -15,8 +15,11 @@ import yaml
 from pydantic import BaseModel, model_serializer
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Repo-root default; fine for development checkouts, which is all M0 supports.
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "default.yaml"
+# Shipped INSIDE the package (it used to be `config/default.yaml` at the repo
+# root, which a wheel install or a frozen build does not have): a checkout,
+# a wheel and a PyInstaller bundle all find it beside this module. Not under
+# a `config/` directory, which would shadow this module's name.
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "default-config.yaml"
 
 # Named as types so the GUI can offer exactly what the config accepts. A menu
 # built from a hand-copied list is a menu that drifts out of step with the

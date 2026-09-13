@@ -1,4 +1,4 @@
-"""Config loading from config/default.yaml (plan §2)."""
+"""Config loading from the packaged default-config.yaml (plan §2)."""
 
 import pytest
 

@@ -147,7 +147,7 @@ config (cache.py, plan §3): two configs that differ in even one field neither
 stage actually reads still produce two different keys. So this uses
 `Config.from_yaml()` — the exact config `swingscribe gui`/`swingscribe run`
 load by default — never a bare `Config()`, whose pydantic defaults quietly
-disagree with config/default.yaml in at least one field
+disagree with the packaged default-config.yaml in at least one field
 (`beats.use_drum_stem`: code default False, yaml default True — behaviourally
 identical here since beats runs before separate and so never sees a drum
 stem, but the cache key cannot tell that). A bare `Config()` was this script's
@@ -155,7 +155,7 @@ first version, and it silently built separations and beat grids the live GUI
 could never find under its own default cache directory — indistinguishable
 from Beats never having run at all.
 
-`cache_dir` is trickier, because it is NOT what config/default.yaml says
+`cache_dir` is trickier, because it is NOT what default-config.yaml says
 (`.swingscribe-cache`) resolved against any one fixed place — it is that
 string resolved against whatever directory `swingscribe gui` happens to be
 launched FROM, which is a habit, not a setting. Checked against a live

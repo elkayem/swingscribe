@@ -153,8 +153,8 @@ Design the classes yourself, but they must satisfy these constraints:
 - Run Python as `.venv\Scripts\python.exe`, never `uv run swingscribe`
   (Application Control blocks the console stub). No librosa, resampy or
   numba-dependent packages; do not add any dependency without asking.
-- The GUI and CLI build their config with `Config.from_yaml("config/
-  default.yaml")`; a bare `Config()` hashes to different cache keys and
+- The GUI and CLI build their config with `Config.from_yaml()` (the
+  packaged `default-config.yaml`); a bare `Config()` hashes to different cache keys and
   finds nothing in the cache.
 - Two cache directories: `.swingscribe-cache` (GUI, repo root) and
   `benchmark/.swingscribe-cache` (batch, Roformer spans). `run_eval.py`
