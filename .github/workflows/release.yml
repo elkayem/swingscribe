@@ -1,0 +1,66 @@
+# Build the portable Windows folder and attach it to a GitHub Release.
+#
+# Triggered by pushing a tag `v<version>` that matches pyproject's version.
+# The zip is a copy of the lock file's contents into a pinned standalone
+# interpreter (packaging/build_portable.ps1); this runner is a machine that
+# has never had the dev environment, so a file the build forgot fails here
+# and not on a user. It cannot judge Smart App Control -- that test is by
+# hand on the dev machine before the tag is pushed (docs/packaging-plan.md,
+# "Rebuilding a release").
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  portable-windows:
+    name: portable folder (windows)
+    runs-on: windows-latest
+    permissions:
+      contents: write   # to attach the zip to the release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Tag must match pyproject's version
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          $tag = "${{ github.ref_name }}"
+          if ($tag -ne "v$version") { throw "tag $tag does not match pyproject version $version" }
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build the portable folder
+        shell: pwsh
+        run: .\packaging\build_portable.ps1 -OutDir "${{ runner.temp }}\portable"
+
+      - name: Smoke test the folder
+        shell: pwsh
+        # The launcher as a user runs it, headless: start, answer /api/config,
+        # stop through the Quit endpoint, exit 0. Model weights are not
+        # downloaded here; that is the by-hand test's job.
+        run: |
+          $folder = "${{ runner.temp }}\portable\SwingScribe"
+          $proc = Start-Process -FilePath "$folder\SwingScribe.cmd" -ArgumentList "--no-browser","--port","8433" -PassThru -NoNewWindow
+          $ok = $false
+          foreach ($i in 1..60) {
+            Start-Sleep -Seconds 1
+            try { $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8433/api/config; if ($r.StatusCode -eq 200) { $ok = $true; break } } catch {}
+            if ($proc.HasExited) { break }
+          }
+          if (-not $ok) { throw "the GUI did not answer within 60 s (exit code $($proc.ExitCode))" }
+          Invoke-WebRequest -UseBasicParsing -Method POST http://127.0.0.1:8433/api/quit | Out-Null
+          $proc.WaitForExit(30000) | Out-Null
+          if ($proc.ExitCode -ne 0) { throw "the launcher exited with $($proc.ExitCode)" }
+          "smoke test passed"
+
+      - name: Attach the zip to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ runner.temp }}/portable/SwingScribe-${{ env.VERSION }}-windows-x64.zip
+          generate_release_notes: true

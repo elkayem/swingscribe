@@ -1,8 +1,13 @@
 # Packaging plan: a double-click SwingScribe
 
-Status: **pieces 1 and 2 done (2026-09-12); piece 3 re-planned as a
-portable folder in a zip (2026-09-13) and not started.** The review's
-findings are folded in below and the decisions are recorded at the end.
+Status: **pieces 1 and 2 done (2026-09-12); piece 3 built and tested on
+this machine with Smart App Control on (2026-09-13)** — launch, ingest
+through the bundled ffmpeg, Beats, Separate (htdemucs, child process),
+Transcribe (CREPE and the piano oracle), Export, Quit, every weight
+downloading into the per-user folder on the way. Folder 1.31 GB, zip
+443 MB. Still to do: the second-laptop test, the first tagged release, and
+the BS-Roformer-SW licence. The review's findings are folded in below and
+the decisions are recorded at the end.
 
 ## What this delivers
 
@@ -167,13 +172,14 @@ verified here with the feature on, which no installer could be.
 What it gives up against the installer: about twice the disk (nothing is
 pruned), no Program Files location, and SmartScreen's one-time "Run"
 prompt on the first launch of the `.cmd`, because the file came from the
-internet. What it gains: no signing, no hidden-import wrangling (the whole
+internet. Measured 2026-09-13: the folder is 1.31 GB (1.13 GB of it
+`site-packages`), the zip 443 MB. What it gains: no signing, no hidden-import wrangling (the whole
 `site-packages` goes in), and a build that is a copy, not a compile.
 
 ### What the user receives
 
-`SwingScribe-<version>-windows-x64.zip`, roughly 700 MB, from the GitHub
-Releases page. They extract it wherever they like — Documents, the desktop,
+`SwingScribe-<version>-windows-x64.zip`, 443 MB (1.31 GB extracted), from
+the GitHub Releases page. They extract it wherever they like — Documents, the desktop,
 a second drive — and get one folder:
 
 ```
@@ -233,6 +239,16 @@ cache and the downloaded weights (about 2 GB, and the only part worth
 asking about); and finally the folder itself, which a script can do by
 handing the last step to a detached `cmd /c` that runs after it exits. It
 says out loud that the sidecars beside the music are left alone.
+
+Tested 2026-09-13 from the zip itself: extracted to `C:\SwingScribe-test`,
+`setup.cmd` made both icons and the Apps entry, the launcher answered on
+its port and quit cleanly, and `uninstall.cmd` (answering yes, then no to
+the data folder) removed the icons, the entry and the folder, and left the
+data folder and the sidecars alone. `uninstall.cmd /y` runs it unattended
+and keeps the data; `/y /data` deletes the data too. One dev-machine
+quirk: `%LOCALAPPDATA%\SwingScribe` is also where `scripts/setup_fixtures.py`
+keeps the tier-1 soundfonts (`fixtures\`), so `/data` here would remove
+those as well; they are re-fetched by that script.
 
 `setup.cmd` registers the app under
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\SwingScribe`
@@ -319,7 +335,16 @@ Two machines, both available:
 
 - **This machine, Smart App Control on.** Launching the folder here is the
   per-file test: every executable in it is judged as it loads, and a
-  refused one is a visible failure in the console. This is the check that
+  refused one is a visible failure in the console. **Passed 2026-09-13**
+  on the first build: the whole sequence below ran through the API with
+  the feature enforcing, the four weight sets downloading into
+  `%LOCALAPPDATA%\SwingScribe\models` as each step first needed them.
+  One thing to expect while building here: Norton's data protector
+  prompts when the build's clean step deletes the previous folder and
+  refuses it until allowed ("access denied" on `folder.gif` under the
+  repo, then on `libcrypto-3-x64.dll` under app-data); it is the build
+  script removing its own output, and allowing it is safe — the user
+  allowed it on 2026-09-13. This is the check that
   no installer could pass and the reason for the shape. A pass today is not
   a pass forever — reputation flaps, as the venv launcher did on
   2026-09-12 — so versions stay pinned to files that passed, and a release
@@ -413,17 +438,86 @@ part of the install.
 
 ---
 
+## Rebuilding a release (the repeatable sequence)
+
+Everything below is in git; nothing depends on this machine except the
+Smart App Control test, which needs a machine with the feature on.
+
+1. **Bump the version** in `pyproject.toml`. The zip, the `VERSION` file,
+   the Settings > Apps entry and the release tag all read it from there.
+2. **Build:**
+
+   ```
+   .\packaging\build_portable.ps1
+   ```
+
+   Output lands in `%LOCALAPPDATA%\SwingScribe-build\` -- outside the repo
+   on purpose, because the repo is under OneDrive, which locks files in a
+   tree being removed and would sync 1.5 GB of build output: the
+   `SwingScribe\` folder, `SwingScribe-<version>-windows-x64.zip`, and a
+   `downloads\` cache that makes the next build skip the fetches.
+   `-OutDir` moves it; `-SkipZip` while iterating on the scripts. Needs uv,
+   git and a network; the script sets `UV_LINK_MODE=copy` itself.
+3. **Launch it here, with Smart App Control on:**
+
+   ```
+   & "$env:LOCALAPPDATA\SwingScribe-build\SwingScribe\SwingScribe.cmd" --no-browser --port 8798
+   ```
+
+   then open a track, run Beats, Separate with htdemucs, Transcribe, Export,
+   Quit. This is the per-file reputation test: a refused DLL is a visible
+   failure in that console. Do it for every release, because verdicts flap.
+4. **Test on the second laptop** as a stranger's machine (Smart App Control
+   is off there): download the zip in a browser, extract, `setup.cmd`, the
+   icon, the same run, `uninstall.cmd`; then confirm its own Python still
+   imports its own packages unchanged and that only the sidecar is left.
+5. **Tag and push:**
+
+   ```
+   git tag v<version> && git push origin v<version>
+   ```
+
+   `.github/workflows/release.yml` rebuilds the zip on a clean Windows
+   runner, smoke-tests the launcher headless, and attaches the zip to a
+   GitHub Release for the tag. It refuses a tag that does not match
+   pyproject's version. Its zip is byte-for-byte the same recipe as step 2.
+
+**Moving a pin.** The pins are the block at the top of
+`packaging/build_portable.ps1`: the python-build-standalone release and
+asset, its checksum, the recorded `python.exe` hash, the ffmpeg tag and
+asset, the torch index. To change the interpreter: pick the release,
+update asset and checksum from that release's `SHA256SUMS`, run the build
+with the old `python.exe` hash still in place so it fails and prints the new
+one, launch the new interpreter on a Smart App Control machine (it is a
+different file with its own reputation clock), and only then record the new
+hash. To change ffmpeg: pick a BtbN `autobuild-*` tag and its `win64-lgpl`
+asset; the checksum is read from the release's own `checksums.sha256`. A
+library moves by moving the lock file (`uv lock`) — the build reads the lock,
+so a version bump in pyproject followed by `uv lock` is the whole change,
+and step 3 is what says whether the new files pass.
+
+**Where the pieces live:**
+
+| | |
+|---|---|
+| `packaging/build_portable.ps1` | the build, with the pins at the top |
+| `packaging/portable/` | `SwingScribe.cmd`, `setup.cmd`, `uninstall.cmd`, `README.txt`, copied into the folder verbatim |
+| `packaging/NOTICES.md` | third-party licences, copied into the folder |
+| `assets/swingscribe.ico` | the icon (`scripts/make_shortcut.ps1` draws it) |
+| `src/swingscribe/default-config.yaml` | copied into the folder as `swingscribe.yaml` |
+| `.github/workflows/release.yml` | the tag-triggered build and release |
+
 ## Effort and cost
 
 | Piece | Developer time | Money |
 |---|---|---|
 | 1. Quit button and the same-origin check | 2 hours (done) | none |
 | 2. Desktop icon, launcher fallback, icon file | 1 hour (done) | none |
-| 3a. Codebase prerequisites (five items above) | half a day | none |
-| 3b. Build script and the first zip | 1 day | none |
-| 3c. setup, uninstall, the Settings > Apps entry | half a day | none |
-| 3d. The two machine tests | half a day | none |
-| 3e. Release workflow and the installation page | half a day | none |
+| 3a. Codebase prerequisites (five items above) | half a day (done) | none |
+| 3b. Build script and the first zip | 1 day (done) | none |
+| 3c. setup, uninstall, the Settings > Apps entry | half a day (done; tested here from the zip: extract to `C:\SwingScribe-test`, setup, launch, uninstall) | none |
+| 3d. The two machine tests | half a day (this machine done; the laptop open) | none |
+| 3e. Release workflow and the installation page | half a day (written, unrun) | none |
 | Mac | later, on request | none if built on python.org's signed interpreter |
 | Per release after that | a tag push, two launches by hand, a wait | |
 

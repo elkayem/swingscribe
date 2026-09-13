@@ -314,6 +314,36 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   `Origin` is not this server's: a page on another site can POST to
   localhost and the request takes effect unread. Closing the tab does NOT
   stop the server; the guide says so.
+- **The shipped app is a PORTABLE FOLDER in a zip, not an installer**
+  (2026-09-13, docs/packaging-plan.md piece 3). Smart App Control judges
+  every executable by the reputation of its exact bytes, so a PyInstaller
+  launcher or an Inno installer — unique binaries every build — is refused
+  and the signing budget is zero; a folder of files that already carry
+  reputation (python-build-standalone's `python.exe` at the PINNED RELEASE
+  uv runs here, the wheels' own DLLs, BtbN's LGPL ffmpeg) runs nothing
+  new. `packaging/build_portable.ps1` is the build, pins at the top;
+  `packaging/portable/` holds the launcher, `setup.cmd` (icons + a per-user
+  Settings > Apps entry) and `uninstall.cmd`; the release workflow rebuilds
+  on a tag. Output goes to `%LOCALAPPDATA%\SwingScribe-build`, NOT under
+  the repo: the first build there died removing its own previous output
+  (`idlelib\Icons\folder.gif`, "access denied" — Norton's data protector
+  prompted on it, and OneDrive holds emptied trees too), and OneDrive
+  would sync 1.5 GB of build tree. Verified 2026-09-13 with the feature
+  on: launch, ingest, Beats, Separate, Transcribe, Export, Quit all pass
+  from the built folder; folder 1.31 GB, zip 443 MB.
+  The launcher isolates with `-I` and points every download and the cache
+  at `%LOCALAPPDATA%\SwingScribe` through env vars (`TORCH_HOME`,
+  `AUDIO_SEPARATOR_MODEL_DIR`, `SWINGSCRIBE_MODELS_DIR`,
+  `SWINGSCRIBE_CACHE_DIR`, `SWINGSCRIBE_GUI__LIBRARY_DIR`) — which only
+  works because `Config.settings_customise_sources` now ranks the
+  environment ABOVE the yaml, as the module docstring always claimed. The
+  per-file reputation test is launching the folder HERE with the feature
+  on, every release; the second laptop (feature off) tests SmartScreen
+  and isolation. Two build-script traps: Windows PowerShell 5.1 turns a
+  native tool's stderr into a terminating error under `Stop` once output
+  is redirected (uv reports on stderr) — the script runs native tools
+  through `cmd /c ... 2>&1`; and `uv export` emits no index line, so torch's
+  `+cpu` pins need `--index <cpu index> --index-strategy unsafe-best-match`.
 - **The default config ships INSIDE the package** as
   `swingscribe/default-config.yaml` (2026-09-12; it was `config/default.yaml`
   at the repo root, which a wheel or a frozen build does not have). Not

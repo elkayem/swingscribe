@@ -4,7 +4,8 @@
 
 <p align="center">
   <a href="src/swingscribe/gui/guide/user-guide.md">User guide</a> ·
-  <a href="#get-started">Get started</a> ·
+  <a href="#install-windows-nothing-else-needed">Install</a> ·
+  <a href="#get-started-from-source">From source</a> ·
   <a href="#how-well-does-it-work">How well it works</a> ·
   <a href="docs/development.md">Developing</a>
 </p>
@@ -95,9 +96,56 @@ and the project keeps a running list of what is still wrong in
 research-grade software that is used daily; it is not finished, and it says
 so.
 
-## Get started
+## Install (Windows, nothing else needed)
 
-You need [uv](https://docs.astral.sh/uv/), Python 3.11, and ffmpeg for
+Each [release](https://github.com/elkayem/swingscribe/releases) carries
+`SwingScribe-<version>-windows-x64.zip`, about 450 MB: a folder holding its
+own Python, every library, ffmpeg and the app. Nothing is installed in the
+usual sense, and a Python already on your computer is neither used nor
+touched.
+
+1. **Download the zip and extract it somewhere with a short path**, such as
+   `C:\SwingScribe` or directly under Documents. A very deep path can hit
+   Windows' path-length limit part-way through extraction.
+2. **Double-click `setup.cmd`** in the folder, once. It puts a SwingScribe
+   icon on the desktop and in the Start Menu, and adds SwingScribe to
+   Settings > Apps.
+3. **Double-click the icon.** A console window opens minimized and the app
+   opens in your browser at `127.0.0.1:8420`. To stop, click **Quit** at the
+   top right of the page; closing the tab does not stop it.
+
+The first time Windows runs a script that came from the internet it may say
+"Windows protected your PC". Click *More info*, then *Run anyway*; it asks
+once per script. The first run of each step (beats, separation,
+transcription) downloads that step's model weights, about half a gigabyte
+all told and only once, into `%LOCALAPPDATA%\SwingScribe`; the progress bar
+says so while it happens.
+
+**What it writes:** downloaded weights and the cache under
+`%LOCALAPPDATA%\SwingScribe`, and a small `<track>.swingscribe.json` beside
+each audio file you open, holding your span, downbeat and edits. That file
+is yours to keep; it is what makes a track open the way you left it.
+
+**Updating:** extract the new version to a new folder, run its `setup.cmd`,
+delete the old folder. Weights and cache are shared, so nothing downloads
+again. **Uninstalling:** `uninstall.cmd` in the folder, or Settings > Apps.
+It removes the icons, the Apps entry and the folder, asks before removing
+the data folder, and never touches the sidecars beside your music.
+
+**If a new laptop refuses to run it:** Windows' Smart App Control judges
+every program file by reputation, and its verdicts change over time. Every
+file in the folder was checked against it before release. If it still
+refuses one, Windows Security > App & browser control > Smart App Control
+settings lets an administrator turn the feature off, and since the April
+2026 Windows update it can be turned back on afterwards. `README.txt` in
+the folder repeats all of this.
+
+Model and library licences are listed in `NOTICES.md` in the folder and
+under [packaging/](packaging/NOTICES.md) here.
+
+## Get started from source
+
+You need [uv](https://docs.astral.sh/uv/), Python 3.11, git, and ffmpeg for
 anything other than wav or flac.
 
 ```
