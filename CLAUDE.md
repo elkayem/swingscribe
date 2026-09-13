@@ -83,8 +83,12 @@ of these has broken a tool at least once:
   Control\CI\Policy\VerifiedAndReputablePolicyState = 1`, Microsoft's in-box
   policy `{0283AC0F-...}`). It judges by Microsoft's REPUTATION graph, not by
   signature, and it has **no allowlist or exclusion by design** — the only
-  ways out are a version with reputation, or turning SAC off for good (it
-  cannot be re-enabled without a clean Windows install). Blocked files raise
+  ways out are a version with reputation, a trusted signature, or turning
+  SAC off. Since the April 2026 update (KB5083769, build 26200.8286) an
+  administrator can switch it Off and back On from Windows Security without
+  reinstalling; before that Off was permanent. Switching it back On does not
+  grandfather anything: every file is judged again at load, so a build that
+  ran while it was Off is refused again once it is On. Blocked files raise
   **`OSError: [WinError 4551]`**, or `WinError 126` if someone has "fixed" it
   by renaming the file away — which is worse, because the error stops naming
   the cause.

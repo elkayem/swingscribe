@@ -1,8 +1,8 @@
 # Packaging plan: a double-click SwingScribe
 
-Status: **reviewed 2026-09-12; pieces 1 and 2 and the config move are being
-built, piece 3 waits for a release.** The review's findings are folded in
-below and the decisions it settled are recorded at the end.
+Status: **pieces 1 and 2 done (2026-09-12); piece 3 re-planned as a
+portable folder in a zip (2026-09-13) and not started.** The review's
+findings are folded in below and the decisions are recorded at the end.
 
 ## What this delivers
 
@@ -14,12 +14,13 @@ shipping.
 |---|---|---|
 | 1. A **Quit** button in the GUI that stops the server | everyone | now |
 | 2. A **desktop icon** that launches the GUI on this machine | the developer | now |
-| 3. An **installer** built by PyInstaller, Windows then Mac | users | when the product ships |
+| 3. A **portable folder** in a zip, with setup and uninstall scripts, Windows first | users | when the product ships |
 
-The end state for a user: download one installer from the GitHub Releases
-page, double-click it, get an icon. Double-click the icon, the app opens in the
-browser. Click Quit, it is gone. Nothing about Python, uv, or a terminal is
-visible to them.
+The end state for a user: download one zip from the GitHub Releases page,
+extract it, double-click `setup.cmd`, get an icon. Double-click the icon,
+the app opens in the browser. Click Quit, it is gone. Nothing about Python,
+uv, or a terminal is visible to them, and nothing else on their machine is
+touched.
 
 ---
 
@@ -114,7 +115,7 @@ launcher, which is the route that never trips Smart App Control because a
 | Target | `C:\Users\lkmcg\OneDrive\Documents\ClaudeCode\swingscribe\swingscribe.cmd gui` |
 | Start in | `C:\Users\lkmcg\OneDrive\Documents\ClaudeCode\swingscribe` |
 | Run | **Minimized** (not hidden; see below) |
-| Icon | `assets/swingscribe.ico` (to be made; see below) |
+| Icon | `assets/swingscribe.ico` (drawn by the script; see below) |
 
 `scripts/make_shortcut.ps1` creates it with `WScript.Shell` so it is
 reproducible, and can be re-run after the repo moves.
@@ -142,141 +143,178 @@ Three things about this that are not obvious:
 The icon file: the GUI has no favicon and the repo has no `.ico`. One is made
 once from a 256 px PNG (a treble clef over a waveform, or the hero image
 cropped) with a short PowerShell `System.Drawing` script, so no new
-dependency. The same file becomes the installer's and the exe's icon later.
+dependency. The same file becomes the shipped folder's icon.
 
 Size: fifteen minutes for the shortcut, an hour with the launcher fallback and
 the icon.
 
 ---
 
-## 3. The installer (PyInstaller)
+## 3. The portable folder (revised 2026-09-13; was a PyInstaller installer)
+
+### Why a folder in a zip, and not an installer
+
+Smart App Control judges every executable file by the reputation of its
+exact bytes. A PyInstaller launcher embeds our code, so every build is a
+binary nobody has seen and it is refused; an Inno Setup installer is a
+unique binary for the same reason. Signing would fix both, and the signing
+budget is zero. A folder of files that already have reputation — a standard
+`python.exe`, the DLLs exactly as the wheels ship them, ffmpeg from a known
+build — runs nothing new, and a zip runs nothing at all when it is
+extracted. So the shipped artifact is that folder, zipped, and it can be
+verified here with the feature on, which no installer could be.
+
+What it gives up against the installer: about twice the disk (nothing is
+pruned), no Program Files location, and SmartScreen's one-time "Run"
+prompt on the first launch of the `.cmd`, because the file came from the
+internet. What it gains: no signing, no hidden-import wrangling (the whole
+`site-packages` goes in), and a build that is a copy, not a compile.
 
 ### What the user receives
 
-`SwingScribe-<version>-windows-x64.exe`, roughly 600 to 900 MB, downloaded
-from the GitHub Releases page. Running it installs a folder under Program
-Files, a Start Menu entry and an optional desktop icon, and registers an
-uninstaller. First launch downloads the model weights (about half a gigabyte)
-into the user's profile and says so on screen. Nothing needs to be installed
-first: Python, torch, ffmpeg and the GUI's libraries are all in the folder.
+`SwingScribe-<version>-windows-x64.zip`, roughly 700 MB, from the GitHub
+Releases page. They extract it wherever they like — Documents, the desktop,
+a second drive — and get one folder:
 
-It is a **folder build with a launcher** (PyInstaller "onedir"), wrapped in an
-installer, not a single self-extracting file. A onefile build of this size
-unpacks to a temp directory on every launch and puts a long pause before
-anything appears.
+```
+SwingScribe\
+  SwingScribe.cmd       launch (the desktop icon points here)
+  setup.cmd             desktop icon + an entry in Settings > Apps
+  uninstall.cmd         the reverse of setup, plus the folder itself
+  swingscribe.yaml      the editable configuration file
+  README.txt            the short version of the install page
+  python\               CPython 3.11 with every library in its site-packages
+  ffmpeg\               ffmpeg.exe, an LGPL build
+```
 
-### Why this and not a bootstrap launcher
+Double-clicking `setup.cmd` once puts the icon on the desktop; the icon
+launches the GUI. First launch downloads the model weights (about half a
+gigabyte) into the user's profile and says so on screen. Nothing needs to
+be installed first, and nothing on the machine is changed except what
+setup writes, listed below.
 
-A bootstrap (a few-megabyte program that installs Python and the libraries on
-first run) has almost no build recipe to write, but every first launch then
-depends on the user's network, on the package index being up, and on the
-resolver picking the versions we tested. The installer contains exactly what
-was tested and works offline once installed. The price is the recipe below,
-paid once.
+### Isolation from anything else on the machine
+
+The folder cannot see, and cannot be seen by, a Python already installed on
+the machine, whatever library versions it has:
+
+- **Its own interpreter and its own libraries.** `python\python.exe` is the
+  interpreter and `python\Lib\site-packages` holds torch, the separators,
+  the GUI's libraries and SwingScribe itself, at the versions in the lock
+  file. The launcher runs it with `-I`, Python's isolated mode: it ignores
+  `PYTHONPATH`, `PYTHONHOME`, the user's own site-packages and the current
+  directory, so another Python's packages never load, and ours are never
+  visible to it.
+- **Nothing on PATH, nothing in the registry** apart from the per-user
+  uninstall entry `setup.cmd` writes (below). The launcher prepends
+  `ffmpeg\` to PATH for its own process only, which is how
+  `ingest.find_ffmpeg` finds it with no code change; that PATH dies with
+  the process.
+- **Downloads and the cache in one per-user place**,
+  `%LOCALAPPDATA%\SwingScribe`. The launcher sets `TORCH_HOME` (demucs and
+  beat_this weights), `AUDIO_SEPARATOR_MODEL_DIR` (the Roformer; its
+  default is `\tmp\audio-separator-models` on the drive root) and
+  `SWINGSCRIBE_CACHE_DIR` (pydantic-settings already reads `SWINGSCRIBE_*`),
+  and the piano checkpoint path gains the same override. A user who also
+  has the dev environment sees no clash: the two keep separate copies.
+- **The only file written anywhere else is the sidecar beside the audio**,
+  `<track>.swingscribe.json`, which holds the listener's own judgements and
+  is theirs to keep.
+
+### Uninstall
+
+`uninstall.cmd` removes, in order: the desktop shortcut; the Settings >
+Apps entry; `%LOCALAPPDATA%\SwingScribe` after asking, since it holds the
+cache and the downloaded weights (about 2 GB, and the only part worth
+asking about); and finally the folder itself, which a script can do by
+handing the last step to a detached `cmd /c` that runs after it exits. It
+says out loud that the sidecars beside the music are left alone.
+
+`setup.cmd` registers the app under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\SwingScribe`
+(display name, icon, version, install location, estimated size and the
+uninstall command), which is all Settings > Apps needs to list SwingScribe
+with a working Uninstall button. Per-user, no administrator prompt, and
+the same key is what a later `setup.cmd` from a newer zip updates.
+
+**Updating** is: extract the new zip over nothing (a new folder), run its
+`setup.cmd`, delete the old folder. The data directory is shared, so the
+weights are not downloaded again and the cache survives.
 
 ### Prerequisites in the codebase
 
-These are small changes that make the code location-independent. Each is worth
-doing before any build is attempted, and each is a normal commit with tests.
+Smaller than the installer's list, because nothing is frozen:
 
-1. **`multiprocessing.freeze_support()` first thing in the entry point.**
-   Separation runs in a spawned child process (`jobs._run_separation`). In a
-   frozen app, spawn re-executes the launcher; without `freeze_support` the
-   child starts a second GUI server instead of the worker. This one is not
-   optional and it does not show up until the first Separate click.
-2. **Move `config/default.yaml` into the package.** `DEFAULT_CONFIG_PATH` is
-   `Path(__file__).parents[2] / "config" / "default.yaml"`, which resolves to
-   the repo root in a checkout and to nothing useful anywhere else (it is
-   already wrong for a wheel install). Ship it as package data beside
-   `config.py` as `swingscribe/default-config.yaml` (not under a `config/`
-   directory, which would shadow the module's name), found with
-   `Path(__file__).parent`, which PyInstaller preserves for bundled data.
-   `--config` keeps working for an editable file beside the exe, which is the
-   "editable configuration file" from the original question. **Done
-   2026-09-12.**
-3. **A per-user data directory when frozen.** `cache_dir` and the file
-   picker's start folder default to the working directory, which for an
-   installed app is Program Files. When `sys.frozen` is set, default
-   `cache_dir` to `%LOCALAPPDATA%\SwingScribe\cache` (Mac:
-   `~/Library/Application Support/SwingScribe`) and the picker to the user's
-   Music folder. Development checkouts keep `.swingscribe-cache`. `cache_dir`
-   is not part of any cache key, so no key moves.
-4. **ffmpeg beside the executable.** `ingest.find_ffmpeg` looks on PATH and
-   then in winget's folder. Add a first look beside `sys.executable` (and
-   inside the `.app` on Mac). The build bundles a static ffmpeg built under
-   the LGPL configuration, not the GPL builds most download sites offer,
-   because a GPL binary shipped inside the installer would bind the whole
-   app's licence. About 80 MB.
-5. **Model-weight downloads must be visible.** All four sets download on
-   first use into the user's profile (torch hub for demucs and beat_this,
-   `~/piano_transcription_inference_data`, audio-separator's model folder).
-   Check each one reports through the job's progress channel; today the
-   piano one prints to the console, which an installed user does not see.
-   Bundling the weights instead is possible (installer grows to about
-   1.5 GB) and is a reviewer decision below.
-6. **Console on, for the first cut.** PyInstaller's windowed mode hides the
-   console. On a Smart App Control machine a blocked DLL then hangs silently
-   (the same trap as the shortcut above), and the console is the only place
-   the server's startup line appears if the browser fails to open. Ship with
-   the console minimized behind the browser; revisit once a native window
-   exists (follow-on, below).
-7. **A first-run notice that names the sidecar.** An installed app writes a
-   small `<track>.swingscribe.json` beside every audio file the user opens,
-   holding their span, downbeat and edits. That is the right design (the
-   cache must stay deletable; the judgements must not), but a user who has
-   not read the guide will wonder what the file is. The first-run notice
-   that reports the weight downloads gets one sentence about it.
+1. **Per-user data directory.** `piano.checkpoint_path` honours an
+   environment override the way audio-separator and torch already do, and
+   the file picker's first folder falls back to the user's Music folder
+   when no library is configured and the working directory is the
+   launcher's own. `cache_dir` needs nothing: `SWINGSCRIBE_CACHE_DIR` is
+   read today.
+2. **Weight downloads reported through the job's progress channel.** All
+   four sets download on first use; the piano one prints to a console the
+   user is not watching. The first-run notice reports them, and gets one
+   sentence naming the sidecar.
+3. **An About text with the third-party notices** — the licence table
+   below, and UVR attribution for audio-separator.
+4. **No console-script stubs in the folder.** `python\Scripts\*.exe` are
+   the per-install binaries Smart App Control refuses and nothing in the
+   folder needs them; the build deletes them.
+5. **Console visible and minimized**, the same rule as the shortcut: a
+   refused DLL must fail out loud, and the console is where a startup
+   failure shows when the browser does not open.
 
-(The version string is a constant in the package and `--version` prints it;
-nothing reads `importlib.metadata`, so no dist-info needs copying in.)
+`multiprocessing.freeze_support` is not needed: the separation worker is
+spawned by an ordinary `python.exe`. The config move is done.
 
 ### The build recipe
 
-Two files under `packaging/`, both text, both in git:
+`packaging/build_portable.ps1`, in git, deterministic given the lock file:
 
-- `packaging/launch.py`: the frozen entry point. Calls `freeze_support()`,
-  then `swingscribe.cli.main(["gui", *sys.argv[1:]])`.
-- `packaging/swingscribe.spec`: the PyInstaller spec. Onedir, name
-  `SwingScribe`, icon from `assets/`. Data files: the GUI's `static/` and
-  `guide/`, the packaged default config, torchcrepe's weight assets,
-  demucs's model manifests, beat_this and audio-separator package data,
-  ffmpeg. Hidden imports: the modules torch, torchaudio, demucs,
-  onnxruntime and audio-separator load by name at runtime. Excludes: pytest,
-  ruff, openpyxl and the rest of the dev and batch groups.
+1. Download the python-build-standalone CPython 3.11 `windows-x86_64`
+   archive — the same build uv installs and the interpreter that runs this
+   project today, so its reputation is already measured here — verify its
+   checksum, and unpack it to `build\SwingScribe\python`.
+2. Export the lock file as pinned requirements with the ml, gui and
+   roformer groups (`uv export`), and install them into that interpreter
+   directly (`uv pip install --python build\SwingScribe\python\python.exe`),
+   no venv, so no trampoline. Same lock file as development, so the same
+   file bytes as were tested. Install the SwingScribe wheel (`uv build`)
+   the same way.
+3. Delete `Scripts\*.exe`, `__pycache__`, tests and anything from the dev
+   or batch groups.
+4. Copy ffmpeg from a pinned URL with a checksum, an LGPL-configured build
+   (the GPL builds most sites offer would bind the whole folder).
+5. Write `SwingScribe.cmd`, `setup.cmd`, `uninstall.cmd`, `README.txt`,
+   `swingscribe.yaml` (a copy of the packaged default the launcher passes
+   with `--config`) and a `VERSION` file.
+6. Zip it, named with the version from `pyproject.toml`.
 
-The hidden-import and data-file lists are found by iteration: build, launch,
-read the "module not found" or the blank page, add a line, rebuild. A build
-with torch takes a few minutes. Expect a day or two the first time and
-nothing after that unless a dependency is added or upgraded, when it is
-usually one added line.
-
-The build is then wrapped by `packaging/windows.iss` (Inno Setup, a free
-installer builder): install to Program Files, Start Menu entry, optional
-desktop icon, uninstaller. Per-user data under `%LOCALAPPDATA%` is never
-touched by the uninstaller.
+A few minutes to run, and nothing in it iterates: there is no import graph
+to discover, because everything is included.
 
 ### Testing the build
 
-The build can only be trusted on a machine that has never had the dev venv,
-because a missing file would otherwise be found on the dev machine's PATH or
-in its caches. The GitHub Actions Windows runner is such a machine, and it is
-also the one place the build will run before signing: **Smart App Control on
-the dev machine will refuse the unsigned launcher exe** exactly as it refuses
-`swingscribe.exe` today, so local double-click testing waits for a signed
-build or a second PC.
+Two machines, both available:
 
-The smoke test, run on the runner in `--no-browser` mode: launch, open a
-tier-1 rendered fixture through the API, run Beats, separate with htdemucs,
-transcribe, export MusicXML, Quit. Every step except transcribe is under a
-minute on the runner; the weights download on the way.
+- **This machine, Smart App Control on.** Launching the folder here is the
+  per-file test: every executable in it is judged as it loads, and a
+  refused one is a visible failure in the console. This is the check that
+  no installer could pass and the reason for the shape. A pass today is not
+  a pass forever — reputation flaps, as the venv launcher did on
+  2026-09-12 — so versions stay pinned to files that passed, and a release
+  is re-launched here before it is published.
+- **The second laptop, as a stranger's machine.** It has its own Python
+  with its own library versions, which is the isolation test: download
+  the zip in a browser (so the files carry the mark of the web and
+  SmartScreen's prompt appears the way it will for users), extract, run
+  `setup.cmd`, launch from the icon, open a track, Beats, Separate with
+  htdemucs, Transcribe, Export, Quit, then `uninstall.cmd` — and confirm
+  that its own Python still imports its own packages unchanged, and that
+  nothing but the sidecar is left behind.
 
-**The iteration loop is the schedule risk.** The recipe is written by
-building, launching, reading the failure and adding a line, and if every
-launch of the unsigned exe has to happen on a CI runner that installs torch
-first, each turn of that loop is a quarter of an hour or more. The one-to-two
-day estimate for 3b assumes a machine where the build can be launched
-directly: a Windows VM on this machine with Smart App Control off, or any
-second PC. Decide which before starting 3b; without one, budget a week.
+The GitHub Actions Windows runner can build the zip and run the CLI smoke
+test on it, but neither machine test can be delegated to it.
 
 ### Weight licences
 
@@ -291,67 +329,59 @@ core. Checked 2026-09-12:
 | htdemucs (Demucs v4) | torch hub, facebookresearch/demucs | MIT (the repo names no separate licence for the weights) | clear |
 | beat_this `final0` | torch hub, CPJKU/beat_this | MIT, stated for code and weights together | clear |
 | piano transcription CRNN (Kong et al.) | Zenodo record 4034264 | CC BY 4.0 | clear; the attribution belongs in the About text |
-| BS-Roformer-SW (jarredou) | audio-separator's model zoo | **not stated** in the zoo's `models.json` and the model page is not publicly readable | **release gate** |
+| BS-Roformer-SW (jarredou) | audio-separator's model zoo | **not stated** in the zoo's `models.json` and the model page is not publicly readable | **must be stated in the notices before release** |
 
-The Roformer is the default separator, so the last row blocks a release
-until its terms are established. If they turn out to be non-commercial the
-options are the MuScriptor shape (its own dependency group and module
-boundary, chosen by the user) or falling back to htdemucs as the shipped
-default; a first release could ship htdemucs-only while the question is
-open. audio-separator itself is MIT and asks for UVR attribution when its
-models are used.
+This is a disclosure obligation, not a legal gate: the legal position of a
+first-run download is the same as today's repo, where the user's own
+audio-separator fetches the checkpoint and nothing is redistributed. What
+changes is the audience. A developer cloning the repo chooses their
+dependencies knowingly; a person double-clicking an installer never sees a
+licence, so if the Roformer's terms turn out to be non-commercial a
+transcriber selling transcriptions would break them unknowingly, under a
+project whose own MIT licence implies otherwise. So: establish the terms,
+state them in a third-party notices file and the About text, and if they
+are non-commercial say so in the separator menu and leave htdemucs (MIT) as
+the choice for commercial use. audio-separator itself is MIT and asks for
+UVR attribution when its models are used.
 
 ### Mac
 
-Separate build, same recipe, different machine. Not cross-compilable: it is
-built on a Mac or on GitHub's `macos-14` runner, which is Apple Silicon.
-
-- **Apple Silicon only.** Torch ships no universal binary, so an Intel Mac
-  would be a second artifact with a second test cycle. Intel Macs stopped
-  selling in 2023; leave them out unless someone asks.
-- **pyproject excludes macOS today** (`tool.uv.environments`). Add
-  `sys_platform == 'darwin'`, and make the torch index source conditional:
-  on Mac torch comes from PyPI (the CPU index has no macOS wheels) and uses
-  the Metal GPU on its own.
-- **numba and librosa load normally on a Mac**, so `torchcrepe` imports
-  without the shim's fallback path. Nothing should change, but it is the first
-  time that path is exercised outside this machine.
-- **ffmpeg**: an arm64 LGPL static build inside the `.app`.
-- PyInstaller's `BUNDLE` step produces `SwingScribe.app`; `hdiutil` wraps it
-  in a `.dmg` with a drag-to-Applications window.
-- **Signing and notarization are mandatory**, not optional: since macOS 15 an
-  unnotarized download cannot be opened by right-click at all, only by a trip
-  to System Settings. Needs an Apple Developer account, `codesign` with a
-  Developer ID certificate, and `notarytool` submission in the workflow.
-
-Someone with a Mac has to double-click the result once before it is released.
-The runner can run the CLI smoke test but cannot tell us the icon opened a
-browser.
+Later, when someone with a Mac asks (decision 4). The same shape applies —
+a folder with a Python and a launcher script, no app bundle — with one
+difference worth recording now: python.org's macOS build is signed and
+notarized by the Python Software Foundation, so a folder built on it
+carries a trusted interpreter the way this one does. Untested; pyproject
+still excludes macOS.
 
 ### Signing
 
-| Platform | What | Cost | Without it |
-|---|---|---|---|
-| Windows | Azure Trusted Signing, or an OV certificate | about $10 a month | SmartScreen "unrecognized app" on every user's first run; Smart App Control machines refuse it outright |
-| Mac | Apple Developer Program | $99 a year | "cannot be opened" with no right-click escape on current macOS |
-
-Certificates and the Apple credentials live in GitHub Actions secrets, never in
-the repo. Windows reputation with SmartScreen still accrues per publisher over
-weeks even when signed; the first releases will warn some users regardless.
+Not needed for this shape. The only executables are files that already
+carry reputation. SmartScreen shows its "Run" prompt once for the `.cmd`
+because it came from the internet; the install page shows what that looks
+like. If a native window (follow-on, below) ever brings a real launcher
+binary back, SignPath Foundation signs open-source Windows builds for free
+and is the route to look at then.
 
 ### Release mechanics
 
-`.github/workflows/release.yml`, triggered by pushing a tag `v*`:
+`.github/workflows/release.yml` on a tag `v*`: build the zip on the Windows
+runner, run the smoke test, attach it to a GitHub Release. Nothing binary
+enters git; the release file limit is 2 GB and the zip is a third of that.
+The version comes from `pyproject.toml` and the workflow refuses a tag that
+does not match. The release is published only after the two machine tests
+above, which are by hand.
 
-1. Windows runner: `uv sync` with the ml, gui and roformer groups, build the
-   spec, run the smoke test, sign, build the Inno installer.
-2. macOS runner: same, then codesign, notarize, staple, make the dmg.
-3. Attach both to a GitHub Release for the tag.
+### The installation page
 
-Nothing binary enters git. Releases sit beside the repository, each version
-under its own tag, with a 2 GB per-file limit that a 900 MB installer clears.
-The version number comes from `pyproject.toml`; the workflow refuses a tag
-that does not match it.
+A section of `README.md` written when the first zip exists, and
+`README.txt` in the folder is its short form. It covers: download and
+extract; `setup.cmd` and the icon; the first launch and the weight
+download; the SmartScreen prompt, with a picture; updating; uninstalling,
+and what it leaves behind; the package-manager route (`uv tool install`)
+for people who already have Python tooling; and troubleshooting, where
+Smart App Control belongs as a documented workaround for the day a fresh
+library file loses reputation — toggle it off, run, toggle it on — not as
+part of the install.
 
 ---
 
@@ -359,18 +389,20 @@ that does not match it.
 
 | Piece | Developer time | Money |
 |---|---|---|
-| 1. Quit button and the same-origin check | 2 hours | none |
-| 2. Desktop icon, launcher fallback, icon file | 1 hour | none |
-| 3a. Codebase prerequisites (seven items above) | half a day | none |
-| 3b. Windows spec, first working build | 1 to 2 days with a local test machine; a week through CI alone | none |
-| 3c. Inno Setup installer and the release workflow | half a day | none |
-| 3d. Windows signing setup | half a day | ~$10 a month |
-| 3e. Mac build, dmg, notarization | 1 to 2 days | $99 a year |
-| Per release after that | a tag push and a wait | |
+| 1. Quit button and the same-origin check | 2 hours (done) | none |
+| 2. Desktop icon, launcher fallback, icon file | 1 hour (done) | none |
+| 3a. Codebase prerequisites (five items above) | half a day | none |
+| 3b. Build script and the first zip | 1 day | none |
+| 3c. setup, uninstall, the Settings > Apps entry | half a day | none |
+| 3d. The two machine tests | half a day | none |
+| 3e. Release workflow and the installation page | half a day | none |
+| Mac | later, on request | none if built on python.org's signed interpreter |
+| Per release after that | a tag push, two launches by hand, a wait | |
 
-Pieces 1 and 2 are cheap and are worth doing now. Piece 3 is worth doing when
-there is a version to give someone, and not before: the spec encodes the
-dependency list, and the project still adds dependencies by milestone.
+Pieces 1 and 2 are done. Piece 3 is worth doing when there is a version to
+give someone: the zip is a copy of the lock file's contents, so it does not
+go stale the way a PyInstaller spec would, but each release still needs the
+two launches by hand.
 
 ## Follow-on, out of scope here
 
@@ -396,8 +428,17 @@ dependency list, and the project still adds dependencies by milestone.
 5. **Move the default config into the package now.** It fixes a latent bug
    for any wheel install; the places that name the old location are a
    handful of one-line edits.
-6. **Signing is a piece 3 cost.** Nothing in pieces 1 and 2 needs it;
-   approve it when there is a release to sign.
-7. **Open: where piece 3b iterates.** A Windows VM without Smart App Control
-   on this machine, or a second PC, before 3b starts.
-8. **Open: the BS-Roformer-SW licence**, before any release.
+6. **No signing.** The budget is zero (2026-09-13), and the portable
+   folder needs none: every executable in it already carries reputation.
+7. **Test machines: this one with Smart App Control on, and the second
+   laptop as a stranger's machine** (2026-09-13). No VM, no toggling
+   needed for the build; the toggle is documented as a user workaround.
+8. **Open: the BS-Roformer-SW licence**, stated in the notices before any
+   release.
+9. **A zip of a portable folder, not an installer** (2026-09-13). Smart App
+   Control refuses any freshly built launcher or installer; a folder of
+   files with reputation runs nothing new. See "Why a folder in a zip".
+10. **Uninstall is a script plus a Settings > Apps entry** (2026-09-13):
+    `setup.cmd` registers the per-user uninstall key, `uninstall.cmd`
+    removes the icon, the entry, the data directory on request, and the
+    folder. Sidecars beside the music are never touched.
