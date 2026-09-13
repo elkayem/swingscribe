@@ -510,6 +510,16 @@ and step 3 is what says whether the new files pass.
 | `src/swingscribe/default-config.yaml` | copied into the folder as `swingscribe.yaml` |
 | `.github/workflows/release.yml` | the tag-triggered build and release |
 
+**Where the zip actually is.** `%LOCALAPPDATA%\SwingScribe-build` is the
+real folder when the script runs from a shell the user opened. Run from a
+shell inside the Claude desktop app, a packaged app, Windows redirects
+that path to
+`%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\SwingScribe-build`,
+and Explorer never shows it (2026-09-13: an
+afternoon spent refreshing an Explorer window that was already right).
+The zip is copied to `%USERPROFILE%\Downloads` at the end of a Claude-run
+build for that reason; Downloads is not redirected.
+
 ## Effort and cost
 
 | Piece | Developer time | Money |

@@ -151,6 +151,19 @@ of these has broken a tool at least once:
   torchcrepe, refuse the import first — `sys.modules["numba"] =
   sys.modules["llvmlite"] = None` before importing swingscribe — so the
   shim takes its ImportError path. The pipeline itself never wants numba.
+- **A shell run from the Claude desktop app writes `%LOCALAPPDATA%` and
+  `%APPDATA%` into a private folder** (2026-09-13). The app is a packaged
+  (MSIX) Windows app, and Windows redirects a packaged process's AppData
+  writes to `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\...`
+  (and its HKCU\Software writes to a private hive). The same
+  process reads the redirected view back, so nothing looks wrong from
+  inside: the portable build "in" `%LOCALAPPDATA%\SwingScribe-build`,
+  the app's own `%LOCALAPPDATA%\SwingScribe` weights and cache, and the
+  `setup.cmd` uninstall registry key all landed there, and Explorer showed
+  none of them. Anything the user must find by hand goes OUTSIDE AppData
+  (`%USERPROFILE%\Downloads`, a folder under C:\), and a registry or
+  AppData check made from such a shell proves nothing about the real
+  profile. A shell the user opens themselves is not redirected.
 - **The CA bundle goes stale.** `uv`/Python downloads fail with
   `CERTIFICATE_VERIFY_FAILED` when the intercepting certs rotate; regenerate
   `%USERPROFILE%\.windows-ca-bundle.pem` from `Cert:\*\Root` and `Cert:\*\CA`

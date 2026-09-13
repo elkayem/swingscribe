@@ -25,7 +25,11 @@ TLS interception UV_SYSTEM_CERTS=true (both set below).
 Where to build. Default: %LOCALAPPDATA%\SwingScribe-build -- deliberately NOT
 under the repo, which lives under OneDrive: OneDrive locks files inside a
 directory being removed (WinError 5 on the final rmdir, CLAUDE.md), and a
-1.5 GB build tree is not something to sync.
+1.5 GB build tree is not something to sync. Run from a shell inside the
+Claude desktop app (a packaged app) this path is REDIRECTED to
+%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Local\SwingScribe-build and
+Explorer will not show it; the script prints the zip's location, and a
+copy under Downloads is the way to hand it to a person.
 
 .PARAMETER SkipZip
 Build the folder but do not zip it (faster while iterating on the scripts).
