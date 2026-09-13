@@ -74,7 +74,7 @@ def _add_tempo_hint(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="swingscribe",
-        description="Jazz audio in → instrument-separated, swing-aware notation out",
+        description="Jazz audio in -> instrument-separated, swing-aware notation out",
     )
     parser.add_argument("--version", action="version", version=f"swingscribe {__version__}")
     subparsers = parser.add_subparsers(dest="command")
@@ -326,7 +326,7 @@ def cmd_audition(config: Config, args: argparse.Namespace) -> int:
     out = Path(args.out) if args.out else abmix.default_audition_path(args.audio, stem)
     abmix.write_stem_slice(stem_path, out, region)
     span = f"{region[0]:.1f}-{region[1]:.1f}s" if region else "whole track"
-    print(f"isolated {stem} stem ({span}) → {out}")
+    print(f"isolated {stem} stem ({span}) -> {out}")
     print("Listen before transcribing: if the soloist isn't clearly dominant here,")
     print("try a different --stem, or separate.model: htdemucs_6s for guitar/piano splits.")
     return 0
@@ -345,7 +345,7 @@ def cmd_click(document, config: Config, args: argparse.Namespace) -> int:
         return 1
     out = Path(args.out) if args.out else click.default_click_path(args.audio)
     click.render_click_track(document.audio.path, grid, out)
-    print(f"{len(grid.beats)} beats / {len(grid.downbeats)} downbeats → {out}")
+    print(f"{len(grid.beats)} beats / {len(grid.downbeats)} downbeats -> {out}")
     return 0
 
 
@@ -360,8 +360,8 @@ def cmd_ab(document, config: Config, args: argparse.Namespace) -> int:
     region = _region_for_output(config, document.audio.duration)
     abmix.notes_to_midi(notes, midi_out)
     abmix.render_ab_mix(document.audio.path, notes, out, region)
-    print(f"{len(notes)} notes → {midi_out}")
-    print(f"A/B mix (original left, transcription right) → {out}")
+    print(f"{len(notes)} notes -> {midi_out}")
+    print(f"A/B mix (original left, transcription right) -> {out}")
     return 0
 
 
