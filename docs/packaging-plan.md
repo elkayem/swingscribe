@@ -33,8 +33,11 @@ touched.
 
 ### What it does
 
-A **Quit** button in the header beside Help. Clicking it sends one request to
-the server; the page replaces itself with a plain "SwingScribe has stopped.
+A **Quit** button in the header beside Help, and a second one at the top of
+the Open a track window, which is an overlay that covers the header and on
+first launch is the only page there is (added 2026-09-13, after the first
+build showed a fresh install with no reachable Quit). Clicking either sends
+one request to the server; the page replaces itself with a plain "SwingScribe has stopped.
 You can close this tab." notice and stops polling; the server finishes the
 request and exits. The console window it was launched from closes with it.
 
