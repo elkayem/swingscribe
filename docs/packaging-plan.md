@@ -325,13 +325,12 @@ Two machines, both available:
   2026-09-12 — so versions stay pinned to files that passed, and a release
   is re-launched here before it is published.
 - **The second laptop, as a stranger's machine.** It has its own Python
-  with its own library versions, which is the isolation test. **Check
-  whether it has Smart App Control on** (Windows Security > App & browser
-  control > Smart App Control settings) before the test and record the
-  answer here: if On, it is a second reputation test on files that have
-  never run there, a stronger check than this machine gives; if Off or
-  absent, the folder is tested under the feature on one machine only and
-  the release note says so. Then: download
+  with its own library versions, which is the isolation test. **Smart App
+  Control is off there** (checked 2026-09-13), so it is not a second
+  reputation test: the folder is tested under the feature on this machine
+  only, and the release note says so. What the laptop does test is the
+  SmartScreen path — the prompt an ordinary machine shows for a `.cmd`
+  that came from the internet — and the isolation. Then: download
   the zip in a browser (so the files carry the mark of the web and
   SmartScreen's prompt appears the way it will for users), extract, run
   `setup.cmd`, launch from the icon, open a track, Beats, Separate with
