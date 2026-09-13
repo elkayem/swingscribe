@@ -30,7 +30,12 @@
   <div class="picker-panel">
     <div class="picker-head">
       <h2 id="picker-title">Open a track</h2>
-      <button class="ghost" id="picker-close" hidden title="Back to the track that is open.">Close</button>
+      <!-- The picker covers the header, Quit included; on first launch it is
+           the only page there is, so it carries its own. -->
+      <div class="picker-actions">
+        <button class="ghost" id="picker-close" hidden title="Back to the track that is open.">Close</button>
+        <button class="ghost" id="picker-quit" title="Stop the SwingScribe server.">Quit</button>
+      </div>
     </div>
     <div class="picker-body">
       <section id="picker-recent">

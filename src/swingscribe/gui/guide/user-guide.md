@@ -28,7 +28,8 @@ App Control refuses as an unsigned binary it has never seen (`os error
 The app serves itself on `127.0.0.1:8420` and opens a browser tab there. It
 listens on localhost only; the audio never leaves your machine.
 
-**Quit**, at the right of the header, stops the server: the page replaces
+**Quit**, at the right of the header and again at the top of the Open a
+track window, stops the server: the page replaces
 itself with a notice and the console window it was launched from closes.
 If a separation or transcription is still running the button turns red and
 names it; a second click within four seconds abandons the job and quits

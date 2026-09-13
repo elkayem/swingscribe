@@ -2545,15 +2545,21 @@ $('picker-close').addEventListener('click', () => { $('picker').hidden = true; }
    (409) and the button arms — red, naming the job — for a second click within
    four seconds, the cache panel's delete gesture. Once the server has gone
    the page replaces itself with a notice and stops talking to it, so the
-   console does not fill with the pollers' connection errors. */
+   console does not fill with the pollers' connection errors. There are two
+   buttons — the header's, and the picker's, because the picker is an overlay
+   that covers the header and on first launch is the only page there is. */
 const QUIT_ARM_MS = 4000;
 let quitArmTimer = null;
+let armedQuit = null;  // the button currently saying "Quit anyway?"
 
 function disarmQuit() {
   clearTimeout(quitArmTimer);
   quitArmTimer = null;
-  $('quit').classList.remove('armed');
-  $('quit').textContent = 'Quit';
+  if (armedQuit) {
+    armedQuit.classList.remove('armed');
+    armedQuit.textContent = 'Quit';
+    armedQuit = null;
+  }
 }
 
 function stoppedNotice() {
@@ -2565,25 +2571,27 @@ function stoppedNotice() {
   window.stop();  // abandon any request in flight; nothing will answer it
 }
 
-$('quit').addEventListener('click', async () => {
-  const armed = quitArmTimer !== null;
+async function quit(button) {
+  const armed = armedQuit === button;
   disarmQuit();
-  $('quit').disabled = true;
+  button.disabled = true;
   try {
     await api(`/api/quit${armed ? '?force=true' : ''}`, { method: 'POST' });
     stoppedNotice();
   } catch (error) {
     if (error.status === 409) {
-      $('quit').classList.add('armed');
-      $('quit').textContent = `Quit anyway? (${error.message})`;
+      armedQuit = button;
+      button.classList.add('armed');
+      button.textContent = `Quit anyway? (${error.message})`;
       quitArmTimer = setTimeout(disarmQuit, QUIT_ARM_MS);
     } else {
       toast(`Could not quit: ${error.message}`, true);
     }
   } finally {
-    $('quit').disabled = false;
+    button.disabled = false;
   }
-});
+}
+for (const id of ['quit', 'picker-quit']) $(id).addEventListener('click', () => quit($(id)));
 
 const openTypedPath = () => {
   const path = $('path-input').value.trim();

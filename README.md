@@ -112,7 +112,8 @@ touched.
    Settings > Apps.
 3. **Double-click the icon.** A console window opens minimized and the app
    opens in your browser at `127.0.0.1:8420`. To stop, click **Quit** at the
-   top right of the page; closing the tab does not stop it.
+   top right of the page (the Open a track window has one too); closing the
+   tab does not stop it.
 
 The first time Windows runs a script that came from the internet it may say
 "Windows protected your PC". Click *More info*, then *Run anyway*; it asks

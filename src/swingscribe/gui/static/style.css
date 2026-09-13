@@ -223,6 +223,7 @@ select:disabled, .chip-select:disabled { opacity: 0.38; cursor: default; box-sha
   padding: 16px 20px; border-bottom: 1px solid var(--hairline);
 }
 .picker-head h2 { font-size: 16px; }
+.picker-actions { display: flex; gap: 8px; }
 .picker-body { overflow-y: auto; padding: 4px 12px 12px; }
 .picker-body section { margin-top: 14px; }
 .picker-body h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); padding: 0 8px; }
@@ -536,7 +537,7 @@ input.rate-value[type=text] {
 }
 .stopped-card h2 { font-size: 17px; }
 .stopped-card code { font: 12px var(--mono); }
-#quit.armed { white-space: nowrap; }
+#quit.armed, #picker-quit.armed { white-space: nowrap; }
 
 /* ── Screen 4: transcribe & review ─────────────────────────────────────────── */
 .review-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
