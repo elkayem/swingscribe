@@ -35,6 +35,7 @@ const state = {
   mixer: new Map(),         // stem -> {level, muted}
   jobTimer: null,
   reloadTimer: null,
+  reviewReloadTimer: null,
   auditionToken: 0,
   beats: null,              // whole-file derived grid from /beats
   showBeats: true,          // draw the grid when we have one
@@ -537,10 +538,13 @@ function activate(which) {
 }
 
 function togglePlay() {
-  if (state.active === 'review' && reviewEngine.duration) {
+  // hasAudio, not duration: while a speed change is being stretched on the
+  // server the section has no audio for a few seconds, and Space used to
+  // fall through to the original mix at section 1's speed.
+  if (state.active === 'review' && reviewEngine.hasAudio) {
     activate('review');
     reviewEngine.toggle();
-  } else if (state.active === 'stem' && stemEngine.duration) {
+  } else if (state.active === 'stem' && stemEngine.hasAudio) {
     activate('stem');
     stemEngine.toggle();
   } else {
@@ -552,8 +556,8 @@ function togglePlay() {
 
 function refreshPlayButtons() {
   $('play').textContent = mix.engine?.playing ? '❚❚' : '▶';
-  $('a-play').textContent = stemEngine.playing ? '❚❚' : '▶';
-  $('r-play').textContent = reviewEngine.playing ? '❚❚' : '▶';
+  $('a-play').textContent = stemEngine.engaged ? '❚❚' : '▶';
+  $('r-play').textContent = reviewEngine.engaged ? '❚❚' : '▶';
 }
 
 function tick() {
@@ -1016,10 +1020,16 @@ async function loadAudition() {
   if (!state.track || !state.selection || !state.stems.length || !state.leadStem) return;
   const token = ++state.auditionToken;
   const { a, b } = state.selection;
-  const wasPlaying = stemEngine.playing;
+  const wasPlaying = stemEngine.engaged;
+  // Where the music was: a speed change resumes there rather than at the
+  // top of the span, and a span change keeps it while it is still inside.
+  const carried = stemEngine.duration ? stemEngine.trackTime : null;
 
   if (!state.mixer.size) seedMixerFromAbMode();
   stemEngine.reset(a, state.stemRate);
+  const resume = carried !== null && carried >= a && carried < b ? (carried - a) / state.stemRate : 0;
+  stemEngine.seek(resume);
+  if (wasPlaying) stemEngine.play(resume);  // armed now, sounds when the audio lands
   renderMixer();
   renderAuditionRange();
   $('a-time-total').textContent = clock(b - a, false);
@@ -1044,7 +1054,6 @@ async function loadAudition() {
   refreshClicks();
   renderMixer();
   await drawStemOverlay(token);
-  if (wasPlaying) stemEngine.play(0);
   invalidateReview();
 }
 
@@ -1518,10 +1527,22 @@ function renderRollRange(view, spanWidth) {
   if (zoomed) node.textContent = `${clock(view.a, precise)}–${clock(view.b, precise)}`;
 }
 
+function scheduleReviewReload() {
+  clearTimeout(state.reviewReloadTimer);
+  state.reviewReloadTimer = setTimeout(() => {
+    if (state.review) loadReviewAudio();
+  }, RELOAD_DEBOUNCE_MS);
+}
+
 async function loadReviewAudio() {
   const token = state.reviewToken;
-  const { a } = state.selection;
+  const { a, b } = state.selection;
+  const wasPlaying = reviewEngine.engaged;
+  const carried = reviewEngine.duration ? reviewEngine.trackTime : null;
   reviewEngine.reset(a, state.reviewRate);
+  const resume = carried !== null && carried >= a && carried < b ? (carried - a) / state.reviewRate : 0;
+  reviewEngine.seek(resume);
+  if (wasPlaying) reviewEngine.play(resume);
   const mixUrl = `/api/tracks/${state.track.id}/stem?${reviewParams({ stem: 'mix', rate: String(state.reviewRate) })}`;
   const transUrl = `/api/tracks/${state.track.id}/transcription?${reviewParams({ rate: String(state.reviewRate) })}`;
   try {
@@ -2692,19 +2713,20 @@ const rateControls = {
   }),
   stem: new RateControl($('stem-rate'), {
     pitchNote: 'stretched without changing pitch',
-    onChange: async (rate) => {
+    onChange: (rate) => {
       state.stemRate = rate;
       // Stretched server-side, so every source stays at rate 1.0 and
-      // therefore still sample-locked to the others. Costs a reload.
-      await loadAudition();
+      // therefore still sample-locked to the others. Costs a reload,
+      // debounced because a wheel over the slider fires once per percent.
+      scheduleAuditionReload();
     },
   }),
   review: new RateControl($('review-rate'), {
     pitchNote: 'stretched without changing pitch',
-    onChange: async (rate) => {
+    onChange: (rate) => {
       state.reviewRate = rate;
       // Stretched server-side, so mix and transcription stay sample-locked.
-      if (state.review) await loadReviewAudio();
+      scheduleReviewReload();
     },
   }),
 };
@@ -2981,14 +3003,14 @@ document.addEventListener('keydown', (event) => {
    of switching it off is to listen around the span without moving it. */
 function restartFromStart() {
   if (!state.selection) return;
-  if (state.active === 'review' && reviewEngine.duration) {
+  if (state.active === 'review' && reviewEngine.hasAudio) {
     reviewEngine.seek(0);
-    if (!reviewEngine.playing) reviewEngine.play(0);
+    if (!reviewEngine.engaged) reviewEngine.play(0);
     pianoRoll.setPlayhead(state.selection.a);
     pianoRoll.follow(state.selection.a);
-  } else if (state.active === 'stem' && stemEngine.duration) {
+  } else if (state.active === 'stem' && stemEngine.hasAudio) {
     stemEngine.seek(0);
-    if (!stemEngine.playing) stemEngine.play(0);
+    if (!stemEngine.engaged) stemEngine.play(0);
   } else {
     seekTo(state.loop ? state.selection.a : 0);
     mix.engine?.play();

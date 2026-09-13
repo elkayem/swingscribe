@@ -63,6 +63,9 @@ export class StemEngine {
     this._startOffset = 0;
     this.rate = 1;
     this.spanStart = 0;
+    this.generation = 0;   // bumped by reset(); a buffer from an older load is discarded
+    this.loading = 0;      // fetches in flight
+    this.pending = null;   // an offset to play from as soon as audio arrives
   }
 
   _context() {
@@ -83,9 +86,16 @@ export class StemEngine {
 
   get duration() { return this.loopLength; }
 
+  /** Sources running, or a play waiting for the audio to arrive. */
+  get engaged() { return this.playing || this.pending !== null; }
+
+  /** Audio is here or on its way: a play now will sound, if not at once. */
+  get hasAudio() { return this.loopLength > 0 || this.loading > 0; }
+
   /** Drop everything: a new span, or a new speed, invalidates every buffer. */
   reset(spanStart, rate) {
     this.stop();
+    this.generation += 1;
     this.buffers.clear();
     this.spanStart = spanStart;
     this.rate = rate;
@@ -97,10 +107,26 @@ export class StemEngine {
 
   async load(key, url) {
     if (this.buffers.has(key)) return;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`${key}: ${response.status} ${await response.text()}`);
-    const bytes = await response.arrayBuffer();
-    const buffer = await this._context().decodeAudioData(bytes);
+    const generation = this.generation;
+    this.loading += 1;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`${key}: ${response.status} ${await response.text()}`);
+      const bytes = await response.arrayBuffer();
+      const buffer = await this._context().decodeAudioData(bytes);
+      // A reset while this was in flight (a new span, a new speed) made it
+      // stale. Two speed changes in a row each ask the server for a stretch,
+      // and the slower one can land last: installing it would play the old
+      // speed over the new one.
+      if (generation !== this.generation) return;
+      this._install(key, buffer);
+    } finally {
+      this.loading -= 1;
+      this._settle();
+    }
+  }
+
+  _install(key, buffer) {
     this.buffers.set(key, buffer);
     // Every stem of one span is the same length by construction; taking the
     // shortest anyway means a stray sample can never desynchronise the loop.
@@ -110,17 +136,23 @@ export class StemEngine {
     if (this.playing) this._startSource(key, this.position, this._context().currentTime + 0.02);
   }
 
+  /* Play was pressed while the audio was still on its way (the reload after
+     a speed change takes seconds), so honour it once the last load lands —
+     all the sources together, the way a play on loaded audio starts them.
+     It used to be dropped, and the listener's next press was Start, which
+     arrived after the load and so seemed to fix it. */
+  _settle() {
+    if (this.pending === null || this.loading > 0) return;
+    const at = this.pending;
+    this.pending = null;
+    if (this.loopLength) this.play(at);  // else every load failed: disarm
+  }
+
   /* Install a locally generated buffer (the click track) as though it were a
      stem: it then loops, mixes and mutes through exactly the same path, and —
      because every source is scheduled from one instant — stays sample-locked to
      the music instead of drifting against it. */
-  setBuffer(key, buffer) {
-    this.buffers.set(key, buffer);
-    this.loopLength = this.loopLength
-      ? Math.min(this.loopLength, buffer.duration)
-      : buffer.duration;
-    if (this.playing) this._startSource(key, this.position, this._context().currentTime + 0.02);
-  }
+  setBuffer(key, buffer) { this._install(key, buffer); this._settle(); }
 
   /* A click track for `events` — {time, frequency, gain} in buffer seconds —
      rendered to a buffer exactly one loop long so it repeats seamlessly.
@@ -203,7 +235,12 @@ export class StemEngine {
   async play(offset = null) {
     const ctx = this._context();
     if (ctx.state === 'suspended') await ctx.resume();
-    if (!this.loopLength) return;
+    if (!this.loopLength) {
+      // Nothing to play yet: keep the wish and start when the audio lands.
+      this.pending = offset === null ? this.pausedAt : offset;
+      return;
+    }
+    this.pending = null;
     this.stopSources();
     const at = offset === null ? this.pausedAt : offset;
     // One `when` for every source is the whole point: they are locked together
@@ -216,21 +253,24 @@ export class StemEngine {
   }
 
   pause() {
+    this.pending = null;
     if (!this.playing) return;
     this.pausedAt = this.position;
     this.stopSources();
     this.playing = false;
   }
 
-  toggle() { return this.playing ? this.pause() : this.play(); }
+  toggle() { return this.engaged ? this.pause() : this.play(); }
 
+  /* Before the audio has arrived the offset is kept as given; _startSource
+     wraps it into the loop once the loop has a length. */
   seek(offset) {
-    const target = this.loopLength ? Math.max(0, offset % this.loopLength) : 0;
-    if (this.playing) this.play(target);
+    const target = this.loopLength ? Math.max(0, offset % this.loopLength) : Math.max(0, offset);
+    if (this.engaged) this.play(target);
     else this.pausedAt = target;
   }
 
-  stop() { this.stopSources(); this.playing = false; this.pausedAt = 0; }
+  stop() { this.stopSources(); this.playing = false; this.pending = null; this.pausedAt = 0; }
 
   stopSources() {
     for (const source of this.sources.values()) {

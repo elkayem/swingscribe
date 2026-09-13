@@ -178,7 +178,8 @@ instant either way. **Click** (<kbd>C</kbd>) mixes a metronome on the bar
 grid into the audition, which is a fast way to hear whether the downbeat is
 right. The speed control slows playback without changing pitch; here and
 in section 3 the audio is stretched on the server and reloaded, so a new
-speed takes a moment to arrive.
+speed takes a moment to arrive. Press play in the meantime and it starts
+as soon as the audio lands, at the new speed and from where you were.
 
 **Speed:** every transport has the same control — preset chips (1×, ¾×,
 ½×, ¼×), a slider from 20% to 200%, **−** / **+** for one percent at a
