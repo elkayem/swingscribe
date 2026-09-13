@@ -35,6 +35,7 @@ const state = {
   mixer: new Map(),         // stem -> {level, muted}
   jobTimer: null,
   reloadTimer: null,
+  reloadKeepsReview: false,
   reviewReloadTimer: null,
   auditionToken: 0,
   beats: null,              // whole-file derived grid from /beats
@@ -998,9 +999,17 @@ async function refreshAudition() {
   refreshReviewPanel();
 }
 
-function scheduleAuditionReload() {
+/* `keepReview` is a speed change: the span and stem the review describes
+   are untouched, so it stays. Anything else that lands in the same
+   debounce window wins, because it does move them. */
+function scheduleAuditionReload({ keepReview = false } = {}) {
   clearTimeout(state.reloadTimer);
-  state.reloadTimer = setTimeout(() => loadAudition(), RELOAD_DEBOUNCE_MS);
+  state.reloadKeepsReview = (state.reloadTimer === null || state.reloadKeepsReview) && keepReview;
+  state.reloadTimer = setTimeout(() => {
+    const keep = state.reloadKeepsReview;
+    state.reloadTimer = null;
+    loadAudition({ keepReview: keep });
+  }, RELOAD_DEBOUNCE_MS);
 }
 
 function stemUrl(stem, { download = false } = {}) {
@@ -1016,7 +1025,7 @@ function stemUrl(stem, { download = false } = {}) {
   return `/api/tracks/${state.track.id}/stem?${params}`;
 }
 
-async function loadAudition() {
+async function loadAudition({ keepReview = false } = {}) {
   if (!state.track || !state.selection || !state.stems.length || !state.leadStem) return;
   const token = ++state.auditionToken;
   const { a, b } = state.selection;
@@ -1033,6 +1042,9 @@ async function loadAudition() {
   renderMixer();
   renderAuditionRange();
   $('a-time-total').textContent = clock(b - a, false);
+  // Stretching takes seconds and the transport is otherwise silent about
+  // it; a play pressed meanwhile is kept and starts when the audio lands.
+  $('a-time-now').textContent = state.stemRate === 1 ? 'loading…' : 'stretching…';
 
   // The original mix and the lead stem always load, so the A/B switch is
   // instant; everything else loads only if it was already part of the mix you
@@ -1050,11 +1062,12 @@ async function loadAudition() {
   }
   if (token !== state.auditionToken) return;   // a newer span superseded this one
 
+  $('a-time-now').textContent = clock(stemEngine.position * state.stemRate);
   applyMixer();
   refreshClicks();
   renderMixer();
   await drawStemOverlay(token);
-  invalidateReview();
+  if (!keepReview) invalidateReview();
 }
 
 /* The span, and the slice of it on screen when the stem view is zoomed in. */
@@ -1543,6 +1556,7 @@ async function loadReviewAudio() {
   const resume = carried !== null && carried >= a && carried < b ? (carried - a) / state.reviewRate : 0;
   reviewEngine.seek(resume);
   if (wasPlaying) reviewEngine.play(resume);
+  $('r-time-now').textContent = state.reviewRate === 1 ? 'loading…' : 'stretching…';
   const mixUrl = `/api/tracks/${state.track.id}/stem?${reviewParams({ stem: 'mix', rate: String(state.reviewRate) })}`;
   const transUrl = `/api/tracks/${state.track.id}/transcription?${reviewParams({ rate: String(state.reviewRate) })}`;
   try {
@@ -1555,6 +1569,7 @@ async function loadReviewAudio() {
     return;
   }
   if (token !== state.reviewToken) return;
+  $('r-time-now').textContent = clock(reviewEngine.position * state.reviewRate);
   applyReviewMode();
 }
 
@@ -2718,7 +2733,7 @@ const rateControls = {
       // Stretched server-side, so every source stays at rate 1.0 and
       // therefore still sample-locked to the others. Costs a reload,
       // debounced because a wheel over the slider fires once per percent.
-      scheduleAuditionReload();
+      scheduleAuditionReload({ keepReview: true });
     },
   }),
   review: new RateControl($('review-rate'), {
