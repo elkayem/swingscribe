@@ -187,8 +187,12 @@ SwingScribe\
   ffmpeg\               ffmpeg.exe, an LGPL build
 ```
 
-Double-clicking `setup.cmd` once puts the icon on the desktop; the icon
-launches the GUI. First launch downloads the model weights (about half a
+**Extract it somewhere shallow** — `C:\SwingScribe`, or straight under
+Documents — because torch's nested include directories on top of a deep
+extraction path can pass the 260-character limit on a machine without
+long paths enabled, and Explorer then fails part-way through the
+extraction. The install page says so first. Double-clicking `setup.cmd`
+once puts the icon on the desktop; the icon launches the GUI. First launch downloads the model weights (about half a
 gigabyte) into the user's profile and says so on screen. Nothing needs to
 be installed first, and nothing on the machine is changed except what
 setup writes, listed below.
@@ -271,24 +275,40 @@ spawned by an ordinary `python.exe`. The config move is done.
 
 `packaging/build_portable.ps1`, in git, deterministic given the lock file:
 
-1. Download the python-build-standalone CPython 3.11 `windows-x86_64`
-   archive — the same build uv installs and the interpreter that runs this
-   project today, so its reputation is already measured here — verify its
-   checksum, and unpack it to `build\SwingScribe\python`.
+1. Download the python-build-standalone CPython 3.11.16 `windows-x86_64`
+   archive from **release `20260814`** — not "3.11", the exact release: the
+   reputation argument rests on identical bytes, and a newer build of the
+   same Python version is a different file with its own reputation clock.
+   That release is the interpreter uv installed here and the one that runs
+   this project today (`BUILD` file under uv's python directory). Verify
+   the archive's published checksum, unpack it to `build\SwingScribe\python`,
+   and confirm its `python.exe` hashes to
+   `624b66d8178129ac5611f3cf32adf440ea0b7dc6b1bde60c5677d7ebc62e635d`,
+   the copy that has been passing Smart App Control here — before
+   trusting the test on this machine.
 2. Export the lock file as pinned requirements with the ml, gui and
-   roformer groups (`uv export`), and install them into that interpreter
-   directly (`uv pip install --python build\SwingScribe\python\python.exe`),
-   no venv, so no trampoline. Same lock file as development, so the same
-   file bytes as were tested. Install the SwingScribe wheel (`uv build`)
-   the same way.
+   roformer groups (`uv export --no-hashes --no-emit-project`) and install
+   them into that interpreter directly
+   (`uv pip install --python build\SwingScribe\python\python.exe`), no
+   venv, so no trampoline. **Pass the PyTorch CPU index explicitly**
+   (`--index https://download.pytorch.org/whl/cpu`, the URL pyproject
+   names): `uv export` emits no index lines (checked 2026-09-13), and
+   `torch==2.12.1+cpu` does not exist on PyPI, so without the flag the
+   step fails on the first package. The export also pins `beat-this` to a
+   git commit, so the build machine needs git. Same lock file as
+   development, so the same file bytes as were tested. Install the
+   SwingScribe wheel (`uv build`) the same way.
 3. Delete `Scripts\*.exe`, `__pycache__`, tests and anything from the dev
    or batch groups.
-4. Copy ffmpeg from a pinned URL with a checksum, an LGPL-configured build
-   (the GPL builds most sites offer would bind the whole folder).
+4. Copy ffmpeg from a pinned URL with a checksum: **BtbN's GitHub builds,
+   the `win64-lgpl` variant**, which publish checksums. Not the gyan.dev
+   build winget installs here — that one is GPL, and a GPL binary in the
+   folder would bind the whole folder.
 5. Write `SwingScribe.cmd`, `setup.cmd`, `uninstall.cmd`, `README.txt`,
    `swingscribe.yaml` (a copy of the packaged default the launcher passes
    with `--config`) and a `VERSION` file.
-6. Zip it, named with the version from `pyproject.toml`.
+6. Zip it, named with the version from `pyproject.toml`, with the folder
+   name short (`SwingScribe\`) for the path-length reason above.
 
 A few minutes to run, and nothing in it iterates: there is no import graph
 to discover, because everything is included.
@@ -305,7 +325,13 @@ Two machines, both available:
   2026-09-12 — so versions stay pinned to files that passed, and a release
   is re-launched here before it is published.
 - **The second laptop, as a stranger's machine.** It has its own Python
-  with its own library versions, which is the isolation test: download
+  with its own library versions, which is the isolation test. **Check
+  whether it has Smart App Control on** (Windows Security > App & browser
+  control > Smart App Control settings) before the test and record the
+  answer here: if On, it is a second reputation test on files that have
+  never run there, a stronger check than this machine gives; if Off or
+  absent, the folder is tested under the feature on one machine only and
+  the release note says so. Then: download
   the zip in a browser (so the files carry the mark of the web and
   SmartScreen's prompt appears the way it will for users), extract, run
   `setup.cmd`, launch from the icon, open a track, Beats, Separate with
@@ -377,8 +403,11 @@ A section of `README.md` written when the first zip exists, and
 `README.txt` in the folder is its short form. It covers: download and
 extract; `setup.cmd` and the icon; the first launch and the weight
 download; the SmartScreen prompt, with a picture; updating; uninstalling,
-and what it leaves behind; the package-manager route (`uv tool install`)
-for people who already have Python tooling; and troubleshooting, where
+and what it leaves behind; the developer route (clone, `uv sync`, run
+through `python -m swingscribe` or the `.cmd`) for people who want the
+source — **not `uv tool install`**, which creates exactly the per-install
+trampolines Smart App Control refuses, so it fails on the machines the zip
+was designed for; and troubleshooting, where
 Smart App Control belongs as a documented workaround for the day a fresh
 library file loses reputation — toggle it off, run, toggle it on — not as
 part of the install.
