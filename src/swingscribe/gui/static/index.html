@@ -36,6 +36,12 @@
       <section id="picker-recent">
         <h3 id="picker-recent-title">Recent</h3>
         <ul class="track-list" id="recent-list"><li class="empty">Nothing yet</li></ul>
+        <!-- A fresh install has no recents: say what the first run will do. -->
+        <div class="first-run muted" id="first-run" hidden>
+          <p>First time here? Two things worth knowing.</p>
+          <p>Each step downloads its model the first time it runs — about half a gigabyte all told, once — and the progress bar says so while it happens.</p>
+          <p>SwingScribe saves your span, downbeat and edits in a small <code>&lt;track&gt;.swingscribe.json</code> file beside each audio file you open. It is yours to keep, and it is what makes a track open the way you left it.</p>
+        </div>
       </section>
       <section id="picker-storage">
         <div class="storage-head">

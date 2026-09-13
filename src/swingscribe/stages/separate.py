@@ -218,6 +218,9 @@ def _roformer_separate(audio_path: Path, checkpoint: str, out_dir: Path) -> dict
     work = out_dir / "_separating"
     work.mkdir(parents=True, exist_ok=True)
     separator = Separator(output_dir=str(work), output_format="WAV", log_level=30)
+    # load_model fetches the checkpoint on first use (hundreds of MB) with
+    # nothing on the job's bar to say so; announce it where the GUI looks.
+    progress.report("separate", 0.0, f"loading {checkpoint} (downloads on first use)")
     separator.load_model(model_filename=checkpoint)
     outputs = separator.separate(str(audio_path))
     stems: dict[str, str] = {}
@@ -347,6 +350,9 @@ def run(document: Document, config: Config) -> Document:
 
     device = resolve_device(config.separate.device, torch.cuda.is_available())
     print(f"separate: model={model} device={device}")
+    progress.report(
+        "separate", 0.0, f"loading {model} (about 80 MB a model downloads on first use)"
+    )
 
     # Loading the bag is seconds; separating with it is minutes. So build the
     # separator first either way — it is what knows which stems this model is

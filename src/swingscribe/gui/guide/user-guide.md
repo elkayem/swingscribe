@@ -355,6 +355,21 @@ weights (about 300 MB) on first use. Without a CUDA GPU they run on the
 CPU: expect minutes, not seconds, for a whole track — which is why the GUI
 separates only the span you selected.
 
+## Third-party models and their licences
+
+SwingScribe is MIT licensed. The models it runs are not SwingScribe's, and
+each is downloaded on first use under its own terms:
+
+| Weights | Used for | Licence |
+|---|---|---|
+| Hybrid Transformer Demucs (`htdemucs` and variants) | separation | MIT |
+| beat_this `final0` | beat tracking | MIT |
+| Piano transcription CRNN (Kong et al.) | the pianist's second opinion and oracle line | CC BY 4.0 |
+| BS-Roformer-SW (jarredou) | separation, the default separator | **not stated by its author** as of September 2026. Until it is, treat it as personal and research use only, and pick `htdemucs` in the separator menu for anything commercial. |
+
+The full list, with the libraries, is in `NOTICES.md` beside the launcher
+in the portable folder and under `packaging/` in the repository.
+
 ## Troubleshooting
 
 **A chunk of the solo is missing entirely.** Demucs assigns every moment to

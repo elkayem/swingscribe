@@ -34,6 +34,7 @@ import statistics
 from collections.abc import Callable
 from pathlib import Path
 
+from swingscribe import progress
 from swingscribe.config import Config
 from swingscribe.device import resolve_device
 from swingscribe.model import BeatGrid, Document
@@ -423,6 +424,10 @@ def run(document: Document, config: Config) -> Document:
     device = resolve_device(config.beats.device, torch.cuda.is_available())
     print(f"beats: source={reason} device={device} dbn={config.beats.dbn}")
 
+    # beat_this fetches its checkpoint (~80 MB) through torch hub on first
+    # use, silently as far as the GUI is concerned; say so where the job's
+    # progress bar can show it.
+    progress.report("beats", None, "loading the beat model (about 80 MB downloads on first use)")
     file2beats = File2Beats(
         checkpoint_path=config.beats.checkpoint, device=device, dbn=config.beats.dbn
     )

@@ -246,6 +246,9 @@ function renderScoreList(node, items) {
 
 function renderTrackList(node, items) {
   node.innerHTML = '';
+  // No recents means a fresh install: the note beside the list says what the
+  // first run downloads and what the sidecar beside the music is.
+  if (node.id === 'recent-list') $('first-run').hidden = items.length > 0;
   if (!items.length) {
     node.innerHTML = '<li class="empty">Nothing yet</li>';
     return;

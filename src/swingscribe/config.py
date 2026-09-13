@@ -529,6 +529,23 @@ class Config(BaseSettings):
     gui: GuiConfig = GuiConfig()
 
     @classmethod
+    def settings_customise_sources(
+        cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+    ):
+        """Environment first, then what the caller passed.
+
+        The module docstring has always promised that `SWINGSCRIBE_*` overrides
+        a value from the YAML — but `from_yaml` hands the YAML in as init
+        kwargs, and pydantic-settings ranks init kwargs above the environment,
+        so the promise was empty: `SWINGSCRIBE_CACHE_DIR` lost to the yaml's
+        `cache_dir` every time (found 2026-09-13 by the portable build, whose
+        launcher points the cache at the user's profile that way). Nested
+        sections deep-merge, so `SWINGSCRIBE_GUI__LIBRARY_DIR` changes one
+        field of `gui` and leaves the yaml's port alone.
+        """
+        return (env_settings, init_settings)
+
+    @classmethod
     def from_yaml(cls, path: str | Path = DEFAULT_CONFIG_PATH) -> "Config":
         data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
         return cls(**data)

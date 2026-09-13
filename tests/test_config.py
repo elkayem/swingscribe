@@ -56,3 +56,22 @@ def test_every_offered_model_is_selectable_and_the_default_is_offered():
     config = Config()
     assert config.separate.model in config.gui.models
     assert config.gui.models[0] == config.separate.model
+
+
+def test_environment_overrides_the_yaml(tmp_path, monkeypatch):
+    """The module docstring's promise, and the portable build's launcher
+    depends on it: `SWINGSCRIBE_*` wins over a value the YAML sets, and a
+    nested override changes one field of a section without disturbing the
+    rest of it. It used to lose — from_yaml hands the YAML in as init
+    kwargs, which pydantic-settings ranks above the environment."""
+    path = tmp_path / "site.yaml"
+    path.write_text(
+        "cache_dir: from-yaml\ngui:\n  port: 9999\n  library_dir: /yaml/music\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SWINGSCRIBE_CACHE_DIR", str(tmp_path / "from-env"))
+    monkeypatch.setenv("SWINGSCRIBE_GUI__LIBRARY_DIR", "/env/music")
+    config = Config.from_yaml(path)
+    assert config.cache_dir == tmp_path / "from-env"
+    assert config.gui.library_dir == "/env/music"
+    assert config.gui.port == 9999  # the yaml's other gui field survives the merge

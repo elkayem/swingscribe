@@ -24,6 +24,7 @@ Heavy imports stay inside functions: this module must import without the ml
 group, which CI never installs.
 """
 
+import os
 import ssl
 import urllib.request
 from pathlib import Path
@@ -41,6 +42,13 @@ MODEL_SAMPLE_RATE = 16_000
 
 
 def checkpoint_path() -> Path:
+    """Where the weights live: `SWINGSCRIBE_MODELS_DIR` when set — the portable
+    build points every model download at one per-user folder that way, as
+    `TORCH_HOME` and `AUDIO_SEPARATOR_MODEL_DIR` do for the others — else the
+    upstream package's own default under the home directory."""
+    models_dir = os.environ.get("SWINGSCRIBE_MODELS_DIR")
+    if models_dir:
+        return Path(models_dir) / CHECKPOINT_NAME
     return Path.home() / "piano_transcription_inference_data" / CHECKPOINT_NAME
 
 
@@ -150,7 +158,16 @@ def transcribe(
     _numba_free()
     from piano_transcription_inference import PianoTranscription
 
-    ensure_checkpoint()
+    from swingscribe import progress
+
+    # Through the progress channel as well as the console: in the GUI the
+    # console is minimized and the first-run download (~172 MB) is otherwise
+    # a transcription that sits at 0% for minutes with no explanation.
+    def announce(message: str) -> None:
+        print(message)
+        progress.report("transcribe", None, message)
+
+    ensure_checkpoint(log=announce)
     model = PianoTranscription(device=device, checkpoint_path=str(checkpoint_path()))
     output = model.transcribe(to_model_rate(mono, sample_rate), None)
     return [
