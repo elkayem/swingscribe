@@ -1025,6 +1025,81 @@ monkeypatch over `quarter_triplet_pairs` that records every candidate pair
 and its truth) lives with this session's scratch scripts; its method is
 above.
 
+### D29 - Eighth-note triplets: we write a quarter of the human's, and the grid is the smaller reason
+
+Measured 2026-09-11/12 with `scripts/triplet_beats.py`, beat by beat over
+the twelve hand scores: a human beat is ternary when a note in it sits on
+a third or is a third (or two thirds) long; ours when an onset in it was
+quantized to a third; the two joined through the aligner (pitch sequence,
+no timing), a human beat looked up by the beat our matched note landed in.
+
+The human wrote 181 ternary beats, 162 reachable through a matched note.
+We wrote 45 of them ternary (recall 0.28). Of the 117 misses, 78 (0.48 of
+reached) are beats where we hold FEWER THAN THREE onsets, so the tuplet
+gate never opens: in 32 the human has a note we never transcribed, in 20
+our third onset fell into the next beat, and 26 are two-note triplet
+figures (a triplet quarter and eighth), which the swung-pair convention
+cannot write (D12, D28). Only 39 (0.24) are beats with three or more
+onsets where `choose_grid` chose binary: 15 went to sixteenths honestly,
+15 to thirty-seconds (the merge rule admitted them because sixteenths
+would have merged two onsets, and the run then won), and 9 to eighths
+with the last onset snapped onto the NEXT downbeat.
+
+The other direction is worse: we wrote 116 ternary beats and 67 of them
+sit where the human wrote binary (precision about 0.42). In the
+three-onset beats alone (255 of ours) the human wrote two notes in 110 --
+a note we transcribed as three, or a figure they simplified -- and we
+wrote 28 of those as triplets.
+
+The same instrument on the three sources, counted one way (a beat is
+ternary when a note sits on a third; "3+ onsets" separates a triplet
+figure from a swung pair annotated at a triplet position):
+
+| | hand scores, 12 | ours, same 12 | WJazzD, 73 located | ours, same 73 | WJazzD, all 456 |
+|---|---|---|---|---|---|
+| notes | 4,234 | 4,293 | 33,833 | 32,148 | 200,809 |
+| ternary beats, share of beats | 0.076 | 0.047 | 0.169 | 0.056 | 0.176 |
+| notes in ternary beats | 0.115 | 0.075 | 0.231 | 0.087 | 0.238 |
+| ternary beats with 3+ onsets | 0.77 | 0.78 | 0.42 | 0.79 | 0.45 |
+| quarter-note triplet figures | 16 (3.8 per 1,000 notes) | 0 | 47 (1.4) | 0 | 247 (1.2) |
+
+The listener uses quarter-note triplets three times as often as WJazzD's
+annotators, and we write none (D28). On eighth-note triplets we write
+about 60% as many ternary beats as they do, and after discounting the
+swung-pair convention about 60% of WJazzD's as well.
+
+**Two grid rules were proposed from the miss table and both were refuted
+before shipping (2026-09-12).**
+
+1. *The displaced eighth.* `_keeps_apart` counts a snap onto position 1.0
+   as a separate position, so the eighth grid "keeps three onsets apart"
+   by moving one out of the beat, and wins as coarsest within slack.
+   Counted over every beat of ours with three or more onsets where the
+   chosen grid did this: 138. The human ALSO puts a note on the next
+   downbeat, with fewer notes in the beat, in 81 of them; wrote the beat
+   binary some other way in 34; ternary in 20; 3 unmatched. So the
+   displacement reads a pushed downbeat correctly two times in three. A
+   rule that refuses a grid moving an onset out of the beat whenever
+   another grid places every onset inside it moves 33 of the 110
+   three-onset cases -- 24 of them away from a reading the human agrees
+   with -- and sends the ternary ones to SIXTEENTHS, not thirds, because
+   a lagging figure like {0.07, 0.49, 0.84} has a raw thirds error of
+   0.13 of a beat and the sixteenth grid fits it better. Not shipped.
+2. *A lag-tolerant thirds test* -- exactly three onsets, both gaps within
+   a tolerance of a third, the first onset no later than a bound. Over
+   the 255 three-onset beats: at gap 0.07 and lag 0.15 it fires on 34,
+   adding 3 true triplet beats and no new false ones; at 0.09 / 0.15, 4
+   and 0; at 0.09 / 0.25, 11 true and 13 false. Three or four beats out
+   of 117 misses. Not worth a rule.
+
+What the table says instead: the eighth-note triplet deficit is mostly
+upstream of the grid -- notes we did not transcribe, notes we split into
+three, thirds that spill into the next beat -- and the two-note figures,
+which are the D28 convention question at beat level. The measurable next
+steps are the false triplets (a taxonomy class for "three onsets where the
+human wrote two") and the transcription misses inside ternary beats, not
+`choose_grid`.
+
 ## Resolved
 
 ### R22 - The harness notated on the raw tracked beats, in 4/4, anchored on its own choice (was D27)

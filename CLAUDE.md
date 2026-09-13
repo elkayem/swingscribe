@@ -673,6 +673,14 @@ Results and limits: `docs/m6-notate.md`.
   Two notes on one grid position are one note in a single-line score. Without
   this, coarsening bought notated rhythm by silently deleting 4.8% of the
   notes.
+- **An onset the eighth grid pushes onto the NEXT downbeat is usually a
+  pushed downbeat, not a merged triplet** (2026-09-12, D29). Over 138
+  three-onset beats where `choose_grid` did this, the hand score also has
+  a note on the next downbeat in 81; it is a triplet in 20. Refusing the
+  grid sends those to sixteenths, not thirds. Do not "fix" `_keeps_apart`
+  for it; the eighth-note triplet deficit is upstream (notes never
+  transcribed, notes split into three, two-note figures), and
+  `scripts/triplet_beats.py` is the instrument.
 - **The grid slack must NOT be tuned on the notation score.** That score
   rises monotonically to "write everything as eighth notes", which three
   bebop solos reward and real sixteenth-note material would not.
