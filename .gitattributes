@@ -1,0 +1,2 @@
+# Batch files: cmd.exe is happiest with CRLF, whatever the checkouts autocrlf says.
+*.cmd text eol=crlf
