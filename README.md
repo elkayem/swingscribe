@@ -117,6 +117,12 @@ uv run python -m swingscribe gui path/to/track.m4a
 Model weights (about 300 MB) download on first use. A GPU is not required;
 everything here was built and measured on a laptop without one.
 
+**Quit**, in the app's header, stops the server; closing the tab does not.
+On Windows, `scripts/make_shortcut.ps1` puts a SwingScribe icon on the
+desktop that launches the app through the `swingscribe.cmd` shim, which is
+the route Smart App Control never refuses (see the user guide's
+troubleshooting section).
+
 The **[user guide](src/swingscribe/gui/guide/user-guide.md)** — also behind
 the Help button in the app — covers every control, the keyboard shortcuts,
 the command line, and troubleshooting. [docs/development.md](docs/development.md)

@@ -522,6 +522,18 @@ input.rate-value[type=text] {
 }
 .toast.error { border-color: rgba(232, 99, 106, 0.6); color: var(--danger); }
 
+/* ── stopped (after Quit) ───────────────────────────────────────────────── */
+.stopped { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
+.stopped-card {
+  max-width: 460px; padding: 26px 30px;
+  background: var(--panel); border: 1px solid var(--hairline-strong);
+  border-radius: 16px; box-shadow: var(--shadow-3), var(--edge-light);
+  display: flex; flex-direction: column; gap: 10px; font-size: 14px; line-height: 1.5;
+}
+.stopped-card h2 { font-size: 17px; }
+.stopped-card code { font: 12px var(--mono); }
+#quit.armed { white-space: nowrap; }
+
 /* ── Screen 4: transcribe & review ─────────────────────────────────────────── */
 .review-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 #review-summary { font: 12px var(--mono); }

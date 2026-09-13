@@ -10,11 +10,12 @@ module is an adapter over pipeline.run and Config, not a second brain. Anything
 resembling pipeline logic belongs in a stage, not here.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -92,11 +93,45 @@ def separation_audio_seconds(document, config: Config) -> float:
     return max(0.0, min(duration, span[1] + margin) - max(0.0, span[0] - margin))
 
 
-def create_app(config: Config) -> FastAPI:
+def allowed_origins(config: Config) -> frozenset[str]:
+    """The origins a state-changing request may come from: this server, by
+    any of the names a browser might reach it under."""
+    port = config.gui.port
+    return frozenset(
+        f"http://{host}:{port}" for host in {config.gui.host, "127.0.0.1", "localhost"}
+    )
+
+
+def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> FastAPI:
+    """The GUI's app. `on_quit` is what the Quit button calls once every job
+    is cancelled — the server's own shutdown, injected so this module never
+    imports uvicorn and a TestClient can watch it being called."""
     app = FastAPI(title="SwingScribe", docs_url=None, redoc_url=None)
     app.state.config = config
     app.state.runner = gui_jobs.JobRunner()
     app.state.tracks = {}  # track id -> {"path", "document"}
+    app.state.on_quit = on_quit or (lambda: None)
+    origins = allowed_origins(config)
+
+    @app.middleware("http")
+    async def same_origin_only(request: Request, call_next):
+        """Refuse a state-changing request from another site.
+
+        The server listens on localhost, but any page open in the same
+        browser can POST to localhost, and the request takes effect even
+        though the page cannot read the reply. A browser stamps such a
+        request with the page's Origin; the frontend's own fetches carry
+        this server's, and a test client or a curl carries none. Anything
+        else is refused before it reaches a route — a delete, a job, a
+        sidecar write, or Quit.
+        """
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            origin = request.headers.get("origin")
+            if origin is not None and origin not in origins:
+                return JSONResponse(
+                    {"detail": f"cross-origin request refused from {origin}"}, status_code=403
+                )
+        return await call_next(request)
 
     def resolve(track_id: str) -> dict[str, Any]:
         """Track id -> its open record, reopening it if the server restarted.
@@ -872,6 +907,30 @@ def create_app(config: Config) -> FastAPI:
     @app.get("/api/jobs")
     def get_jobs() -> dict[str, Any]:
         return {"jobs": app.state.runner.all()}
+
+    # ── quit ────────────────────────────────────────────────────────────────
+
+    @app.post("/api/quit")
+    def quit_server(force: bool = False) -> dict[str, Any]:
+        """Stop the server: the Quit button.
+
+        With a job in flight it refuses (409) unless `force` — the button
+        arms and asks for a second click, the cache panel's delete gesture —
+        and then cancels every active job first, so a separation's child
+        process does not outlive the server that was listening to it. What a
+        cancelled job loses is cache work only; the listener's span,
+        downbeat and edits are in the sidecar already.
+        """
+        active = [job for job in app.state.runner.all() if job["state"] in ("queued", "running")]
+        if active and not force:
+            names = ", ".join(f"{job['kind']} of {Path(job['path']).name}" for job in active)
+            return JSONResponse(
+                {"detail": f"still running: {names}", "active": active}, status_code=409
+            )
+        for job in active:
+            app.state.runner.cancel(job["id"])
+        app.state.on_quit()
+        return {"stopped": True, "cancelled": [job["id"] for job in active]}
 
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: str) -> dict[str, Any]:

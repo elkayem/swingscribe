@@ -1339,3 +1339,90 @@ def test_an_enabled_candidate_in_a_gap_is_a_note_of_its_own_and_sounds(world, mo
     response = world["client"].get(f"/api/tracks/{track['id']}/transcription", params=params)
     assert response.status_code == 200, response.text
     assert seen["pitches"] == [78, 75, 72]
+
+
+# ── quit, and the same-origin check ──────────────────────────────────────────
+
+
+class FakeRunner:
+    """A JobRunner with whatever jobs the test says are in flight."""
+
+    def __init__(self, jobs):
+        self.jobs = jobs
+        self.cancelled = []
+
+    def all(self):
+        return list(self.jobs)
+
+    def cancel(self, job_id):
+        self.cancelled.append(job_id)
+        return None
+
+
+def quit_client(tmp_path, jobs=()):
+    calls = []
+    app = gui_app.create_app(Config(cache_dir=tmp_path / "cache"), on_quit=lambda: calls.append(1))
+    app.state.runner = FakeRunner(
+        [
+            {"id": f"job{i}", "kind": kind, "state": state, "path": "C:/music/Oleo.m4a"}
+            for i, (kind, state) in enumerate(jobs)
+        ]
+    )
+    return TestClient(app), calls, app.state.runner
+
+
+def test_quit_stops_the_server_when_idle(tmp_path):
+    client, calls, _runner = quit_client(tmp_path, jobs=[("separate", "done")])
+    response = client.post("/api/quit")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"stopped": True, "cancelled": []}
+    assert calls == [1]
+
+
+def test_quit_refuses_while_a_job_runs(tmp_path):
+    """A job in flight means the button must arm and ask, not kill the
+    separation the listener has waited ten minutes on."""
+    client, calls, runner = quit_client(tmp_path, jobs=[("separate", "running")])
+    response = client.post("/api/quit")
+    assert response.status_code == 409, response.text
+    assert "separate of Oleo.m4a" in response.json()["detail"]
+    assert response.json()["active"][0]["id"] == "job0"
+    assert calls == [] and runner.cancelled == []
+
+
+def test_quit_forced_cancels_every_active_job_first(tmp_path):
+    """Forced, it cancels what is running — and what is queued — before the
+    server goes, so a separation's child process does not outlive it."""
+    client, calls, runner = quit_client(
+        tmp_path, jobs=[("separate", "running"), ("transcribe", "queued"), ("beats", "done")]
+    )
+    response = client.post("/api/quit?force=true")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"stopped": True, "cancelled": ["job0", "job1"]}
+    assert runner.cancelled == ["job0", "job1"]
+    assert calls == [1]
+
+
+def test_state_changing_requests_from_another_origin_are_refused(tmp_path):
+    """Any page open in the same browser can POST to localhost, and the
+    request takes effect even though the page cannot read the reply. The
+    browser stamps it with that page's Origin; ours carries this server's."""
+    client, calls, _runner = quit_client(tmp_path)
+    foreign = client.post("/api/quit", headers={"origin": "https://evil.example"})
+    assert foreign.status_code == 403, foreign.text
+    assert "cross-origin" in foreign.json()["detail"]
+    assert calls == []
+    # GETs are not state changes and stay open — the page's own loads.
+    assert client.get("/api/jobs", headers={"origin": "https://evil.example"}).status_code == 200
+    # The frontend's own fetches carry the server's origin, under either name.
+    for origin in ("http://127.0.0.1:8420", "http://localhost:8420"):
+        assert client.post("/api/quit", headers={"origin": origin}).status_code == 200, origin
+    assert calls == [1, 1]
+
+
+def test_quit_is_a_no_op_without_a_server(tmp_path):
+    """create_app without on_quit — every existing caller and test — must
+    keep working; the button then stops nothing, and says so honestly by
+    returning normally."""
+    client = TestClient(gui_app.create_app(Config(cache_dir=tmp_path / "cache")))
+    assert client.post("/api/quit").status_code == 200

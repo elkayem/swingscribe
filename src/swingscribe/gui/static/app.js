@@ -107,7 +107,9 @@ function clock(seconds, precise = true) {
 }
 
 let toastTimer = null;
+let serverStopped = false;  // set by Quit; nothing is worth reporting after it
 function toast(message, isError = false) {
+  if (serverStopped) return;
   const node = $('toast');
   node.textContent = message;
   node.classList.toggle('error', isError);
@@ -2499,6 +2501,50 @@ function renderScoreLine() {
 
 $('open-picker').addEventListener('click', () => openPicker('track'));
 $('picker-close').addEventListener('click', () => { $('picker').hidden = true; });
+
+/* Quit: one click stops the server; with a job in flight the server refuses
+   (409) and the button arms — red, naming the job — for a second click within
+   four seconds, the cache panel's delete gesture. Once the server has gone
+   the page replaces itself with a notice and stops talking to it, so the
+   console does not fill with the pollers' connection errors. */
+const QUIT_ARM_MS = 4000;
+let quitArmTimer = null;
+
+function disarmQuit() {
+  clearTimeout(quitArmTimer);
+  quitArmTimer = null;
+  $('quit').classList.remove('armed');
+  $('quit').textContent = 'Quit';
+}
+
+function stoppedNotice() {
+  serverStopped = true;
+  for (const engine of [mix.engine, stemEngine, reviewEngine]) {
+    try { engine?.pause(); } catch { /* nothing playing */ }
+  }
+  for (const node of document.body.children) node.hidden = node.id !== 'stopped';
+  window.stop();  // abandon any request in flight; nothing will answer it
+}
+
+$('quit').addEventListener('click', async () => {
+  const armed = quitArmTimer !== null;
+  disarmQuit();
+  $('quit').disabled = true;
+  try {
+    await api(`/api/quit${armed ? '?force=true' : ''}`, { method: 'POST' });
+    stoppedNotice();
+  } catch (error) {
+    if (error.status === 409) {
+      $('quit').classList.add('armed');
+      $('quit').textContent = `Quit anyway? (${error.message})`;
+      quitArmTimer = setTimeout(disarmQuit, QUIT_ARM_MS);
+    } else {
+      toast(`Could not quit: ${error.message}`, true);
+    }
+  } finally {
+    $('quit').disabled = false;
+  }
+});
 
 const openTypedPath = () => {
   const path = $('path-input').value.trim();

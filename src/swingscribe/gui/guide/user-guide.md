@@ -28,6 +28,15 @@ App Control refuses as an unsigned binary it has never seen (`os error
 The app serves itself on `127.0.0.1:8420` and opens a browser tab there. It
 listens on localhost only; the audio never leaves your machine.
 
+**Quit**, at the right of the header, stops the server: the page replaces
+itself with a notice and the console window it was launched from closes.
+If a separation or transcription is still running the button turns red and
+names it; a second click within four seconds abandons the job and quits
+anyway. Nothing you judged is lost either way — your span, downbeat, edits
+and score link are written beside the audio as you change them; an abandoned
+job only loses cache work it can redo. Closing the browser tab on its own
+does **not** stop the server.
+
 ## Opening a track
 
 Click **Open track…** in the top bar to bring up the picker:
@@ -366,6 +375,11 @@ consults the piano model. Pick `Trio (piano)` or `Solo piano` explicitly.
 **A separation is stuck or you picked the wrong model.** Click **Cancel**
 to stop it and return to the Separate button; pick a different model or
 span and run it again.
+
+**The browser tab is closed but the console window is still there.** The
+server is still running — closing the tab does not stop it. Open
+`http://127.0.0.1:8420/` again and click **Quit**, or close the console
+window.
 
 **Windows refuses to run `swingscribe.exe`.** If `uv run swingscribe ...`
 fails with `An Application Control policy has blocked this file (os error

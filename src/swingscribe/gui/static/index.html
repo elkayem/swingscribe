@@ -13,7 +13,17 @@
   <div class="track-title" id="track-title">No track loaded</div>
   <button class="ghost" id="open-picker" title="Choose a track: one you opened recently, one in the cache, or browse for a file.">Open track…</button>
   <a class="ghost button-link" id="help-link" href="/guide/" target="_blank" rel="noopener" title="Open the user guide in a new tab.">Help</a>
+  <button class="ghost" id="quit" title="Stop the SwingScribe server. Your span, downbeat and edits are already saved beside the audio.">Quit</button>
 </header>
+
+<!-- Shown in place of everything else once the server has stopped. -->
+<div class="stopped" id="stopped" hidden>
+  <div class="stopped-card">
+    <h2>SwingScribe has stopped.</h2>
+    <p>You can close this tab. Your span, downbeat and edits are saved beside the audio, and the cache is where you left it.</p>
+    <p class="muted">To start again, double-click the SwingScribe icon or run <code>swingscribe gui</code>.</p>
+  </div>
+</div>
 
 <!-- ── Screen 1: load & navigate ─────────────────────────────────────────── -->
 <div class="picker" id="picker" hidden>

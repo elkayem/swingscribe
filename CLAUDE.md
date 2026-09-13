@@ -111,6 +111,14 @@ of these has broken a tool at least once:
     retry with nothing in the CodeIntegrity or AppLocker logs. A first
     launch can fail on the reputation lookup and pass on the second; retry
     before diagnosing, and keep the `.cmd` as the route that never asks.)
+    **2026-09-12: `.venv\Scripts\python.exe` itself (uv's trampoline) is
+    refused too**, exit 126. `swingscribe.cmd` now probes it with a no-op
+    and falls back to the base interpreter named by `home =` in
+    `.venv\pyvenv.cfg` with `PYTHONPATH=.venv\Lib\site-packages;src` — so
+    the desktop shortcut (`scripts/make_shortcut.ps1`, minimized never
+    hidden) and `.claude/launch.json` (`cmd /c .\swingscribe.cmd`) both go
+    through the `.cmd`. Run tests the same way when the trampoline is
+    blocked; `uv run` still works because uv spawns the base interpreter.
 - **numba is blocked again** (2026-08-30): `numba/experimental/jitclass/
   _box.cp311-win_amd64.pyd` raises WinError 4551, so a bare `import
   torchcrepe` fails — it pulls librosa, which pulls numba. This does NOT
@@ -292,6 +300,20 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   `index.html` renders it client-side with a small Markdown subset, served
   at `/guide/` behind the Help button. Write the guide within that subset;
   no Markdown library, no build step.
+- **Quit is a button, and every state-changing request is same-origin
+  only** (2026-09-12, docs/packaging-plan.md). `POST /api/quit` cancels
+  the active jobs (409 and the button arms first, the cache panel's delete
+  gesture) and calls the `on_quit` that `server.serve` injects into
+  `create_app` — the app never imports uvicorn. `serve` then `os._exit`s if
+  a CREPE pass is still in its non-daemon worker thread, or the console
+  would sit open for minutes. A middleware refuses any non-GET whose
+  `Origin` is not this server's: a page on another site can POST to
+  localhost and the request takes effect unread. Closing the tab does NOT
+  stop the server; the guide says so.
+- **The default config ships INSIDE the package** as
+  `swingscribe/default-config.yaml` (2026-09-12; it was `config/default.yaml`
+  at the repo root, which a wheel or a frozen build does not have). Not
+  under a `config/` directory, which would shadow `config.py`.
 - **The grid repair mends BOTH tracker mistakes** (2026-09-10). A dropped
   beat and a doubled beat each shift every bar line after them by one
   beat; `repair_beats` inserted for the first and ignored the second until

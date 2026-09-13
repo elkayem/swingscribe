@@ -8,13 +8,40 @@ rem is already trusted.
 rem
 rem Usage from the repo root:  .\swingscribe gui
 rem
-rem Prefers the project venv and falls back to whatever `uv` resolves, so this
-rem still works before `uv sync` has built .venv.
+rem Three routes, tried in order:
+rem   1. the venv's python.exe -- uv's 262 KB trampoline, which Smart App
+rem      Control ALSO refused on 2026-09-12 (it had run that morning;
+rem      reputation is per file and flaps). Probed with a no-op first, so a
+rem      refusal is told apart from swingscribe itself exiting non-zero --
+rem      re-running on any failure would launch the GUI twice;
+rem   2. the base interpreter the venv was made from (`home =` in
+rem      .venv\pyvenv.cfg) with PYTHONPATH naming the venv's site-packages
+rem      and src/ -- PYTHONPATH does not process the editable install's
+rem      .pth, so src must be named;
+rem   3. whatever `uv` resolves, for a checkout where `uv sync` has not run.
 setlocal
-set "VENV_PY=%~dp0.venv\Scripts\python.exe"
-if exist "%VENV_PY%" (
+set "ROOT=%~dp0"
+set "VENV_PY=%ROOT%.venv\Scripts\python.exe"
+if not exist "%VENV_PY%" goto :uv
+
+"%VENV_PY%" -c "pass" >nul 2>&1
+if not errorlevel 1 (
     "%VENV_PY%" -m swingscribe %*
-) else (
-    uv run python -m swingscribe %*
+    exit /b %ERRORLEVEL%
 )
+
+rem The venv launcher is refused: find the interpreter it wraps.
+set "BASE_HOME="
+for /f "usebackq tokens=1,* delims== " %%A in ("%ROOT%.venv\pyvenv.cfg") do (
+    if /i "%%A"=="home" set "BASE_HOME=%%B"
+)
+if "%BASE_HOME%"=="" goto :uv
+set "BASE_PY=%BASE_HOME%\python.exe"
+if not exist "%BASE_PY%" goto :uv
+set "PYTHONPATH=%ROOT%.venv\Lib\site-packages;%ROOT%src"
+"%BASE_PY%" -m swingscribe %*
+exit /b %ERRORLEVEL%
+
+:uv
+uv run python -m swingscribe %*
 exit /b %ERRORLEVEL%
