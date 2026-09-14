@@ -194,7 +194,7 @@ def test_a_note_alone_in_its_window_is_kept():
 
 
 def test_note_loudness_reads_the_signal_under_the_note_in_whole_track_time():
-    import numpy as np
+    np = pytest.importorskip("numpy", reason="ml dependency group not installed")
 
     rate = 1000
     signal = np.zeros(2000, dtype="float32")
@@ -659,6 +659,7 @@ def test_an_unavailable_oracle_leaves_the_line_alone(monkeypatch):
     """A missing checkpoint or an absent ml group must not turn a working
     transcription into no transcription — the oracle improves a line that
     already exists."""
+    pytest.importorskip("numpy", reason="ml dependency group not installed")
     from swingscribe import piano
     from swingscribe.stages import transcribe as stage
 
@@ -672,6 +673,7 @@ def test_an_unavailable_oracle_leaves_the_line_alone(monkeypatch):
 
 
 def test_an_oracle_that_hears_nothing_leaves_the_line_alone(monkeypatch):
+    pytest.importorskip("numpy", reason="ml dependency group not installed")
     from swingscribe import piano
     from swingscribe.stages import transcribe as stage
 
@@ -685,6 +687,7 @@ def test_an_oracle_that_hears_nothing_leaves_the_line_alone(monkeypatch):
 def test_the_oracle_corrects_an_octave_and_drops_a_phantom(monkeypatch):
     """The two measured effects, end to end through the stage: a note at the
     wrong octave is moved (recall), a note nobody else heard goes (precision)."""
+    pytest.importorskip("numpy", reason="ml dependency group not installed")
     from swingscribe import piano
     from swingscribe.stages import transcribe as stage
 
@@ -710,6 +713,7 @@ def test_the_second_voice_is_opt_in_and_never_joins_the_line(monkeypatch):
     """The listener's review aid must not become part of the transcription:
     doubling the note count would halve precision on every benchmark while
     describing the same playing."""
+    pytest.importorskip("numpy", reason="ml dependency group not installed")
     from swingscribe import piano
     from swingscribe.stages import transcribe as stage
 
@@ -738,6 +742,7 @@ def test_the_oracle_line_replaces_crepe_when_asked_for(monkeypatch):
     """`piano_line = "oracle"`: the line is PICKED from the model's full
     output — loudest, register-continuous, one per simultaneity — and
     CREPE's notes are set aside, not merged."""
+    pytest.importorskip("numpy", reason="ml dependency group not installed")
     from swingscribe import piano
     from swingscribe.stages import transcribe as stage
 
@@ -763,6 +768,7 @@ def test_the_oracle_line_replaces_crepe_when_asked_for(monkeypatch):
 def test_the_oracle_line_needs_no_crepe_notes_to_start_from(monkeypatch):
     """The CREPE path returns early on an empty line because there is nothing
     to correct; the oracle line has its own notes and must not."""
+    pytest.importorskip("numpy", reason="ml dependency group not installed")
     from swingscribe import piano
     from swingscribe.stages import transcribe as stage
 
@@ -783,6 +789,7 @@ def test_the_oracle_line_needs_no_crepe_notes_to_start_from(monkeypatch):
 def test_an_unavailable_oracle_falls_back_to_crepe_for_the_oracle_line(monkeypatch):
     """A missing checkpoint must not turn a working transcription into no
     transcription, whichever line was asked for."""
+    pytest.importorskip("numpy", reason="ml dependency group not installed")
     from swingscribe import piano
     from swingscribe.stages import transcribe as stage
 
@@ -862,6 +869,7 @@ def test_a_blocked_resampy_dll_is_stubbed_not_raised(monkeypatch):
 def test_the_piano_oracle_gets_a_passthrough_numba_when_its_dll_is_blocked(monkeypatch):
     import sys
 
+    pytest.importorskip("numpy", reason="ml dependency group not installed")
     from swingscribe import piano
 
     _block_imports(monkeypatch, "resampy", "numba", "llvmlite")

@@ -1,9 +1,13 @@
 """Cross-detector corroboration: telling an invented note from an unwanted one.
 
-Pure numpy over note dicts, so all of it runs in CI without the ml group.
+Pure numpy over note dicts -- and numpy lives in the ml group, so a plain
+``uv sync`` (CI) has none, and this module must skip rather than fail to
+collect: one collection error aborts the whole pytest run.
 """
 
 import pytest
+
+pytest.importorskip("numpy", reason="ml dependency group not installed")
 
 from swingscribe.corroborate import apply, corroborate, fill_gaps, second_voice, snap_octaves
 from swingscribe.line_selection import ONSET_SHIFT_S
