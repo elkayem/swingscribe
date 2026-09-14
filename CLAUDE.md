@@ -315,8 +315,11 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
 - **The user guide lives in the package at `gui/guide/`** — `user-guide.md`
   is the single source (rendered on GitHub, linked from the README) and
   `index.html` renders it client-side with a small Markdown subset, served
-  at `/guide/` behind the Help button. Write the guide within that subset;
-  no Markdown library, no build step.
+  at `/guide/` behind the Help button. Write the guide within that subset
+  — headings, paragraphs, bulleted and numbered lists, fenced code,
+  inline code/bold/italic/links, `<kbd>` — and NO TABLES: a pipe table
+  renders as one paragraph of pipes (the licence section did, 2026-09-14;
+  it is a list now). No Markdown library, no build step.
 - **Quit is a button, and every state-changing request is same-origin
   only** (2026-09-12, docs/packaging-plan.md). `POST /api/quit` cancels
   the active jobs (409 and the button arms first, the cache panel's delete
