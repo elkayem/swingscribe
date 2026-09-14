@@ -1,13 +1,19 @@
 # Packaging plan: a double-click SwingScribe
 
-Status: **pieces 1 and 2 done (2026-09-12); piece 3 built and tested on
-this machine with Smart App Control on (2026-09-13)** — launch, ingest
-through the bundled ffmpeg, Beats, Separate (htdemucs, child process),
-Transcribe (CREPE and the piano oracle), Export, Quit, every weight
-downloading into the per-user folder on the way. Folder 1.31 GB, zip
-443 MB. Still to do: the second-laptop test, the first tagged release, and
-the BS-Roformer-SW licence. The review's findings are folded in below and
-the decisions are recorded at the end.
+Status: **v0.1.0 released (2026-09-14)** — the first tagged release; the
+Release workflow ran on the runner for the first time, built the folder
+from the pins, passed its headless smoke test and attached
+`SwingScribe-0.1.0-windows-x64.zip` (464 MB) to
+https://github.com/elkayem/swingscribe/releases/tag/v0.1.0. Before the
+tag: pieces 1 and 2 done (2026-09-12); piece 3 built and tested on this
+machine with Smart App Control on (2026-09-13) — launch, ingest through
+the bundled ffmpeg, Beats, Separate (htdemucs, child process), Transcribe
+(CREPE and the piano oracle), Export, Quit, every weight downloading into
+the per-user folder on the way — and tested on the second laptop (Smart
+App Control off) from the zip: setup, icon, a track through every step,
+uninstall, all working. Still to do: the BS-Roformer-SW licence. The
+review's findings are folded in below and the decisions are recorded at
+the end.
 
 ## What this delivers
 
