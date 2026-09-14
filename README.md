@@ -142,7 +142,11 @@ settings lets an administrator turn the feature off, and since the April
 the folder repeats all of this.
 
 Model and library licences are listed in `NOTICES.md` in the folder and
-under [packaging/](packaging/NOTICES.md) here.
+under [packaging/](packaging/NOTICES.md) here. One deserves a sentence: the
+default separator's weights, BS-Roformer-SW, have no licence and no known
+author. SwingScribe does not ship them; your machine downloads them from
+the UVR community model repository the first time you separate. Use
+`htdemucs` (MIT) for anything you sell.
 
 ## Get started from source
 

@@ -367,7 +367,7 @@ each is downloaded on first use under its own terms:
 | Hybrid Transformer Demucs (`htdemucs` and variants) | separation | MIT |
 | beat_this `final0` | beat tracking | MIT |
 | Piano transcription CRNN (Kong et al.) | the pianist's second opinion and oracle line | CC BY 4.0 |
-| BS-Roformer-SW (jarredou) | separation, the default separator | **not stated by its author** as of September 2026. Until it is, treat it as personal and research use only, and pick `htdemucs` in the separator menu for anything commercial. |
+| BS-Roformer-SW | separation, the default separator | **None: the weights are of unknown authorship.** The person who rehosted them says they did not train them and know nothing of their origin, and every copy since declares the licence unknown. SwingScribe does not ship them; your machine downloads them from the UVR community model repository the first time you separate with this model, the same way every UVR user gets them. For anything you sell, pick `htdemucs` (MIT) in the separator menu. |
 
 The full list, with the libraries, is in `NOTICES.md` beside the launcher
 in the portable folder and under `packaging/` in the repository.

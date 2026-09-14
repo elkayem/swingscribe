@@ -12,7 +12,7 @@ libraries; the model weights are downloaded by SwingScribe on first use into
 | Hybrid Transformer Demucs (`htdemucs`, `htdemucs_6s`, `htdemucs_ft`) | source separation | facebookresearch/demucs, via torch hub | MIT |
 | beat_this `final0` | beat tracking | CPJKU/beat_this, via torch hub | MIT (code and weights) |
 | Piano transcription CRNN (Kong et al., 2020) | piano second opinion and the oracle line | Zenodo record 4034264 | CC BY 4.0 — Qiuqiang Kong, Bochen Li, Xuchen Song, Yuan Wan, Yuxuan Wang, "High-resolution piano transcription with pedals by regressing onset and offset times" |
-| BS-Roformer-SW (jarredou) | source separation, the default separator | python-audio-separator's model zoo | **not stated by its author as of 2026-09-13.** Until it is, treat it as available for personal and research use only; choose `htdemucs` in the separator menu for anything commercial. |
+| BS-Roformer-SW | source separation, the default separator | the UVR community model repository, through python-audio-separator's model zoo | **None. The weights are of unknown authorship.** They were rehosted by jarredou, who has said they did not train them and know nothing of their origin, and whose account is gone; every redistribution since declares the licence unknown (checked 2026-09-14). SwingScribe does not ship them: your machine downloads them from the community repository the first time you separate with this model. For your own transcribing that is the same position every UVR user is in. For anything you sell, choose `htdemucs` (MIT) in the separator menu. |
 
 ## Libraries (shipped in the folder)
 

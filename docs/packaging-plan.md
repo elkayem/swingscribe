@@ -11,7 +11,8 @@ the bundled ffmpeg, Beats, Separate (htdemucs, child process), Transcribe
 (CREPE and the piano oracle), Export, Quit, every weight downloading into
 the per-user folder on the way — and tested on the second laptop (Smart
 App Control off) from the zip: setup, icon, a track through every step,
-uninstall, all working. Still to do: the BS-Roformer-SW licence. The
+uninstall, all working. The BS-Roformer-SW licence question is closed by
+disclosure (2026-09-14, below): there is no licence to find. The
 review's findings are folded in below and the decisions are recorded at
 the end.
 
@@ -388,7 +389,7 @@ core. Checked 2026-09-12:
 | htdemucs (Demucs v4) | torch hub, facebookresearch/demucs | MIT (the repo names no separate licence for the weights) | clear |
 | beat_this `final0` | torch hub, CPJKU/beat_this | MIT, stated for code and weights together | clear |
 | piano transcription CRNN (Kong et al.) | Zenodo record 4034264 | CC BY 4.0 | clear; the attribution belongs in the About text |
-| BS-Roformer-SW (jarredou) | audio-separator's model zoo | **not stated** in the zoo's `models.json` and the model page is not publicly readable | **must be stated in the notices before release** |
+| BS-Roformer-SW | the UVR community model repository, via audio-separator's model zoo | **none, and none obtainable** (2026-09-14): jarredou only rehosted the checkpoint, has said they did not train it and have no provenance information, and their account is deleted; the rescue copy declares the licence unknown, and the MIT badges on the ONNX and GGUF conversions cover the conversion code only, as those cards say themselves | closed by disclosure: the notices, the guide, the README and the first-download message all say what the weights are |
 
 This is a disclosure obligation, not a legal gate: the legal position of a
 first-run download is the same as today's repo, where the user's own
@@ -574,8 +575,14 @@ two launches by hand.
 7. **Test machines: this one with Smart App Control on, and the second
    laptop as a stranger's machine** (2026-09-13). No VM, no toggling
    needed for the build; the toggle is documented as a user workaround.
-8. **Open: the BS-Roformer-SW licence**, stated in the notices before any
-   release.
+8. **The BS-Roformer-SW licence: closed by disclosure, not by licence**
+   (2026-09-14). The trainer is unknown and there is nobody to ask, so the
+   choice was between keeping the measured default (WJazzD note F1 0.790
+   -> 0.858 over 61 solos) with the provenance stated plainly wherever a
+   user reads before the download, or making htdemucs the default and
+   giving that up for a risk that does not exist for personal use.
+   Kept, with the disclosure; htdemucs stays named as the choice for
+   commercial work.
 9. **A zip of a portable folder, not an installer** (2026-09-13). Smart App
    Control refuses any freshly built launcher or installer; a folder of
    files with reputation runs nothing new. See "Why a folder in a zip".

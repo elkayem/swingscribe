@@ -220,7 +220,14 @@ def _roformer_separate(audio_path: Path, checkpoint: str, out_dir: Path) -> dict
     separator = Separator(output_dir=str(work), output_format="WAV", log_level=30)
     # load_model fetches the checkpoint on first use (hundreds of MB) with
     # nothing on the job's bar to say so; announce it where the GUI looks.
-    progress.report("separate", 0.0, f"loading {checkpoint} (downloads on first use)")
+    # The SW weights have no licence and no known author (NOTICES.md): the
+    # download is the listener's choice, so say so at the moment it happens.
+    progress.report(
+        "separate",
+        0.0,
+        f"loading {checkpoint} (downloads on first use; weights of unknown"
+        " origin, no licence - see NOTICES.md)",
+    )
     separator.load_model(model_filename=checkpoint)
     outputs = separator.separate(str(audio_path))
     stems: dict[str, str] = {}
