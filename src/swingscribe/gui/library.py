@@ -59,14 +59,19 @@ def library_dir(config: Config) -> Path:
 
 
 def list_drives() -> list[str]:
-    """Windows drive letters that exist, for the folder browser's root level.
+    """The folder browser's root level: the drive letters that exist on Windows,
+    the filesystem root anywhere else.
 
-    Windows-only, matching the rest of this project (CLAUDE.md). A single-drive
-    machine still benefits: it's how the browser gets back to "Computer" after
-    navigating down into a folder with no further parent.
+    A single-drive machine still benefits: it's how the browser gets back to
+    "Computer" after navigating down into a folder with no further parent.
+    The app is developed on Windows (CLAUDE.md), but CI runs the tests on
+    Linux too, and a root level with nothing in it is wrong there.
     """
+    import os
     import string
 
+    if os.name != "nt":
+        return ["/"]
     return [f"{letter}:\\" for letter in string.ascii_uppercase if Path(f"{letter}:\\").exists()]
 
 

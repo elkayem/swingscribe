@@ -134,9 +134,14 @@ def test_browse_lists_are_sorted_case_insensitively(tmp_path, config):
 
 
 def test_browse_reports_available_drives():
+    import os
+
     drives = library.list_drives()
-    assert all(d.endswith(":\\") for d in drives)
-    assert len(drives) >= 1  # the drive this repo lives on, at minimum
+    if os.name == "nt":
+        assert all(d.endswith(":\\") for d in drives)
+        assert len(drives) >= 1  # the drive this repo lives on, at minimum
+    else:
+        assert drives == ["/"]  # CI's Linux runner has no drive letters
 
 
 def test_settings_live_beside_the_audio_not_in_the_cache(config, tmp_path):
