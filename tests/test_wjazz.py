@@ -137,6 +137,29 @@ def test_notated_positions_read_the_metrical_annotation():
     assert abs(positions[2][0] - 8.8333333) < 1e-6
 
 
+def test_notated_beats_keep_the_place_in_the_bar():
+    """What `notated_positions` throws away and a bar-line check needs."""
+    from swingscribe.wjazz import notated_beats
+
+    class FakeDb:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def execute(self, _sql, _params):
+            return iter(self.rows)
+
+    # beat, tatum, division, period, denom, pitch
+    rows = [(1, 2, 2, 4, 4, 57), (3, 1, 1, 4, 4, 62), (2, 2, 3, 4, 4, 55)]
+    beats, bar = notated_beats(FakeDb(rows), 1)
+    assert bar == 4.0
+    assert beats[0] == (0.5, 57) and beats[1] == (2.0, 62)
+    assert abs(beats[2][0] - (1 + 1 / 3)) < 1e-9
+    # A beat that is not a quarter, or a change of metre, is not judged.
+    assert notated_beats(FakeDb([(1, 1, 1, 2, 8, 60)]), 1) == ([], 0.0)
+    assert notated_beats(FakeDb([(1, 1, 1, 4, 4, 60), (1, 1, 1, 3, 4, 60)]), 1) == ([], 0.0)
+    assert notated_beats(FakeDb([]), 1) == ([], 0.0)
+
+
 # ── a WJazzD solo as a SCORE ────────────────────────────────────────────────
 # The metrical positions ARE a notation: in a single line the written value of
 # a note is the distance to the next one, less any rest. Nothing is missing --

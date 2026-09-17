@@ -1042,6 +1042,10 @@ def test_notation_score_reports_rhythm_and_value(world, monkeypatch, tmp_path):
     assert payload["coverage"] == 1.0
     assert payload["trusted"] is True
     assert payload["score"] == "Hand Transcription.mscx"
+    # The bar lines travel with the score: rhythm cannot see a page that
+    # starts on the wrong beat, and this is where the listener can move it.
+    assert {"on_the_bar", "beat_offset", "beat_share", "beats_per_bar"} <= payload.keys()
+    assert payload["beat_share"] > 0
 
 
 def test_a_score_that_barely_lines_up_is_marked_untrusted(world, monkeypatch, tmp_path):

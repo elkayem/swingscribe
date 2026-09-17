@@ -905,7 +905,9 @@ out of `too_short` (765 → 744), `dropped` (172 → 164) and `tracked_other`
 (252 → 247) into `unclassified` (0 → 34, 0.4%) — the frame rules skipped
 for want of a trace, item 2 exactly, and the paired test names it: `up 3 /
 down 0 of 73`. Frame evidence on 70 of 73. The guard exits 1 and will until
-D31 is settled, which is what it is for. The Omnibook block, pinned today,
+D31 is settled, which is what it is for. (Settled the same day, as R25: the
+narrowest covering stem set wins, the three traces were rebuilt with
+`wjazz_reviews.py --redo` and read `matches run_eval` again.) The Omnibook block, pinned today,
 reads back `all 59 counts unchanged`.
 
 ### 10.8 Assumptions on the record, for the Omnibook block

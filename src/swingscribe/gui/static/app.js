@@ -2522,9 +2522,16 @@ function renderScoreLine() {
       'so it is withheld rather than shown as if it meant something.';
     return;
   }
+  /* Rhythm compares gaps and scores a page that starts on the wrong beat
+     exactly like the right one, so the bar lines are judged separately: the
+     share of matched notes on the beat the score wrote them on, and -- when
+     most of them sit the same distance off -- which way to move the downbeat. */
+  const offBar = s.beat_offset ? barLineWarning(s) : '';
+  line.classList.toggle('off-the-bar', !!offBar);
   line.textContent =
     `vs ${s.score}: rhythm ${s.rhythm.toFixed(3)} · value ${s.value.toFixed(3)} ` +
-    `· ${pct}% lined up (${s.matched}/${s.reference})`;
+    `· ${pct}% lined up (${s.matched}/${s.reference})` +
+    (offBar || (s.on_the_bar != null ? ` · on the bar ${s.on_the_bar.toFixed(3)}` : ''));
   line.title =
     'NOT the pitch F1 above, which asks whether we heard the right notes. This asks ' +
     'whether the ones we got are WRITTEN the way a human wrote them: rhythm is the gap ' +
@@ -2534,6 +2541,18 @@ function renderScoreLine() {
     (s.transposition
       ? `, their score written ${s.transposition > 0 ? '+' : ''}${s.transposition} semitones`
       : '');
+}
+
+/* `beat_offset` is ours minus theirs, modulo the bar: 3 in 4/4 means every
+   note sits a beat EARLY on our page, i.e. our downbeat is a beat late. Said
+   as the shorter way round, in the direction the downbeat has to move. */
+function barLineWarning(s) {
+  const bar = s.beats_per_bar || 4;
+  const early = s.beat_offset > bar / 2;
+  const beats = early ? bar - s.beat_offset : s.beat_offset;
+  const share = Math.round(s.beat_share * 100);
+  return ` · BAR LINES OFF: ${share}% of matched notes sit ${beats} beat${beats === 1 ? '' : 's'} ` +
+    `${early ? 'early' : 'late'} — move the downbeat that far ${early ? 'earlier' : 'later'}`;
 }
 
 // ── events ──────────────────────────────────────────────────────────────────

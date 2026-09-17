@@ -278,6 +278,14 @@ rhythm and value, not just pitch. It always reads lower than the F1 above
 it, because it charges the gap between performed timing and notated rhythm
 to the transcriber. Neither number replaces the other.
 
+The same line ends with **on the bar**: the share of matched notes written
+on the beat your score writes them on. Rhythm cannot see a page whose every
+bar line is a beat off — the gaps between notes are all still right — so
+this is the number that does. A page on its bar lines reads about 0.8 to
+0.95. If most notes sit the same distance from where your score has them,
+the line turns into a warning — **BAR LINES OFF** — and says how far, and
+which way to move the downbeat. Move it, export again, and score again.
+
 ## Export
 
 **Export MusicXML** writes the score beside the audio file, with the span

@@ -210,6 +210,34 @@ def notated_positions(db, melid: int) -> list[tuple[float, int]]:
     return [(position - origin, pitch) for position, pitch in out]
 
 
+def notated_beats(db, melid: int) -> tuple[list[tuple[float, int]], float]:
+    """((beat in the bar in quarter notes, pitch) per note, the bar's length).
+
+    `notated_positions` is relative to the solo's first NOTE, which is right
+    for a measure of gaps and throws away the one thing a bar-line check
+    needs: where in the bar each note sits. This keeps it -- beat 1 is 0.0 --
+    for `score_bars.wjazz_bar_line_agreement`.
+
+    Only for a solo in one metre whose beat is a quarter note (`denom` 4, one
+    `period` throughout): 437 of the 456. Anything else returns ([], 0.0)
+    and is not judged, because `beat` counts the signature's own beats and
+    our pages count quarters.
+    """
+    rows = db.execute(
+        "select beat, tatum, division, period, denom, pitch from melody "
+        "where melid=? order by eventid",
+        (melid,),
+    )
+    rows = [row for row in rows if row[3] and row[0] is not None]
+    if not rows or len({(row[3], row[4]) for row in rows}) != 1 or rows[0][4] != 4:
+        return [], 0.0
+    period = float(rows[0][3])
+    return [
+        ((beat - 1) + (tatum - 1) / max(1, division or 1), int(pitch))
+        for beat, tatum, division, _period, _denom, pitch in rows
+    ], period
+
+
 # A gap this long or shorter becomes the note's written value; anything
 # longer is a note followed by a real rest. Two beats, because a lead sheet
 # does not write articulation and WJazzD's `duration` is a human's note-off:

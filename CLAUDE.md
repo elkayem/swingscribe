@@ -391,7 +391,11 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   remainder is the notes (the review's, with erasures), not the grid.
 - Bar lines are derived by counting beats from an anchor. The beat tracker's
   detected downbeat layer is noise (open-issue #5) and must not be drawn or
-  trusted; only its pulse layer is reliable.
+  trusted; only its pulse layer is reliable. Its individual marks, that is:
+  the layer's BEST PHASE (`meter._auto_anchor`, what a track with no
+  anchor gets) is now measured against references -- right on 22 of 22
+  Omnibook sides and the listener's three hand-placed downbeats, wrong on
+  5 of 73 WJazzD solos (D32). Better than a guess, not yet a fact.
 - `gui.*` config is UI state and must never reach a cache key. `stage_config()`
   enforces this via `STAGE_SECTIONS`; changing a port must not throw away a
   separation.
@@ -826,10 +830,30 @@ list of what is actually wrong; run everything with one command:
   it (`benchmark.place_on_anchors`, 19 ms median leave-one-out). The same
   three classes lead both; notes under an eighth are 27% of the book and
   54% of its outright misses. Its frame evidence needs
-  `wjazz_reviews.py --folder Omnibook` after a transcribe change, and D31:
-  three Parker solos under `benchmark/wjazzd/` are byte-identical to their
-  Omnibook copies, share a stems digest, and now resolve to the whole-file
-  Roformer set -- a fresh transcription no longer matches the notes cache.
+  `wjazz_reviews.py --folder Omnibook` after a transcribe change. (R25,
+  was D31: three Parker solos under `benchmark/wjazzd/` are byte-identical
+  to their Omnibook copies and share a stems digest; the Omnibook's later
+  whole-file separation changed what their spans read.)
+- **The NARROWEST stem set covering a span answers first, the whole-file
+  set last** (2026-09-17, R25; `separate.covering_dirs`,
+  `library.available_stems`). Stability, not quality: the sets differ by a
+  few notes and neither is better, so a whole-file separation made LATER
+  must not change what a span already separated and measured reads. A
+  review's key cannot see which stems it was made from --
+  `wjazz_reviews.py --redo <name>` rebuilds one.
+- **A page that starts on the wrong beat is scored, everywhere**
+  (2026-09-17, D32). Notated rhythm is gap-based and phase-immune BY DESIGN
+  -- keep it that way -- so `score_bars.beat_agreement` asks the other
+  question: `on_the_bar`, the share of matched notes on the reference's
+  beat (0.8-0.95 on a right page, under 0.1 a beat off), with `beat_offset`
+  / `beat_share` saying which way and how surely. WJazzD's reference is its
+  own bar/beat/tatum (`wjazz.notated_beats`). Pinned per page and as
+  `summary/{mscz,omnibook,wjazz}_placement` and `*_on_the_bar`; in both
+  sheets; on the Score line, which tells the listener which way to move the
+  downbeat. First reading: 12 of 12, 22 of 22, and **62 of 73 on WJazzD** --
+  five clean wrong downbeats (`_auto_anchor`'s, on sidecars with no
+  anchor) and six diffuse ones that are the grid (half-rate, slipped
+  beats). A high `beat_share` off zero is a downbeat; a low one is a grid.
 - **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
   this notate the way a human notated it?" It charges the gap between
   performed timing and notated rhythm to the transcriber, so it reads lower

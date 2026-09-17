@@ -15,6 +15,7 @@ from swingscribe.score_bars import (
     bars_on_grid,
     beat_coordinate,
     clock_anchors,
+    wjazz_bar_line_agreement,
 )
 
 
@@ -157,3 +158,25 @@ def test_a_page_on_the_books_bar_lines_reads_zero_and_a_beat_late_reads_three():
 def test_bar_line_agreement_of_nothing_is_empty():
     score = _Score([_Note(0.0, 60)], bars=1)
     assert bar_line_agreement(Notation(), score)["beat_n"] == 0.0
+
+
+def test_a_wjazz_solo_that_starts_on_the_wrong_beat_loses_nearly_all_of_on_the_bar():
+    """The listener saw WJazzD pages begin on the wrong beat; WJazzD's own
+    bar/beat/tatum is the reference that says so. The annotation's solo
+    starts mid-bar, as they do -- only the beat in the bar is compared."""
+    rng = random.Random(9)
+    scale = [60, 62, 63, 65, 67, 69, 70, 72]
+    score = _Score([_Note(i * 0.5, rng.choice(scale)) for i in range(96)], bars=12)
+    theirs = [((n.position + 2.0) % 4.0, n.pitch) for n in score.melody]  # solo enters on beat 3
+    right = wjazz_bar_line_agreement(_page(score, 2.0), theirs, 4.0)
+    assert right["beat_offset"] == 0.0 and right["on_the_bar"] == 1.0
+    wrong = wjazz_bar_line_agreement(_page(score, 1.0), theirs, 4.0)
+    assert wrong["beat_offset"] == 3.0
+    assert wrong["on_the_bar"] == 0.0
+
+
+def test_a_page_in_another_metre_is_not_judged():
+    score = _Score([_Note(i * 0.5, 60 + i % 5) for i in range(48)], bars=6)
+    theirs = [(n.position % 3.0, n.pitch) for n in score.melody]
+    assert wjazz_bar_line_agreement(_page(score, 0.0), theirs, 3.0)["beat_n"] == 0.0
+    assert wjazz_bar_line_agreement(_page(score, 0.0), [], 4.0)["beat_n"] == 0.0

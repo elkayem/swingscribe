@@ -581,7 +581,8 @@ def wjazz_notation_scores(db_path: Path, card_wjazz: dict, runs: dict, grids: di
     import sqlite3
 
     from swingscribe.benchmark import readability, score_against_wjazz_notation
-    from swingscribe.wjazz import notated_positions
+    from swingscribe.score_bars import wjazz_bar_line_agreement
+    from swingscribe.wjazz import notated_beats, notated_positions
 
     db = sqlite3.connect(db_path)
     out = {}
@@ -619,6 +620,13 @@ def wjazz_notation_scores(db_path: Path, card_wjazz: dict, runs: dict, grids: di
                 "trusted": float(bool(result["trusted"])),
             }
         )
+        # Whether our bar lines are the annotator's. Rhythm above is
+        # gap-based and cannot see a page that starts on the wrong beat;
+        # WJazzD's bar/beat/tatum can (score_bars.py). Absent for a solo
+        # whose beat is not a quarter or whose metre is not the page's.
+        agreement = wjazz_bar_line_agreement(notation, *notated_beats(db, entry["melid"]))
+        if agreement["beat_n"]:
+            out[key].update({k: round(v, 4) for k, v in agreement.items()})
     return out
 
 
@@ -641,6 +649,50 @@ def readable_pages(card: dict) -> dict:
             if "readability" in entry and take_of(name) is None:
                 pages[prefix + name] = entry
     return pages
+
+
+def bar_cell(entry: dict) -> str:
+    """`on_the_bar` for a notation row, and a loud flag when the page's bar
+    lines are not the reference's: the number alone reads like a bad rhythm
+    score, and this is a different and much cheaper defect -- one downbeat."""
+    if not entry.get("beat_n"):
+        return f"{'-':>7s}"
+    cell = f"{entry['on_the_bar']:7.3f}"
+    if entry["beat_offset"] != 0.0:
+        cell += (
+            f"   OFF THE BAR: {entry['beat_share']:.0%} of matched notes sit "
+            f"{entry['beat_offset']:+.1f} beats from the reference's"
+        )
+    return cell
+
+
+def placement_summary(rows: dict, prefix: str) -> dict:
+    """The set's mean `on_the_bar` and how many of its pages sit on the
+    reference's bar lines -- default takes, trusted pairings only. A page a
+    beat off reads under 0.1 where a right one reads 0.8-0.95, so one wrong
+    downbeat in twenty moves the mean by 0.04: this is the number that
+    PENALIZES starting on the wrong beat, which rhythm cannot."""
+    judged = [
+        e
+        for name, e in rows.items()
+        if e.get("beat_n") and e.get("trusted", 1.0) and take_of(name) is None
+    ]
+    if not judged:
+        return {}
+    return {
+        f"{prefix}_placement": round(statistics.fmean(e["on_the_bar"] for e in judged), 4),
+        f"{prefix}_on_the_bar": float(sum(1 for e in judged if e["beat_offset"] == 0.0)),
+        f"{prefix}_on_the_bar_n": float(len(judged)),
+    }
+
+
+def print_placement(summary: dict, prefix: str) -> None:
+    if f"{prefix}_placement" in summary:
+        print(
+            f"\n  mean on-the-bar {summary[f'{prefix}_placement']:.3f}; "
+            f"{int(summary[f'{prefix}_on_the_bar'])} of "
+            f"{int(summary[f'{prefix}_on_the_bar_n'])} pages on the reference's bar lines"
+        )
 
 
 def render(card: dict) -> None:
@@ -676,19 +728,24 @@ def render(card: dict) -> None:
 
     if card.get("notation"):
         print("\n== Notation: our score against the hand transcription, as notation ==")
-        header = f"  {'tune':<30s} {'bars':>5s} {'matched':>8s} {'rhythm':>8s} {'value':>7s}"
+        header = (
+            f"  {'tune':<30s} {'bars':>5s} {'matched':>8s} {'rhythm':>8s} {'value':>7s} "
+            f"{'on bar':>7s}"
+        )
         print(header)
         print("  " + "-" * (len(header) - 2))
         for name, entry in sorted(card["notation"].items()):
             print(
                 f"  {Path(name).stem[:30]:<30s} {int(entry['bars']):5d} "
-                f"{int(entry['n_matched']):8d} {entry['rhythm']:8.3f} {entry['value']:7.3f}"
+                f"{int(entry['n_matched']):8d} {entry['rhythm']:8.3f} {entry['value']:7.3f} "
+                f"{bar_cell(entry)}"
             )
+        print_placement(card["summary"], "mscz")
 
     if card.get("wjazz_notation"):
         print("\n== Notation: our score against WJazzD's metrical annotation ==")
         print("  (rhythm only — WJazzD stores metrical position, not notated value)")
-        header = f"  {'solo':<34s} {'matched':>8s} {'cover':>7s} {'rhythm':>8s}"
+        header = f"  {'solo':<34s} {'matched':>8s} {'cover':>7s} {'rhythm':>8s} {'on bar':>7s}"
         print(header)
         print("  " + "-" * (len(header) - 2))
         rows = sorted(card["wjazz_notation"].items())
@@ -699,8 +756,9 @@ def render(card: dict) -> None:
             flag = "" if entry["trusted"] else "   (untrusted — too little lined up)"
             print(
                 f"  {Path(name).stem[:34]:<34s} {int(entry['n_matched']):8d} "
-                f"{entry['coverage']:7.3f} {entry['rhythm']:8.3f}{flag}"
+                f"{entry['coverage']:7.3f} {entry['rhythm']:8.3f} {bar_cell(entry)}{flag}"
             )
+        print_placement(card["summary"], "wjazz")
         trusted = [e for _n, e in rows if e.get("trusted")]
         if trusted:
             print(
@@ -780,11 +838,7 @@ def render(card: dict) -> None:
                 f"  mean rhythm {s['omnibook_rhythm']:.3f}   value {s['omnibook_value']:.3f}"
                 f"   over {int(s['omnibook_rhythm_n'])} trusted"
             )
-        if "omnibook_on_the_bar_n" in s:
-            print(
-                f"  {int(s['omnibook_on_the_bar'])} of {int(s['omnibook_on_the_bar_n'])} pages "
-                "on the book's bar lines"
-            )
+        print_placement(s, "omnibook")
         if "omnibook_readability" in s:
             print(
                 f"  mean readability {s['omnibook_readability']:.4f} over "
@@ -995,13 +1049,9 @@ def main() -> None:
         )
         card["summary"]["omnibook_value"] = round(statistics.fmean(e["value"] for e in trusted), 4)
         card["summary"]["omnibook_rhythm_n"] = float(len(trusted))
-    barred = [e for e in card["omnibook_notation"].values() if e.get("beat_n")]
-    if barred:
-        # A count, not a mean: a page is on the book's bar lines or it is not.
-        card["summary"]["omnibook_on_the_bar"] = float(
-            sum(1 for e in barred if e["beat_offset"] == 0.0)
-        )
-        card["summary"]["omnibook_on_the_bar_n"] = float(len(barred))
+    card["summary"].update(placement_summary(card["omnibook_notation"], "omnibook"))
+    card["summary"].update(placement_summary(card["notation"], "mscz"))
+    card["summary"].update(placement_summary(card["wjazz_notation"], "wjazz"))
     omnibook_pages = [e for e in card["omnibook_notation"].values() if "readability" in e]
     if omnibook_pages:
         card["summary"]["omnibook_readability"] = round(

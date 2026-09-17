@@ -275,6 +275,7 @@ def score_span(
     """
     from swingscribe import mscz
     from swingscribe.benchmark import score_against_notation
+    from swingscribe.score_bars import bar_line_agreement
 
     notation = build_notation(
         document, config, run_config, audio_path, notes, settings, added=added
@@ -304,4 +305,14 @@ def score_span(
         "transposition": int(result["transposition"]),
         "bars": len(notation.bars),
         "reference_bars": reference.bars,
+        # Are our bar lines the score's? Rhythm is gap-based and cannot see a
+        # page that starts on the wrong beat (score_bars.py). This is the one
+        # place the listener can FIX it -- by moving the downbeat -- so the
+        # offset travels with the score and the frontend says which way.
+        "beats_per_bar": reference.beats_per_bar,
+        **{
+            key: round(value, 3)
+            for key, value in bar_line_agreement(notation, reference).items()
+            if key != "beat_n"
+        },
     }

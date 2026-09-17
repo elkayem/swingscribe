@@ -97,6 +97,8 @@ HEADERS = [
     "notation_rhythm",
     "notation_value",
     "notation_coverage",
+    "notation_on_the_bar",
+    "notation_beat_offset",
     "notation_matched",
     "notation_reference",
     "readability",
@@ -243,6 +245,10 @@ def process_track(client, audio_path: Path, log=print) -> dict:
     row["notation_rhythm"] = result["rhythm"]
     row["notation_value"] = result["value"]
     row["notation_coverage"] = result["coverage"]
+    # Rhythm cannot see a page that starts on the wrong beat; these can
+    # (score_bars.py). beat_offset 0 is a page on the reference's bar lines.
+    row["notation_on_the_bar"] = result.get("on_the_bar")
+    row["notation_beat_offset"] = result.get("beat_offset")
     row["notation_matched"] = result["matched"]
     row["notation_reference"] = result["reference"]
 

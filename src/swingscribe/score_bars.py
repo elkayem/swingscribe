@@ -140,40 +140,45 @@ def bars_on_grid(
     return result
 
 
-def bar_line_agreement(notation, score) -> dict[str, float]:
-    """Are our page's bar lines the reference score's? Beat-in-bar, note by note.
+EMPTY_AGREEMENT = {"beat_offset": 0.0, "beat_share": 0.0, "on_the_bar": 0.0, "beat_n": 0.0}
+
+
+def beat_agreement(
+    ours: list[tuple[float, int]], theirs: list[tuple[float, int]], bar: float
+) -> dict[str, float]:
+    """Our beat-in-bar against a reference's, over the true pitch matches.
+
+    `ours` are (position in quarters from OUR bar 1, pitch), `theirs` (beat
+    in THEIR bar, pitch), `bar` the bar's length in quarters -- one metre
+    throughout, both sides.
 
     The notated rhythm measure compares the GAPS between matched notes, so a
     page whose every bar line sits a beat early scores exactly what the right
     page scores -- it is phase-immune on purpose (`benchmark.score_notation`),
     and that is how eleven Omnibook pages went out a beat or two off the book
-    with nothing in the scorecard to say so. This asks the other question:
-    over the true pitch matches, how far is our beat-in-bar from theirs?
+    with nothing in the scorecard to say so. This asks the other question.
 
-    `beat_offset` is the commonest difference (ours minus theirs, modulo the
-    bar, to the nearest half beat): 0.0 is a page on the book's bar lines,
-    3.0 one whose bar lines come a beat late. `beat_share` is the share of
-    matches at that difference and `on_the_bar` the share at zero -- quote the
-    offset with its share, it is a mode. Both sides are assumed to hold one
-    metre throughout, which every score in the benchmark does.
+    `on_the_bar` is the SCORE: the share of matched notes we wrote on the
+    beat the reference wrote them on (to the nearest half beat). A page on
+    its bar lines reads 0.8-0.95 -- what is left is syncopation we resolved
+    differently -- and a page a beat off reads under 0.1, so a wrong
+    downbeat costs nearly the whole of it. `beat_offset` says which way: the
+    commonest difference (ours minus theirs, modulo the bar), 0.0 for a page
+    on the reference's bar lines, 3.0 for one whose notes all sit a beat
+    early. `beat_share` is the share of matches at that difference -- quote
+    the offset with it, it is a mode.
     """
     from swingscribe.alignment import measured_transposition
-    from swingscribe.benchmark import notation_notes
 
-    ours = notation_notes(notation)
-    theirs = list(score.melody)
-    result = {"beat_offset": 0.0, "beat_share": 0.0, "on_the_bar": 0.0, "beat_n": 0.0}
-    if not ours or not theirs:
+    result = dict(EMPTY_AGREEMENT)
+    if not ours or not theirs or bar <= 0:
         return result
-    bar = float(score.beats_per_bar)
-    offset, aligned = measured_transposition(
-        [n.pitch for n in theirs], [pitch for _, _, pitch in ours]
-    )
+    offset, aligned = measured_transposition([p for _, p in theirs], [p for _, p in ours])
     deltas: Counter = Counter()
     for ri, ei in aligned.pairs:
-        if ri is None or ei is None or theirs[ri].pitch != ours[ei][2] + offset:
+        if ri is None or ei is None or theirs[ri][1] != ours[ei][1] + offset:
             continue
-        delta = round(((ours[ei][0] - theirs[ri].position) % bar) * 2) / 2
+        delta = round(((ours[ei][0] - theirs[ri][0]) % bar) * 2) / 2
         deltas[0.0 if delta >= bar else delta] += 1
     total = sum(deltas.values())
     if not total:
@@ -186,3 +191,40 @@ def bar_line_agreement(notation, score) -> dict[str, float]:
         beat_n=float(total),
     )
     return result
+
+
+def _our_positions(notation) -> list[tuple[float, int]]:
+    from swingscribe.benchmark import notation_notes
+
+    return [(position, pitch) for position, _duration, pitch in notation_notes(notation)]
+
+
+def _our_bar(notation) -> float:
+    """The length in TRUE quarters of our page's bar, 0.0 if it changes metre.
+    A double-time page is written in doubled units (`notation_notes` halves
+    its positions), so its written bar is half as long as it looks."""
+    lengths = {bar.time_signature[0] * 4.0 / bar.time_signature[1] for bar in notation.bars}
+    if len(lengths) != 1:
+        return 0.0
+    return lengths.pop() * (0.5 if getattr(notation, "double_time", False) else 1.0)
+
+
+def bar_line_agreement(notation, score) -> dict[str, float]:
+    """`beat_agreement` against a parsed `mscz.Score` (both readers pad a
+    short bar to its time signature, so position modulo the bar is the beat)."""
+    bar = float(score.beats_per_bar)
+    theirs = [(n.position % bar, n.pitch) for n in score.melody]
+    return beat_agreement(_our_positions(notation), theirs, bar)
+
+
+def wjazz_bar_line_agreement(
+    notation, beats_in_bar: list[tuple[float, int]], bar: float
+) -> dict[str, float]:
+    """`beat_agreement` against WJazzD's own bar/beat/tatum annotation
+    (`wjazz.notated_beats`). Refused -- every field zero -- when our page's
+    bar does not divide theirs: a 4/4 page against a 3/4 annotation has no
+    common bar line to be on, and the mode of noise is not a finding."""
+    ours_bar = _our_bar(notation)
+    if not beats_in_bar or bar <= 0 or ours_bar <= 0 or (bar / ours_bar) % 1:
+        return dict(EMPTY_AGREEMENT)
+    return beat_agreement(_our_positions(notation), beats_in_bar, bar)

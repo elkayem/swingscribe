@@ -1137,7 +1137,51 @@ choruses of those four sides hold 2 octave pairs between them. Cost: 0.030
 of the set's mean pitch F1 (14.2% of its deficit); the four read 0.611
 against 0.830 for the other eighteen.
 
-### D31 - Two copies of one recording share a stems digest, and the WJazzD notes cache cannot see it
+Until it was told apart from the transposition search it looked three
+times worse: see R23.
+
+### D32 - Eleven of seventy-three WJazzD pages start on the wrong beat, and nothing scored it until now
+
+The listener had seen it on WJazzD pages and asked for it to be penalized
+(2026-09-17, after R24). Notated rhythm compares gaps and cannot see a
+constant shift, so `score_bars.beat_agreement` now scores the other
+question on every set: `on_the_bar`, the share of matched notes written on
+the beat the reference wrote them on. A page on its bar lines reads
+0.8-0.95 (the rest is syncopation resolved differently); a page a beat off
+reads under 0.1, so a wrong downbeat costs nearly all of it. WJazzD's
+reference is its own bar/beat/tatum (`wjazz.notated_beats`; solos whose
+beat is not a quarter, or whose metre is not the page's, are not judged).
+It is on the scorecard with a loud row flag, in `summary/*_placement` and
+`*_on_the_bar`, in both sheets (`notation_on_the_bar`,
+`notation_beat_offset`), and on the GUI's Score line, which says which way
+to move the downbeat.
+
+First reading: the listener's twelve 12 of 12 on the bar (mean 0.867), the
+Omnibook 22 of 22 (0.856), **WJazzD 62 of 73 (0.747)**. The eleven are two
+different defects:
+
+- **A wrong downbeat on a sound grid** -- most matched notes at ONE offset:
+  So What (+1, 91%), Orbits (+3, 86%, both takes), Coltrane's Giant Steps
+  (+1, 83%) and Oleo (+3, 66%), Nothing Personal (+2, 55%). These sidecars
+  carry no anchor, so this is `meter._auto_anchor` (the downbeat layer's
+  best phase) naming the wrong beat: right on 22 of 22 Parker sides and on
+  the listener's three hand-placed downbeats, wrong on 5 of 73 here. It is
+  open-issue #5 with a truth set at last -- 107 tracks whose downbeat
+  phase is now known from a reference.
+- **No single offset at all** -- the mode holds 28-42%: both In 'n Out
+  solos, The Sidewinder, Totem Pole, My Favorite Things (solo 228), Brother
+  Hubbard. That is the GRID, not the anchor: a half-rate pulse (R21's
+  Brother Hubbard), beats slipped part-way, a 3/4 tune. Dexter Gordon's
+  Confirmation on the listener's set is the same shape in miniature
+  (offset 0 at 50%, 131 bars against the score's 129).
+
+Not fixed here: nothing was tuned, only measured. What `on_the_bar` cannot
+do is say WHERE a page leaves its bar lines; a per-bar trace of the offset
+would turn the second group into a list of slipped beats.
+
+## Resolved
+
+### R25 - Two copies of one recording shared a stems digest, and a later whole-file separation changed what a measured span read (was D31)
 
 Found 2026-09-17 by the error taxonomy's guard (docs/error-taxonomy.md,
 10.7). Parker's Blues For Alice (53), Donna Lee (55) and Yardbird Suite (68)
@@ -1161,10 +1205,19 @@ for a reason that is not the transcriber. Not yet decided: whether the
 span-scoped set should win when both cover a span (it is what the listener
 separated), or the fingerprint should carry the stems directory.
 
-Until it was told apart from the transposition search it looked three
-times worse: see R23.
-
-## Resolved
+Resolved 2026-09-17, the listener's call: **the narrowest stem set that
+covers a span wins, and the whole-file set answers last**
+(`separate.covering_dirs`, `library.available_stems`). It is a rule about
+stability, not quality -- the two sets differ by a few notes because the
+model chunks from wherever its input starts, and neither is better -- so
+what a span was separated and measured on keeps answering for it, and
+separating the whole track later changes nothing already pinned.
+Verified on the three solos: `wjazz_reviews.py --redo` (new; the review key
+cannot see which stems were read, so the stale traces had to be named)
+rebuilt them from the span-scoped sets and all three read `matches
+run_eval` again -- 272, 370 and 194 notes. The fingerprint still does not
+carry the stems directory; with a deterministic order it no longer needs
+to for this case.
 
 ### R24 - A located score's downbeat came from a straight line, and eleven of twenty-two pages sat off the book's bar lines
 
