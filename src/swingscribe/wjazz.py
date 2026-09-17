@@ -211,12 +211,13 @@ def notated_positions(db, melid: int) -> list[tuple[float, int]]:
 
 
 def notated_beats(db, melid: int) -> tuple[list[tuple[float, int]], float]:
-    """((beat in the bar in quarter notes, pitch) per note, the bar's length).
+    """((quarter notes from THEIR bar 1 beat 1, pitch) per note, the bar's length).
 
     `notated_positions` is relative to the solo's first NOTE, which is right
     for a measure of gaps and throws away the one thing a bar-line check
-    needs: where in the bar each note sits. This keeps it -- beat 1 is 0.0 --
-    for `score_bars.wjazz_bar_line_agreement`.
+    needs: where the bar lines are. This keeps them -- a bar line at every
+    multiple of the bar's length, pickup bars (0, -1) negative -- for
+    `score_bars.wjazz_bar_line_agreement` and `score_bars.bar_line_trace`.
 
     Only for a solo in one metre whose beat is a quarter note (`denom` 4, one
     `period` throughout): 437 of the 456. Anything else returns ([], 0.0)
@@ -224,17 +225,45 @@ def notated_beats(db, melid: int) -> tuple[list[tuple[float, int]], float]:
     our pages count quarters.
     """
     rows = db.execute(
-        "select beat, tatum, division, period, denom, pitch from melody "
+        "select bar, beat, tatum, division, period, denom, pitch from melody "
         "where melid=? order by eventid",
         (melid,),
     )
-    rows = [row for row in rows if row[3] and row[0] is not None]
-    if not rows or len({(row[3], row[4]) for row in rows}) != 1 or rows[0][4] != 4:
+    rows = [row for row in rows if row[4] and row[0] is not None and row[1] is not None]
+    if not rows or len({(row[4], row[5]) for row in rows}) != 1 or rows[0][5] != 4:
         return [], 0.0
-    period = float(rows[0][3])
+    period = float(rows[0][4])
     return [
-        ((beat - 1) + (tatum - 1) / max(1, division or 1), int(pitch))
-        for beat, tatum, division, _period, _denom, pitch in rows
+        ((bar - 1) * period + (beat - 1) + (tatum - 1) / max(1, division or 1), int(pitch))
+        for bar, beat, tatum, division, _period, _denom, pitch in rows
+    ], period
+
+
+def bar_anchors(db, melid: int) -> tuple[list[tuple[float, float]], float]:
+    """((quarter notes from their bar 1 beat 1, onset in THEIR seconds) per
+    note, the bar's length) -- the annotation as evidence about bar lines.
+
+    Every annotated note carries both where it is written and when it was
+    played, so mapped through a fit each one is a vote for which beat of OUR
+    grid is a bar line (`score_bars.bars_on_grid`). One note is a poor
+    witness -- a pushed or laid-back downbeat sits nearer the next beat than
+    its own at 300 bpm, and a sidecar anchor taken from the single annotated
+    downbeat nearest the solo's start named the wrong beat on 5 of 63 solos
+    (D32). Same refusals as `notated_beats`: ([], 0.0) unless the solo is in
+    one metre whose beat is a quarter.
+    """
+    rows = db.execute(
+        "select bar, beat, tatum, division, period, denom, onset from melody "
+        "where melid=? order by eventid",
+        (melid,),
+    )
+    rows = [row for row in rows if row[4] and row[0] is not None and row[1] is not None]
+    if not rows or len({(row[4], row[5]) for row in rows}) != 1 or rows[0][5] != 4:
+        return [], 0.0
+    period = float(rows[0][4])
+    return [
+        ((bar - 1) * period + (beat - 1) + (tatum - 1) / max(1, division or 1), float(onset))
+        for bar, beat, tatum, division, _period, _denom, onset in rows
     ], period
 
 

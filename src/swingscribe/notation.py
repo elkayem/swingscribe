@@ -182,6 +182,7 @@ def bar_grid_for_settings(
     settings: dict,
     config: Config,
     duration: float,
+    near: tuple[float, float] | None = None,
 ) -> tuple[list[float], float | None]:
     """The beat grid AS THE ROLL DRAWS IT, and the beat it counts bars from.
 
@@ -197,7 +198,15 @@ def bar_grid_for_settings(
     Whole-track, before the span is trimmed: the repair needs the pulse
     either side of a gap, and the anchor's phase is read off the full grid
     (`span_anchor`).
+
+    `near` is the span being notated. It matters only when the listener has
+    set no downbeat: the automatic one is then voted around the span rather
+    than over the whole track (`meter._auto_anchor`, D32). It defaults to the
+    settings' own `region`.
     """
+    if near is None and settings.get("region"):
+        lo, hi = settings["region"]
+        near = (float(lo), float(duration if hi is None else hi))
     overrides = {
         key: value
         for key, value in {
@@ -208,7 +217,7 @@ def bar_grid_for_settings(
         if value is not None
     }
     meter_config = config.meter.model_copy(update=overrides)
-    repaired, sections = meter.bar_grid(beats, downbeats, meter_config, duration)
+    repaired, sections = meter.bar_grid(beats, downbeats, meter_config, duration, near=near)
     anchor = sections[0].anchor if sections else settings.get("anchor")
     return [beat.time for beat in repaired], anchor
 

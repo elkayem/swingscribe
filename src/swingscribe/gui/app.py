@@ -444,8 +444,15 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         anchor: float | None = None,
         bars_per_chorus: int | None = None,
         form_start: float | None = None,
+        start: float | None = None,
+        end: float | None = None,
     ) -> dict[str, Any]:
         """The bar grid for this track+model, or ready:false.
+
+        `start`/`end` are the selection. With no `anchor` the downbeat is
+        voted around them rather than over the whole track, exactly as Export
+        does for the same span (meter._auto_anchor, D32) -- so the roll's bar
+        lines stay the page's.
 
         Never computes the beat grid: even at seconds rather than the minutes
         it cost when it chained from a separation, "draw the bars if they're
@@ -501,7 +508,10 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             raise HTTPException(400, str(exc)) from exc
 
         duration = entry["document"].audio.duration
-        repaired, sections = meter.bar_grid(grid.beats, grid.downbeats, meter_config, duration)
+        near = (start, end) if start is not None and end is not None and end > start else None
+        repaired, sections = meter.bar_grid(
+            grid.beats, grid.downbeats, meter_config, duration, near=near
+        )
         lines = meter.bar_lines(repaired, sections, meter_config.form_start)
 
         intervals = sorted(

@@ -331,6 +331,46 @@ def test_auto_anchor_uses_the_downbeat_layer_as_a_weak_hint():
     assert sections[0].anchor == pytest.approx(0.5)
 
 
+def _slipped_track():
+    """A 4/4 tune the tracker lost one beat of at 80 s: real downbeats fall on
+    index phase 0 before the slip and phase 3 after it. The first part is the
+    longer, so the whole-track vote is phase 0."""
+    beats = meter.repair_beats(steady(240), MeterConfig())  # 120 s at 0.5 s a beat
+    times = [b.time for b in beats]
+    before = [times[i] for i in range(0, 160, 4)]
+    after = [times[i] for i in range(163, 240, 4)]
+    return beats, before + after
+
+
+def test_the_automatic_downbeat_is_voted_around_the_span_not_over_the_track():
+    """D32: one slipped beat anywhere shifts the phase of everything after it,
+    and the whole-track majority describes the longer side -- which need not
+    be the side the solo is on (53 of 63 WJazzD solos right, against 62)."""
+    beats, downbeats = _slipped_track()
+    whole = meter.derive_sections(beats, downbeats, MeterConfig())
+    assert whole[0].anchor == pytest.approx(0.0)  # phase 0: the longer side's
+    late_solo = meter.derive_sections(beats, downbeats, MeterConfig(), near=(95.0, 115.0))
+    assert late_solo[0].anchor == pytest.approx(1.5)  # phase 3: the solo's own side
+    early_solo = meter.derive_sections(beats, downbeats, MeterConfig(), near=(5.0, 25.0))
+    assert early_solo[0].anchor == pytest.approx(0.0)
+
+
+def test_a_span_with_too_few_marks_falls_back_to_the_whole_track():
+    beats, downbeats = _slipped_track()
+    sparse = [d for d in downbeats if d < 80.0] + [d for d in downbeats if d > 110.0][:2]
+    sections = meter.derive_sections(beats, sparse, MeterConfig(), near=(100.0, 105.0))
+    assert sections[0].anchor == pytest.approx(0.0)
+
+
+def test_a_placed_downbeat_is_never_outvoted_and_bar_grid_passes_the_span_through():
+    beats, downbeats = _slipped_track()
+    placed = meter.derive_sections(beats, downbeats, MeterConfig(anchor=1.0), near=(90.0, 115.0))
+    assert placed[0].anchor == pytest.approx(1.0)
+    raw = [b.time for b in beats]
+    _grid, sections = meter.bar_grid(raw, downbeats, MeterConfig(), 120.0, near=(90.0, 115.0))
+    assert sections[0].anchor == pytest.approx(1.5)
+
+
 def test_sections_carry_the_notated_signature_not_just_the_pulse():
     beats = meter.repair_beats(steady(64), MeterConfig())
     sections = meter.derive_sections(beats, [], MeterConfig(time_signature="6/8", anchor=0.0))

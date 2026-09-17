@@ -121,6 +121,11 @@ quantize against, so it's worth checking before you spend time downstream.
 
 - <kbd>D</kbd>, or clicking a beat dot, sets the downbeat at the nearest
   beat — useful while the music is playing.
+- Until you set one, the downbeat is a guess taken from the music **around
+  your selection**, so the bar lines can shift by a beat when you select a
+  different part of a long track. That is deliberate: a beat the tracker
+  lost elsewhere in the tune should not put your solo's bar lines off. Once
+  you set the downbeat yourself, it stays where you put it.
 - <kbd>F</kbd>, or shift-clicking a beat, sets the **form start**: that beat
   becomes bar 1, chorus counting starts there, and everything before it is
   drawn faint and unnumbered. Handy for skipping an intro.

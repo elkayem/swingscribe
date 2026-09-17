@@ -517,7 +517,42 @@ def process_file(
             )
         ]
         anchor = min(downbeats, key=lambda t: abs(t - solo_start)) if downbeats else None
+        # ONE annotated downbeat is a poor witness: pushed or laid back, it
+        # sits nearer the next beat than its own at 300 bpm, and the anchor
+        # above named the wrong beat on 5 of 63 solos (D32). Every annotated
+        # note carries its written position and its played onset, so they all
+        # vote on the grid the page is built on; the single note stands only
+        # when that grid does not carry the annotation's pulse.
+        voted = voted_anchor(offset, rate)
+        if voted is not None:
+            if anchor is not None and abs(voted - anchor) > 0.05:
+                log(f"  [{melid}] downbeat by vote {voted:.2f}s (one note said {anchor:.2f}s)")
+            anchor = voted
         return solo_start, solo_end, anchor
+
+    def voted_anchor(offset: float, rate: float) -> float | None:
+        from swingscribe.score_bars import bars_on_grid
+        from swingscribe.stages import meter
+        from swingscribe.wjazz import bar_anchors
+
+        written, bar = bar_anchors(db, melid)
+        grid = prepared.beat_grid
+        if not written or grid is None or not grid.beats:
+            return None
+        signature = time_signature_for(db, melid)
+        meter_config = base.meter.model_copy(
+            update={"time_signature": signature} if signature else {}
+        )
+        try:
+            _signature, pulses = meter.resolve_meter(meter_config)
+        except ValueError:
+            return None
+        if pulses != round(bar):
+            return None
+        repaired, _sections = meter.bar_grid(grid.beats, grid.downbeats, meter_config, duration)
+        anchors = [(position, onset * rate + offset) for position, onset in written]
+        bars = bars_on_grid(anchors, [beat.time for beat in repaired], 0.0, pulses)
+        return round(float(bars["anchor"]), 3) if bars["trusted"] else None
 
     reused = None
     if reuse_span and not fresh:

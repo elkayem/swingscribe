@@ -148,8 +148,9 @@ def beat_agreement(
 ) -> dict[str, float]:
     """Our beat-in-bar against a reference's, over the true pitch matches.
 
-    `ours` are (position in quarters from OUR bar 1, pitch), `theirs` (beat
-    in THEIR bar, pitch), `bar` the bar's length in quarters -- one metre
+    `ours` are (position in quarters from OUR bar 1, pitch), `theirs` the
+    same from THEIR bar 1 (or already the beat in the bar: only the position
+    modulo the bar is read), `bar` the bar's length in quarters -- one metre
     throughout, both sides.
 
     The notated rhythm measure compares the GAPS between matched notes, so a
@@ -213,18 +214,181 @@ def bar_line_agreement(notation, score) -> dict[str, float]:
     """`beat_agreement` against a parsed `mscz.Score` (both readers pad a
     short bar to its time signature, so position modulo the bar is the beat)."""
     bar = float(score.beats_per_bar)
-    theirs = [(n.position % bar, n.pitch) for n in score.melody]
+    theirs = [(n.position, n.pitch) for n in score.melody]
     return beat_agreement(_our_positions(notation), theirs, bar)
 
 
+def _comparable(notation, bar: float) -> bool:
+    """Our page's bar must divide theirs: a 4/4 page against a 3/4 annotation
+    has no common bar line to be on, and the mode of noise is not a finding."""
+    ours_bar = _our_bar(notation)
+    return bar > 0 and ours_bar > 0 and not (bar / ours_bar) % 1
+
+
 def wjazz_bar_line_agreement(
-    notation, beats_in_bar: list[tuple[float, int]], bar: float
+    notation, positions: list[tuple[float, int]], bar: float
 ) -> dict[str, float]:
     """`beat_agreement` against WJazzD's own bar/beat/tatum annotation
-    (`wjazz.notated_beats`). Refused -- every field zero -- when our page's
-    bar does not divide theirs: a 4/4 page against a 3/4 annotation has no
-    common bar line to be on, and the mode of noise is not a finding."""
-    ours_bar = _our_bar(notation)
-    if not beats_in_bar or bar <= 0 or ours_bar <= 0 or (bar / ours_bar) % 1:
+    (`wjazz.notated_beats`). Refused -- every field zero -- when the page's
+    metre is not the annotation's."""
+    if not positions or not _comparable(notation, bar):
         return dict(EMPTY_AGREEMENT)
-    return beat_agreement(_our_positions(notation), beats_in_bar, bar)
+    return beat_agreement(_our_positions(notation), positions, bar)
+
+
+# ── where a page leaves its bar lines ───────────────────────────────────────
+#
+# `on_the_bar` says a page is off; it cannot say WHERE. On a sound page the
+# difference between our position and the reference's is one constant from
+# the first matched note to the last. Every way a beat grid fails writes its
+# own signature into that difference: a beat the tracker dropped or doubled
+# is a STEP of one beat at the bar where it happened (and every bar line
+# after it is off), a chorus the reference omits is a step of whole bars, a
+# grid at half or double the pulse is a SLOPE, and a wrong downbeat is no
+# step at all -- one constant that is not a multiple of the bar.
+
+# The label of a match is the commonest difference among this many matches
+# around it: wide enough that a syncopation we resolved differently (half a
+# beat, a note or two at a time) never reads as a step.
+TRACE_WINDOW = 15
+# A run of labels shorter than this is folded into the run before it.
+TRACE_MIN_RUN = 10
+# Our positions should advance one quarter per reference quarter. Outside
+# this the grid is not at the reference's pulse, and steps mean nothing.
+TRACE_SLOPE_TOLERANCE = 0.1
+
+
+def _matched_differences(
+    ours: list[tuple[float, int]], theirs: list[tuple[float, int]]
+) -> list[tuple[float, float]]:
+    """(our position, ours minus theirs) for every true pitch match, in order."""
+    from swingscribe.alignment import measured_transposition
+
+    offset, aligned = measured_transposition([p for _, p in theirs], [p for _, p in ours])
+    return [
+        (ours[ei][0], ours[ei][0] - theirs[ri][0])
+        for ri, ei in aligned.pairs
+        if ri is not None and ei is not None and theirs[ri][1] == ours[ei][1] + offset
+    ]
+
+
+def difference_trace(
+    ours: list[tuple[float, int]],
+    theirs: list[tuple[float, int]],
+    bar: float,
+    first_bar: int = 1,
+) -> dict:
+    """How (ours - theirs) moves along a page: its runs, its steps, its slope.
+
+    `segments` are runs of one difference -- `from`/`to` in OUR quarters from
+    our first bar line, `offset` the difference to the nearest half beat,
+    `beat_offset` that modulo the bar (0.0 is a run on the reference's bar
+    lines), `matches` how many notes say so. `steps` are the changes between
+    consecutive runs: `at` (our quarters), `bar` (our bar as PRINTED, counted
+    from `first_bar` -- 0 when the page opens with a pickup), `change` in
+    beats. `slope` is our quarters per reference quarter, a Theil-Sen line,
+    and `steady` whether it is near enough to 1 for the steps to mean
+    anything.
+    """
+    from swingscribe.benchmark import robust_line
+
+    result = {
+        "segments": [],
+        "steps": [],
+        "slope": 0.0,
+        "steady": False,
+        "matches": 0,
+        "first_bar": first_bar,
+    }
+    pairs = _matched_differences(ours, theirs)
+    if len(pairs) < TRACE_MIN_RUN or bar <= 0:
+        return result
+    slope, _ = robust_line([(position - difference, position) for position, difference in pairs])
+    steady = abs(slope - 1.0) <= TRACE_SLOPE_TOLERANCE
+    result.update(slope=slope, steady=steady, matches=len(pairs))
+    if not steady:
+        return result
+
+    half = TRACE_WINDOW // 2
+    rounded = [round(difference * 2) / 2 for _, difference in pairs]
+    labels = [
+        Counter(rounded[max(0, i - half) : i + half + 1]).most_common(1)[0][0]
+        for i in range(len(rounded))
+    ]
+    runs: list[list] = []  # [label, first index, last index]
+    for index, label in enumerate(labels):
+        if runs and runs[-1][0] == label:
+            runs[-1][2] = index
+        else:
+            runs.append([label, index, index])
+    merged: list[list] = []
+    for run in runs:
+        short = run[2] - run[1] + 1 < TRACE_MIN_RUN
+        if merged and (short or merged[-1][0] == run[0]):
+            merged[-1][2] = run[2]
+        else:
+            merged.append(run)
+    if len(merged) > 1 and merged[0][2] - merged[0][1] + 1 < TRACE_MIN_RUN:
+        merged[1][1] = merged[0][1]  # a short opening run belongs to what follows
+        merged = merged[1:]
+
+    for label, first, last in merged:
+        agree = sum(1 for value in rounded[first : last + 1] if value == label)
+        result["segments"].append(
+            {
+                "from": pairs[first][0],
+                "to": pairs[last][0],
+                "offset": label,
+                "beat_offset": label % bar,
+                "matches": last - first + 1,
+                "share": agree / (last - first + 1),
+            }
+        )
+    for before, after in zip(result["segments"], result["segments"][1:], strict=False):
+        result["steps"].append(
+            {
+                "at": after["from"],
+                "bar": int(after["from"] // bar) + first_bar,
+                "change": after["offset"] - before["offset"],
+            }
+        )
+    return result
+
+
+def _first_bar(notation) -> int:
+    return int(notation.bars[0].number) if notation.bars else 1
+
+
+def bar_line_trace(notation, score) -> dict:
+    """`difference_trace` against a parsed `mscz.Score`."""
+    theirs = [(n.position, n.pitch) for n in score.melody]
+    return difference_trace(
+        _our_positions(notation), theirs, float(score.beats_per_bar), _first_bar(notation)
+    )
+
+
+def wjazz_bar_line_trace(notation, positions: list[tuple[float, int]], bar: float) -> dict:
+    """`difference_trace` against `wjazz.notated_beats`; empty when the
+    page's metre is not the annotation's."""
+    if not positions or not _comparable(notation, bar):
+        return difference_trace([], [], 0.0)
+    return difference_trace(_our_positions(notation), positions, bar, _first_bar(notation))
+
+
+def describe_trace(trace: dict, bar: float) -> str:
+    """One line a person can act on."""
+    if not trace["matches"]:
+        return "nothing to trace"
+    if not trace["steady"]:
+        return (
+            f"our page advances {trace['slope']:.2f} quarters per reference quarter -- "
+            "the beat grid is not at the reference's pulse"
+        )
+    parts = []
+    for segment in trace["segments"]:
+        first = int(segment["from"] // bar) + trace["first_bar"]
+        last = int(segment["to"] // bar) + trace["first_bar"]
+        where = "on the bar" if segment["beat_offset"] == 0.0 else f"{segment['beat_offset']:+.1f}"
+        parts.append(f"bars {first}-{last} {where}")
+    steps = ", ".join(f"{step['change']:+.1f} at bar {step['bar']}" for step in trace["steps"])
+    return "; ".join(parts) + (f"  [steps: {steps}]" if steps else "")

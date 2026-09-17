@@ -148,16 +148,39 @@ def test_notated_beats_keep_the_place_in_the_bar():
         def execute(self, _sql, _params):
             return iter(self.rows)
 
-    # beat, tatum, division, period, denom, pitch
-    rows = [(1, 2, 2, 4, 4, 57), (3, 1, 1, 4, 4, 62), (2, 2, 3, 4, 4, 55)]
+    # bar, beat, tatum, division, period, denom, pitch
+    rows = [(0, 4, 2, 2, 4, 4, 57), (1, 3, 1, 1, 4, 4, 62), (3, 2, 2, 3, 4, 4, 55)]
     beats, bar = notated_beats(FakeDb(rows), 1)
     assert bar == 4.0
-    assert beats[0] == (0.5, 57) and beats[1] == (2.0, 62)
-    assert abs(beats[2][0] - (1 + 1 / 3)) < 1e-9
+    assert beats[0] == (-0.5, 57)  # the and-of-four of the pickup bar
+    assert beats[1] == (2.0, 62)
+    assert abs(beats[2][0] - (8 + 1 + 1 / 3)) < 1e-9
+    assert all(
+        abs(p % 4.0 - b) < 1e-9 for (p, _), b in zip(beats, (3.5, 2.0, 1 + 1 / 3), strict=True)
+    )
     # A beat that is not a quarter, or a change of metre, is not judged.
-    assert notated_beats(FakeDb([(1, 1, 1, 2, 8, 60)]), 1) == ([], 0.0)
-    assert notated_beats(FakeDb([(1, 1, 1, 4, 4, 60), (1, 1, 1, 3, 4, 60)]), 1) == ([], 0.0)
+    assert notated_beats(FakeDb([(1, 1, 1, 1, 2, 8, 60)]), 1) == ([], 0.0)
+    rows = [(1, 1, 1, 1, 4, 4, 60), (2, 1, 1, 1, 3, 4, 60)]
+    assert notated_beats(FakeDb(rows), 1) == ([], 0.0)
     assert notated_beats(FakeDb([]), 1) == ([], 0.0)
+
+
+def test_bar_anchors_pair_every_written_position_with_its_played_onset():
+    from swingscribe.wjazz import bar_anchors
+
+    class FakeDb:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def execute(self, _sql, _params):
+            return iter(self.rows)
+
+    # bar, beat, tatum, division, period, denom, onset
+    rows = [(0, 4, 1, 1, 4, 4, 10.2), (1, 1, 1, 1, 4, 4, 10.5), (1, 2, 2, 2, 4, 4, 10.95)]
+    anchors, bar = bar_anchors(FakeDb(rows), 1)
+    assert bar == 4.0
+    assert anchors == [(-1.0, 10.2), (0.0, 10.5), (1.5, 10.95)]
+    assert bar_anchors(FakeDb([(1, 1, 1, 1, 2, 8, 0.0)]), 1) == ([], 0.0)
 
 
 # ── a WJazzD solo as a SCORE ────────────────────────────────────────────────

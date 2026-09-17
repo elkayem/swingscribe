@@ -452,6 +452,7 @@ function updateSelection(a, b, done) {
     persist();
     scheduleAuditionReload();
     refreshModelStatus();  // a span-scoped separation may or may not cover the new span
+    if (state.anchor === null && state.beats) maybeLoadBeats();  // the automatic downbeat follows the span
   }
 }
 
@@ -657,6 +658,14 @@ async function maybeLoadBeats() {
   if (state.anchor !== null) params.set('anchor', state.anchor.toFixed(3));
   if (state.barsPerChorus) params.set('bars_per_chorus', String(state.barsPerChorus));
   if (state.formStart !== null) params.set('form_start', state.formStart.toFixed(3));
+  /* With no downbeat placed, the automatic one is voted AROUND THE SELECTION
+     (a beat the tracker slipped elsewhere in the track must not decide the
+     solo's bar lines), and Export votes over the same span -- so the roll's
+     bar lines are the page's. A placed downbeat makes this moot. */
+  if (state.anchor === null && state.selection) {
+    params.set('start', state.selection.a.toFixed(3));
+    params.set('end', state.selection.b.toFixed(3));
+  }
   try {
     const grid = await api(`/api/tracks/${state.track.id}/beats?${params}`);
     state.beats = grid.ready ? grid : null;

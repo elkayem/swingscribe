@@ -529,7 +529,7 @@ def notation_scores(runs: dict, grids: dict) -> dict:
 
     from swingscribe import mscz
     from swingscribe.benchmark import readability, score_against_notation
-    from swingscribe.score_bars import bar_line_agreement
+    from swingscribe.score_bars import bar_line_agreement, bar_line_trace
 
     by_audio = {audio: mscz_name for audio, mscz_name, *_ in score_benchmark.TUNES.values()}
     out = {}
@@ -557,6 +557,7 @@ def notation_scores(runs: dict, grids: dict) -> dict:
             # Rhythm compares gaps and cannot see a page whose every bar line
             # sits a beat off the reference's; this can (score_bars.py).
             **{k: round(v, 4) for k, v in bar_line_agreement(notation, reference).items()},
+            **traced(bar_line_trace(notation, reference), reference.beats_per_bar),
         }
         if is_omnibook(name):
             # A located span can be the wrong take, so its rhythm is never
@@ -581,7 +582,7 @@ def wjazz_notation_scores(db_path: Path, card_wjazz: dict, runs: dict, grids: di
     import sqlite3
 
     from swingscribe.benchmark import readability, score_against_wjazz_notation
-    from swingscribe.score_bars import wjazz_bar_line_agreement
+    from swingscribe.score_bars import wjazz_bar_line_agreement, wjazz_bar_line_trace
     from swingscribe.wjazz import notated_beats, notated_positions
 
     db = sqlite3.connect(db_path)
@@ -624,9 +625,11 @@ def wjazz_notation_scores(db_path: Path, card_wjazz: dict, runs: dict, grids: di
         # gap-based and cannot see a page that starts on the wrong beat;
         # WJazzD's bar/beat/tatum can (score_bars.py). Absent for a solo
         # whose beat is not a quarter or whose metre is not the page's.
-        agreement = wjazz_bar_line_agreement(notation, *notated_beats(db, entry["melid"]))
+        positions, bar = notated_beats(db, entry["melid"])
+        agreement = wjazz_bar_line_agreement(notation, positions, bar)
         if agreement["beat_n"]:
             out[key].update({k: round(v, 4) for k, v in agreement.items()})
+            out[key].update(traced(wjazz_bar_line_trace(notation, positions, bar), bar))
     return out
 
 
@@ -649,6 +652,38 @@ def readable_pages(card: dict) -> dict:
             if "readability" in entry and take_of(name) is None:
                 pages[prefix + name] = entry
     return pages
+
+
+def traced(trace: dict, bar: float) -> dict:
+    """What a page's bar-line trace adds to its row. `on_the_bar` says a page
+    is off; the trace says WHERE and which kind: `beat_steps` counts the
+    places the page leaves or rejoins its bar lines (a beat the grid dropped
+    or doubled, a chorus the reference omits), `beat_slope` is our quarters
+    per reference quarter (0.5 or 2.0 is a grid at the wrong pulse), and
+    `trace` is the sentence a person reads -- a string, so never pinned."""
+    from swingscribe.score_bars import describe_trace
+
+    if not trace["matches"]:
+        return {}
+    return {
+        "beat_steps": float(len(trace["steps"])),
+        "beat_slope": round(trace["slope"], 3),
+        "trace": describe_trace(trace, bar),
+    }
+
+
+# A page is traced on the scorecard when its bar lines are in doubt: off the
+# reference's, or fewer than this share of its matched notes at one offset.
+TRACE_BELOW_SHARE = 0.75
+
+
+def trace_line(entry: dict) -> str:
+    in_doubt = entry.get("beat_n") and (
+        entry["beat_offset"] != 0.0
+        or entry["beat_share"] < TRACE_BELOW_SHARE
+        or entry.get("beat_steps")
+    )
+    return f"\n      -> {entry['trace']}" if in_doubt and entry.get("trace") else ""
 
 
 def bar_cell(entry: dict) -> str:
@@ -738,7 +773,7 @@ def render(card: dict) -> None:
             print(
                 f"  {Path(name).stem[:30]:<30s} {int(entry['bars']):5d} "
                 f"{int(entry['n_matched']):8d} {entry['rhythm']:8.3f} {entry['value']:7.3f} "
-                f"{bar_cell(entry)}"
+                f"{bar_cell(entry)}{trace_line(entry)}"
             )
         print_placement(card["summary"], "mscz")
 
@@ -757,6 +792,7 @@ def render(card: dict) -> None:
             print(
                 f"  {Path(name).stem[:34]:<34s} {int(entry['n_matched']):8d} "
                 f"{entry['coverage']:7.3f} {entry['rhythm']:8.3f} {bar_cell(entry)}{flag}"
+                f"{trace_line(entry)}"
             )
         print_placement(card["summary"], "wjazz")
         trusted = [e for _n, e in rows if e.get("trusted")]
@@ -826,6 +862,7 @@ def render(card: dict) -> None:
                 f"  {Path(name).stem[:26]:<26s} {e['pitch_f1']:6.3f} {e['note_f1']:6.3f} "
                 f"{cell('bars', 5, 0)} {cell('coverage', 6, 3)} {cell('rhythm', 7, 3)} "
                 f"{cell('value', 6, 3)} {cell('readability', 7, 4)} {bar_line:>9s}{flag}"
+                f"{trace_line(n)}"
             )
         s = card["summary"]
         if "omnibook_pitch_f1" in s:

@@ -1157,27 +1157,55 @@ It is on the scorecard with a loud row flag, in `summary/*_placement` and
 to move the downbeat.
 
 First reading: the listener's twelve 12 of 12 on the bar (mean 0.867), the
-Omnibook 22 of 22 (0.856), **WJazzD 62 of 73 (0.747)**. The eleven are two
-different defects:
+Omnibook 22 of 22 (0.856), **WJazzD 62 of 73 (0.747)**.
 
-- **A wrong downbeat on a sound grid** -- most matched notes at ONE offset:
-  So What (+1, 91%), Orbits (+3, 86%, both takes), Coltrane's Giant Steps
-  (+1, 83%) and Oleo (+3, 66%), Nothing Personal (+2, 55%). These sidecars
-  carry no anchor, so this is `meter._auto_anchor` (the downbeat layer's
-  best phase) naming the wrong beat: right on 22 of 22 Parker sides and on
-  the listener's three hand-placed downbeats, wrong on 5 of 73 here. It is
-  open-issue #5 with a truth set at last -- 107 tracks whose downbeat
-  phase is now known from a reference.
-- **No single offset at all** -- the mode holds 28-42%: both In 'n Out
-  solos, The Sidewinder, Totem Pole, My Favorite Things (solo 228), Brother
-  Hubbard. That is the GRID, not the anchor: a half-rate pulse (R21's
-  Brother Hubbard), beats slipped part-way, a 3/4 tune. Dexter Gordon's
-  Confirmation on the listener's set is the same shape in miniature
-  (offset 0 at 50%, 131 bars against the score's 129).
+**The same day: two causes found and fixed, one measured and left open.**
 
-Not fixed here: nothing was tuned, only measured. What `on_the_bar` cannot
-do is say WHERE a page leaves its bar lines; a per-bar trace of the offset
-would turn the second group into a list of slipped beats.
+1. *The WJazzD sidecars' downbeat came from ONE annotated note* -- the
+   annotated beat-1 note nearest the solo's start, mapped through the fit
+   and snapped to the nearest beat (`wjazz_batch.place`). A pushed or
+   laid-back downbeat at 300 bpm sits nearer the next beat than its own:
+   wrong on 5 of 63 (So What, Orbits, Giant Steps 222, Coltrane's Oleo,
+   Nothing Personal). The same mistake as R24's intercept, made first. Every
+   annotated note now votes (`wjazz.bar_anchors` through
+   `score_bars.bars_on_grid`); the single note stands only when the grid
+   does not carry the annotation's pulse. Sheet re-run with `--reuse-span`:
+   **67 of 73 on the bar, mean 0.795**; only those five solos' pages moved
+   (rhythm within 0.011, tie rate down on four of the five).
+2. *The automatic downbeat voted over the whole track.* `scripts/
+   downbeat_truth.py` is the instrument: for every track with a reference
+   the matched notes vote the true phase on the repaired grid (96 tracks
+   with a trustworthy truth; 11 more whose grid does not carry the pulse),
+   and each candidate rule is scored against it. `meter._auto_anchor`'s
+   whole-track vote: 11 of 11, 22 of 22, and **53 of 63 on WJazzD**. The
+   same vote taken within 20 s of the span: 11, 22 and **62 of 63** (the
+   span alone: 60 -- a short solo holds too few marks). A bar's phase is an
+   index modulo the bar, so one beat slipped anywhere in a track shifts
+   everything after it and the whole-track majority describes the longer
+   side. `_auto_anchor(near=...)` ships it: Export, the harness and the
+   pipeline's meter stage (`CACHE_VERSION` 2) pass the span, and `/beats`
+   takes the selection so the roll's bar lines stay the page's -- verified
+   live on So What, whose bar lines move one beat, to the annotator's. It
+   changes nothing pinned: every benchmark sidecar carries an anchor. It is
+   for the listener who never places one.
+3. *Open: the grid itself.* `score_bars.difference_trace` follows (ours -
+   theirs) along a page: a wrong downbeat is one constant, a slipped beat a
+   STEP at a bar, a chorus the reference omits a step of whole bars, a grid
+   at the wrong pulse a SLOPE. It prints under any row in doubt and pins
+   `beat_steps` and `beat_slope`. On WJazzD: **8 of 73 pages have a grid
+   that is not at the annotated pulse** (slope 0.50 Brother Hubbard twice,
+   0.81-0.82 Adam's Apple and Nothing Personal, 1.13-1.53 both Sidewinders,
+   Totem Pole, Fuller's Blue Train), and **15 more slip a whole beat
+   part-way**, 56 slips in all of which 37 are +1 -- our grid GAINING a beat
+   on the annotator's (Cheese Cake and Cherokee II gain one every five to
+   twelve bars; Orbits and Giant Steps 222 start on the bar and slip once,
+   at bars 11 and 10, which is why they read as wrong downbeats). The six
+   pages still off the bar are all from these two groups. Dexter Gordon's
+   Confirmation on the listener's set is three slips (bars 48, 62, 109);
+   the Omnibook has two pages with one. A gained beat is either a doubled
+   beat `drop_doubled_beats` does not catch or an implied beat
+   `repair_beats` should not have inserted; nobody has looked yet, and the
+   trace names the bar to look at.
 
 ## Resolved
 

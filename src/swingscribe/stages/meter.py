@@ -62,6 +62,10 @@ REFERENCE_WINDOW = 8
 # the very passage that has no pulse to draw.
 BRIDGE_BEATS = 1
 
+# 2: with no anchor set, the downbeat is voted around the transcribe region
+# rather than over the whole track (`_auto_anchor`, D32).
+CACHE_VERSION = 2
+
 
 @dataclass(frozen=True)
 class Beat:
@@ -359,11 +363,34 @@ def metrical_spans(beats: list[Beat], config: MeterConfig) -> list[tuple[int, in
     ]
 
 
-def _auto_anchor(beats: list[Beat], downbeats: list[float], pulses: int) -> int:
+# The downbeat vote is taken this far either side of the span being notated.
+AUTO_ANCHOR_MARGIN_S = 20.0
+# Marked beats needed near the span before the local vote is believed; with
+# fewer, the whole track votes as it always did.
+AUTO_ANCHOR_MIN_MARKS = 4
+
+
+def _auto_anchor(
+    beats: list[Beat],
+    downbeats: list[float],
+    pulses: int,
+    near: tuple[float, float] | None = None,
+) -> int:
     """Index of the beat to treat as beat 1 when the user hasn't chosen one.
 
     The detected downbeat layer is noise, but it is *biased* noise, so the phase
     it agrees with most often beats a coin flip — and one click fixes it.
+
+    `near` is the span being notated, and the vote is taken AROUND IT
+    (2026-09-17, D32). A bar's phase is an index modulo the bar, and one beat
+    the tracker dropped or doubled anywhere in a track shifts the phase of
+    everything after it -- so over a whole track the majority describes
+    whichever side of the slip is longer, which need not be the side the solo
+    is on. Measured against 96 tracks whose true phase a reference gives
+    (scripts/downbeat_truth.py): the whole-track vote names the right beat on
+    53 of 63 WJazzD solos, the vote within 20 s of the span on 62; the
+    Omnibook (22 of 22) and the listener's own (11 of 11) are right either
+    way. The span alone reads 60 -- a short solo holds too few marks.
     """
     if not beats:
         return 0
@@ -377,7 +404,13 @@ def _auto_anchor(beats: list[Beat], downbeats: list[float], pulses: int) -> int:
             marked.add(best)
     if not marked:
         return 0
-    scores = [sum(1 for i in marked if i % pulses == phase) for phase in range(pulses)]
+    voters = marked
+    if near is not None:
+        lo, hi = near[0] - AUTO_ANCHOR_MARGIN_S, near[1] + AUTO_ANCHOR_MARGIN_S
+        local = {i for i in marked if lo <= times[i] <= hi}
+        if len(local) >= AUTO_ANCHOR_MIN_MARKS:
+            voters = local
+    scores = [sum(1 for i in voters if i % pulses == phase) for phase in range(pulses)]
     return max(range(pulses), key=lambda phase: scores[phase])
 
 
@@ -391,6 +424,7 @@ def derive_sections(
     beats: list[Beat],
     downbeats: list[float],
     config: MeterConfig,
+    near: tuple[float, float] | None = None,
 ) -> list[MeterSection]:
     """Bar grid for each metrical span, sharing one phase and one meter.
 
@@ -406,7 +440,7 @@ def derive_sections(
     anchor_index = (
         nearest_beat_index(beats, config.anchor)
         if config.anchor is not None
-        else _auto_anchor(beats, downbeats, pulses)
+        else _auto_anchor(beats, downbeats, pulses, near)
     )
     phase = anchor_index % pulses
 
@@ -439,7 +473,11 @@ def derive_sections(
 
 
 def bar_grid(
-    beats: list[float], downbeats: list[float], config: MeterConfig, duration: float
+    beats: list[float],
+    downbeats: list[float],
+    config: MeterConfig,
+    duration: float,
+    near: tuple[float, float] | None = None,
 ) -> tuple[list[Beat], list[MeterSection]]:
     """The bar grid as the GUI draws it: tracked beats repaired and extended
     to the track's ends, and sections counted from the anchor -- the user's
@@ -453,7 +491,7 @@ def bar_grid(
     """
     repaired = repair_beats(beats, config)
     repaired = extend_beats(repaired, config, 0.0, duration)
-    return repaired, derive_sections(repaired, downbeats, config)
+    return repaired, derive_sections(repaired, downbeats, config, near)
 
 
 def bar_lines(
@@ -487,10 +525,23 @@ def bar_lines(
     return lines
 
 
+def span_of(config: Config, duration: float) -> tuple[float, float] | None:
+    """The span being notated -- the transcribe region, an open end meaning
+    the track's -- for the automatic downbeat to vote around. None is the
+    whole track."""
+    region = config.transcribe.region
+    if region is None:
+        return None
+    start, end = region
+    return (float(start), float(duration if end is None else end))
+
+
 def run(document: Document, config: Config) -> Document:
     grid = document.beat_grid
     if grid is None or not grid.beats:
         return document.model_copy(update={"meter": []})
     duration = document.audio.duration if document.audio else grid.beats[-1]
-    _beats, sections = bar_grid(grid.beats, grid.downbeats, config.meter, duration)
+    _beats, sections = bar_grid(
+        grid.beats, grid.downbeats, config.meter, duration, near=span_of(config, duration)
+    )
     return document.model_copy(update={"meter": sections})

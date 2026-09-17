@@ -15,6 +15,8 @@ from swingscribe.score_bars import (
     bars_on_grid,
     beat_coordinate,
     clock_anchors,
+    describe_trace,
+    difference_trace,
     wjazz_bar_line_agreement,
 )
 
@@ -180,3 +182,63 @@ def test_a_page_in_another_metre_is_not_judged():
     theirs = [(n.position % 3.0, n.pitch) for n in score.melody]
     assert wjazz_bar_line_agreement(_page(score, 0.0), theirs, 3.0)["beat_n"] == 0.0
     assert wjazz_bar_line_agreement(_page(score, 0.0), [], 4.0)["beat_n"] == 0.0
+
+
+def _line(rng, count, start=0.0):
+    scale = [60, 62, 63, 65, 67, 69, 70, 72]
+    return [(start + i * 0.5, rng.choice(scale)) for i in range(count)]
+
+
+def test_a_sound_page_is_one_run_with_no_steps_even_when_it_starts_bars_late():
+    rng = random.Random(21)
+    theirs = _line(rng, 200)
+    ours = [(position + 8.0, pitch) for position, pitch in theirs]  # two bars of intro on our page
+    trace = difference_trace(ours, theirs, 4.0)
+    assert trace["steady"] and abs(trace["slope"] - 1.0) < 0.01
+    assert [s["offset"] for s in trace["segments"]] == [8.0]
+    assert trace["segments"][0]["beat_offset"] == 0.0
+    assert trace["steps"] == []
+
+
+def test_a_dropped_beat_is_a_step_at_the_bar_where_it_happened():
+    """The tracker lost a beat at our quarter 40: every note after it sits a
+    beat early on our page, every bar line after it is a beat off, and
+    `on_the_bar` can only say 'about half'."""
+    rng = random.Random(22)
+    theirs = _line(rng, 240)
+    ours = [(p if p < 40.0 else p - 1.0, pitch) for p, pitch in theirs]
+    trace = difference_trace(ours, theirs, 4.0)
+    assert [s["offset"] for s in trace["segments"]] == [0.0, -1.0]
+    assert [s["beat_offset"] for s in trace["segments"]] == [0.0, 3.0]
+    (step,) = trace["steps"]
+    assert step["change"] == -1.0
+    assert step["bar"] in (10, 11)  # quarter 40 is the first beat of bar 11
+    assert "steps: -1.0 at bar" in describe_trace(trace, 4.0)
+
+
+def test_a_few_syncopations_resolved_differently_are_not_steps():
+    rng = random.Random(23)
+    theirs = _line(rng, 200)
+    ours = [(p + (0.5 if i % 9 == 0 else 0.0), pitch) for i, (p, pitch) in enumerate(theirs)]
+    trace = difference_trace(ours, theirs, 4.0)
+    assert len(trace["segments"]) == 1 and trace["steps"] == []
+    assert trace["segments"][0]["share"] < 1.0
+
+
+def test_a_wrong_downbeat_is_one_run_off_the_bar_and_a_half_rate_grid_is_a_slope():
+    rng = random.Random(24)
+    theirs = _line(rng, 200)
+    wrong = difference_trace([(p + 3.0, pitch) for p, pitch in theirs], theirs, 4.0)
+    assert [s["beat_offset"] for s in wrong["segments"]] == [3.0] and wrong["steps"] == []
+    halved = difference_trace([(p / 2.0, pitch) for p, pitch in theirs], theirs, 4.0)
+    assert not halved["steady"] and abs(halved["slope"] - 0.5) < 0.02
+    assert halved["segments"] == []
+    assert "not at the reference's pulse" in describe_trace(halved, 4.0)
+
+
+def test_printed_bar_numbers_follow_a_pickup_bar():
+    rng = random.Random(25)
+    theirs = _line(rng, 120)
+    ours = [(p if p < 20.0 else p + 1.0, pitch) for p, pitch in theirs]
+    assert difference_trace(ours, theirs, 4.0, first_bar=0)["steps"][0]["bar"] in (4, 5)
+    assert difference_trace([], theirs, 4.0)["matches"] == 0

@@ -393,9 +393,9 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   detected downbeat layer is noise (open-issue #5) and must not be drawn or
   trusted; only its pulse layer is reliable. Its individual marks, that is:
   the layer's BEST PHASE (`meter._auto_anchor`, what a track with no
-  anchor gets) is now measured against references -- right on 22 of 22
-  Omnibook sides and the listener's three hand-placed downbeats, wrong on
-  5 of 73 WJazzD solos (D32). Better than a guess, not yet a fact.
+  anchor gets) is now measured against references: voted around the span
+  it names the right beat on 95 of 96 tracks (D32). Good enough to draw;
+  one click still fixes it.
 - `gui.*` config is UI state and must never reach a cache key. `stage_config()`
   enforces this via `STAGE_SECTIONS`; changing a port must not throw away a
   separation.
@@ -850,10 +850,24 @@ list of what is actually wrong; run everything with one command:
   own bar/beat/tatum (`wjazz.notated_beats`). Pinned per page and as
   `summary/{mscz,omnibook,wjazz}_placement` and `*_on_the_bar`; in both
   sheets; on the Score line, which tells the listener which way to move the
-  downbeat. First reading: 12 of 12, 22 of 22, and **62 of 73 on WJazzD** --
-  five clean wrong downbeats (`_auto_anchor`'s, on sidecars with no
-  anchor) and six diffuse ones that are the grid (half-rate, slipped
-  beats). A high `beat_share` off zero is a downbeat; a low one is a grid.
+  downbeat. 12 of 12, 22 of 22, and 67 of 73 on WJazzD (62 before the
+  batch's one-note downbeat became a vote, `wjazz.bar_anchors`).
+- **Never take a downbeat from one point -- a line's intercept, one
+  annotated note. Vote** (`score_bars.bars_on_grid`). Both benchmarks made
+  the mistake independently (R24, D32).
+- **With no downbeat placed, the automatic one is voted AROUND THE SPAN**
+  (`meter._auto_anchor(near=...)`, +-20 s; `meter.CACHE_VERSION` 2). One
+  slipped beat shifts the phase of everything after it, so a whole-track
+  majority describes the longer side: 53 of 63 WJazzD solos right, against
+  62 for the local vote (`scripts/downbeat_truth.py`, the truth table for
+  any future rule). `/beats` takes the selection as `start`/`end` for the
+  same reason the page does -- keep them agreeing.
+- **`score_bars.difference_trace` says WHERE a page leaves its bar lines**:
+  a constant is a downbeat, a step a slipped beat, a slope a grid at the
+  wrong pulse. It prints under any scorecard row in doubt. On WJazzD 8 of
+  73 grids are off the annotated pulse and 15 more slip part-way, mostly
+  GAINING a beat (37 of 56 steps are +1) -- open (D32.3), and the next
+  thing to fix in the grid repair.
 - **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
   this notate the way a human notated it?" It charges the gap between
   performed timing and notated rhythm to the transcriber, so it reads lower

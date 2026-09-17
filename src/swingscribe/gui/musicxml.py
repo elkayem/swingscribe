@@ -32,7 +32,12 @@ from typing import Any
 
 from swingscribe.config import TRANSPOSITIONS, Config
 from swingscribe.model import Document, NoteEvent
-from swingscribe.notation import meter_from_settings, notation_for_span, with_chords
+from swingscribe.notation import (
+    bar_grid_for_settings,
+    meter_from_settings,
+    notation_for_span,
+    with_chords,
+)
 
 
 class NotReady(Exception):
@@ -68,7 +73,11 @@ def take_of(config: Config, line: str | None) -> str | None:
 
 
 def bar_grid(
-    audio_path: str | Path, config: Config, settings: dict[str, Any], duration: float
+    audio_path: str | Path,
+    config: Config,
+    settings: dict[str, Any],
+    duration: float,
+    near: tuple[float, float] | None = None,
 ) -> tuple[list[float], float | None]:
     """The beat grid AS THE ROLL DRAWS IT, and the beat it counts bars from.
 
@@ -90,7 +99,7 @@ def bar_grid(
     anything else looks up a different track.
     """
     from swingscribe import pipeline
-    from swingscribe.stages import beats, ingest, meter
+    from swingscribe.stages import beats, ingest
 
     cached = pipeline.cached_document(
         audio_path,
@@ -100,19 +109,10 @@ def bar_grid(
     grid = cached.beat_grid if cached else None
     if grid is None or not grid.beats:
         raise NotReady("no beat grid yet - press Beats first")
-    overrides = {
-        key: value
-        for key, value in {
-            "time_signature": settings.get("time_signature"),
-            "pulses_per_bar": settings.get("pulses_per_bar"),
-            "anchor": settings.get("anchor"),
-        }.items()
-        if value is not None
-    }
-    meter_config = config.meter.model_copy(update=overrides)
-    repaired, sections = meter.bar_grid(grid.beats, grid.downbeats, meter_config, duration)
-    anchor = sections[0].anchor if sections else settings.get("anchor")
-    return [beat.time for beat in repaired], anchor
+    # One derivation, shared with the eval harness (notation.py): the
+    # listener's meter settings over the repaired grid, and with no downbeat
+    # set, the automatic one voted around `near` -- the span on the page.
+    return bar_grid_for_settings(grid.beats, grid.downbeats, settings, config, duration, near)
 
 
 def notate_config(config: Config, settings: dict[str, Any], title: str) -> Config:
@@ -170,8 +170,9 @@ def build_notation(
         raise NotReady("nothing to notate - every note in this span is silenced")
 
     duration = document.audio.duration if document.audio else 0.0
-    beats, anchor = bar_grid(audio_path, config, settings, duration)
     region = run_config.transcribe.region or (0.0, None)
+    near = (float(region[0]), float(duration if region[1] is None else region[1]))
+    beats, anchor = bar_grid(audio_path, config, settings, duration, near)
     stem = run_config.transcribe.stem
     signature, pulses = meter_from_settings(
         settings.get("time_signature"), settings.get("pulses_per_bar"), config
