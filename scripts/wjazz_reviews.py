@@ -3,6 +3,7 @@ CURRENT transcribe config, so the error taxonomy has frame evidence again.
 
     uv run python scripts/wjazz_reviews.py                 # compute what is missing
     uv run python scripts/wjazz_reviews.py --dry           # only say what is missing
+    uv run python scripts/wjazz_reviews.py --folder Omnibook   # another set's spans
 
 `scripts/error_taxonomy.py` reads its frame evidence (CREPE periodicity, the
 energy gate, the smoothed pitch) from the GUI's review cache BY KEY, and that
@@ -45,6 +46,11 @@ DEFAULT_CACHE_DIR = Path("benchmark/.swingscribe-cache")
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
+    parser.add_argument(
+        "--folder",
+        default="wjazzd",
+        help="the subfolder of benchmark/ whose sidecars to review (Omnibook for the third set)",
+    )
     parser.add_argument("--dry", action="store_true", help="say what is missing, compute nothing")
     parser.add_argument("--limit", type=int, default=None, help="compute at most N (dev)")
     parser.add_argument("--step-cost", type=float, default=0.2)
@@ -61,7 +67,7 @@ def main() -> None:
     for sidecar_path in sorted(run_eval.BENCH.rglob("*.swingscribe.json")):
         sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
         name = run_eval.sidecar_name(sidecar_path, sidecar)
-        if not name.startswith("wjazzd/") or not (run_eval.BENCH / name).is_file():
+        if not name.startswith(f"{args.folder}/") or not (run_eval.BENCH / name).is_file():
             continue
         # The same config, document and span config `error_taxonomy.load_evidence`
         # builds, so the key this writes under is the key it reads from.

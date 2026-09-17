@@ -810,6 +810,17 @@ list of what is actually wrong; run everything with one command:
   six of these sides are already in `benchmark/wjazzd/` under their own
   names. A trailing take number ("Now's_The_Time_1") is part of a tune key
   and two files on one key are refused, not folded.
+- **The error taxonomy reads BOTH sets, as two pinned blocks** (2026-09-17,
+  docs/error-taxonomy.md section 10): `scripts/error_taxonomy.py` classifies
+  WJazzD from mir_eval's hits and the Omnibook from the time-free
+  alignment's, each book note placed in time from the matched notes around
+  it (`benchmark.place_on_anchors`, 19 ms median leave-one-out). The same
+  three classes lead both; notes under an eighth are 27% of the book and
+  54% of its outright misses. Its frame evidence needs
+  `wjazz_reviews.py --folder Omnibook` after a transcribe change, and D31:
+  three Parker solos under `benchmark/wjazzd/` are byte-identical to their
+  Omnibook copies, share a stems digest, and now resolve to the whole-file
+  Roformer set -- a fresh transcription no longer matches the notes cache.
 - **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
   this notate the way a human notated it?" It charges the gap between
   performed timing and notated rhythm to the transcriber, so it reads lower

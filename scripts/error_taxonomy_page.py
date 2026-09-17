@@ -8,6 +8,11 @@ the repository alone and carries nothing derived from a recording beyond
 counts. One Pareto per block (all solos, then each instrument family with at
 least one solo), bars coloured by population (miss / fp / pair), a cumulative
 share line on the same percent axis, and the numbers as a table underneath.
+
+The baseline's `omnibook` block, when it is there, gets a part of its own
+below WJazzD's: the Charlie Parker Omnibook sides are scored against a notated
+score, their hits are the time-free alignment's and their deficit is pitch
+F1's, so the two sets are drawn beside each other and never summed.
 """
 
 from __future__ import annotations
@@ -118,18 +123,106 @@ def block_table(block: dict, rules, noise: dict | None) -> str:
     )
 
 
-def section(title: str, block: dict, rules, noise: dict | None, note: str = "") -> str:
+def section(
+    title: str,
+    block: dict,
+    rules,
+    noise: dict | None,
+    note: str = "",
+    measure: str = "note F1",
+    unit: str = "solos",
+) -> str:
     pops = block["populations"]
     return f"""
 <section>
   <h2>{html.escape(title)}</h2>
-  <p class="meta"><b>{block["n_solos"]}</b> solos · <b>{block["n_reference"]:,}</b> reference notes ·
-  <b>{block["n_estimate"]:,}</b> of ours · mean note F1 <b>{block["mean_note_f1"]:.3f}</b> ·
+  <p class="meta"><b>{block["n_solos"]}</b> {unit} · <b>{block["n_reference"]:,}</b> reference notes ·
+  <b>{block["n_estimate"]:,}</b> of ours · mean {measure} <b>{block["mean_note_f1"]:.3f}</b> ·
   <b>{block["n_errors"]:,}</b> errors: {pops["miss"]} misses, {pops["fp"]} false positives,
   {pops["pair"]} pairs{(" · " + note) if note else ""}</p>
   <figure>{pareto_svg(block, rules, noise)}</figure>
   <details><summary>The same numbers as a table</summary>{block_table(block, rules, noise)}</details>
 </section>"""
+
+
+def tempo_rows_of(tempo: dict) -> str:
+    return "".join(
+        f"<tr><td>{html.escape(t)}</td><td class='num'>{b['n_solos']}</td>"
+        f"<td class='num'>{b['mean_note_f1']:.3f}</td><td class='num'>{b['n_errors']}</td>"
+        f"<td>{html.escape(', '.join(f'{c} {n}' for c, n in ranked(b['counts'])[:3]))}</td></tr>"
+        for t, b in tempo.items()
+    )
+
+
+def side_by_side(wjazzd: dict, omnibook: dict, rules) -> str:
+    """Each class's share of the errors in the two sets, by the larger share.
+    Shares, because the sets differ in size and in what a hit is."""
+    classes = sorted(
+        set(wjazzd["counts"]) | set(omnibook["counts"]),
+        key=lambda c: (
+            -max(
+                wjazzd["counts"].get(c, 0) / (wjazzd["n_errors"] or 1),
+                omnibook["counts"].get(c, 0) / (omnibook["n_errors"] or 1),
+            )
+        ),
+    )
+    rows = []
+    for cls in classes[:14]:
+        a = wjazzd["counts"].get(cls, 0)
+        b = omnibook["counts"].get(cls, 0)
+        rows.append(
+            f"<tr><td>{html.escape(cls)}</td><td class='pop'>{population_of(cls, rules)}</td>"
+            f"<td class='num'>{a:,}</td><td class='num'>{a / (wjazzd['n_errors'] or 1):.1%}</td>"
+            f"<td class='num'>{b:,}</td><td class='num'>{b / (omnibook['n_errors'] or 1):.1%}</td></tr>"
+        )
+    return (
+        "<div class='wrap'><table><thead><tr><th>class</th><th>population</th>"
+        "<th class='num'>WJazzD horns</th><th class='num'>share</th>"
+        "<th class='num'>Omnibook</th><th class='num'>share</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table></div>"
+    )
+
+
+def omnibook_part(agg: dict, omnibook: dict, rules) -> str:
+    """The Omnibook set's part of the page; empty when nothing is pinned."""
+    if not omnibook:
+        return ""
+    overall = omnibook["overall"]
+    placement = omnibook.get("placement") or {}
+    placed = (
+        f"""A matched note placed from its neighbours lands
+  <b>{placement["loo_median_ms"]:.0f} ms</b> from where it was heard at the median
+  (p90 {placement["loo_p90_ms"]:.0f} ms; {placement["loo_within_tolerance"]:.0%} inside the 50 ms the
+  rules use), so read the time-sensitive classes here more loosely than WJazzD's."""
+        if placement
+        else ""
+    )
+    horns = agg["family"].get("horn", agg["overall"])
+    return f"""
+  <h1 class="part">The Omnibook set</h1>
+  <p class="lede">Twenty-two Charlie Parker sides against LORIA's MusicXML of the Omnibook. A score
+  has bars, not seconds, so a hit here is a true match of the time-free pitch alignment — the set's
+  pinned pitch F1 — and each notated note gets its instant from the matched notes around it. Every
+  rule after that is the one used above. {placed}</p>
+  <div class="hero">
+    <div><div class="n">{overall["mean_note_f1"]:.3f}</div><div class="l">mean pitch F1 · n={overall["n_solos"]}</div></div>
+    <div><div class="n">{1.0 - overall["mean_note_f1"]:.3f}</div><div class="l">deficit explained below</div></div>
+    <div><div class="n">{overall["n_errors"]:,}</div><div class="l">errors classified · {overall["counts"].get("unclassified", 0)} unclassified</div></div>
+  </div>
+  {section("All sides", overall, rules, omnibook.get("noise"), "", "pitch F1", "sides")}
+  <section>
+    <h2>The two sets side by side</h2>
+    <p class="meta">Share of each set's errors, horns against horns. Counts are not comparable
+    (<b>{horns["n_solos"]}</b> solos against <b>{overall["n_solos"]}</b> sides, and a different
+    definition of a hit); shares are.</p>
+    {side_by_side(horns, overall, rules)}
+  </section>
+  <section>
+    <h2>Omnibook, by tempo band</h2>
+    <p class="meta">WJazzD's bands, applied to each side's fitted tempo.</p>
+    <div class="wrap"><table><thead><tr><th>tempo band</th><th class="num">sides</th><th class="num">mean pitch F1</th>
+    <th class="num">errors</th><th>three largest classes</th></tr></thead><tbody>{tempo_rows_of(omnibook["tempo"])}</tbody></table></div>
+  </section>"""
 
 
 def render(agg: dict) -> str:
@@ -145,19 +238,14 @@ def render(agg: dict) -> str:
         sections.append(
             section(f"{family.capitalize()} solos", block, rules, block.get("noise"), note)
         )
-    tempo_rows = "".join(
-        f"<tr><td>{html.escape(t)}</td><td class='num'>{b['n_solos']}</td>"
-        f"<td class='num'>{b['mean_note_f1']:.3f}</td><td class='num'>{b['n_errors']}</td>"
-        f"<td>{html.escape(', '.join(f'{c} {n}' for c, n in ranked(b['counts'])[:3]))}</td></tr>"
-        for t, b in agg["tempo"].items()
-    )
+    tempo_rows = tempo_rows_of(agg["tempo"])
     rules_rows = "".join(
         f"<tr><td class='pop'>{p}</td><td>{html.escape(c)}</td><td>{html.escape(d)}</td></tr>"
         for p, c, d in rules
     )
     deficit = 1.0 - overall["mean_note_f1"]
     return f"""<title>Where the 0.145 Goes</title>
-<meta name="description" content="Pareto of every WJazzD transcription error, one cause each">
+<meta name="description" content="Pareto of every WJazzD and Omnibook transcription error, one cause each">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,600&display=swap">
 <style>
 :root {{
@@ -184,6 +272,7 @@ body {{ background: var(--bg); color: var(--ink); margin: 0;
   font: 15px/1.5 "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; }}
 main {{ max-width: 880px; margin: 0 auto; padding: 40px 24px 64px; }}
 h1 {{ font: 600 40px/1.1 "Fraunces", Georgia, serif; margin: 0 0 8px; text-wrap: balance; letter-spacing: -0.01em; }}
+h1.part {{ font-size: 30px; margin: 64px 0 8px; padding-top: 32px; border-top: 1px solid var(--rule); }}
 h2 {{ font: 600 20px/1.3 "IBM Plex Sans", system-ui, sans-serif; margin: 40px 0 4px; }}
 .lede {{ color: var(--ink-2); max-width: 62ch; margin: 0 0 20px; }}
 .meta {{ color: var(--ink-2); margin: 0 0 12px; font-size: 14px; }}
@@ -224,7 +313,8 @@ footer {{ color: var(--ink-3); font-size: 13px; margin-top: 40px; border-top: 1p
   <p class="lede">Every note the WJazzD benchmark counts against the transcriber — a reference note
   we missed, a note we emitted that nobody played, or a pair of the two that is really one error —
   given exactly one cause by a fixed rule table, then ranked. Bars are the share of all errors;
-  the line is the running total. Same-recording, audio-against-audio, offsets ignored.</p>
+  the line is the running total. Same-recording, audio-against-audio, offsets ignored.
+  The 0.145 in the name was the first reading's deficit; the tiles carry the pinned one.</p>
   <div class="hero">
     <div><div class="n">{overall["mean_note_f1"]:.3f}</div><div class="l">mean note F1 · n={overall["n_solos"]}</div></div>
     <div><div class="n">{deficit:.3f}</div><div class="l">deficit explained below</div></div>
@@ -240,6 +330,7 @@ footer {{ color: var(--ink-3); font-size: 13px; margin-top: 40px; border-top: 1p
     <div class="wrap"><table><thead><tr><th>tempo class</th><th class="num">solos</th><th class="num">mean F1</th>
     <th class="num">errors</th><th>three largest classes</th></tr></thead><tbody>{tempo_rows}</tbody></table></div>
   </section>
+  {omnibook_part(agg, agg.get("omnibook"), rules)}
   <section>
     <h2>The rule table, in decision order</h2>
     <p class="meta">The first rule that fires wins. `swingscribe.taxonomy.RULES`.</p>

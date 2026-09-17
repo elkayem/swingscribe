@@ -644,3 +644,39 @@ def test_paired_delta_noise_compares_only_solos_present_in_both():
     assert out["merged"]["delta"] == -1
     assert out["merged"]["up"] == 1 and out["merged"]["down"] == 1
     assert paired_delta_noise({}, after) == {}
+
+
+# ── a notated reference: the caller's hits, and the class only it can leave ──
+
+
+def test_unaligned_is_a_same_pitch_pair_inside_the_tolerance():
+    # mir_eval would have matched these two; only a time-free alignment, which
+    # walks both lines in order, can leave them unmatched.
+    row = classify_pair(note(1.00, 60), note(1.02, 60))
+    assert (row.population, row.cls) == ("pair", "unaligned")
+    assert classify_pair(note(1.00, 60), note(1.08, 60)).cls == "timing_late"
+
+
+def test_every_rule_names_a_class_once():
+    from swingscribe.taxonomy import RULES
+
+    assert ("pair", "unaligned") in {(pop, cls) for pop, cls, _ in RULES}
+    assert len({(pop, cls) for pop, cls, _ in RULES}) == len(RULES)
+
+
+def test_the_callers_hits_replace_mir_evals_and_the_deficit_still_sums():
+    _needs_pairing()
+    from swingscribe.taxonomy import classify_solo
+
+    reference = [note(0.0, 60), note(0.5, 62), note(1.0, 64), note(1.5, 65)]
+    estimate = [note(0.0, 60), note(0.5, 63), note(1.5, 65), note(2.5, 70)]
+    # The alignment matched 0 and 3->2; nothing here asks mir_eval.
+    errors = classify_solo(reference, estimate, matched=[(0, 0), (3, 2)])
+    assert errors.matched == [(0, 0), (3, 2)]
+    assert errors.note_f1 == pytest.approx(2 * 2 / 8)
+    by_class = class_counts(errors.rows)
+    assert by_class["neighbour"] == 1  # 62 heard as 63, one error counted once
+    assert sum(f1_deficit(errors).values()) == pytest.approx(1 - errors.note_f1)
+    # Every non-hit on both sides is in exactly one row.
+    refs = [r.ref_index for r in errors.rows if r.ref_index is not None]
+    assert sorted(refs) == [1, 2]

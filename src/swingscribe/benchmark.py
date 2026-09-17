@@ -38,6 +38,7 @@ score, because nothing is optimized against the score.
 Pure Python, no numpy, so CI exercises it (CLAUDE.md).
 """
 
+import math
 import statistics
 
 # Aligned pairs a window needs before its own shift beats the whole solo's.
@@ -563,3 +564,144 @@ def locate_score(score, notes: list[tuple[float, int]]) -> dict[str, float]:
         and placed >= PLACED_FLOOR,
     )
     return result
+
+
+# ── placing a score NOTE BY NOTE, on its own matched notes ───────────────
+#
+# `score_tune` places a window of bars at one tempo and lets it slide; that
+# is good enough to score onsets and too coarse to say WHY a note was missed,
+# which needs each notated note's own instant to within a few frames. The
+# error taxonomy (scripts/error_taxonomy.py, the Omnibook set) gets it from
+# the same independently-derived correspondence everything above uses: every
+# true pitch match of the time-free alignment is an anchor (notated
+# position, heard onset), and a note between two anchors sits where a
+# straight line between them puts it.
+#
+# Two things keep that honest. The anchors come from pitch alone, so nothing
+# here optimises the number being reported -- a matched note is a hit because
+# the aligner said so, not because it was placed on itself. And the placement
+# has a control of its own: leave each anchor out, place it from its
+# neighbours, and read the error (`placement_errors`). On the 22 Omnibook
+# sides that is 25 ms at the median with the score as written and 20 ms with
+# the swing the book does not write taken out (`fit_swing_delta`), against
+# 50 ms for the taxonomy's onset rules -- stated beside every number built on
+# it, because it is three times WJazzD's.
+
+# An anchor whose own neighbours put it further than this from where we
+# heard it is a chance match: a quarter of a second is an eighth at 120 bpm,
+# and the leave-one-out error's 95th percentile over the Omnibook is 0.15 s.
+WILD_ANCHOR_S = 0.25
+# Offbeat delays tried, in quarter notes: 0 is straight, 0.17 is a triplet.
+SWING_DELTAS = tuple(i / 100 for i in range(0, 21))
+
+
+def swing_warp(position: float, delta: float) -> float:
+    """A notated position with its beat's offbeat moved `delta` quarters late.
+
+    Piecewise linear inside the beat, the same binary hypothesis quantize
+    warps by: 0 stays 0, a half lands on 0.5 + delta, 1 stays 1.
+    """
+    beat = math.floor(position)
+    frac = position - beat
+    if frac <= 0.5:
+        return beat + frac * (0.5 + delta) / 0.5
+    return beat + 0.5 + delta + (frac - 0.5) * (0.5 - delta) / 0.5
+
+
+def _interpolate(points: list[tuple[float, float]], slope: float, x: float) -> float:
+    """y at `x` on the polyline through `points` (sorted, distinct x),
+    continued at `slope` beyond either end."""
+    if x <= points[0][0]:
+        return points[0][1] - slope * (points[0][0] - x)
+    if x >= points[-1][0]:
+        return points[-1][1] + slope * (x - points[-1][0])
+    lo, hi = 0, len(points) - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if points[mid][0] <= x:
+            lo = mid
+        else:
+            hi = mid
+    (x0, y0), (x1, y1) = points[lo], points[hi]
+    return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+
+
+def _distinct(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    out: list[tuple[float, float]] = []
+    for x, y in sorted(points):
+        if not out or x > out[-1][0]:
+            out.append((x, y))
+    return out
+
+
+def placement_errors(points: list[tuple[float, float]]) -> list[float]:
+    """Leave-one-out: each interior anchor placed from its two neighbours,
+    minus where it was heard. Seconds, signed (positive = placed late)."""
+    points = _distinct(points)
+    return [
+        y0 + (y1 - y0) * (x - x0) / (x1 - x0) - y
+        for (x0, y0), (x, y), (x1, y1) in zip(points, points[1:], points[2:], strict=False)
+    ]
+
+
+def fit_swing_delta(anchors: list[tuple[float, float]]) -> float:
+    """The offbeat delay (quarters) under which the anchors place each other
+    best: the smallest mean leave-one-out error over `SWING_DELTAS`. Fitted on
+    matched notes only, against their own heard onsets."""
+    if len(anchors) < MIN_LOCATE_ANCHORS:
+        return 0.0
+
+    def cost(delta: float) -> float:
+        errors = placement_errors([(swing_warp(q, delta), t) for q, t in anchors])
+        return statistics.fmean(abs(e) for e in errors) if errors else 0.0
+
+    return min(SWING_DELTAS, key=lambda d: (cost(d), d))
+
+
+def drop_wild_anchors(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """The anchors without the chance matches: the worst leave-one-out
+    offender over `WILD_ANCHOR_S` goes, and the rest are read again, because a
+    wild anchor spoils its neighbours' reading by half its own error."""
+    points = _distinct(points)
+    while len(points) > 3:
+        errors = placement_errors(points)
+        worst = max(range(len(errors)), key=lambda k: abs(errors[k]))
+        if abs(errors[worst]) <= WILD_ANCHOR_S:
+            break
+        del points[worst + 1]
+    return points
+
+
+def place_on_anchors(
+    positions: list[float], durations: list[float], anchors: list[tuple[float, float]]
+) -> dict:
+    """Every notated note's onset and duration in seconds.
+
+    `positions` and `durations` are quarter notes; `anchors` are (notated
+    position, heard onset seconds) for the notes the time-free alignment
+    truly matched. Returns `onsets`, `durations`, the fitted `delta`, the
+    `seconds_per_quarter` the ends continue at, how many anchors were `kept`
+    of `offered`, and the leave-one-out `errors` of the kept ones -- the
+    control every consumer should print.
+    """
+    delta = fit_swing_delta(anchors)
+    kept = drop_wild_anchors([(swing_warp(q, delta), t) for q, t in anchors])
+    if len(kept) < 2:
+        raise ValueError("placing a score needs at least two anchors")
+    slope, _ = robust_line(kept)
+    if slope <= 0:
+        raise ValueError("the anchors do not run forward in time")
+
+    def at(position: float) -> float:
+        return _interpolate(kept, slope, swing_warp(position, delta))
+
+    onsets = [at(q) for q in positions]
+    return {
+        "onsets": onsets,
+        "durations": [at(q + d) - t for q, d, t in zip(positions, durations, onsets, strict=True)],
+        "delta": delta,
+        "seconds_per_quarter": slope,
+        "offered": len(anchors),
+        "kept": len(kept),
+        "errors": placement_errors(kept),
+    }

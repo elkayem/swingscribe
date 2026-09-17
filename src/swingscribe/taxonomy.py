@@ -43,6 +43,17 @@ residual (`align_resid`), read off the matched notes, so a timing pair the fit
 explains can be told from one the transcriber placed. `paired_delta_noise` is
 the guard's paired test, beside `bootstrap_noise`'s sample test.
 
+## A second kind of reference (2026-09-17, the Omnibook set)
+
+A notated score has no onsets in seconds, so `mir_eval` cannot say which of
+its notes we hit. There the hits are the time-free alignment's true matches
+(`alignment.align`, the measure that set is pinned on), handed to
+`classify_solo` as `matched`, and the reference notes are placed in time from
+those same matches (`benchmark.place_on_anchors`). Everything after the hits
+is identical. One class exists only for that path: `unaligned`, a same-pitch
+pair inside the tolerance that the aligner's ORDER constraint refused, which
+mir_eval can never leave behind.
+
 ## What this is not
 
 It does not re-score anything. `mir_eval.transcription.match_notes` with the
@@ -124,6 +135,11 @@ def family_of(instrument: str | None) -> str:
 # (population, class, what fires it). `classify_*` walk their population's
 # rows in this order and take the first that fires; the doc renders it.
 RULES: list[tuple[str, str, str]] = [
+    (
+        "pair",
+        "unaligned",
+        "same pitch inside the tolerance, unmatched by the time-free alignment (scores only)",
+    ),
     # pairs: a reference note and one of ours within PAIR_WINDOW_S of each other
     ("pair", "timing_late", "same pitch, our onset 50-150 ms AFTER theirs"),
     ("pair", "timing_early", "same pitch, our onset 50-150 ms BEFORE theirs"),
@@ -434,6 +450,9 @@ def classify_pair(ref: dict, est: dict, estimate: list[dict] | None = None) -> E
     dpitch = int(est["pitch"]) - int(ref["pitch"])
     facts = {"dt": round(dt, 3), "dpitch": dpitch}
     if dpitch == 0:
+        if abs(dt) <= ONSET_TOLERANCE_S:
+            # Unreachable under mir_eval, which would have matched the two.
+            return ErrorRow("pair", "unaligned", "same pitch, |dt| <= tolerance", evidence=facts)
         cls = "timing_late" if dt > 0 else "timing_early"
         return ErrorRow("pair", cls, "same pitch, |dt| > tolerance", evidence=facts)
     body = _body_after(ref, est, estimate)
@@ -674,10 +693,17 @@ def classify_solo(
     estimate: list[dict],
     evidence: Evidence | None = None,
     family: str = "horn",
+    matched: list[tuple[int, int]] | None = None,
 ) -> SoloErrors:
-    """Match, pair, then give every non-hit its one class."""
+    """Match, pair, then give every non-hit its one class.
+
+    `matched` replaces mir_eval's hits with the caller's — the time-free
+    alignment's true matches, for a reference that is a notated score placed
+    in time from those very matches (module docstring). `note_f1` then reads
+    as that alignment's pitch F1, and the deficit decomposes the same way."""
     evidence = evidence or Evidence()
-    matched = match(reference, estimate)
+    if matched is None:
+        matched = match(reference, estimate)
     ref_hit = {i for i, _ in matched}
     est_hit = {j for _, j in matched}
     ref_free = [i for i in range(len(reference)) if i not in ref_hit]

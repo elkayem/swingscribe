@@ -5,6 +5,11 @@
 where the other 0.1451 goes, and what it said the first time it was run.
 Nothing in the transcriber was changed to produce it.
 
+**Revisited 2026-09-17.** Section 10 reviews both changes below from outside,
+re-runs the guard against the third pin, and adds a second reference: the
+twenty-two Charlie Parker Omnibook sides, classified by the same rules from
+the time-free alignment's hits and pinned as a block of their own.
+
 **Second reading, same day.** `docs/error-taxonomy-review.md` is an
 independent analysis of this document's raw table. Three of its findings
 changed the instrument and the baseline was re-pinned (2026-09-07, later):
@@ -601,3 +606,309 @@ rule text, and re-drawing with another `--seed` gives a fresh sample.
 10. **The transcriptions are the 2026-09-02 pin's.** Any change to
     transcribe invalidates `.benchmark-notes-c0.2-d0.0.json` through its
     fingerprint, and this instrument then classifies the new notes.
+
+## 10. Revisited, 2026-09-17: where the instrument stands, and the Omnibook set
+
+Two things happened to this instrument after it was written, both outside
+the session that wrote it, and a third set of recordings arrived. This
+section reviews the first two and adds the third. Nothing above was
+rewritten; nothing in the transcriber was changed.
+
+### 10.1 What changed since, and what stands
+
+`docs/error-taxonomy-review.md` is the record; in one paragraph each:
+
+- **The instrument** (46db658): `absorbed` split into `absorbed` proper and
+  `squeezed`, no cover slack for a miss, the fit's local residual on every
+  pair, a paired guard beside the sample one. A redefinition: the tables in
+  sections 3-4 are that second pin's.
+- **The transcriber** (536c7eb): `pitch_persist_ms` 60 → 40 and the oracle
+  onset shift, note F1 0.8549 → 0.8583 over the same 73. **The current pin
+  is that third one** — 7,583 errors, deficit 0.1417 — and its Pareto leads
+  with `squeezed` 1,145 (15.1%), `neighbour` 836 (11.0%), `too_short` 765
+  (10.1%), `fragment_neighbour` 632, `split_sustain` 578, `merged` 479;
+  `absorbed` is eighth at 333. Section 4.1's "what a fix would move" is
+  therefore SPENT: the persistence change took what a threshold could take.
+- **The front end is measured out** (review sections 8-10): seven segmenter
+  knobs, six onset detectors and a 5 ms CREPE hop, all at or under the
+  shipped point. CREPE's 64 ms window bounds the 50 ms notes. What stands
+  is separation, `neighbour` (CREPE's salience under a semitone-off note,
+  unmeasured), and the pianists' line selection.
+
+**The guard, re-run today against the third pin.** See 10.7 for the verdict
+and the two things it caught, one of which was this revision's own bug.
+
+### 10.2 The Omnibook set: what had to be different, and what did not
+
+`benchmark/Omnibook/` is twenty-two Charlie Parker sides against LORIA's
+MusicXML of the Omnibook (docs/omnibook-benchmark.md). A score has bars and
+beats, not seconds, so `mir_eval` cannot say which of its notes we hit, and
+the set is pinned on the time-free **pitch F1** (mean 0.7904 over 22) for
+that reason. The taxonomy takes the same road:
+
+- **Hits are the alignment's true matches** (`alignment.measured_transposition`,
+  exactly `score_benchmark.score_tune`'s call), handed to
+  `taxonomy.classify_solo(matched=...)`. The control is the same as
+  WJazzD's: the F1 read off the hits equals the pinned pitch F1 on **all 22
+  sides to four places**, and the per-class costs sum to 0.2096, the whole
+  deficit.
+- **Every notated note is given an instant from the matched notes around
+  it** (`benchmark.place_on_anchors`, tested in `tests/test_benchmark.py`):
+  a straight line between neighbouring anchors, after a per-side swing warp
+  fitted on the anchors alone (the book writes straight eighths; the fitted
+  offbeat delay runs 0.00 of a beat on Kim and Ko Ko at 300 bpm to about 0.10
+  on the medium sides, swing ratios 1.0 to 1.5), with the worst chance
+  matches dropped (146 of 7,441 anchors, leave-one-out error over 0.25 s).
+  Substitutions that are the same note an octave away also set the clock
+  (194) and are never hits — without them a unison head has almost no
+  anchors and its octave pairs read as `loose` (75 did; 27 still do).
+- **Everything after the hits is the WJazzD path, unchanged**: the same
+  pairing, the same rules in the same order, the same evidence. Frame
+  evidence needed one review per side under the harness's key
+  (`scripts/wjazz_reviews.py --folder Omnibook`, 22 sides in about 20 minutes,
+  every payload note-for-note the harness's); 22 of 22 have a trace.
+- **One class exists only here**: `unaligned` (1) — a same-pitch pair inside
+  the tolerance that the aligner's order constraint refused, which
+  `mir_eval` can never leave behind.
+
+**The placement's own control.** Leave each anchor out and place it from its
+neighbours: **19 ms at the median, 67 ms at p90, 84% inside the 50 ms the
+rules use** (per side 14-30 ms). That is several times coarser than WJazzD's fit
+(3.5 ms median per-solo residual), and it is the scale to read every time-sensitive
+class here against: 242 of the 996 pairs have 30 ≤ |dt| ≤ 70 ms, so the line
+between `neighbour`/`other_pitch`/`octave` (inside 50 ms) and `loose`
+(outside) is soft for a quarter of them. Read those four as one population
+of wrong-pitch pairs where it matters; the covering rules (`squeezed`,
+`absorbed`) turn on 60 ms of OUR note and are as firm as they are on WJazzD.
+
+**The set is kept apart**, as `run_eval` keeps it: its own table
+(`.benchmark-taxonomy-omnibook.csv`, gitignored), its own spot-check sample
+(`benchmark/Omnibook/error-taxonomy-spotcheck.csv`), and an `omnibook`
+block in `tests/regression/taxonomy-baseline.json` that the guard compares
+on its own. Its deficit is pitch F1's, not note F1's: **the timing classes
+are empty by construction** (3 of 2,752), and the 0.0205 of WJazzD's
+deficit that is placement has no counterpart here.
+
+### 10.3 The Omnibook Pareto
+
+22 sides, 9,523 book notes, 9,099 of ours, 7,437 hits; mean pitch F1
+**0.7904**, deficit **0.2096**; 2,752 errors as 1,090 misses, 666 false
+positives and 996 pairs; **6 unclassified (0.2%)**. ±sd is the bootstrap
+over the 22 sides.
+
+| class | pop. | n | share | F1 cost | % of deficit | ±sd |
+|---|---|---|---|---|---|---|
+| squeezed | miss | 460 | 16.7% | 0.0240 | 11.5% | 51 |
+| neighbour | pair | 369 | 13.4% | 0.0401 | 19.1% | 50 |
+| fragment_neighbour | fp | 276 | 10.0% | 0.0157 | 7.5% | 23 |
+| octave | pair | 248 | 9.0% | 0.0298 | 14.2% | 95 |
+| absorbed | miss | 238 | 8.6% | 0.0130 | 6.2% | 27 |
+| loose | pair | 195 | 7.1% | 0.0226 | 10.8% | 39 |
+| fragment_other | fp | 192 | 7.0% | 0.0109 | 5.2% | 23 |
+| tracked_other | miss | 165 | 6.0% | 0.0090 | 4.3% | 23 |
+| other_pitch | pair | 159 | 5.8% | 0.0177 | 8.4% | 39 |
+| too_short | miss | 141 | 5.1% | 0.0077 | 3.7% | 19 |
+| between_phrases | fp | 74 | 2.7% | 0.0045 | 2.1% | 15 |
+| between_notes | fp | 63 | 2.3% | 0.0034 | 1.6% | 13 |
+| dropped | miss | 43 | 1.6% | 0.0022 | 1.0% | 9 |
+| split_sustain | fp | 22 | 0.8% | 0.0012 | 0.6% | 6 |
+| attack_transient | pair | 21 | 0.8% | 0.0024 | 1.1% | 6 |
+| bleed_register | fp | 20 | 0.7% | 0.0012 | 0.6% | 13 |
+| merged | miss | 17 | 0.6% | 0.0009 | 0.4% | 8 |
+| everything else (10 classes) | | 49 | 1.8% | 0.0033 | 1.6% | |
+
+By tempo band (WJazzD's bands on each side's fitted tempo; none is under
+112 bpm): MEDIUM n=2, pitch F1 0.838, 26.4 errors per 100 book notes;
+MEDIUM UP n=4, 0.833, 26.1; **UP n=16, 0.774, 29.7**, where `octave` (244
+of 248) sits.
+
+### 10.4 The two sets side by side (horns against horns)
+
+WJazzD's 68 horns at the third pin against the 22 sides. Counts are not
+comparable; shares and rates are.
+
+| | WJazzD horns (n=68) | Omnibook (n=22) |
+|---|---|---|
+| errors per 100 reference notes | 23.0 | 28.9 |
+| misses / fps / pairs per 100 | 9.5 / 6.5 / 7.0 | 11.4 / 7.0 / 10.5 |
+| squeezed | 14.4% | 16.7% |
+| neighbour | 11.4% | 13.4% |
+| fragment_neighbour | 8.5% | 10.0% |
+| absorbed | 3.4% | 8.6% |
+| tracked_other | 3.3% | 6.0% |
+| too_short | 10.5% | 5.1% |
+| octave | 2.0% | **9.0%** |
+| loose + other_pitch | 5.6% | **12.9%** |
+| split_sustain | 8.0% | **0.8%** |
+| merged | 6.5% | **0.6%** |
+| timing_late + timing_early | 8.5% | 0.1% (by construction) |
+
+**What agrees.** The same three classes lead both sets once timing is set
+aside: a short note with no room (`squeezed`), a short note read a semitone
+off (`neighbour`), a sliver cut off the edge of a real note
+(`fragment_neighbour`). An independent reference — a different human, a
+different convention, a different decade of recordings, a different way of
+deciding what a hit is — puts the transcriber's errors in the same places
+in nearly the same proportions. That is the strongest evidence yet that the
+WJazzD Pareto describes the transcriber and not WJazzD.
+
+**What differs, and why.**
+
+- **`octave` is the head, not the solo** (10.5): 209 of the 248 sit on four
+  sides.
+- **`split_sustain` and `merged` nearly vanish** (39 rows against 1,043).
+  Both are about re-articulation — one note or two — and the two references
+  disagree about it by convention, not by ear: WJazzD's annotators mark
+  every re-attack, and the book's editors write the line. 10% of the
+  book's notes are a quarter or longer, and nothing in the table can say
+  how much of the gap that explains. It is on the record as a property of
+  the reference, and it means D25's `merged` (the onset detector's recall)
+  cannot be studied on this set.
+- **`too_short` is half its WJazzD share and `absorbed` more than twice.**
+  The persistence change moved WJazzD's `absorbed` into `too_short` on
+  notes of median 49-57 ms; the book's short notes are longer when placed
+  (the misses' median is 75 ms, 30% under 60 ms against WJazzD's 55-66%),
+  because a notated sixteenth at 200 bpm IS 75 ms whatever Parker played.
+  Same population, read through a coarser reference duration.
+
+### 10.5 The three largest mechanisms
+
+**1. The short note — `squeezed` + `absorbed` + `too_short` + `tracked_other`
++ `dropped`: 1,047 (38.0%, 0.0558 of F1, 26.6% of the deficit).** The same
+mechanism as WJazzD's largest, and the book says what those notes are,
+which WJazzD's seconds could not:
+
+| the book's value | notes | not hit | rate | pure misses | rate |
+|---|---|---|---|---|---|
+| sixteenth-triplet or shorter | 542 | 214 | 39.5% | 159 | 29.3% |
+| sixteenth | 1,199 | 375 | 31.3% | 258 | 21.5% |
+| triplet eighth | 862 | 285 | 33.1% | 177 | 20.5% |
+| eighth | 5,953 | 1,065 | 17.9% | 465 | 7.8% |
+| up to a quarter | 601 | 98 | 16.3% | 23 | 3.8% |
+| longer | 366 | 49 | 13.4% | 8 | 2.2% |
+
+**Notes shorter than an eighth are 27% of the book and 54% of the pure
+misses (594 of 1,090)**; a sixteenth is missed outright three times as
+often as an eighth. The coverer is a matched note at the previous book
+pitch in 79% of `squeezed` (363 of 460) and ends 23 ms after the missed
+onset at the median. The frames: the gated pitch reached the book's note
+for 30-50 ms in 227 of 460 `squeezed` and never in 132; for `absorbed`,
+never in 141 of 238. That is review section 10's finding from a second
+reference: the turn, the triplet and the double-time run are where the
+recall goes, the trace holds half of them for under 60 ms, and no
+threshold of this front end reaches them. *What a fix would move:* nothing
+new to propose — this is the class the review measured out. *What this set
+adds:* a fix can now be scored BY NOTE VALUE, which says whether it
+recovers ornaments or merely shifts boundaries.
+
+**2. The wrong pitch — `neighbour` 369 + `other_pitch` 159 + `loose` 195 =
+723 (26.3%, 0.0804 of F1, 38.4% of the deficit).** Pairs weigh two, so
+this is the largest share of the deficit. `neighbour` is +1 in 173, −1 in
+123, ±2 in 73; the gated pitch was never at the book's pitch in 231 of 369
+(63%), and our pitch is the previous or next book note in only 28 (8%,
+against 26% on WJazzD) — a wrong reading of the note, not a neighbouring
+note heard early. 55 of them are on Shawnuff alone. Two readings must be
+counted here, because a score is an EDITION: a semitone between us and the
+book is either CREPE's error or the editor's (an enharmonic normalised, a
+ghosted chromatic passing tone written as its neighbour). The table cannot
+tell them apart; the spot-check sample can, and that is what it is for on
+this set. 74 of `other_pitch` and 80 of `loose` are on the unison-head
+sides, where the wrong pitch is the other horn. *At risk from any fix:*
+`fragment_neighbour` (276), the same excursions cut loose.
+
+**3. The head an octave low — `octave` 248 (9.0%, 0.0298 of F1, 14.2% of
+the deficit; ±sd 95, the least stable class in either set).** 226 are an
+octave UNDER the book. 209 sit on four sides and inside the first chorus:
+Ornithology 67 (bars 2-27), Card Board 60 (2-31), Moose The Mooche 47 (46
+of them by bar 33), and **Yardbird Suite 35 (34 by bar 33), a fourth side
+D30 does not list** — it surfaced when octave-displaced notes were allowed
+to set the clock (11 before, the rest had been `loose`). Those four read
+mean pitch F1 0.611 against 0.830 for the other 18. The solo choruses of
+the same four sides hold 2 octave pairs between them. So this is D30
+exactly as written, one side larger, with its cost now stated: 0.030 of
+the set's pitch F1, none of it in a solo. *What a fix would move:* a
+unison head is two horns in one stem; `fold_octave_outliers` judges a note
+against its neighbours and a whole head an octave low has none to disagree
+with. *At risk:* nothing in a solo — which is also why no number on the
+listener's own set or WJazzD, whose spans start at the solo, will move.
+
+### 10.6 What the Omnibook set is and is not good for
+
+- **Good for**: confirming the class ranking on an independent reference
+  (it does); scoring a recall fix by notated value (10.5.1); the head
+  (D30), which no other set scores; a regression guard with a different
+  failure surface than WJazzD's.
+- **Not good for**: anything about timing (no onsets), re-articulation
+  (`merged`/`split_sustain`, 10.4), or loudness (no `loud_max`). Its
+  reference durations are NOTATED values placed in time — legato by
+  convention — so a false positive is "inside a reference note" more often
+  than on WJazzD (`between_notes` is 2.3% here against 3.4%), and the
+  fragment classes should be read with that in mind.
+- **The book is an edition.** Ghosted notes dropped and enharmonics
+  normalised land in our false positives and `neighbour` pairs and are not
+  the transcriber's. Nothing here estimates how many; the spot-check is
+  the instrument for it.
+
+### 10.7 The guard today, and two things it caught
+
+Re-run on 2026-09-17 against the third pin, before anything was re-pinned:
+
+1. **This revision's own bug.** The first pass read 81 solos, not 73:
+   `discover` walked every sidecar, and four Omnibook recordings are in the
+   WJazzD database too (Ornithology, Scrapple, Segment, Yardbird Suite were
+   identified and scored as WJazzD solos). `run_eval` keeps the sets
+   disjoint for exactly this reason and `discover` now does the same
+   (`run_eval.is_omnibook`). The paired test read `se 0.0, up 0 / down 0 of
+   73` for every class while the totals moved by 5-82 — eight new solos,
+   not a changed transcriber — which is the paired guard doing its job.
+2. **Three WJazzD solos have lost their frame evidence, and the cause is
+   in the harness, not here.** Parker's Blues For Alice (53), Donna Lee
+   (55) and Yardbird Suite (68) under `benchmark/wjazzd/` are
+   byte-identical to their Omnibook copies, so they share a stems digest;
+   since the Omnibook's whole-file Roformer separation landed, a fresh
+   transcription of those solos resolves to the whole-file set ("a
+   whole-file set answers for any span") and no longer reproduces the
+   notes `run_eval` cached from the span-scoped set (270, 372 and 193
+   notes, each reported `DIFFERS from run_eval` by `wjazz_reviews.py`).
+   The taxonomy refuses a trace whose notes differ, so those three solos'
+   frame-rule misses read `unclassified`. The notes cache's fingerprint
+   hashes the transcribe config and cannot see which stems were read —
+   the same shape as R15, and D31 in docs/benchmark-deficiencies.md. Left for
+   the harness's owner; the WJazzD block of
+   the pin was NOT re-pinned over it. Pat Metheny's trace was simply
+   missing and is restored.
+
+**The verdict, with both out of the way.** 73 solos, 7,583 errors, mean note
+F1 0.8583: the third pin's population to the note, and every class count
+equal to the pin's except four. 34 misses on the three Parker solos moved
+out of `too_short` (765 → 744), `dropped` (172 → 164) and `tracked_other`
+(252 → 247) into `unclassified` (0 → 34, 0.4%) — the frame rules skipped
+for want of a trace, item 2 exactly, and the paired test names it: `up 3 /
+down 0 of 73`. Frame evidence on 70 of 73. The guard exits 1 and will until
+D31 is settled, which is what it is for. The Omnibook block, pinned today,
+reads back `all 59 counts unchanged`.
+
+### 10.8 Assumptions on the record, for the Omnibook block
+
+1. **A hit is a true match of the time-free alignment**, whole-line
+   transposition (0 on all 22). A chance match is a hit here exactly as it
+   is in the pinned pitch F1; the 146 anchors dropped from the CLOCK are
+   still hits.
+2. **Placement is piecewise linear between anchors**, continued at the
+   Theil-Sen tempo beyond the outermost ones, after a per-side binary swing
+   warp (offbeat delay 0-0.20 of a beat, chosen by the anchors'
+   leave-one-out error — never by any class count). A note between two
+   anchors cannot be placed better than the music is regular between them.
+3. **Octave-displaced substitutions set the clock and are not hits.**
+   Without them: `octave` 224, `loose` 223; with them 248 and 195. Both
+   readings are in this paragraph; the pin is the second.
+4. **Reference durations are the book's values placed in time.** No rule
+   for a miss reads them; the false-positive rules that ask "is a reference
+   note sounding" do.
+5. **Pairing, windows, rules and evidence are WJazzD's**, including the
+   150 ms pairing window, which at 300 bpm is three sixteenths.
+6. **Family is `horn` and tempo is the fitted one** (60 / Theil-Sen seconds
+   per quarter), banded by WJazzD's `tempoclass` bounds.
+7. **n = 22, one player, one decade.** Every share above is Charlie Parker
+   on 78-era transfers; the bootstrap sd says how far a class would move on
+   another 22 of his sides, not on another player.

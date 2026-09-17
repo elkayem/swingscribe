@@ -23,6 +23,23 @@ counts against the pinned baseline, and writes three files:
    non-zero if any class count moved, following run_eval.py's pattern.
    `--json` writes the same aggregate elsewhere without pinning.
 
+## The Omnibook set (2026-09-17)
+
+`--sets wjazzd,omnibook` is the default: after the WJazzD solos, the
+twenty-two Parker sides under `benchmark/Omnibook/` are classified against
+LORIA's MusicXML of the book (docs/omnibook-benchmark.md). A score has no
+onsets in seconds, so there the hits are the time-free alignment's true
+matches -- the set's pinned PITCH F1, which the run checks side by side --
+and each notated note is given its instant from the matched notes around it
+(`benchmark.place_on_anchors`; the leave-one-out placement error is printed
+and pinned). Everything after the hits is the same code. The set has a table
+(`.benchmark-taxonomy-omnibook.csv`), a spot-check sample
+(`benchmark/Omnibook/error-taxonomy-spotcheck.csv`) and an `omnibook` block
+in the baseline of its own, and is never folded into WJazzD's counts: its
+deficit is pitch F1's, not note F1's. Its frame evidence needs
+`scripts/wjazz_reviews.py --folder Omnibook` once per transcribe config.
+`--sets omnibook` needs no `--db`; pinning one set keeps the other's block.
+
 ## Evidence
 
 Frame evidence (CREPE periodicity, the energy gate, the smoothed pitch) is
@@ -97,6 +114,10 @@ One row per error. Columns, in order:
                     fps: max over other stems of harmonic energy at our
                     pitch, relative to the chosen stem
     ref_gap_s       fps: the reference inter-onset gap our onset falls in
+    ref_bar, ref_position
+                    Omnibook rows only: the book's bar number and the note's
+                    position in quarter notes from bar 1 (the instant in
+                    ref_onset is PLACED from the matched notes around it)
 
 Blank means the evidence was not available or the column does not apply.
 """
@@ -187,6 +208,8 @@ COLUMNS = [
     "under_ref_line",
     "cross_stem_ratio",
     "ref_gap_s",
+    "ref_bar",
+    "ref_position",
 ]
 
 
@@ -423,6 +446,11 @@ def discover(db, runs, log=print):
         name = run_eval.sidecar_name(sidecar_path, sidecar)
         if name not in runs or not (run_eval.BENCH / name).is_file():
             continue
+        # The Omnibook set stays out of the WJazzD identification, as it does
+        # in run_eval: several of its sides are in the database too, and are
+        # already scored from benchmark/wjazzd/ under their own names.
+        if run_eval.is_omnibook(name):
+            continue
         run = runs[name]
         onsets = np.array([n["onset"] for n in run["notes"]])
         pitches = np.array([int(n["pitch"]) for n in run["notes"]])
@@ -542,6 +570,8 @@ def table_rows(name, solo, info, family, reference, estimate, errors, evidence):
             "ref_prev_gap": None if ref is None else ref["prev_gap"],
             "ref_repeat": None if ref is None else ref["repeat"],
             "ref_step": None if ref is None else ref["step"],
+            "ref_bar": None if ref is None else ref.get("bar"),
+            "ref_position": None if ref is None else ref.get("position"),
             "est_onset": None if est is None else round(est["onset"], 3),
             "est_pitch": None if est is None else est["pitch"],
             "est_duration": None if est is None else round(est["duration"], 3),
@@ -558,6 +588,192 @@ def table_rows(name, solo, info, family, reference, estimate, errors, evidence):
                 record[column] = value
         out.append(record)
     return out
+
+
+# ── the Omnibook set: a notated reference, placed by its own matches ──────
+#
+# docs/omnibook-benchmark.md: twenty-two Parker sides against LORIA's MusicXML
+# of the book. There is no human onset in seconds to match against, so the
+# HITS are the time-free alignment's true matches -- the pitch F1 the set is
+# pinned on -- and every notated note is given an instant from those same
+# matches (`benchmark.place_on_anchors`). Pairing and every rule after the
+# hits are the WJazzD path's. The set is classified, tabled, spot-checked and
+# pinned APART (the `omnibook` block of the baseline), as run_eval keeps its
+# means apart: a score's deficit is a pitch-F1 deficit, not a note-F1 one.
+
+OMNIBOOK_TABLE = Path(".benchmark-taxonomy-omnibook.csv")
+OMNIBOOK_SPOTCHECK = Path("benchmark/Omnibook/error-taxonomy-spotcheck.csv")
+# WJazzD's own `tempoclass` bands (min and max avgtempo per class over its
+# 456 solos), so the two sets' tempo tables read on one scale.
+TEMPO_BANDS = ((80.0, "SLOW"), (112.0, "MEDIUM SLOW"), (140.0, "MEDIUM"), (180.0, "MEDIUM UP"))
+
+
+def tempo_band(bpm):
+    for ceiling, band in TEMPO_BANDS:
+        if bpm < ceiling:
+            return band
+    return "UP"
+
+
+def score_reference(score, estimate):
+    """(reference notes on our clock, the alignment's hits, the placement).
+
+    The transposition is settled over the whole line, exactly as
+    `score_benchmark.score_tune` settles it, so the hits counted here are the
+    matches behind the pinned pitch F1."""
+    from swingscribe import benchmark
+    from swingscribe.alignment import measured_transposition
+
+    ref_pitches = score.pitches
+    offset, alignment = measured_transposition(ref_pitches, [n["pitch"] for n in estimate])
+    shifted = [n["pitch"] + offset for n in estimate]
+    anchor_of = benchmark.anchor_map(alignment.pairs, ref_pitches, shifted)
+    # The CLOCK also reads the substitutions that are the same note an octave
+    # away: a head played in unison with a trumpet is heard an octave under
+    # the book (D30), so its bars hold almost no true matches, and placed from
+    # the solo's anchors alone its octave pairs read as `loose`. They say
+    # when the note sounded, never that we heard it: the hits stay the
+    # alignment's true matches.
+    clock = dict(anchor_of)
+    for ri, ei in alignment.pairs:
+        paired = ri is not None and ei is not None and ri not in clock
+        if paired and (ref_pitches[ri] - shifted[ei]) % 12 == 0:
+            clock[ri] = ei
+    placement = benchmark.place_on_anchors(
+        [n.position for n in score.melody],
+        [n.duration for n in score.melody],
+        [(score.melody[ri].position, estimate[ei]["onset"]) for ri, ei in sorted(clock.items())],
+    )
+    placement["octave_anchors"] = len(clock) - len(anchor_of)
+    reference = []
+    previous = None
+    for note, onset, duration in zip(
+        score.melody, placement["onsets"], placement["durations"], strict=True
+    ):
+        pitch = int(note.pitch) - offset  # the score, down to the concert pitch we produce
+        reference.append(
+            {
+                "onset": onset,
+                "duration": duration,
+                "pitch": pitch,
+                "loud_rel": None,
+                "f0_mod": "",
+                "prev_gap": None if previous is None else round(onset - previous["onset"], 3),
+                "repeat": int(previous is not None and previous["pitch"] == pitch),
+                "step": None if previous is None else pitch - previous["pitch"],
+                "bar": note.bar,
+                "position": round(note.position, 4),
+            }
+        )
+        previous = reference[-1]
+    placement["transposition"] = offset
+    return reference, sorted(anchor_of.items()), placement
+
+
+def classify_omnibook(runs, cache_dir, with_audio=True, limit=None, log=print):
+    """The Omnibook sides in `classify_all`'s result shape."""
+    import run_eval
+
+    from swingscribe import mscz
+
+    real = Path("tests/regression/real-audio-baselines.json")
+    pinned_f1 = json.loads(real.read_text(encoding="utf-8")) if real.is_file() else {}
+    names = sorted(
+        name
+        for name in runs
+        if run_eval.is_omnibook(name)
+        and run_eval.take_of(name) is None
+        and (run_eval.BENCH / name).is_file()
+    )
+    if limit:
+        names = names[:limit]
+    results = []
+    disagreements = []
+    for name in names:
+        started = time.time()
+        run = runs[name]
+        sidecar_path = run_eval.BENCH / (name + ".swingscribe.json")
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        if not sidecar.get("score") or not Path(sidecar["score"]).is_file():
+            log(f"  {name}: skipped - the sidecar names no score on disk")
+            continue
+        estimate = estimate_notes(run, float("-inf"), float("inf"))
+        reference, matched, placement = score_reference(mscz.parse_any(sidecar["score"]), estimate)
+        lo = min(reference[0]["onset"], estimate[0]["onset"]) - 0.75
+        hi = max(reference[-1]["onset"], estimate[-1]["onset"]) + 0.75
+        if with_audio:
+            evidence = load_evidence(name, run, sidecar, max(lo, 0.0), hi, cache_dir, log)
+        else:
+            evidence = taxonomy.Evidence()
+        errors = taxonomy.classify_solo(reference, estimate, evidence, "horn", matched=matched)
+        bpm = 60.0 / placement["seconds_per_quarter"]
+        info = {
+            "performer": "Charlie Parker",
+            "instrument": "as",
+            "tempo": round(bpm, 1),
+            "tempoclass": tempo_band(bpm),
+        }
+        loo = sorted(abs(e) for e in placement["errors"])
+        within = sum(1 for e in loo if e <= taxonomy.ONSET_TOLERANCE_S)
+        results.append(
+            {
+                "name": name,
+                "melid": None,
+                "info": info,
+                "family": "horn",
+                "frame_evidence": getattr(evidence, "diagnostics", None) is not None,
+                "fit": {
+                    "swing_delta": placement["delta"],
+                    "bpm": round(bpm, 1),
+                    "anchors": placement["kept"],
+                    "anchors_dropped": placement["offered"] - placement["kept"],
+                    "octave_anchors": placement["octave_anchors"],
+                    "loo_median_ms": round(1000 * loo[len(loo) // 2], 1) if loo else None,
+                    "loo_within_tolerance": round(within / len(loo), 3) if loo else None,
+                    "transposition": placement["transposition"],
+                },
+                "loo": loo,
+                "errors": errors,
+                "rows": table_rows(
+                    name, {"melid": None}, info, "horn", reference, estimate, errors, evidence
+                ),
+            }
+        )
+        counts = taxonomy.class_counts(errors.rows)
+        top = ", ".join(f"{c} {n}" for c, n in sorted(counts.items(), key=lambda kv: -kv[1])[:4])
+        # The control that these hits ARE the scorecard's: the F1 read off the
+        # alignment's matches must equal the pitch F1 run_eval pinned.
+        pinned = pinned_f1.get(f"omnibook/{run_eval.pin_name(name)}/pitch_f1")
+        agreement = "" if pinned is None else f", pinned {pinned:.4f}"
+        if pinned is not None and abs(pinned - errors.note_f1) > 0.002:
+            agreement += " DISAGREES"
+            disagreements.append(name)
+        fit = results[-1]["fit"]
+        log(
+            f"  {name}: pitch F1 {errors.note_f1:.4f}{agreement}, {len(errors.rows)} errors "
+            f"[{top}]; placed to {fit['loo_median_ms']} ms (swing {fit['swing_delta']:.2f}, "
+            f"{fit['anchors_dropped']} wild) in {time.time() - started:.0f}s"
+        )
+    if disagreements:
+        log(f"  WARNING: {len(disagreements)} side(s) disagree with the pinned pitch F1")
+    return results
+
+
+def placement_of(results):
+    """How well the score was placed, pooled: the control beside every
+    time-sensitive class of the Omnibook block."""
+    loo = sorted(e for r in results for e in r["loo"])
+    if not loo:
+        return {}
+    within = sum(1 for e in loo if e <= taxonomy.ONSET_TOLERANCE_S)
+    return {
+        "anchors": len(loo),
+        "loo_median_ms": round(1000 * loo[len(loo) // 2], 1),
+        "loo_p90_ms": round(1000 * loo[int(0.9 * len(loo))], 1),
+        "loo_within_tolerance": round(within / len(loo), 3),
+        "anchors_dropped": sum(r["fit"]["anchors_dropped"] for r in results),
+        "octave_anchors": sum(r["fit"]["octave_anchors"] for r in results),
+    }
 
 
 # ── aggregation, printing, pinning ────────────────────────────────────────
@@ -652,12 +868,12 @@ def aggregate(results, resamples=1000, seed=0):
     return out
 
 
-def render(agg):
+def render(agg, measure="note F1"):
     def pareto(title, block, noise=None):
         total = block["n_errors"] or 1
         print(f"\n== {title}: {block['n_solos']} solos, {block['n_errors']} errors, ", end="")
         print(
-            f"mean note F1 {block['mean_note_f1']:.4f}; "
+            f"mean {measure} {block['mean_note_f1']:.4f}; "
             f"populations miss {block['populations']['miss']} / fp {block['populations']['fp']} "
             f"/ pair {block['populations']['pair']} =="
         )
@@ -722,8 +938,36 @@ def paired_by_family(pinned_solos, current_solos):
     return out
 
 
-def compare(agg):
+def pin_payload(agg):
+    """What of an aggregate is pinned: counts and per-solo class counts,
+    never a note."""
+    payload = {
+        "overall": agg["overall"],
+        "family": {
+            f: {k: v for k, v in b.items() if k != "noise"} for f, b in agg["family"].items()
+        },
+        "tempo": agg["tempo"],
+        "noise": agg["noise"],
+        "pairs_alternative_differ": agg["pairs_alternative_differ"],
+        "timing_residual": agg.get("timing_residual"),
+        # Per-solo CLASS COUNTS, not notes: aggregates, so they can ship.
+        # They are what the paired test in `compare` reads.
+        "solos": {
+            name: {"family": s["family"], "note_f1": s["note_f1"], "counts": s["counts"]}
+            for name, s in agg["solos"].items()
+        },
+        "flat": flatten(agg),
+    }
+    if agg.get("placement"):
+        payload["placement"] = agg["placement"]
+    return payload
+
+
+def compare(agg, section=None):
     """Diff the per-class counts against the pin. Returns an exit code.
+
+    `section` names a block of the baseline pinned apart from WJazzD's (the
+    `omnibook` set); None is the file's own top level.
 
     Every moved count is printed. Classification is deterministic, so any
     movement after a transcriber change is real; the ±sd column is the
@@ -735,6 +979,12 @@ def compare(agg):
         print(f"\nNo taxonomy baseline pinned yet. Run with --pin to create {BASELINE}.")
         return 0
     pinned = json.loads(BASELINE.read_text(encoding="utf-8"))
+    label = "Taxonomy baseline" if section is None else f"Taxonomy baseline [{section}]"
+    if section is not None:
+        pinned = pinned.get(section)
+        if pinned is None:
+            print(f"\nNo `{section}` block pinned yet. Run with --pin to add it.")
+            return 0
     current = flatten(agg)
     noise = pinned.get("noise", agg["noise"])
     moved = [
@@ -744,9 +994,9 @@ def compare(agg):
     ]
     vanished = sorted(set(pinned["flat"]) - set(current))
     if not moved and not vanished:
-        print(f"\n== Taxonomy baseline: all {len(current)} counts unchanged ==")
+        print(f"\n== {label}: all {len(current)} counts unchanged ==")
         return 0
-    print("\n== Taxonomy baseline: CHANGED ==")
+    print(f"\n== {label}: CHANGED ==")
     # The paired reading: per-solo deltas over the solos both runs hold.
     # `count_sd` says how big a class would be on another set of solos; the
     # paired se says whether THIS change moved it (docs/error-taxonomy-review.md).
@@ -845,14 +1095,48 @@ def write_spotcheck(results, path, n, seed):
             )
 
 
+def run_set(label, results, args, table, spotcheck, measure, placement=False):
+    """Aggregate, print, table and spot-check one set; returns its aggregate."""
+    traced = sum(1 for r in results if r["frame_evidence"])
+    print(f"== Frame evidence: {traced} of {len(results)} {label} solos have a review trace ==")
+    if not args.no_audio and traced < len(results):
+        print(
+            "  WARNING: the frame-evidence classes are incomplete and their misses fall into "
+            "`unclassified`; run scripts/wjazz_reviews.py before trusting or pinning this (D26)"
+        )
+    agg = aggregate(results, args.resamples, args.seed)
+    if placement:
+        agg["placement"] = placement_of(results)
+    render(agg, measure)
+    if placement and agg["placement"]:
+        pl = agg["placement"]
+        print(
+            f"Placement: a matched note placed from its neighbours lands {pl['loo_median_ms']} ms "
+            f"from where we heard it at the median (p90 {pl['loo_p90_ms']} ms, "
+            f"{pl['loo_within_tolerance']:.0%} inside the tolerance; {pl['anchors']} anchors, "
+            f"{pl['anchors_dropped']} dropped as chance matches; {pl['octave_anchors']} more are "
+            f"octave-displaced notes, which set the clock and are not hits)."
+        )
+    write_table(results, table)
+    print(f"\nWrote {sum(len(r['rows']) for r in results)} rows to {table}")
+    write_spotcheck(results, spotcheck, args.spotcheck_n, args.seed)
+    print(f"Wrote a {args.spotcheck_n}-row spot-check sample to {spotcheck}")
+    return agg
+
+
 def main():
     global CACHE_DIR
-    parser = argparse.ArgumentParser(description="Classify every WJazzD transcription error.")
-    parser.add_argument("--db", type=Path, required=True, help="wjazz/wjazzd.db")
+    parser = argparse.ArgumentParser(
+        description="Classify every transcription error on WJazzD and the Omnibook set."
+    )
+    parser.add_argument("--db", type=Path, default=None, help="wjazz/wjazzd.db (the wjazzd set)")
+    parser.add_argument("--sets", default="wjazzd,omnibook", help="which of wjazzd,omnibook")
     parser.add_argument("--notes", type=Path, default=None, help="run_eval's notes cache")
     parser.add_argument("--cache-dir", type=Path, default=CACHE_DIR)
     parser.add_argument("--table", type=Path, default=TABLE)
     parser.add_argument("--spotcheck", type=Path, default=SPOTCHECK)
+    parser.add_argument("--omnibook-table", type=Path, default=OMNIBOOK_TABLE)
+    parser.add_argument("--omnibook-spotcheck", type=Path, default=OMNIBOOK_SPOTCHECK)
     parser.add_argument("--spotcheck-n", type=int, default=40)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--resamples", type=int, default=1000)
@@ -861,6 +1145,12 @@ def main():
     parser.add_argument("--json", type=Path, default=None, help="also write the aggregate here")
     parser.add_argument("--pin", action="store_true", help="rewrite the baseline from this run")
     args = parser.parse_args()
+    sets = {name.strip() for name in args.sets.split(",") if name.strip()}
+    unknown = sorted(sets - {"wjazzd", "omnibook"})
+    if unknown:
+        parser.error(f"--sets knows wjazzd and omnibook, not {unknown}")
+    if "wjazzd" in sets and args.db is None:
+        parser.error("the wjazzd set needs --db wjazz/wjazzd.db (or pass --sets omnibook)")
 
     import run_eval
 
@@ -868,55 +1158,64 @@ def main():
     run_eval.CACHE_DIR = CACHE_DIR
     notes = args.notes or run_eval.notes_cache(0.2, 0.0)
     runs = json.loads(notes.read_text(encoding="utf-8"))
-    print(f"== Classifying {notes} against {args.db}, evidence from {CACHE_DIR} ==")
-    db = sqlite3.connect(args.db)
-    results = classify_all(db, runs, CACHE_DIR, not args.no_audio, args.limit)
-    if not results:
-        print("nothing to classify")
-        return
-    traced = sum(1 for r in results if r["frame_evidence"])
-    print(f"== Frame evidence: {traced} of {len(results)} solos have a review trace ==")
-    if not args.no_audio and traced < len(results):
-        print(
-            "  WARNING: the frame-evidence classes are incomplete and their misses fall into "
-            "`unclassified`; run scripts/wjazz_reviews.py before trusting or pinning this (D26)"
-        )
 
-    agg = aggregate(results, args.resamples, args.seed)
-    render(agg)
-    write_table(results, args.table)
-    print(f"\nWrote {sum(len(r['rows']) for r in results)} rows to {args.table}")
-    write_spotcheck(results, args.spotcheck, args.spotcheck_n, args.seed)
-    print(f"Wrote a {args.spotcheck_n}-row spot-check sample to {args.spotcheck}")
+    # section of the baseline -> this run's aggregate; None is WJazzD, the
+    # file's own top level, where it has been since the first pin.
+    aggregates = {}
+    if "wjazzd" in sets:
+        print(f"== Classifying {notes} against {args.db}, evidence from {CACHE_DIR} ==")
+        db = sqlite3.connect(args.db)
+        results = classify_all(db, runs, CACHE_DIR, not args.no_audio, args.limit)
+        if results:
+            aggregates[None] = run_set(
+                "WJazzD", results, args, args.table, args.spotcheck, "note F1"
+            )
+        else:
+            print("nothing to classify on WJazzD")
+    if "omnibook" in sets:
+        print(f"\n== Classifying {notes} against the Omnibook scores, evidence from {CACHE_DIR} ==")
+        results = classify_omnibook(runs, CACHE_DIR, not args.no_audio, args.limit)
+        if results:
+            aggregates["omnibook"] = run_set(
+                "Omnibook",
+                results,
+                args,
+                args.omnibook_table,
+                args.omnibook_spotcheck,
+                "pitch F1",
+                placement=True,
+            )
+        else:
+            print("nothing to classify on the Omnibook")
+    if not aggregates:
+        return
 
     if args.json:
-        args.json.write_text(json.dumps(agg, indent=2), encoding="utf-8")
-    if args.pin or args.limit:
-        if args.limit:
-            print("\n--limit set: not comparing against the baseline")
-            return
-        payload = {
-            "overall": agg["overall"],
-            "family": {
-                f: {k: v for k, v in b.items() if k != "noise"} for f, b in agg["family"].items()
-            },
-            "tempo": agg["tempo"],
-            "noise": agg["noise"],
-            "pairs_alternative_differ": agg["pairs_alternative_differ"],
-            "timing_residual": agg.get("timing_residual"),
-            # Per-solo CLASS COUNTS, not notes: aggregates, so they can ship.
-            # They are what the paired test in `compare` reads.
-            "solos": {
-                name: {"family": s["family"], "note_f1": s["note_f1"], "counts": s["counts"]}
-                for name, s in agg["solos"].items()
-            },
-            "flat": flatten(agg),
-        }
+        dump = dict(aggregates.get(None, {}))
+        if "omnibook" in aggregates:
+            dump["omnibook"] = aggregates["omnibook"]
+        args.json.write_text(json.dumps(dump, indent=2), encoding="utf-8")
+    if args.limit:
+        print("\n--limit set: not comparing against the baseline")
+        return
+    if args.pin:
+        # A set that was not run keeps the block it had.
+        held = json.loads(BASELINE.read_text(encoding="utf-8")) if BASELINE.is_file() else {}
+        payload = pin_payload(aggregates[None]) if None in aggregates else dict(held)
+        payload.pop("omnibook", None)
+        omnibook = (
+            pin_payload(aggregates["omnibook"])
+            if "omnibook" in aggregates
+            else held.get("omnibook")
+        )
+        if omnibook:
+            payload["omnibook"] = omnibook
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
         BASELINE.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-        print(f"\nPinned {len(payload['flat'])} counts to {BASELINE}.")
+        pinned = sum(len(pin_payload(agg)["flat"]) for agg in aggregates.values())
+        print(f"\nPinned {pinned} counts to {BASELINE}.")
         return
-    raise SystemExit(compare(agg))
+    raise SystemExit(max(compare(agg, section) for section, agg in aggregates.items()))
 
 
 if __name__ == "__main__":

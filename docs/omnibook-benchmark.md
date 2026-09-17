@@ -217,3 +217,17 @@ Billy Boy moved on its own account (pitch F1 0.730 -> 0.722 default take,
 had lost its `stem` in an edit on 2026-09-13, the harness fell back to
 `other` and heard nothing, and the stem was put back to `piano` -- the one
 every addition and erasure on the sidecar names -- before pinning.
+
+## Where the missing 0.21 goes
+
+The error taxonomy reads this set too, as a block of its own
+(`scripts/error_taxonomy.py`, docs/error-taxonomy.md section 10; pinned
+under `omnibook` in `tests/regression/taxonomy-baseline.json`). Its hits
+are this document's pitch-F1 matches, reproduced on all 22 sides, and each
+book note is placed in time from the matched notes around it (19 ms median
+leave-one-out error). 2,752 errors, 6 unclassified. The short note leads, as
+on WJazzD — notes under an eighth are 27% of the book and 54% of the
+outright misses — then the semitone-off pair, then the head an octave low
+(D30: 209 of 248 octave pairs on four sides' first chorus, Yardbird Suite
+being the fourth). Re-articulation classes are nearly empty here, which is
+the book's editorial convention and not the transcriber.

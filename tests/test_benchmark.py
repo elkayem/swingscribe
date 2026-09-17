@@ -698,3 +698,96 @@ def test_robust_line_ignores_a_minority_of_wild_points():
     slope, intercept = robust_line(points)
     assert abs(slope - 2.0) < 1e-9
     assert abs(intercept - 1.0) < 1e-9
+
+
+# ── placing a score note by note, on its own matched notes ───────────────
+#
+# The error taxonomy needs each notated note's instant, not a window's. These
+# pin the three things that placement must not do: invent a clock the anchors
+# do not show, follow a chance match, or read the book's straight eighths as
+# the performance's.
+
+
+def _swung(position: float, delta: float, spq: float = 0.3, start: float = 10.0) -> float:
+    from swingscribe.benchmark import swing_warp
+
+    return start + spq * swing_warp(position, delta)
+
+
+def test_swing_warp_moves_the_offbeat_and_leaves_the_beat():
+    from swingscribe.benchmark import swing_warp
+
+    assert swing_warp(3.0, 0.1) == 3.0
+    assert swing_warp(3.5, 0.1) == pytest.approx(3.6)
+    assert swing_warp(3.25, 0.1) == pytest.approx(3.3)  # halfway to the late offbeat
+    assert swing_warp(3.75, 0.1) == pytest.approx(3.8)  # halfway from it to the next beat
+    assert swing_warp(3.5, 0.0) == 3.5
+
+
+def test_notes_between_anchors_sit_on_the_line_between_them():
+    from swingscribe.benchmark import place_on_anchors
+
+    positions = [q / 2 for q in range(80)]
+    anchors = [(q, 10.0 + 0.3 * q) for q in positions if q % 2 == 0]
+    placed = place_on_anchors(positions, [0.5] * 80, anchors)
+    assert placed["onsets"] == pytest.approx([10.0 + 0.3 * q for q in positions])
+    assert placed["durations"] == pytest.approx([0.15] * 80)
+    assert placed["seconds_per_quarter"] == pytest.approx(0.3)
+    assert placed["kept"] == placed["offered"] == 20
+
+
+def test_the_score_continues_at_its_own_tempo_beyond_the_outermost_anchors():
+    from swingscribe.benchmark import place_on_anchors
+
+    anchors = [(float(q), 5.0 + 0.25 * q) for q in range(8, 40)]
+    placed = place_on_anchors([0.0, 50.0], [1.0, 1.0], anchors)
+    assert placed["onsets"] == pytest.approx([5.0, 17.5])
+
+
+def test_the_swing_the_book_does_not_write_is_read_off_the_matched_notes():
+    from swingscribe.benchmark import fit_swing_delta, place_on_anchors, placement_errors
+
+    positions = [q / 2 for q in range(120)]
+    anchors = [(q, _swung(q, 0.1)) for q in positions if int(q * 2) % 3 != 0]
+    assert fit_swing_delta(anchors) == pytest.approx(0.1)
+    # Placed straight, a left-out offbeat lands a tenth of a beat early...
+    straight = placement_errors(anchors)
+    assert max(abs(e) for e in straight) > 0.02
+    # ...and with the warp every note, matched or not, lands where it was played.
+    placed = place_on_anchors(positions, [0.5] * 120, anchors)
+    assert placed["delta"] == pytest.approx(0.1)
+    assert placed["onsets"] == pytest.approx([_swung(q, 0.1) for q in positions])
+    assert max(abs(e) for e in placed["errors"]) < 1e-9
+
+
+def test_a_straight_line_is_not_given_a_swing():
+    from swingscribe.benchmark import fit_swing_delta
+
+    assert fit_swing_delta([(q / 2, 0.1 * q) for q in range(100)]) == 0.0
+
+
+def test_a_chance_match_is_dropped_and_does_not_bend_the_clock():
+    from swingscribe.benchmark import drop_wild_anchors, place_on_anchors
+
+    anchors = [(float(q), 0.3 * q) for q in range(40)]
+    anchors[20] = (20.0, 0.3 * 20 + 0.28)  # a match nearly a beat from where its neighbours put it
+    assert (20.0, 0.3 * 20 + 0.28) not in drop_wild_anchors(anchors)
+    assert len(drop_wild_anchors(anchors)) == 39
+    placed = place_on_anchors([19.5, 20.0, 20.5], [0.5] * 3, anchors)
+    assert placed["onsets"] == pytest.approx([5.85, 6.0, 6.15])
+    assert placed["offered"] - placed["kept"] == 1
+
+
+def test_an_anchor_inside_the_bound_is_kept_because_it_may_be_the_music():
+    from swingscribe.benchmark import drop_wild_anchors
+
+    anchors = [(float(q), 0.3 * q) for q in range(40)]
+    anchors[20] = (20.0, 0.3 * 20 + 0.1)  # laid back, not wrong
+    assert len(drop_wild_anchors(anchors)) == 40
+
+
+def test_a_score_cannot_be_placed_on_one_anchor():
+    from swingscribe.benchmark import place_on_anchors
+
+    with pytest.raises(ValueError):
+        place_on_anchors([0.0, 1.0], [1.0, 1.0], [(0.0, 3.0)])

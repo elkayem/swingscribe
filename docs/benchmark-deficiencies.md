@@ -1127,6 +1127,40 @@ is a transcribe problem on a passage the listener's own set never asked
 about (their spans start at the solo), and it is the only reason these
 three sides sit below the rest.
 
+**2026-09-17, later: the error taxonomy puts a count and a cost on it, and
+finds a fourth side** (docs/error-taxonomy.md, 10.5). Classified note by
+note, 226 of the set's 248 `octave` pairs are an octave under the book, and
+209 sit on four sides inside the first chorus: Ornithology 67, Card Board
+60, Moose The Mooche 47 and **Yardbird Suite 35** (34 of them by bar 33;
+pitch F1 0.754, chroma 0.881 — the same signature, weaker). The solo
+choruses of those four sides hold 2 octave pairs between them. Cost: 0.030
+of the set's mean pitch F1 (14.2% of its deficit); the four read 0.611
+against 0.830 for the other eighteen.
+
+### D31 - Two copies of one recording share a stems digest, and the WJazzD notes cache cannot see it
+
+Found 2026-09-17 by the error taxonomy's guard (docs/error-taxonomy.md,
+10.7). Parker's Blues For Alice (53), Donna Lee (55) and Yardbird Suite (68)
+under `benchmark/wjazzd/` are byte-identical to their copies under
+`benchmark/Omnibook/`, so the two share an ingest wav digest and therefore
+a stems directory name. The WJazzD copies were transcribed from span-scoped
+Roformer sets; the Omnibook's `locate_scores.py` then wrote WHOLE-FILE sets
+for the same digest, and "a whole-file set answers for any span". A fresh
+transcription of the three WJazzD solos now reads the whole-file stems and
+does not reproduce the notes `run_eval` holds in
+`.benchmark-notes-c0.2-d0.0.json` (`wjazz_reviews.py` reports `DIFFERS from
+run_eval` on all three: 270, 372 and 193 notes). The notes cache is
+fingerprinted on the transcribe config and `CACHE_VERSION`; which stems were
+read is not in it — R15's shape, one level down.
+
+What it costs today: nothing on the scorecard, which still serves the cached
+notes; three WJazzD solos without frame evidence in the taxonomy (their
+frame-rule misses read `unclassified`, and the guard says so on every run);
+and the next forced re-transcription will move those three solos' numbers
+for a reason that is not the transcriber. Not yet decided: whether the
+span-scoped set should win when both cover a span (it is what the listener
+separated), or the fingerprint should carry the stems directory.
+
 Until it was told apart from the transposition search it looked three
 times worse: see R23.
 
