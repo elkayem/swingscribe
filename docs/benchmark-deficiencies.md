@@ -1166,6 +1166,54 @@ times worse: see R23.
 
 ## Resolved
 
+### R24 - A located score's downbeat came from a straight line, and eleven of twenty-two pages sat off the book's bar lines
+
+Found by the listener, 2026-09-17, with the first Omnibook export open
+beside the book: Au Privave's beat 2 printed on our beat 1 and its first
+two notes missing. `locate_scores.py` wrote the Theil-Sen line's intercept
+into the sidecar as both the span's start and the bar-1 anchor. A side's
+tempo breathes, so the intercept lands up to two beats from the music's
+bar 1, and a stored anchor overrides the tracker's own downbeat phase --
+which was right on all 22 (`meter._auto_anchor`; it also agrees with the
+listener's hand-placed downbeat on the three of their tracks that have
+one, so "the downbeat layer is noise" holds for its individual marks and
+not for its best phase on this material). Eleven pages were off by one
+constant each: seven with every note a beat early, three a beat late,
+Segment by two. On ten sides the span also opened after the book's bar 1,
+so the opening notes were never transcribed.
+
+Nothing pinned could see it. Notated rhythm compares the gaps between
+matched notes and is immune to a constant shift by construction (R22 says
+so in as many words), so eleven wrong pages scored what eleven right ones
+would have.
+
+Fixed the same day. `score_bars.bars_on_grid` votes the downbeat on the
+beat grid the page is built on: each on-clock match's fractional beat index
+less its score position is the beat that is quarter zero, and 86-98% of
+139-568 votes per side agree. Bar 1, the last bar line and the anchor are
+beats of that grid; the span opens a quarter-beat (never under 80 ms)
+before bar 1; a grid that does not carry the score's pulse gets no anchor
+and the tracker's stands. `score_bars.bar_line_agreement` is the measure
+that was missing -- our beat-in-bar less the reference's over the true
+matches -- and `run_eval` pins it for every hand-scored page: 22 of 22
+Omnibook pages at offset 0 and all twelve of the listener's.
+
+What moved (22 spans re-transcribed, re-pinned): Omnibook mean pitch F1
+0.7904 -> 0.7905, note F1 0.5355 -> 0.5368, rhythm 0.7290 -> 0.7303, value
+0.6567 -> 0.6559, readability 0.9933 -> 0.9949; largest single moves Au
+Privave note F1 -0.026 and Blues For Alice rhythm +0.053. Nothing on the
+listener's set or WJazzD moved; the `beat_*` and `on_the_bar` keys are new
+on every hand-scored page. Left open: Dexter Gordon's Confirmation reads
+offset 0 with only 49% of its matches there, the lowest share in either
+set by a wide margin, which is what a beat slipped part-way through a
+solo looks like; and 7-19% of matches on most Omnibook pages sit half a
+beat LATER than the book's, which the rhythm score already charges for
+and nobody has taken apart.
+
+Also fixed in passing: the exporter wrote the track's filename as a
+printed `part-name`, which MuseScore draws left of the first system. It is
+still written (the schema requires one) with `print-object="no"`.
+
 ### R23 - The span-scoped transposition was settled on the opening 120 notes, and charged a whole solo for its head
 
 Every span-scoped scorer -- `score_against_notation`, the WJazzD notation

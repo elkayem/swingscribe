@@ -67,8 +67,9 @@ with the same time-free aligner every score here uses. Every true match is
 an anchor (notated position, heard onset), and a Theil-Sen line through the
 anchors -- the median of the pairwise slopes, immune to a minority of wild
 points -- is the score's clock: seconds per quarter note, and where quarter
-zero falls. The sidecar gets that extent as its region and its start as the
-bar-1 anchor, and from then on the track is an ordinary benchmark tune.
+zero falls. That line places the score; its bar lines come from the beat
+grid ("Bar 1 is a beat of the grid", below), and from then on the track is
+an ordinary benchmark tune.
 
 Two things were learned building it, both recorded in `benchmark.py`:
 
@@ -99,28 +100,28 @@ of the line on every side.
 
 | side | bars | fitted bpm | marked | placed at | score lined up |
 |---|---|---|---|---|---|
-| Au Privave 1 | 61 | 202 | 220 | 0.6-73.0 s | 82% |
-| Bloomdido | 73 | 227 | 240 | 9.3-86.6 s | 83% |
-| Blues For Alice | 49 | 168 | 165 | 6.4-76.3 s | 76% |
-| Card Board | 66 | 202 | 210 | 0.0-77.5 s | 56% |
-| Chasing The Bird | 65 | 190 | 210 | 0.3-82.3 s | 84% |
-| Confirmation | 97 | 203 | 208 | 6.5-120.9 s | 80% |
-| Dewey Square | 65 | 179 | 184 | 11.4-98.7 s | 86% |
-| Donna Lee | 97 | 226 | 230 | 0.5-103.5 s | 87% |
-| KC Blues | 38 | 118 | 126 | 7.1-84.6 s | 83% |
-| Kim 2 | 97 | 320 | 320 | 6.8-79.6 s | 79% |
-| Ko Ko | 129 | 301 | 308 | 25.3-128.2 s | 82% |
-| Laird Baird | 50 | 155 | 162 | 10.6-88.2 s | 85% |
-| Moose The Mooche | 65 | 209 | 224 | 0.0-74.8 s | 55% |
-| My Little Suede Shoes | 66 | 146 | 148 | 11.7-120.4 s | 86% |
-| Now's The Time 1 | 62 | 202 | 132 | 34.5-108.1 s | 79% |
-| Now's The Time 2 | 50 | 129 | 220 | 11.5-104.4 s | 85% |
-| Ornithology | 66 | 220 | 236 | 3.5-75.3 s | 57% |
-| Red Cross | 66 | 208 | 210 | 3.4-79.7 s | 72% |
-| Scrapple From The Apple | 64 | 198 | 200 | 10.7-88.3 s | 86% |
-| Segment | 97 | 245 | 260 | 5.1-100.3 s | 83% |
-| Shawnuff | 66 | 282 | 326 | 19.3-75.5 s | 67% |
-| Yardbird Suite | 65 | 210 | 224 | 9.8-84.1 s | 76% |
+| Au Privave 1 | 61 | 202 | 220 | 0.3-72.8 s | 82% |
+| Bloomdido | 73 | 227 | 240 | 9.2-86.7 s | 83% |
+| Blues For Alice | 49 | 168 | 165 | 6.1-76.1 s | 76% |
+| Card Board | 66 | 202 | 210 | 0.0-76.6 s | 56% |
+| Chasing The Bird | 65 | 190 | 210 | 0.3-82.2 s | 84% |
+| Confirmation | 97 | 203 | 208 | 5.6-120.1 s | 80% |
+| Dewey Square | 65 | 179 | 184 | 11.4-98.6 s | 86% |
+| Donna Lee | 97 | 226 | 230 | 0.2-103.1 s | 87% |
+| KC Blues | 38 | 118 | 126 | 6.5-84.3 s | 83% |
+| Kim 2 | 97 | 320 | 320 | 6.6-79.5 s | 79% |
+| Ko Ko | 129 | 301 | 308 | 25.2-128.4 s | 82% |
+| Laird Baird | 50 | 155 | 162 | 10.7-88.8 s | 85% |
+| Moose The Mooche | 65 | 209 | 224 | 0.2-74.7 s | 55% |
+| My Little Suede Shoes | 66 | 146 | 148 | 11.6-120.4 s | 86% |
+| Now's The Time 1 | 62 | 202 | 132 | 34.0-107.8 s | 79% |
+| Now's The Time 2 | 50 | 129 | 220 | 12.7-104.8 s | 85% |
+| Ornithology | 66 | 220 | 236 | 3.3-75.3 s | 57% |
+| Red Cross | 66 | 208 | 210 | 3.7-79.5 s | 72% |
+| Scrapple From The Apple | 64 | 198 | 200 | 10.5-88.4 s | 86% |
+| Segment | 97 | 245 | 260 | 4.4-99.8 s | 83% |
+| Shawnuff | 66 | 282 | 326 | 19.2-75.6 s | 67% |
+| Yardbird Suite | 65 | 210 | 224 | 9.5-84.1 s | 76% |
 
 "Score lined up" is the raw share of the book's notes the whole-file
 alignment matched, before any span was cut; the span-scoped coverage the
@@ -138,39 +139,97 @@ markedly less of their score than the rest; whether that is the head (a
 two-horn unison the Roformer leaves in `other`) or a different take than
 the book's is what their span-scoped coverage below says.
 
+### Bar 1 is a beat of the grid, not the line's intercept
+
+The listener opened the first exports beside the book and found Au Privave
+a beat early: the book's beat 2 printed on our beat 1, and its first two
+notes missing. Measured over all twenty-two (the pages' true pitch matches,
+our beat-in-bar less the book's): **eleven pages sat off the book's bar
+lines** -- seven with every note a beat early, three a beat late, Segment by
+two -- each by ONE constant from its first bar to its last (69-91% of
+matches at the modal offset). The beat grid was sound; only the downbeat was wrong.
+
+The cause was the placement, not the tracker. The sidecar's bar-1 anchor
+was the Theil-Sen line's intercept, and a straight line through a side
+whose tempo breathes puts quarter zero up to two beats from the music's
+(Segment: the line's 245 bpm against a grid at 254). A stored anchor
+overrides the tracker's own downbeat phase -- and that phase, the best
+phase of the downbeat layer (`meter._auto_anchor`), **named the right beat
+on all 22 sides**, and agrees with the listener's hand-placed downbeat on
+the three of their own tracks that carry one. Writing our own made eleven
+worse. The same intercept was the span's start, so on ten sides the span
+opened after the book's bar 1 and the opening notes were never transcribed
+(four of them on Confirmation).
+
+`swingscribe.score_bars.bars_on_grid` reads the bar lines off the grid the
+page is built on instead. Every on-clock match is a (score position, heard
+onset) pair; the onset's fractional index on the repaired beat grid, less
+the position, is the index of the beat that is quarter zero. One pair is
+worth little -- a laid-back eighth sits a sixth of a beat late -- but
+**86-98% of 139-568 votes per side name one beat of the bar**. The phase is
+the majority's; bar 1 and the last bar line are read from the first and
+last quarter of the score's notes, so a slipped beat or a chorus the book
+omits moves only the end it is near. The span now opens a quarter-beat
+(never under 80 ms) before that beat. Half a beat was tried first and let
+a stray sound on the and-of-four into three spans, each written as a
+one-note pickup bar; two such bars remain and are real (a scoop into Blues
+For Alice's first note, the last note of the piano intro on Now's The Time
+1, both inside 80 ms of the bar line). A grid that does not carry the
+score's pulse (half or double time) spreads its votes over the bar, fails
+the 0.6 share floor, and gets NO anchor written: the tracker's stands.
+`locate_scores.py --bars-only` re-votes a downbeat without moving a stored
+span, for a span someone has since corrected by hand.
+
+**What moved when the spans did** (22 re-transcribed, re-pinned): mean
+pitch F1 0.7904 -> 0.7905, note F1 0.5355 -> 0.5368, rhythm 0.7290 ->
+0.7303, value 0.6567 -> 0.6559, readability 0.9933 -> 0.9949. The largest
+single moves: Au Privave pitch +0.012 and note -0.026, Blues For Alice
+rhythm +0.053 and value +0.040, KC Blues readability +0.012. Nothing on the
+listener's set or WJazzD moved. The reason the defect went out at all is
+that nothing pinned could see it: notated rhythm compares the gaps between
+matched notes and is immune to a constant shift by construction.
+`bar_line_agreement` is the measure that can, and the harness now pins it
+for every hand-scored page -- 22 of 22 Omnibook pages at offset 0, and all
+twelve of the listener's own (weakest Dexter Gordon's Confirmation, where
+only 49% of matches sit at the modal offset; not yet looked at).
+
 ## Results
 
 Pinned 2026-09-17 (`tests/regression/real-audio-baselines.json`,
-`summary/omnibook_*`), all 22 sides, every one above the coverage floor:
+`summary/omnibook_*`), all 22 sides, every one above the coverage floor --
+re-pinned the same day once bar 1 came off the beat grid ("Bar 1 is a beat
+of the grid", above; what moved is listed there). `bar line` is
+`score_bars.bar_line_agreement`: how many beats our bar lines sit from the
+book's, and the share of matched notes that say so.
 
-| side | pitch F1 | chroma | onset F1 | note F1 | coverage | rhythm | value | readability |
-|---|---|---|---|---|---|---|---|---|
-| Donna Lee | 0.881 | 0.885 | 0.734 | 0.684 | 0.86 | 0.785 | 0.748 | 0.9955 |
-| Scrapple From The Apple | 0.878 | 0.885 | 0.734 | 0.674 | 0.84 | 0.863 | 0.776 | 0.9912 |
-| Ko Ko | 0.872 | 0.877 | 0.750 | 0.678 | 0.82 | 0.778 | 0.711 | 0.9963 |
-| My Little Suede Shoes | 0.861 | 0.861 | 0.613 | 0.551 | 0.85 | 0.674 | 0.692 | 0.9941 |
-| Now's The Time 2 | 0.860 | 0.866 | 0.592 | 0.448 | 0.83 | 0.775 | 0.735 | 0.9837 |
-| Bloomdido | 0.859 | 0.870 | 0.695 | 0.619 | 0.82 | 0.803 | 0.695 | 0.9981 |
-| Laird Baird | 0.853 | 0.856 | 0.630 | 0.513 | 0.81 | 0.741 | 0.692 | 0.9856 |
-| Kim 2 | 0.850 | 0.852 | 0.712 | 0.638 | 0.78 | 0.777 | 0.711 | 0.9966 |
-| Dewey Square | 0.841 | 0.845 | 0.674 | 0.581 | 0.83 | 0.736 | 0.672 | 0.9939 |
-| Confirmation | 0.838 | 0.841 | 0.614 | 0.509 | 0.79 | 0.710 | 0.629 | 0.9958 |
-| Segment | 0.838 | 0.847 | 0.700 | 0.603 | 0.82 | 0.851 | 0.714 | 0.9905 |
-| Au Privave 1 | 0.836 | 0.839 | 0.641 | 0.562 | 0.81 | 0.764 | 0.624 | 0.9975 |
-| Now's The Time 1 | 0.828 | 0.836 | 0.648 | 0.541 | 0.78 | 0.699 | 0.618 | 0.9954 |
-| Chasing The Bird | 0.820 | 0.825 | 0.663 | 0.571 | 0.83 | 0.721 | 0.652 | 0.9979 |
-| KC Blues | 0.817 | 0.817 | 0.549 | 0.416 | 0.83 | 0.586 | 0.548 | 0.9818 |
-| Red Cross | 0.793 | 0.816 | 0.645 | 0.553 | 0.72 | 0.645 | 0.524 | 0.9951 |
-| Blues For Alice | 0.778 | 0.778 | 0.627 | 0.482 | 0.76 | 0.647 | 0.613 | 0.9950 |
-| Yardbird Suite | 0.754 | 0.881 | 0.665 | 0.557 | 0.75 | 0.644 | 0.592 | 0.9976 |
-| Shawnuff | 0.646 | 0.659 | 0.646 | 0.417 | 0.60 | 0.767 | 0.683 | 0.9838 |
-| Ornithology | 0.585 | 0.857 | 0.624 | 0.409 | 0.56 | 0.664 | 0.612 | 0.9977 |
-| Card Board | 0.557 | 0.794 | 0.633 | 0.367 | 0.55 | 0.739 | 0.646 | 0.9961 |
-| Moose The Mooche | 0.546 | 0.827 | 0.636 | 0.406 | 0.53 | 0.667 | 0.558 | 0.9930 |
-| **mean** | **0.790** | 0.837 | 0.656 | **0.535** | 0.76 | **0.729** | **0.657** | **0.9933** |
+| side | pitch F1 | chroma | onset F1 | note F1 | coverage | rhythm | value | readability | bar line |
+|---|---|---|---|---|---|---|---|---|---|
+| Scrapple From The Apple | 0.886 | 0.890 | 0.739 | 0.663 | 0.85 | 0.833 | 0.756 | 1.0000 | +0.0 (94%) |
+| Donna Lee | 0.884 | 0.888 | 0.729 | 0.682 | 0.86 | 0.772 | 0.732 | 0.9970 | +0.0 (91%) |
+| Ko Ko | 0.869 | 0.873 | 0.750 | 0.684 | 0.82 | 0.783 | 0.711 | 0.9988 | +0.0 (89%) |
+| My Little Suede Shoes | 0.862 | 0.862 | 0.607 | 0.529 | 0.85 | 0.674 | 0.680 | 0.9881 | +0.0 (81%) |
+| Bloomdido | 0.858 | 0.867 | 0.698 | 0.623 | 0.81 | 0.817 | 0.701 | 1.0000 | +0.0 (93%) |
+| Laird Baird | 0.855 | 0.858 | 0.628 | 0.514 | 0.81 | 0.749 | 0.696 | 0.9879 | +0.0 (84%) |
+| Now's The Time 2 | 0.851 | 0.858 | 0.592 | 0.439 | 0.82 | 0.767 | 0.724 | 0.9894 | +0.0 (85%) |
+| Au Privave 1 | 0.848 | 0.851 | 0.633 | 0.536 | 0.82 | 0.783 | 0.648 | 0.9974 | +0.0 (88%) |
+| Kim 2 | 0.848 | 0.851 | 0.712 | 0.639 | 0.78 | 0.765 | 0.697 | 0.9967 | +0.0 (87%) |
+| Dewey Square | 0.846 | 0.851 | 0.688 | 0.592 | 0.84 | 0.735 | 0.668 | 0.9920 | +0.0 (88%) |
+| Confirmation | 0.845 | 0.848 | 0.619 | 0.509 | 0.80 | 0.704 | 0.616 | 0.9930 | +0.0 (88%) |
+| Segment | 0.836 | 0.845 | 0.691 | 0.598 | 0.81 | 0.812 | 0.688 | 0.9968 | +0.0 (92%) |
+| Chasing The Bird | 0.826 | 0.826 | 0.678 | 0.588 | 0.84 | 0.722 | 0.674 | 0.9979 | +0.0 (86%) |
+| Now's The Time 1 | 0.822 | 0.830 | 0.636 | 0.532 | 0.78 | 0.705 | 0.595 | 0.9953 | +0.0 (83%) |
+| KC Blues | 0.812 | 0.812 | 0.565 | 0.406 | 0.83 | 0.595 | 0.552 | 0.9940 | +0.0 (77%) |
+| Red Cross | 0.782 | 0.805 | 0.642 | 0.550 | 0.72 | 0.623 | 0.517 | 0.9950 | +0.0 (83%) |
+| Blues For Alice | 0.780 | 0.780 | 0.643 | 0.506 | 0.76 | 0.700 | 0.653 | 0.9926 | +0.0 (77%) |
+| Yardbird Suite | 0.750 | 0.874 | 0.675 | 0.564 | 0.74 | 0.645 | 0.585 | 0.9952 | +0.0 (82%) |
+| Shawnuff | 0.647 | 0.660 | 0.659 | 0.436 | 0.60 | 0.787 | 0.654 | 0.9908 | +0.0 (83%) |
+| Ornithology | 0.581 | 0.863 | 0.629 | 0.408 | 0.55 | 0.655 | 0.641 | 0.9953 | +0.0 (79%) |
+| Card Board | 0.558 | 0.795 | 0.638 | 0.392 | 0.55 | 0.739 | 0.646 | 0.9961 | +0.0 (86%) |
+| Moose The Mooche | 0.546 | 0.830 | 0.645 | 0.418 | 0.53 | 0.700 | 0.596 | 0.9976 | +0.0 (86%) |
+| **mean** | **0.790** | 0.837 | 0.659 | **0.537** | 0.76 | **0.730** | **0.656** | **0.9949** | 22 of 22 at 0 |
 
 Every mean is over the same 22 sides; the tie rate beside readability is
-0.068. For scale, the listener's own twelve tracks read mean note F1
+0.069. For scale, the listener's own twelve tracks read mean note F1
 0.517 on the same measure, and WJazzD's seventy-three solos
 0.858 on the audio-against-audio one that this set cannot
 answer.
@@ -187,21 +246,20 @@ answer.
   docs/benchmark-deficiencies.md). Ornithology, Card Board and Moose The
   Mooche open with a head played in unison with a trumpet, and on those
   three we hear it an octave under the book; the solo that follows lines
-  up at the right octave. Without them the mean pitch F1 is 0.826 over 19.
+  up at the right octave. Without them the mean pitch F1 is 0.827 over 19.
   Until the transposition was settled over the whole line rather than the
   opening (R23), those sides read 0.30-0.36 -- the prefix chose the head's
   octave and charged the entire solo for it.
-- **Notation: rhythm 0.729 and value 0.657 at 0.76 coverage**, in
+- **Notation: rhythm 0.730 and value 0.656 at 0.76 coverage**, in
   the range the listener's own scores read (0.62-0.78 rhythm on the hand
   scores in docs/benchmark-deficiencies.md). The lowest rhythm is KC Blues
-  (0.586), the slowest side at 118 bpm, where the book writes sixteenths --
+  (0.595), the slowest side at 118 bpm, where the book writes sixteenths --
   the quantizer's candidate set is tempo-blind (D11) and under 120 bpm a
   human puts 43.6% of values below a sixteenth; the highest are Scrapple
-  (0.863) and Segment (0.851), medium-up eighth-note lines, which is where
+  (0.833), Bloomdido (0.817) and Segment (0.812), medium-up eighth-note lines, which is where
   the grid rule was measured. Not yet taken apart note by note.
-- **Readability 0.9933** against the human's 0.995: the page is
-  writable everywhere, with 0.66 sub-eighth rests and 0.02 sub-sixteenth
-  values per hundred events.
+- **Readability 0.9949** against the human's 0.995: the page is
+  writable everywhere.
 - **Take-matching, the plan's first trap, did not bite** on the twenty-two
   the listener found: every side placed by content at the book's bar
   count, at the right octave, and every span-scoped coverage clears the
@@ -225,7 +283,8 @@ The error taxonomy reads this set too, as a block of its own
 under `omnibook` in `tests/regression/taxonomy-baseline.json`). Its hits
 are this document's pitch-F1 matches, reproduced on all 22 sides, and each
 book note is placed in time from the matched notes around it (19 ms median
-leave-one-out error). 2,752 errors, 6 unclassified. The short note leads, as
+leave-one-out error). 2,743 errors, none unclassified (the second pin, after
+R24 moved the spans; 2,752 and 6 on the first). The short note leads, as
 on WJazzD — notes under an eighth are 27% of the book and 54% of the
 outright misses — then the semitone-off pair, then the head an octave low
 (D30: 209 of 248 octave pairs on four sides' first chorus, Yardbird Suite

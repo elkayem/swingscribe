@@ -794,7 +794,7 @@ list of what is actually wrong; run everything with one command:
   the MuseScore set's code but pinned under `omnibook/` and
   `omnibook-notation/` with `summary/omnibook_*` means of its own, so the
   listener's twelve-track means never absorb it. Mean pitch F1 0.790, note
-  F1 0.535, rhythm 0.729 / value 0.657 at coverage 0.76, over 22. Nobody
+  F1 0.537, rhythm 0.730 / value 0.656 at coverage 0.76, over 22. Nobody
   drew its spans: `scripts/locate_scores.py` places each score by content
   (`benchmark.locate_score` -- the time-free aligner's true matches, a
   Theil-Sen line through them as the clock) and writes the sidecar; the
@@ -806,7 +806,16 @@ list of what is actually wrong; run everything with one command:
   (D30), the only reason they sit at 0.55-0.59; and a whole file offers
   the aligner enough chance matches (47-52% raw coverage at the WRONG
   octave) that a located span is trusted by the share of the score on one
-  clock, not by coverage. The set stays out of the WJazzD identification:
+  clock, not by coverage. And that clock places the SPAN, never the
+  downbeat: the line's intercept written as the sidecar anchor put eleven
+  of the twenty-two pages one to two beats off the book's bar lines,
+  overriding a tracker phase (`meter._auto_anchor`) that was right on all
+  22 (R24). `score_bars.bars_on_grid` votes bar 1 on the beat grid from
+  the matched notes, and `score_bars.bar_line_agreement` is pinned for
+  every hand-scored page because notated rhythm is gap-based and cannot
+  see a constant shift. Never write a sidecar `anchor` you have not
+  checked against the grid; no anchor is better than a near one.
+  The set stays out of the WJazzD identification:
   six of these sides are already in `benchmark/wjazzd/` under their own
   names. A trailing take number ("Now's_The_Time_1") is part of a tune key
   and two files on one key are refused, not folded.

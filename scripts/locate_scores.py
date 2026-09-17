@@ -114,10 +114,16 @@ def tracked_beats(audio: Path, config, duration: float) -> list[float]:
     return [beat.time for beat in repaired]
 
 
-# The span opens this share of a beat before bar 1, so a downbeat played a
-# hair ahead of the tracked beat is inside it; `notation.span_anchor` still
-# takes the nearest bar line as bar 1.
-LEAD_BEATS = 0.5
+# The span opens a little before bar 1, so a downbeat played a hair ahead of
+# the tracked beat is inside it: a quarter of a beat, and never under 80 ms
+# (at 320 bpm a quarter-beat is 47 ms, inside the tracker's own jitter). Not
+# more. Half a beat was tried first and let a stray sound on the and-of-four
+# into three spans (Confirmation, Blues For Alice, Now's The Time 1), each
+# written as a pickup bar holding one note; an onset more than a quarter-beat
+# early would be written before the bar line anyway, and the book's bar 1 is
+# where the book starts.
+LEAD_BEATS = 0.25
+LEAD_FLOOR_S = 0.08
 
 
 def process(
@@ -172,7 +178,7 @@ def process(
     )
     start, end, anchor = found["start"], found["end"], None
     if bars["trusted"]:
-        lead = LEAD_BEATS * found["seconds_per_quarter"]
+        lead = max(LEAD_BEATS * found["seconds_per_quarter"], LEAD_FLOOR_S)
         start = bars["bar_one"] - lead if bars["bar_one"] is not None else 0.0
         end = bars["end"] if bars["end"] is not None else duration
         anchor = bars["anchor"]

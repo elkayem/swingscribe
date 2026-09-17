@@ -717,6 +717,26 @@ over the 22 sides.
 | merged | miss | 17 | 0.6% | 0.0009 | 0.4% | 8 |
 | everything else (10 classes) | | 49 | 1.8% | 0.0033 | 1.6% | |
 
+**Re-pinned later the same day, and what that did to this table.** The
+Omnibook spans were moved onto the book's bar 1 (R24 in
+docs/benchmark-deficiencies.md: ten of them had opened after it, and the
+opening notes were never transcribed), all 22 were re-transcribed, the
+review traces rebuilt (22 of 22 note-for-note the harness's) and the
+`omnibook` block pinned again. The table above is the FIRST pin, kept as
+written; the second reads 2,743 errors (1,085 / 658 / 1,000), mean pitch F1
+0.7905, **0 unclassified**, and the same ranking: `squeezed` 470,
+`neighbour` 369, `fragment_neighbour` 262, `absorbed` 239, `octave` 234,
+`loose` 219, `fragment_other` 195, `tracked_other` 152, `other_pitch` 151,
+`too_short` 127. The paired guard put every class inside noise except
+`dropped` (43 -> 55, up on 9 sides of 22, beyond 2 se; a run at the book's
+pitch that survived the gates and became no note). Twelve notes, not
+explained here. Nothing in 10.4-10.6 changes.
+
+**One reading this table invites and should not get.** The tempo bands
+below say UP is the worst (0.774 against 0.83). All four unison-head sides
+(10.5.3) are in UP; the other twelve UP sides read 0.829, level with the
+slower bands. On this set tempo explains nothing once D30 is set aside.
+
 By tempo band (WJazzD's bands on each side's fitted tempo; none is under
 112 bpm): MEDIUM n=2, pitch F1 0.838, 26.4 errors per 100 book notes;
 MEDIUM UP n=4, 0.833, 26.1; **UP n=16, 0.774, 29.7**, where `octave` (244
