@@ -465,6 +465,23 @@ def test_a_span_scoped_set_answers_for_a_selection_it_covers(config, tmp_path):
         "ready"
     ] is False
 
+    # D31: a whole-file set separated LATER does not take the span over --
+    # the span set keeps answering for the selection it covers, and the
+    # whole file answers everywhere else.
+    whole = stems_dir(config.cache_dir, library.file_digest(wav), "bsroformer_sw")
+    whole.mkdir(parents=True)
+    for name in ("drums", "bass", "other", "vocals", "guitar", "piano"):
+        (whole / f"{name}.wav").write_bytes(b"stem")
+    inside = library.available_stems(document, config, "bsroformer_sw", (38.4, 75.1))
+    assert pathlib.Path(inside["other"]).parent == out
+    outside = library.available_stems(document, config, "bsroformer_sw", (100.0, 120.0))
+    assert pathlib.Path(outside["other"]).parent == whole
+    assert (
+        pathlib.Path(library.available_stems(document, config, "bsroformer_sw")["other"]).parent
+        == whole
+    )
+    assert library.model_status(document, config, (38.4, 75.1))  # still listed
+
 
 def test_resolve_stem_finds_a_span_scoped_set_for_the_selection(config, tmp_path):
     """The audition routes hold only the request's bounds, not a config with

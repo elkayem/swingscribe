@@ -52,6 +52,13 @@ def main() -> None:
         help="the subfolder of benchmark/ whose sidecars to review (Omnibook for the third set)",
     )
     parser.add_argument("--dry", action="store_true", help="say what is missing, compute nothing")
+    parser.add_argument(
+        "--redo",
+        action="append",
+        default=[],
+        help="recompute a review already present, by a substring of its track name (repeatable): "
+        "the key cannot see WHICH stems were read, so a trace made from another set stays (D31)",
+    )
     parser.add_argument("--limit", type=int, default=None, help="compute at most N (dev)")
     parser.add_argument("--step-cost", type=float, default=0.2)
     parser.add_argument("--dip-db", type=float, default=0.0)
@@ -84,7 +91,8 @@ def main() -> None:
             config, settings.stem, settings.region[0], settings.region[1], settings.ensemble
         )
         key = review.review_key(document, cfg, sidecar["model"])
-        if review._cache(cfg).get_json(key) is not None:
+        redo = any(part in name for part in args.redo)
+        if not redo and review._cache(cfg).get_json(key) is not None:
             present += 1
             continue
         if args.dry:

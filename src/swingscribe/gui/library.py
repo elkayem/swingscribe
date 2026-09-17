@@ -197,32 +197,34 @@ def available_stems(
     This is what lets the audition screen say "htdemucs_ft is ready, htdemucs_6s
     is thirteen minutes away" before you commit to either.
 
-    A whole-file set answers for any span; failing that, a span set that
-    covers the span asked about (`span_for`) answers, complete sets only.
-    The whole-file directory may be partial (one stem copied across from
-    another cache, CLAUDE.md) and is still listed, so `resolve_stem` and
-    run_eval can use the stem that is there.
+    The narrowest span set that covers the span asked about (`span_for`)
+    answers first, complete sets only; failing that, the whole-file set,
+    which answers for any span. The order is `separate.covering_dirs`'s and
+    the reason is there (D31): a whole-file separation made later must not
+    change what a span already separated reads. The whole-file directory may
+    be partial (one stem copied across from another cache, CLAUDE.md) and is
+    still listed, so `resolve_stem` and run_eval can use the stem that is
+    there.
     """
     from swingscribe.stages.separate import covering_dirs, existing_stems, missing_stems
 
+    def listed(directory: Path) -> dict[str, str]:
+        return {
+            p.stem: str(p) for p in sorted(directory.glob("*.wav")) if not p.stem.startswith("_")
+        }
+
     digest = stem_digest(document)
+    wanted = span_for(document, config, span)
+    if wanted is not None:
+        for candidate in covering_dirs(config.cache_dir, digest, model, wanted)[:-1]:
+            present = {p.stem for p in candidate.glob("*.wav")}
+            if missing_stems(model, present):
+                continue
+            if existing_stems(candidate, sorted(present - {"other+vocals"})) is not None:
+                return listed(candidate)
     whole = stems_dir(config.cache_dir, digest, model)
     if whole.is_dir() and any(whole.glob("*.wav")):
-        return {p.stem: str(p) for p in sorted(whole.glob("*.wav")) if not p.stem.startswith("_")}
-    wanted = span_for(document, config, span)
-    if wanted is None:
-        return {}
-    for candidate in covering_dirs(config.cache_dir, digest, model, wanted)[1:]:
-        present = {p.stem for p in candidate.glob("*.wav")}
-        if missing_stems(model, present):
-            continue
-        found = existing_stems(candidate, sorted(present - {"other+vocals"}))
-        if found is not None:
-            return {
-                p.stem: str(p)
-                for p in sorted(candidate.glob("*.wav"))
-                if not p.stem.startswith("_")
-            }
+        return listed(whole)
     return {}
 
 

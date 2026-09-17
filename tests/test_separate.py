@@ -107,19 +107,20 @@ def test_a_span_names_its_own_stems_dir_in_milliseconds(tmp_path):
     assert span_of_dir(whole) is None
 
 
-def test_covering_dirs_prefers_the_whole_file_then_any_containing_span(tmp_path):
+def test_covering_dirs_prefers_the_narrowest_covering_span_and_the_whole_file_last(tmp_path):
+    """D31: a whole-file separation made LATER must not change what a span
+    already separated reads, so the whole file answers last."""
     from swingscribe.stages.separate import covering_dirs
 
     whole = stems_dir(tmp_path, "d1", "m")
+    wider = stems_dir(tmp_path, "d1", "m", (10.0, 150.0))
     wide = stems_dir(tmp_path, "d1", "m", (30.0, 80.0))
     narrow = stems_dir(tmp_path, "d1", "m", (40.0, 50.0))
     elsewhere = stems_dir(tmp_path, "d1", "m", (100.0, 120.0))
-    for d in (wide, narrow, elsewhere):
+    for d in (wider, wide, narrow, elsewhere):
         d.mkdir(parents=True)
     found = covering_dirs(tmp_path, "d1", "m", (38.4, 75.1))
-    assert found[0] == whole  # first even though it does not exist yet
-    assert wide in found
-    assert narrow not in found and elsewhere not in found
+    assert found == [wide, wider, whole]  # whole listed even though it does not exist yet
     assert covering_dirs(tmp_path, "d1", "m", None) == [whole]  # no span: whole file only
 
 

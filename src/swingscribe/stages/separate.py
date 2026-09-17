@@ -103,23 +103,35 @@ def span_of_dir(path: str | Path) -> Span | None:
 
 
 def covering_dirs(cache_dir: str | Path, audio_digest: str, model: str, span: Span | None):
-    """Stems directories that cover `span`, most general first: the whole-file
-    set, then any span set containing it. With no span, only the whole-file
-    set qualifies — a partial separation must never stand in for the track."""
+    """Stems directories that cover `span`, NARROWEST first: the span sets
+    containing it by length, then the whole-file set. With no span, only the
+    whole-file set qualifies — a partial separation must never stand in for
+    the track.
+
+    Narrowest first is a rule about STABILITY, not quality (D31, 2026-09-17).
+    The model chunks from wherever its input starts, so a whole-file set and
+    a span set of the same music differ by a few notes, and neither is the
+    better one. With the whole file first, separating a whole track LATER
+    silently changed what every span already separated and measured on it
+    read: three Parker solos under benchmark/wjazzd/ stopped reproducing
+    their pinned notes the day their byte-identical Omnibook copies got
+    whole-file sets. A span set is what the listener separated for that
+    span; it keeps answering for it until they separate a narrower one.
+    """
     whole = stems_dir(cache_dir, audio_digest, model)
-    out = [whole]
     if span is None:
-        return out
+        return [whole]
     prefix = f"{audio_digest}-{model}{SPAN_SEPARATOR}"
     parent = Path(cache_dir) / "stems"
+    covering = []
     if parent.is_dir():
         for candidate in sorted(parent.iterdir()):
             if not candidate.name.startswith(prefix):
                 continue
             covered = span_of_dir(candidate)
             if covered and covered[0] <= span[0] + 1e-3 and covered[1] >= span[1] - 1e-3:
-                out.append(candidate)
-    return out
+                covering.append((covered[1] - covered[0], candidate))
+    return [candidate for _length, candidate in sorted(covering, key=lambda c: c[0])] + [whole]
 
 
 def find_stems(
