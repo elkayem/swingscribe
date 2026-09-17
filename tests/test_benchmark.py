@@ -237,11 +237,13 @@ def _notation(bars):
 
 
 class _Score:
-    """The two fields `score_against_notation` reads off an mscz.Score."""
+    """The fields `score_against_notation` and `locate_score` read off an
+    mscz.Score."""
 
-    def __init__(self, melody, bars=2):
+    def __init__(self, melody, bars=2, beats_per_bar=4.0):
         self.melody = melody
         self.bars = bars
+        self.beats_per_bar = beats_per_bar
 
 
 class _ScoreNote:
@@ -568,3 +570,131 @@ def test_an_empty_notation_scores_zero_rather_than_dividing_by_it():
 
     assert readability(_notation([]))["events"] == 0.0
     assert readability(_notation([_bar([])]))["readability"] == 0.0
+
+
+# ── locating a score inside a whole track ───────────────────────────────────
+# The Omnibook scores come with no span: bar 1 has to be found in the
+# recording. What is under test is that the placement is right when the score
+# is there, and refused when it is not -- the same control every fit in this
+# project answers to.
+
+
+def _heard(melody, start, seconds_per_quarter):
+    return [(start + n.position * seconds_per_quarter, n.pitch) for n in melody]
+
+
+def _bebop_score(rng, bars=24):
+    scale = [60, 62, 63, 65, 67, 69, 70, 72]
+    melody = [_ScoreNote(i * 0.5, 0.5, scale[rng.randrange(8)]) for i in range(bars * 8)]
+    return _Score(melody, bars=bars)
+
+
+def test_locate_score_finds_bar_one_and_the_clock_in_a_whole_track():
+    import random
+
+    from swingscribe.benchmark import locate_score
+
+    rng = random.Random(3)
+    score = _bebop_score(rng)
+    start, spq = 12.0, 0.3  # the score begins twelve seconds in, at 200 bpm
+    heard = _heard(score.melody, start, spq)
+    # We missed every eleventh note and got every seventeenth wrong.
+    heard = [(t, p + (3 if i % 17 == 0 else 0)) for i, (t, p) in enumerate(heard) if i % 11]
+    intro = [(i * 0.25, rng.randint(48, 84)) for i in range(40)]
+    next_soloist = [(start + 96 * spq + 0.5 + i * 0.3, rng.randint(48, 84)) for i in range(80)]
+    found = locate_score(score, sorted(intro + heard + next_soloist))
+    assert found["trusted"] is True
+    assert abs(found["start"] - start) < 0.1
+    assert abs(found["end"] - (start + 96 * spq)) < 0.2
+    assert abs(found["bpm"] - 200.0) < 2.0
+    assert found["transposition"] == 0.0
+    assert found["coverage"] > 0.8
+
+
+def test_locate_score_measures_the_transposition():
+    """A transcription an octave up is the same placement, and says so."""
+    import random
+
+    from swingscribe.benchmark import locate_score
+
+    score = _bebop_score(random.Random(5))
+    found = locate_score(score, [(t, p + 12) for t, p in _heard(score.melody, 3.0, 0.25)])
+    assert found["transposition"] == -12.0
+    assert abs(found["start"] - 3.0) < 0.05
+    assert abs(found["bpm"] - 240.0) < 1.0
+
+
+def test_locate_score_refuses_a_score_the_track_does_not_hold():
+    """The control: against the wrong take nothing may be written."""
+    import random
+
+    from swingscribe.benchmark import COVERAGE_FLOOR, PLACED_FLOOR, locate_score
+
+    rng = random.Random(11)
+    score = _bebop_score(rng)
+    unrelated = [(i * 0.3, rng.randint(48, 84)) for i in range(300)]
+    found = locate_score(score, unrelated)
+    assert found["trusted"] is False
+    # Not by the share ON a line: the aligner walks both sequences in order,
+    # so chance matches in uniformly dense music sit near a line anyway. By
+    # how little of the score that line accounts for.
+    assert found["placed"] < PLACED_FLOOR
+    assert found["coverage"] < COVERAGE_FLOOR
+
+
+def test_locate_score_is_not_fooled_by_scattered_matches_at_the_wrong_octave():
+    """On a whole file the wrong octave can out-MATCH the right one by chance
+    (Ornithology, 2026-09-17: 195 matches scattered over the side against
+    213 on one clock); only the matches on a clock are evidence."""
+    import random
+
+    from swingscribe.benchmark import locate_score
+
+    rng = random.Random(17)
+    score = _bebop_score(rng, bars=16)
+    start, spq = 20.0, 0.3
+    heard = _heard(score.melody, start, spq)
+    # Two minutes of unrelated playing before and after, dense enough that
+    # every octave finds plenty of the score's pitches in it somewhere.
+    around = [(i * 0.2, rng.choice([60, 62, 63, 65, 67, 69, 70, 72]) + 12) for i in range(600)]
+    around = [(t, p) for t, p in around if not (start - 1 < t < start + 128 * spq + 1)]
+    found = locate_score(score, sorted(around + heard))
+    assert found["transposition"] == 0.0
+    assert abs(found["start"] - start) < 0.1
+    assert found["trusted"] is True
+
+
+def test_locate_score_refuses_a_take_whose_head_alone_lines_up():
+    """The same tune, a different take: the head is on the clock and the solo
+    is not. A placement built on the head alone would score the wrong solo."""
+    import random
+
+    from swingscribe.benchmark import PLACED_FLOOR, locate_score
+
+    rng = random.Random(23)
+    score = _bebop_score(rng, bars=40)  # 8 bars of head, 32 of solo
+    head = [n for n in score.melody if n.position < 32]
+    heard = _heard(head, 5.0, 0.3)
+    other_solo = [(5.0 + 32 * 0.3 + i * 0.15, rng.randint(55, 80)) for i in range(400)]
+    found = locate_score(score, sorted(heard + other_solo))
+    assert found["placed"] < PLACED_FLOOR
+    assert found["trusted"] is False
+
+
+def test_locate_score_needs_enough_anchors_to_draw_a_line():
+    from swingscribe.benchmark import locate_score
+
+    score = _bebop_score(__import__("random").Random(1), bars=1)
+    found = locate_score(score, _heard(score.melody, 1.0, 0.3)[:5])
+    assert found["trusted"] is False
+    assert found["anchors"] == 0.0
+    assert locate_score(score, [])["trusted"] is False
+
+
+def test_robust_line_ignores_a_minority_of_wild_points():
+    from swingscribe.benchmark import robust_line
+
+    points = [(x, 2.0 * x + 1.0) for x in range(30)] + [(5.0, 40.0), (7.0, -30.0), (9.0, 55.0)]
+    slope, intercept = robust_line(points)
+    assert abs(slope - 2.0) < 1e-9
+    assert abs(intercept - 1.0) < 1e-9

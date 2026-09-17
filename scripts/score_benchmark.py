@@ -3,9 +3,11 @@
     uv run python scripts/score_benchmark.py                 # transcribe + score
     uv run python scripts/score_benchmark.py --reuse         # score cached notes
 
-Each tune in `benchmark/` is an audio file, a `.mscz` hand transcription, and
-a `.swingscribe.json` sidecar holding the span/stem/model chosen in the GUI.
-The sidecar's span is the transcribed span: bar 1 of the score is its start.
+Each tune in `benchmark/` is an audio file, a hand transcription (`.mscz`, or
+MusicXML -- the Omnibook set under benchmark/Omnibook/ is LORIA's MusicXML of
+the book), and a `.swingscribe.json` sidecar holding the span/stem/model
+chosen in the GUI, or located by content (scripts/locate_scores.py). The
+sidecar's span is the transcribed span: bar 1 of the score is its start.
 
 Two measures, deliberately kept apart:
 
@@ -37,7 +39,7 @@ import time
 from pathlib import Path
 
 from swingscribe import metrics, mscz
-from swingscribe.alignment import align, best_transposition, to_chroma
+from swingscribe.alignment import align, measured_transposition, to_chroma
 from swingscribe.benchmark import anchor_map, solo_shift, window_shift
 from swingscribe.config import Config
 from swingscribe.model import NoteEvent
@@ -62,11 +64,41 @@ INSTRUMENT_OF = {"trio": "piano", "solo-piano": "piano", "horn-led": "horn"}
 
 def tune_key(audio_name: str) -> str:
     """A stable slug for a track, used only inside this script."""
-    stem = Path(audio_name).stem
-    # Album track numbers ("02 Confirmation", "1-17 Star Eyes") are not part
-    # of the tune's name.
-    words = [w for w in stem.replace("_", " ").split() if not w[0].isdigit()]
-    return "_".join(words).lower().replace("'", "")
+    path = Path(audio_name)
+    # A LEADING album track number ("02 Confirmation", "1-17 Star Eyes") is
+    # not part of the tune's name. A trailing one is: the Omnibook's Now's The
+    # Time 1 and 2 are two recordings, and stripping every digit-led word
+    # folded them onto one key, so the second silently replaced the first and
+    # the set was scored one side short (2026-09-17).
+    words = path.stem.replace("_", " ").split()
+    if words and words[0][0].isdigit():
+        words = words[1:]
+    key = "_".join(words).lower().replace("'", "")
+    # A subfolder is another set -- benchmark/Omnibook/ holds Parker's
+    # Confirmation and the root holds Dexter Gordon's -- so it stays in the key.
+    folder = path.parent.as_posix()
+    return key if folder == "." else f"{folder.lower()}/{key}"
+
+
+def score_file(sidecar_path: Path, score_path: str, bench: Path) -> str | None:
+    """Where the sidecar's score is, relative to benchmark/ with forward
+    slashes -- or None when it is not a file under benchmark/ at all.
+
+    The GUI stores the absolute path the score was picked at; a sidecar
+    written by hand, or on another machine, may carry a bare name, which is
+    taken to mean "beside the sidecar". A score outside benchmark/ (the
+    wjazzd sidecars point at ../wjazz-scores, ODbL and kept out) is not a
+    benchmark tune, exactly as before.
+    """
+    candidate = Path(score_path)
+    if not candidate.is_absolute():
+        candidate = sidecar_path.parent / candidate
+    if not candidate.is_file():
+        return None
+    try:
+        return candidate.resolve().relative_to(bench.resolve()).as_posix()
+    except ValueError:
+        return None
 
 
 def tune_title(audio_name: str) -> str:
@@ -94,11 +126,20 @@ def discover_tunes(bench: Path = BENCH) -> dict[str, tuple[str, str, str, str]]:
         folder = sidecar_path.parent.relative_to(bench)
         if folder != Path("."):
             audio_name = f"{folder.as_posix()}/{audio_name}"
-        mscz_name = Path(score_path).name
-        if not (bench / audio_name).is_file() or not (bench / mscz_name).is_file():
+        mscz_name = score_file(sidecar_path, score_path, bench)
+        if mscz_name is None or not (bench / audio_name).is_file():
             continue
         instrument = INSTRUMENT_OF.get(sidecar.get("ensemble") or "", "horn")
-        found[tune_key(audio_name)] = (
+        key = tune_key(audio_name)
+        if key in found:
+            # Two recordings on one key would score as one, with the second
+            # silently replacing the first: exactly the subset-without-a-word
+            # failure this harness has had three times. Refuse instead.
+            raise ValueError(
+                f"{audio_name} and {found[key][0]} share the tune key {key!r}; "
+                "rename one so the benchmark can tell them apart"
+            )
+        found[key] = (
             audio_name,
             mscz_name,
             tune_title(audio_name),
@@ -170,7 +211,7 @@ def transcribe_all(cache_path: Path, step_cost: float = 0.0) -> dict:
 
 def score_tune(key: str, run: dict) -> dict:
     _, mscz_name, title, instrument = TUNES[key]
-    score = mscz.parse(BENCH / mscz_name)
+    score = mscz.parse_any(BENCH / mscz_name)
     lo, hi = run["region"]
     span = hi - lo
     # The score covers exactly this span, so its bars fix the average tempo.
@@ -191,13 +232,11 @@ def score_tune(key: str, run: dict) -> dict:
     est_pitches = [n.pitch for n in est]
 
     # --- pitch sequence ---------------------------------------------------
-    # Aligning all 49 transposition candidates in full would be minutes of
-    # pure Python, so narrow on a prefix and align once at the winner.
-    head_ref, head_est = ref_pitches[:120], est_pitches[:160]
-    coarse, _ = best_transposition(head_ref, head_est)
-    offset, _ = best_transposition(head_ref, head_est, search=range(coarse - 2, coarse + 3))
+    # The transposition is settled over the whole line, not its opening
+    # (alignment.measured_transposition) -- the same call the Score button
+    # and the ground-truth bar make.
+    offset, pitch = measured_transposition(ref_pitches, est_pitches)
     shifted = [p + offset for p in est_pitches]
-    pitch = align(ref_pitches, shifted)
     chroma = align(to_chroma(ref_pitches), to_chroma(shifted))
 
     # --- onset timing, per window ----------------------------------------
@@ -236,6 +275,15 @@ def score_tune(key: str, run: dict) -> dict:
         if not est_win:
             windows.append({"onset_f1": 0.0, "note_f1": 0.0, "n_ref": len(ref_win), "shift": shift})
             continue
+        # mir_eval refuses a negative time. A score placed by content can
+        # begin before the recording does (Card Board's transfer is cut into
+        # its pickup), and a window's shift can then carry its first notes
+        # below zero; the comparison is translation-invariant, so both sides
+        # move up together rather than either being clamped.
+        floor = min(e.onset for e in moved)
+        if floor < 0:
+            moved = [e.model_copy(update={"onset": e.onset - floor}) for e in moved]
+            est_win = [n.model_copy(update={"onset": n.onset - floor}) for n in est_win]
         scored = metrics.score_notes(moved, est_win)
         windows.append(
             {

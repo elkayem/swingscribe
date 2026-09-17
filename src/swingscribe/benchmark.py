@@ -187,11 +187,10 @@ def score_notation(
 # twice (docs/benchmark-deficiencies.md R1, R2).
 COVERAGE_FLOOR = 0.5
 
-# Prefix sizes for the transposition search, matching gui/ground_truth.py and
-# scripts/score_benchmark.py. The offset is constant, so a prefix settles it
-# and a full search over ~900 notes each side is minutes of pure Python.
-HEAD_REFERENCE = 120
-HEAD_ESTIMATE = 160
+# The transposition is measured by `alignment.measured_transposition`, over
+# the whole sequences -- the prefix sizes that used to live here settle only
+# the coarse candidate now. gui/ground_truth.py and scripts/score_benchmark.py
+# go through the same function, so the three cannot disagree.
 
 
 def bar_starts(bars: list) -> list[float]:
@@ -245,7 +244,7 @@ def score_against_notation(notation, score) -> dict[str, float]:
     monophonic, so scoring it against every chord tone would charge us for
     notes a single-line score cannot hold (`mscz.Score`).
     """
-    from swingscribe.alignment import align, best_transposition
+    from swingscribe.alignment import measured_transposition
 
     ours = notation_notes(notation)
     theirs = [(n.position, n.duration, n.pitch) for n in score.melody]
@@ -254,14 +253,8 @@ def score_against_notation(notation, score) -> dict[str, float]:
 
     their_pitches = [p for _, _, p in theirs]
     our_pitches = [p for _, _, p in ours]
-    coarse, _ = best_transposition(their_pitches[:HEAD_REFERENCE], our_pitches[:HEAD_ESTIMATE])
-    offset, _ = best_transposition(
-        their_pitches[:HEAD_REFERENCE],
-        our_pitches[:HEAD_ESTIMATE],
-        search=range(coarse - 2, coarse + 3),
-    )
+    offset, aligned = measured_transposition(their_pitches, our_pitches)
     shifted = [(position, duration, pitch + offset) for position, duration, pitch in ours]
-    aligned = align(their_pitches, [p for _, _, p in shifted])
     result = score_notation(theirs, shifted, aligned.pairs)
     coverage = result["n_matched"] / len(theirs)
     return {
@@ -297,7 +290,7 @@ def score_against_wjazz_notation(notation, positions: list[tuple[float, int]]) -
     be inventing one. `rhythm` is the interval question, and the interval
     question is the whole of "did we write the swing straight?"
     """
-    from swingscribe.alignment import align, best_transposition
+    from swingscribe.alignment import measured_transposition
 
     ours = notation_notes(notation)
     if not ours or not positions:
@@ -308,14 +301,8 @@ def score_against_wjazz_notation(notation, positions: list[tuple[float, int]]) -
     theirs = [(position, 0.0, pitch) for position, pitch in positions]
     their_pitches = [p for _, p in positions]
     our_pitches = [p for _, _, p in ours]
-    coarse, _ = best_transposition(their_pitches[:HEAD_REFERENCE], our_pitches[:HEAD_ESTIMATE])
-    offset, _ = best_transposition(
-        their_pitches[:HEAD_REFERENCE],
-        our_pitches[:HEAD_ESTIMATE],
-        search=range(coarse - 2, coarse + 3),
-    )
+    offset, aligned = measured_transposition(their_pitches, our_pitches)
     shifted = [(position, duration, pitch + offset) for position, duration, pitch in ours]
-    aligned = align(their_pitches, [p for _, _, p in shifted])
     result = score_notation(theirs, shifted, aligned.pairs)
     coverage = result["n_matched"] / len(theirs)
     return {
@@ -417,3 +404,162 @@ def readability(notation) -> dict[str, float]:
         "readability": round(1.0 - (short_rests + short_values) / events, 4),
         "events": float(events),
     }
+
+
+# ── locating a score inside a whole track ───────────────────────────────────
+#
+# Every hand transcription in benchmark/ covers exactly the span the listener
+# drew, so bar 1 is the span's start by construction (scripts/score_benchmark
+# .py). The Omnibook scores (benchmark/Omnibook/, LORIA's MusicXML of the
+# book) cover the head and Parker's choruses of a whole side, and nobody drew
+# a span: where bar 1 falls, and how many seconds the score's bars take, has
+# to be found from the recording itself.
+#
+# Found by CONTENT, the way a WJazzD solo is (wjazz.fit_affine), but from a
+# notation rather than from onsets in seconds. The time-free aligner pairs the
+# score's pitch sequence with a whole-file transcription; every true match is
+# an anchor (notated position, heard onset); and a robust line through the
+# anchors is the score's clock -- seconds per quarter note, and where quarter
+# zero falls. Theil-Sen (the median of the pairwise slopes) rather than least
+# squares, because the aligner's chance matches on the music AFTER the score
+# ends -- the next soloist -- are exactly the outliers a mean would follow.
+#
+# What comes out is a span for the sidecar, and every number scored against
+# it afterwards is the ordinary benchmark's, so this cannot manufacture
+# agreement: it decides where to look, never what was heard. A wrong take
+# reads under the coverage floor here exactly as it does there.
+
+# Anchors needed before a line through them says anything.
+MIN_LOCATE_ANCHORS = 20
+# An anchor further than this (seconds) from the fitted line is a chance
+# match, not evidence about the clock: two beats at 120 bpm.
+LOCATE_RESIDUAL_S = 1.0
+# Theil-Sen is quadratic in the anchors; a long score is thinned to this many
+# before the pairwise slopes, evenly, so the line still spans the whole of it.
+MAX_LINE_POINTS = 400
+# What makes a placement trustworthy -- and it is NOT the coverage floor the
+# span-scoped scores use. Against a whole file the aligner finds chance
+# matches for two or three times the notes, and at a WRONG transposition
+# they reached 47-52% of the score on three sides (Ornithology, Card Board,
+# Moose the Mooche, 2026-09-17), above COVERAGE_FLOOR. Those matches are
+# scattered over the whole file; the right offset's sit on one clock. So the
+# gate is the share of matches on the line (right 70-88%, wrong 6-39%), and
+# the share of the SCORE on it, so a wrong take of the same tune -- whose
+# head lines up and whose solo does not -- is not placed on its head alone.
+ON_LINE_FLOOR = 0.5
+PLACED_FLOOR = 0.3
+
+
+def robust_line(points: list[tuple[float, float]]) -> tuple[float, float]:
+    """Theil-Sen: (slope, intercept) of y = slope * x + intercept.
+
+    The median of every pairwise slope, then the median intercept under it.
+    Immune to a minority of wild points, which least squares is not; pure
+    Python, so a few hundred anchors is a fraction of a second.
+    """
+    if len(points) > MAX_LINE_POINTS:
+        step = len(points) / MAX_LINE_POINTS
+        points = [points[int(i * step)] for i in range(MAX_LINE_POINTS)]
+    slopes = [
+        (y2 - y1) / (x2 - x1)
+        for i, (x1, y1) in enumerate(points)
+        for x2, y2 in points[i + 1 :]
+        if x2 != x1
+    ]
+    if not slopes:
+        return 0.0, 0.0
+    slope = statistics.median(slopes)
+    return slope, statistics.median(y - slope * x for x, y in points)
+
+
+def _clock(anchors: list[tuple[float, float]]) -> tuple[float, float, list[tuple[float, float]]]:
+    """The line through the anchors, and the anchors that sit on it.
+
+    One pass of outlier removal and the line again: the chance matches away
+    from the score's clock sit seconds off it, and the first fit has already
+    said where the clock is.
+    """
+    slope, intercept = robust_line(anchors)
+    kept = [(x, y) for x, y in anchors if abs(y - (slope * x + intercept)) <= LOCATE_RESIDUAL_S]
+    if len(kept) >= MIN_LOCATE_ANCHORS:
+        slope, intercept = robust_line(kept)
+        kept = [(x, y) for x, y in anchors if abs(y - (slope * x + intercept)) <= LOCATE_RESIDUAL_S]
+    return slope, intercept, kept
+
+
+def locate_score(score, notes: list[tuple[float, int]]) -> dict[str, float]:
+    """Where a notated score sits in a whole-track transcription.
+
+    `notes` are (onset seconds, MIDI pitch) in onset order, transcribed from
+    the WHOLE recording. Returns the score's own extent in seconds -- `start`
+    is quarter zero, `end` the close of its last bar -- its clock, and how
+    much of the score sits on that clock. `trusted` means the span can go
+    into a sidecar and be scored like any other; without it the recording is
+    the wrong take, the wrong file, or too poorly heard to place, and
+    nothing should be built on it.
+
+    The transposition is measured over the whole sequences and chosen by the
+    anchors ON THE CLOCK, not by raw matches: a whole file offers the aligner
+    enough chance matches that a wrong octave can out-match the right one
+    (see ON_LINE_FLOOR). `coverage` is still the raw share of the score the
+    alignment matched, for comparison with the span-scoped scores.
+    """
+    from swingscribe.alignment import TRANSPOSE_SEARCH, align
+
+    result = {
+        "start": 0.0,
+        "end": 0.0,
+        "seconds_per_quarter": 0.0,
+        "bpm": 0.0,
+        "coverage": 0.0,
+        "n_matched": 0.0,
+        "reference": float(len(score.melody)),
+        "anchors": 0.0,
+        "on_line": 0.0,
+        "placed": 0.0,
+        "residual_s": 0.0,
+        "transposition": 0.0,
+        "trusted": False,
+    }
+    if not score.melody or not notes:
+        return result
+    theirs = [n.pitch for n in score.melody]
+    ours = [p for _, p in notes]
+    best = None
+    for offset in TRANSPOSE_SEARCH:
+        aligned = align(theirs, [p + offset for p in ours])
+        anchors = [
+            (score.melody[ri].position, notes[ei][0])
+            for ri, ei in aligned.pairs
+            if ri is not None and ei is not None and theirs[ri] == ours[ei] + offset
+        ]
+        if len(anchors) < MIN_LOCATE_ANCHORS:
+            continue
+        slope, intercept, kept = _clock(anchors)
+        if slope <= 0:
+            continue
+        if best is None or len(kept) > best[0]:
+            best = (len(kept), offset, anchors, slope, intercept, kept)
+    if best is None:
+        return result
+    _n, offset, anchors, slope, intercept, kept = best
+    quarters = score.bars * getattr(score, "beats_per_bar", 4.0)
+    on_line = len(kept) / len(anchors)
+    placed = len(kept) / len(theirs)
+    result.update(
+        start=intercept,
+        end=intercept + slope * quarters,
+        seconds_per_quarter=slope,
+        bpm=60.0 / slope,
+        coverage=len(anchors) / len(theirs),
+        n_matched=float(len(anchors)),
+        anchors=float(len(kept)),
+        on_line=on_line,
+        placed=placed,
+        residual_s=statistics.median(abs(y - (slope * x + intercept)) for x, y in kept),
+        transposition=float(offset),
+        trusted=len(kept) >= MIN_LOCATE_ANCHORS
+        and on_line >= ON_LINE_FLOOR
+        and placed >= PLACED_FLOOR,
+    )
+    return result

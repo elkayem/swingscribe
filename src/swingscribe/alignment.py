@@ -140,6 +140,54 @@ def best_transposition(
     return best_offset, best
 
 
+# Prefix sizes for the coarse transposition search below. The offset is a
+# constant, so a prefix narrows the 49 candidates cheaply; what a prefix must
+# NOT do is decide alone (see `measured_transposition`).
+HEAD_REFERENCE = 120
+HEAD_ESTIMATE = 160
+
+
+def measured_transposition(reference: list[int], estimate: list[int]) -> tuple[int, Alignment]:
+    """The constant offset that explains the WHOLE estimate, and the alignment
+    at it.
+
+    A prefix settles the coarse candidate cheaply, and a prefix was also
+    settling the answer -- which is wrong whenever the opening is not the
+    line. Three Omnibook sides (Ornithology, Card Board, Moose The Mooche,
+    2026-09-17) open with a head played in unison with a trumpet, heard an
+    octave under the book; the first 120 notes chose +12, and every note of
+    Parker's solo was then scored as the wrong note, pitch F1 0.30-0.36
+    where the whole sequence reads ~0.8. So the candidates the prefix
+    suggests -- its own neighbourhood, and the octaves either side of it --
+    are each aligned in FULL, and the one that matches the most of the
+    whole line wins. Where the prefix was already right, that is the same
+    offset and the same alignment as before.
+    """
+    if not reference or not estimate:
+        return 0, align(reference, estimate)
+    coarse, _ = best_transposition(reference[:HEAD_REFERENCE], estimate[:HEAD_ESTIMATE])
+    candidates = sorted(
+        {
+            offset
+            for offset in (
+                *range(coarse - 2, coarse + 3),
+                coarse - 12,
+                coarse + 12,
+                coarse - 24,
+                coarse + 24,
+            )
+            if offset in TRANSPOSE_SEARCH
+        },
+        key=lambda offset: (offset != coarse, abs(offset - coarse)),
+    )
+    best_offset, best = candidates[0], align(reference, [p + candidates[0] for p in estimate])
+    for offset in candidates[1:]:
+        candidate = align(reference, [p + offset for p in estimate])
+        if candidate.matches > best.matches:
+            best_offset, best = offset, candidate
+    return best_offset, best
+
+
 def to_chroma(pitches: list[int]) -> list[int]:
     """Pitch classes. Scoring in chroma separates "wrong note" from "right
     note, wrong octave" — the second is a much smaller musical error and the

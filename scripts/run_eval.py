@@ -23,6 +23,21 @@ reads lower, because notation idealizes what was played.
 Reporting only the second one is what made the transcriber look worse than it
 is for months.
 
+## A third set: the Omnibook
+
+`benchmark/Omnibook/` holds LORIA's MusicXML of the Charlie Parker Omnibook
+beside the recordings the listener could find, with spans located by content
+(`scripts/locate_scores.py`) rather than drawn by ear. It is scored by
+exactly the code the listener's own transcriptions are -- the same
+`score_benchmark.score_tune`, the same `score_against_notation` -- but kept
+in sections and means of its own (`omnibook`, `omnibook_notation`): folding
+twenty-two Parker sides into a twelve-track mean would move every pinned
+number without the pipeline having changed, and the two references differ in
+kind. A listener's page covers one solo; the book covers the head and the
+choruses, editorially (plan section 6, layer 3: ghost notes dropped,
+enharmonics normalised), of a 78-era side. Its rhythm is never read without
+its coverage, because a located span could be the wrong take.
+
 ## What "pinned" means here
 
 Real-audio baselines cannot run in CI -- they need the audio, which is never
@@ -95,6 +110,16 @@ def sidecar_name(sidecar_path: Path, sidecar: dict) -> str:
 # the track and every pinned number stays distinct. The default take's keys
 # are exactly what they were; the oracle take's are new.
 ORACLE_TAKE = " [line=oracle]"
+
+# The Omnibook set lives in this subfolder of benchmark/ (module docstring).
+# Its rows are split out of the MuseScore sections by track key, which
+# carries the folder (sidecar_name), so nothing else has to know.
+OMNIBOOK_FOLDER = "Omnibook"
+
+
+def is_omnibook(key: str) -> bool:
+    """Whether a run key names a track of the Omnibook set."""
+    return track_of(key).startswith(OMNIBOOK_FOLDER + "/")
 
 
 def track_of(key: str) -> str:
@@ -346,6 +371,18 @@ def wjazz_scores(db_path: Path, runs: dict, grids: dict) -> dict:
     db = sqlite3.connect(db_path)
     out = {}
     for name, run in sorted(runs.items()):
+        if is_omnibook(name):
+            # The sets stay disjoint. WJazzD annotated six of these very
+            # sides, and benchmark/wjazzd/ already holds them under their own
+            # names: identifying them here again would score the same
+            # recording twice and move the WJazzD mean's population without
+            # the pipeline having changed.
+            continue
+        if not run["notes"]:
+            # A span that transcribed to nothing is a finding, not a crash:
+            # the fit has no onsets to place and indexes an empty array.
+            out[name] = {"skipped": "transcribed no notes"}
+            continue
         track = track_of(name)
         onsets = np.array([n["onset"] for n in run["notes"]])
         pitches = np.array([int(n["pitch"]) for n in run["notes"]])
@@ -502,7 +539,7 @@ def notation_scores(runs: dict, grids: dict) -> dict:
         notation = notate_run(name, run, grids[track])
         if notation is None or not notation.bars:
             continue
-        result = score_against_notation(notation, mscz.parse(BENCH / by_audio[track]))
+        result = score_against_notation(notation, mscz.parse_any(BENCH / by_audio[track]))
         if not result["n_matched"]:
             continue
         out[name] = {
@@ -516,6 +553,12 @@ def notation_scores(runs: dict, grids: dict) -> dict:
             # in a pass of its own because the notation is already built.
             **readability(notation),
         }
+        if is_omnibook(name):
+            # A located span can be the wrong take, so its rhythm is never
+            # read without its coverage (CLAUDE.md). The listener's rows
+            # carry none: their spans were drawn by ear around one solo.
+            out[name]["coverage"] = round(result["coverage"], 4)
+            out[name]["trusted"] = float(bool(result["trusted"]))
     return out
 
 
@@ -695,6 +738,44 @@ def render(card: dict) -> None:
     if card["mscz"]:
         print(f"\n  mean note F1 {card['summary']['mscz_note_f1']:.3f}")
 
+    if card.get("omnibook"):
+        print("\n== Omnibook: Parker's recordings against LORIA's MusicXML of the book ==")
+        print("  (pitch and note as the MuseScore set; rhythm and value never without coverage)")
+        header = (
+            f"  {'tune':<26s} {'pitch':>6s} {'note':>6s} {'bars':>5s} {'cover':>6s} "
+            f"{'rhythm':>7s} {'value':>6s} {'read':>7s}"
+        )
+        print(header)
+        print("  " + "-" * (len(header) - 2))
+        for name, e in sorted(card["omnibook"].items()):
+            n = card.get("omnibook_notation", {}).get(name, {})
+
+            def cell(field: str, width: int, digits: int, n=n) -> str:
+                return f"{n[field]:{width}.{digits}f}" if field in n else f"{'-':>{width}s}"
+
+            flag = "" if n.get("trusted", 1.0) else "   (untrusted — too little lined up)"
+            print(
+                f"  {Path(name).stem[:26]:<26s} {e['pitch_f1']:6.3f} {e['note_f1']:6.3f} "
+                f"{cell('bars', 5, 0)} {cell('coverage', 6, 3)} {cell('rhythm', 7, 3)} "
+                f"{cell('value', 6, 3)} {cell('readability', 7, 4)}{flag}"
+            )
+        s = card["summary"]
+        if "omnibook_pitch_f1" in s:
+            print(
+                f"\n  mean pitch F1 {s['omnibook_pitch_f1']:.3f}   note F1 "
+                f"{s['omnibook_note_f1']:.3f}   over {int(s['omnibook_n'])} sides"
+            )
+        if "omnibook_rhythm" in s:
+            print(
+                f"  mean rhythm {s['omnibook_rhythm']:.3f}   value {s['omnibook_value']:.3f}"
+                f"   over {int(s['omnibook_rhythm_n'])} trusted"
+            )
+        if "omnibook_readability" in s:
+            print(
+                f"  mean readability {s['omnibook_readability']:.4f} over "
+                f"{int(s['omnibook_readability_n'])} notation(s)"
+            )
+
     takes = sorted(k for k in card["mscz"] if take_of(k) is None and oracle_key(k) in card["mscz"])
     if takes:
         print("\n== Pianists: the default line against the oracle take (issue #8) ==")
@@ -767,6 +848,11 @@ def flatten(card: dict) -> dict[str, float]:
         for field, value in entry.items():
             if isinstance(value, (int, float)):
                 flat[f"wjazz-notation/{pin_name(name)}/{field}"] = float(value)
+    for section, prefix in (("omnibook", "omnibook"), ("omnibook_notation", "omnibook-notation")):
+        for name, entry in card.get(section, {}).items():
+            for field, value in entry.items():
+                if isinstance(value, (int, float)):
+                    flat[f"{prefix}/{pin_name(name)}/{field}"] = float(value)
     for field, value in card["summary"].items():
         flat[f"summary/{field}"] = float(value)
     return flat
@@ -831,11 +917,17 @@ def main() -> None:
     grids = beat_grids(args.grids)
 
     wjazz = wjazz_scores(args.db, runs, grids) if args.db else {}
+    # The Omnibook set is scored by the same two functions and then kept
+    # apart (OMNIBOOK_FOLDER), so the MuseScore sections stay the listener's.
+    scored = mscz_scores(runs)
+    notated = notation_scores(runs, grids) if grids else {}
     card = {
         "settings": {"step_cost": args.step_cost, "dip_db": args.dip_db},
         "wjazz": wjazz,
-        "mscz": mscz_scores(runs),
-        "notation": notation_scores(runs, grids) if grids else {},
+        "mscz": {k: v for k, v in scored.items() if not is_omnibook(k)},
+        "notation": {k: v for k, v in notated.items() if not is_omnibook(k)},
+        "omnibook": {k: v for k, v in scored.items() if is_omnibook(k)},
+        "omnibook_notation": {k: v for k, v in notated.items() if is_omnibook(k)},
         # WJazzD carries a human's NOTATION as well as their onsets, so the
         # same solos answer both questions.
         "wjazz_notation": (
@@ -870,6 +962,30 @@ def main() -> None:
             statistics.fmean(e["note_f1"] for e in default_mscz), 4
         )
         card["summary"]["mscz_note_n"] = float(len(default_mscz))
+    # The Omnibook set, in means of its own, so every mean above stays over
+    # the music it was pinned on. All horns, so no oracle take to keep out.
+    omnibook = list(card["omnibook"].values())
+    if omnibook:
+        card["summary"]["omnibook_pitch_f1"] = round(
+            statistics.fmean(e["pitch_f1"] for e in omnibook), 4
+        )
+        card["summary"]["omnibook_note_f1"] = round(
+            statistics.fmean(e["note_f1"] for e in omnibook), 4
+        )
+        card["summary"]["omnibook_n"] = float(len(omnibook))
+    trusted = [e for e in card["omnibook_notation"].values() if e.get("trusted")]
+    if trusted:
+        card["summary"]["omnibook_rhythm"] = round(
+            statistics.fmean(e["rhythm"] for e in trusted), 4
+        )
+        card["summary"]["omnibook_value"] = round(statistics.fmean(e["value"] for e in trusted), 4)
+        card["summary"]["omnibook_rhythm_n"] = float(len(trusted))
+    omnibook_pages = [e for e in card["omnibook_notation"].values() if "readability" in e]
+    if omnibook_pages:
+        card["summary"]["omnibook_readability"] = round(
+            statistics.fmean(e["readability"] for e in omnibook_pages), 4
+        )
+        card["summary"]["omnibook_readability_n"] = float(len(omnibook_pages))
     # The pianists on both lines, PAIRED: the same tracks under each mean, so
     # the difference is the take's and not the population's.
     for section, field, label in (

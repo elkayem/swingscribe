@@ -3,7 +3,7 @@
 Pure logic, no numpy — these must run in CI, where the ml group is absent.
 """
 
-from swingscribe.alignment import align, best_transposition, to_chroma
+from swingscribe.alignment import align, best_transposition, measured_transposition, to_chroma
 
 
 def test_identical_sequences_align_perfectly():
@@ -95,3 +95,43 @@ def test_chroma_forgives_octaves_but_not_wrong_notes():
     assert align(to_chroma(reference), to_chroma(octave_off)).matches == 3
     wrong_note = [60, 63, 64]
     assert align(to_chroma(reference), to_chroma(wrong_note)).matches == 2
+
+
+# ── the transposition is settled over the whole line ────────────────────────
+
+
+def _line(seed: int, n: int) -> list[int]:
+    import random
+
+    rng = random.Random(seed)
+    return [rng.choice([60, 62, 63, 65, 67, 69, 70, 72]) for _ in range(n)]
+
+
+def test_measured_transposition_is_not_decided_by_the_opening():
+    """A head heard an octave under the book, then a solo heard right: the
+    prefix says +12, the whole line says 0. Three Omnibook sides did exactly
+    this and lost two thirds of their pitch F1 to it."""
+    reference = _line(1, 400)
+    estimate = [p - 12 for p in reference[:100]] + reference[100:]
+    prefix, _ = best_transposition(reference[:120], estimate[:160])
+    assert prefix == 12
+    offset, aligned = measured_transposition(reference, estimate)
+    assert offset == 0
+    assert aligned.matches >= 300  # the solo, plus whatever the head yields by chance
+
+
+def test_measured_transposition_agrees_with_the_prefix_when_the_prefix_is_right():
+    """Where the opening IS the line, the answer and the alignment are exactly
+    what the prefix search gave, so no pinned number moves."""
+    reference = _line(2, 300)
+    estimate = [p + 12 for p in reference]
+    offset, aligned = measured_transposition(reference, estimate)
+    assert offset == -12
+    assert aligned.matches >= 300  # the solo, plus whatever the head yields by chance
+    assert aligned.pairs == align(reference, [p + offset for p in estimate]).pairs
+
+
+def test_measured_transposition_on_an_empty_side_is_zero():
+    offset, aligned = measured_transposition([], [60, 62])
+    assert offset == 0
+    assert aligned.matches == 0

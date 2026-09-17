@@ -151,6 +151,14 @@ of these has broken a tool at least once:
   torchcrepe, refuse the import first — `sys.modules["numba"] =
   sys.modules["llvmlite"] = None` before importing swingscribe — so the
   shim takes its ImportError path. The pipeline itself never wants numba.
+  **Unless the detached run SEPARATES with the Roformer** (2026-09-16):
+  audio-separator's `prepare_mix` lazy-imports librosa, which does `from
+  numba import jit, stencil, guvectorize` and dies on a refused module.
+  Install a pass-through stub instead (jit/njit/vectorize/guvectorize/
+  stencil return the function, `prange = range`; the shape
+  `piano._numba_free` builds, but unconditionally -- trying the real numba
+  first is what hangs). librosa only ever uses numba to optimise. A
+  whole-file Roformer separation of a 3-minute side is ~7.5 min on CPU.
 - **A shell run from the Claude desktop app writes `%LOCALAPPDATA%` and
   `%APPDATA%` into a private folder** (2026-09-13). The app is a packaged
   (MSIX) Windows app, and Windows redirects a packaged process's AppData
@@ -780,6 +788,28 @@ list of what is actually wrong; run everything with one command:
   own count. It reads stems from `--cache-dir`; the batch's span-scoped
   Roformer sets live in `benchmark/.swingscribe-cache`, so the pin is run
   against that.
+- **The Omnibook (`benchmark/Omnibook/`) is a THIRD set, kept apart**
+  (2026-09-17, docs/omnibook-benchmark.md): LORIA's MusicXML of the Charlie
+  Parker Omnibook beside the 22 of 50 recordings on hand, scored by exactly
+  the MuseScore set's code but pinned under `omnibook/` and
+  `omnibook-notation/` with `summary/omnibook_*` means of its own, so the
+  listener's twelve-track means never absorb it. Mean pitch F1 0.790, note
+  F1 0.535, rhythm 0.729 / value 0.657 at coverage 0.76, over 22. Nobody
+  drew its spans: `scripts/locate_scores.py` places each score by content
+  (`benchmark.locate_score` -- the time-free aligner's true matches, a
+  Theil-Sen line through them as the clock) and writes the sidecar; the
+  sheet is `benchmark_batch.py --folder Omnibook`. Three things it taught:
+  the transposition is settled over the WHOLE line, in one place
+  (`alignment.measured_transposition`) -- the opening 120 notes chose the
+  head's octave on three sides and charged the whole solo (R23); a head
+  played in unison with a trumpet is heard an octave low on those three
+  (D30), the only reason they sit at 0.55-0.59; and a whole file offers
+  the aligner enough chance matches (47-52% raw coverage at the WRONG
+  octave) that a located span is trusted by the share of the score on one
+  clock, not by coverage. The set stays out of the WJazzD identification:
+  six of these sides are already in `benchmark/wjazzd/` under their own
+  names. A trailing take number ("Now's_The_Time_1") is part of a tune key
+  and two files on one key are refused, not folded.
 - **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
   this notate the way a human notated it?" It charges the gap between
   performed timing and notated rhythm to the transcriber, so it reads lower

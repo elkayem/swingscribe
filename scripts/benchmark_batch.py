@@ -4,6 +4,7 @@ keep a progress spreadsheet of the result.
     uv sync --group ml --group gui --group batch
     uv run python scripts/benchmark_batch.py
     uv run python scripts/benchmark_batch.py --file Tommy_Flanagan_Giant_Steps.m4a
+    uv run python scripts/benchmark_batch.py --folder Omnibook
 
 The wjazzd sheet's sibling (wjazz_batch.py), for the tracks in benchmark/
 itself — the listener's OWN transcriptions (.mscz beside each audio file).
@@ -11,6 +12,12 @@ One row per audio file, in benchmark/benchmark_test.xlsx, same columns and
 the same two measures: `pitch_*` (the green ground-truth bar — did we hear
 the right notes?) and `notation_*` (the Score button — is it written the way
 the human wrote it?).
+
+`--folder Omnibook` does the same for a subfolder of benchmark/, with its own
+sheet beside the audio (benchmark/Omnibook/omnibook_test.xlsx): the Omnibook
+set, LORIA's MusicXML of the book, whose spans scripts/locate_scores.py wrote
+by content. The GUI's endpoints read a MusicXML reference exactly as they
+read a .mscz one, so the row is still the Score button's.
 
 ## Driven through the GUI's OWN endpoints, not its internals
 
@@ -99,11 +106,19 @@ HEADERS = [
 FIELDS = HEADERS  # row keys match headers one-to-one here (no melid/number split)
 
 
-def audio_files() -> list[Path]:
+def audio_files(folder: Path = BENCH_DIR) -> list[Path]:
     return sorted(
-        (p for p in BENCH_DIR.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES),
+        (p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES),
         key=lambda p: p.name.lower(),
     )
+
+
+def sheet_for(folder: Path) -> tuple[Path, str]:
+    """The sheet a folder's rows go to, and its sheet title: the root's is
+    benchmark_test.xlsx, a subfolder's sits inside it, named after it."""
+    if folder == BENCH_DIR:
+        return SHEET_PATH, "benchmark"
+    return folder / f"{folder.name.lower()}_test.xlsx", folder.name.lower()
 
 
 def wait_for_job(client, job: dict, log) -> dict:
@@ -255,8 +270,15 @@ def process_track(client, audio_path: Path, log=print) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--file", action="append", default=[], help="only these files (repeatable)")
+    parser.add_argument(
+        "--folder", default="", help="a subfolder of benchmark/ to process instead (e.g. Omnibook)"
+    )
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     args = parser.parse_args()
+    folder = BENCH_DIR / args.folder if args.folder else BENCH_DIR
+    if not folder.is_dir():
+        raise SystemExit(f"no such folder: {folder}")
+    sheet_path, sheet_title = sheet_for(folder)
 
     import os
 
@@ -267,31 +289,31 @@ def main() -> None:
     from swingscribe.config import Config
     from swingscribe.gui.app import create_app
 
-    files = audio_files()
+    files = audio_files(folder)
     if args.file:
         wanted = set(args.file)
         files = [p for p in files if p.name in wanted]
         missing = wanted - {p.name for p in files}
         if missing:
-            raise SystemExit(f"no such file(s) in {BENCH_DIR}: {', '.join(sorted(missing))}")
-    files = [p for p in files if (BENCH_DIR / f"{p.name}.swingscribe.json").is_file()]
+            raise SystemExit(f"no such file(s) in {folder}: {', '.join(sorted(missing))}")
+    files = [p for p in files if (folder / f"{p.name}.swingscribe.json").is_file()]
     if not files:
-        print("Nothing to do — no sidecar'd audio in benchmark/.")
+        print(f"Nothing to do — no sidecar'd audio in {folder}.")
         return
 
     print(f"Processing {len(files)} file(s): {', '.join(p.name for p in files)}")
     client = TestClient(create_app(Config.from_yaml()))
-    wb, ws = batch_sheet.load_or_create_sheet(SHEET_PATH, HEADERS, "benchmark")
+    wb, ws = batch_sheet.load_or_create_sheet(sheet_path, HEADERS, sheet_title)
     index = batch_sheet.row_index(ws)
 
     for audio_path in files:
         print(f"\n== {audio_path.name} ==")
         row = process_track(client, audio_path)
         batch_sheet.write_row(ws, index, row["file"], row, FIELDS)
-        batch_sheet.save_sheet(wb, ws, SHEET_PATH, HEADERS)
+        batch_sheet.save_sheet(wb, ws, sheet_path, HEADERS)
         print(f"  -> {row['status'] or 'ok'}")
 
-    print(f"\nSpreadsheet: {SHEET_PATH}")
+    print(f"\nSpreadsheet: {sheet_path}")
 
 
 if __name__ == "__main__":

@@ -1100,7 +1100,67 @@ steps are the false triplets (a taxonomy class for "three onsets where the
 human wrote two") and the transcription misses inside ternary beats, not
 `choose_grid`.
 
+### D30 - A head played in unison with a trumpet is heard an octave low
+
+Found 2026-09-17 by the Omnibook set (docs/omnibook-benchmark.md), where the
+book's score begins at the head and so, for the first time, the head is
+scored. On three of twenty-two sides the opening 120 notes of the score
+match our line at +12 -- we hear the tune an octave UNDER the book -- and
+the solo that follows matches at 0:
+
+| side | head at 0 | head at +12 | whole line at 0 | pitch F1 |
+|---|---|---|---|---|
+| Ornithology | 38 of 120 | 92 | 213 of 373 | 0.585 |
+| Card Board | 25 of 120 | 75 | 241 of 447 | 0.557 |
+| Moose The Mooche | 49 of 120 | 64 | 188 of 358 | 0.546 |
+
+All three are Dial/Savoy sides with Miles Davis or Kenny Dorham playing the
+head in unison with Bird, and the Roformer files both horns under `other`.
+Shawnuff (Gillespie) reads the same way more weakly (pitch F1 0.646, 87
+wrong notes). Donna Lee, also a Davis unison, is heard right (0.881), so it
+is not every unison -- but whichever voice CREPE follows on these three, it
+is not the one the book writes. Every other side reads pitch F1 0.75-0.88.
+
+What it costs: the `wrong` column on those sides is the head, and the means
+over the set carry it (pitch F1 0.789 over 22; 0.83 without the three). It
+is a transcribe problem on a passage the listener's own set never asked
+about (their spans start at the solo), and it is the only reason these
+three sides sit below the rest.
+
+Until it was told apart from the transposition search it looked three
+times worse: see R23.
+
 ## Resolved
+
+### R23 - The span-scoped transposition was settled on the opening 120 notes, and charged a whole solo for its head
+
+Every span-scoped scorer -- `score_against_notation`, the WJazzD notation
+score, the ground-truth overlay and `score_tune` -- chose its constant
+transposition from the first 120 reference notes against the first 160 of
+ours, then aligned the whole line at that offset. The prefix exists because
+a 49-candidate search over the whole sequences was thought to be minutes
+of pure Python (it is under a second per candidate at these lengths). On
+the three D30 sides the prefix IS the head, heard an octave low, so the
+search chose +12 and every note of Parker's solo was then a wrong note:
+pitch F1 0.339, 0.305, 0.364 where the whole line reads 0.585, 0.557,
+0.546, and the notation coverage sat under the floor at 0.30-0.35.
+
+Fixed 2026-09-17 in one place, `alignment.measured_transposition`: the
+prefix still names the coarse candidate, but that candidate's
+neighbourhood and the octaves either side of it are each aligned in full
+and the offset that matches the most of the WHOLE line wins. All four
+scorers call it. Where the prefix was already right it returns the same
+offset and the same alignment, and the pinned numbers show it: not one of
+the listener's twelve tracks or the seventy-three WJazzD solos moved
+(Billy Boy moved by 0.01-0.02, for a different reason -- its sidecar had
+lost its `stem` and was re-transcribed on `piano` once it was restored).
+The ground-truth overlay cache is versioned past it (CACHE_VERSION 3).
+
+A second, smaller subset bug from the same day: `score_benchmark.tune_key`
+stripped every digit-led word as an album track number, so Now's The Time
+1 and 2 -- two recordings -- shared one key and the second silently
+replaced the first. A leading track number is still dropped; a trailing
+take number stays, and `discover_tunes` now refuses a collision outright.
 
 ### R22 - The harness notated on the raw tracked beats, in 4/4, anchored on its own choice (was D27)
 

@@ -48,7 +48,7 @@ from pathlib import Path
 from typing import Any
 
 from swingscribe import mscz
-from swingscribe.alignment import align, best_transposition
+from swingscribe.alignment import measured_transposition
 from swingscribe.cache import StageCache
 from swingscribe.config import Config
 
@@ -56,12 +56,6 @@ from swingscribe.config import Config
 # writes, what this project exports, and the format a score generated from
 # WJazzD's metrical annotation arrives in (scripts/wjazz_score.py).
 SCORE_SUFFIXES = frozenset({".mscz", ".mscx"}) | mscz.MUSICXML_SUFFIXES
-
-# Prefix sizes for narrowing the transposition search. A full 49-candidate
-# search over ~900 notes each side is minutes of pure Python; the offset is
-# constant, so a prefix settles it. Matches scripts/score_benchmark.py.
-HEAD_REFERENCE = 120
-HEAD_ESTIMATE = 160
 
 _WORD = re.compile(r"[a-z0-9]+")
 # Words that appear in nearly every filename and so carry no evidence about
@@ -190,15 +184,9 @@ def overlay(
     seconds_per_quarter = span / quarters
     implied_bpm = 60.0 / seconds_per_quarter
 
-    offset = 0
-    if reference and estimate:
-        coarse, _ = best_transposition(reference[:HEAD_REFERENCE], estimate[:HEAD_ESTIMATE])
-        offset, _ = best_transposition(
-            reference[:HEAD_REFERENCE],
-            estimate[:HEAD_ESTIMATE],
-            search=range(coarse - 2, coarse + 3),
-        )
-    aligned = align(reference, [p + offset for p in estimate])
+    # Measured over the WHOLE line (alignment.measured_transposition): a head
+    # heard an octave from the book must not decide the solo's octave.
+    offset, aligned = measured_transposition(reference, estimate)
 
     # ── classify ──────────────────────────────────────────────────────────
     # The four classes fall straight out of the alignment path: a pair is
@@ -302,8 +290,9 @@ def _cache(config: Config) -> StageCache:
 # Bump when `overlay`'s output changes shape or placement without either side's
 # content changing — neither the review key nor the score digest can see that,
 # and a stored overlay is served verbatim. Bumped to 2 when off-span reference
-# notes started being pinned into the span (R16).
-CACHE_VERSION = 2
+# notes started being pinned into the span (R16); to 3 when the transposition
+# began to be measured over the whole line rather than its opening.
+CACHE_VERSION = 3
 
 
 def overlay_key(review_key: str, score_path: str | Path) -> str:

@@ -83,6 +83,106 @@ def test_a_sidecar_without_a_score_is_not_a_benchmark_tune(tmp_path):
     assert score_benchmark.discover_tunes(tmp_path) == {}
 
 
+# -- the Omnibook set: MusicXML beside the audio, in a subfolder -------------
+
+
+def test_discover_tunes_takes_a_musicxml_score_beside_its_sidecar(tmp_path):
+    """The Omnibook set is LORIA's MusicXML, not .mscz, named like the audio
+    and stored in the sidecar by its absolute path (as the GUI stores it) or
+    a bare name (as a hand-written sidecar might)."""
+    (tmp_path / "Omnibook" / "Confirmation.xml").parent.mkdir()
+    (tmp_path / "Omnibook" / "Confirmation.xml").write_text("<score-partwise/>", encoding="utf-8")
+    write_sidecar(
+        tmp_path / "Omnibook",
+        "Confirmation.m4a",
+        score=str(tmp_path / "Omnibook" / "Confirmation.xml"),
+    )
+    found = score_benchmark.discover_tunes(tmp_path)
+    assert list(found) == ["omnibook/confirmation"]
+    audio, score, _title, instrument = found["omnibook/confirmation"]
+    assert audio == "Omnibook/Confirmation.m4a"
+    assert score == "Omnibook/Confirmation.xml"
+    assert instrument == "horn"
+
+    # The same sidecar naming the score by its bare name finds it beside it.
+    write_sidecar(tmp_path / "Omnibook", "Confirmation.m4a", score="Confirmation.xml")
+    assert score_benchmark.discover_tunes(tmp_path)["omnibook/confirmation"][1] == (
+        "Omnibook/Confirmation.xml"
+    )
+
+
+def test_a_score_outside_benchmark_is_not_a_benchmark_tune(tmp_path):
+    """The wjazzd sidecars point at ../wjazz-scores (ODbL, kept out of the
+    tree); they were never MuseScore tunes and must not become ones."""
+    outside = tmp_path.parent / f"{tmp_path.name}-scores"
+    outside.mkdir(exist_ok=True)
+    (outside / "Solo.musicxml").write_text("<score-partwise/>", encoding="utf-8")
+    write_sidecar(tmp_path / "wjazzd", "Solo.m4a", score=str(outside / "Solo.musicxml"))
+    assert score_benchmark.discover_tunes(tmp_path) == {}
+
+
+def test_a_trailing_take_number_stays_in_the_key():
+    """ "02 Confirmation" is Confirmation; "Now's_The_Time_1" and "_2" are two
+    recordings and must not fold onto one key."""
+    assert score_benchmark.tune_key("02 Confirmation.m4a") == "confirmation"
+    assert score_benchmark.tune_key("1-17 Star Eyes.m4a") == "star_eyes"
+    assert score_benchmark.tune_key("Now's_The_Time_1.m4a") == "nows_the_time_1"
+    assert score_benchmark.tune_key("Now's_The_Time_2.m4a") == "nows_the_time_2"
+
+
+def test_two_recordings_on_one_key_are_refused_not_folded(tmp_path):
+    for name in ("Kim.m4a", "01 Kim.m4a"):
+        (tmp_path / "Kim.xml").write_text("<score-partwise/>", encoding="utf-8")
+        write_sidecar(tmp_path, name, score=str(tmp_path / "Kim.xml"))
+    with pytest.raises(ValueError, match="share the tune key"):
+        score_benchmark.discover_tunes(tmp_path)
+
+
+def test_the_same_tune_in_two_folders_keeps_two_keys():
+    """benchmark/Omnibook/ holds Parker's Confirmation and the root holds
+    Dexter Gordon's: the key carries the folder so neither shadows the other."""
+    assert score_benchmark.tune_key("02 Confirmation.m4a") == "confirmation"
+    assert score_benchmark.tune_key("Omnibook/Confirmation.m4a") == "omnibook/confirmation"
+
+
+def test_the_omnibook_set_is_told_apart_by_its_folder():
+    assert run_eval.is_omnibook("Omnibook/Confirmation.m4a")
+    assert run_eval.is_omnibook("Omnibook/Confirmation.m4a [line=oracle]")
+    assert not run_eval.is_omnibook("Dexter_Gordon_Confirmation.m4a")
+    assert not run_eval.is_omnibook("wjazzd/Charlie_Parker_Blues_For_Alice_solo_53.m4a")
+
+
+def test_the_omnibook_numbers_are_pinned_in_sections_of_their_own():
+    """Every existing pin is under mscz/ or notation/; the Omnibook's go
+    under omnibook/ and omnibook-notation/, so a reader of the baselines can
+    tell the sets apart and the listener's means never absorb the book."""
+    card = {
+        "wjazz": {},
+        "mscz": {"Dexter_Gordon_Confirmation.m4a": {"pitch_f1": 0.8}},
+        "notation": {},
+        "omnibook": {"Omnibook/Confirmation.m4a": {"pitch_f1": 0.7, "note_f1": 0.5}},
+        "omnibook_notation": {
+            "Omnibook/Confirmation.m4a": {"rhythm": 0.6, "coverage": 0.7, "trusted": 1.0}
+        },
+        "summary": {"omnibook_n": 1.0},
+    }
+    flat = run_eval.flatten(card)
+    assert flat["mscz/Dexter_Gordon_Confirmation/pitch_f1"] == 0.8
+    assert flat["omnibook/Confirmation/pitch_f1"] == 0.7
+    assert flat["omnibook-notation/Confirmation/coverage"] == 0.7
+    assert flat["summary/omnibook_n"] == 1.0
+    assert not any(key.startswith("mscz/Confirmation") for key in flat)
+
+
+def test_the_batch_sheet_for_a_subfolder_sits_beside_its_audio():
+    benchmark_batch = pytest.importorskip("benchmark_batch")
+    root_sheet, root_title = benchmark_batch.sheet_for(benchmark_batch.BENCH_DIR)
+    assert root_sheet == benchmark_batch.SHEET_PATH
+    assert root_title == "benchmark"
+    folder = benchmark_batch.BENCH_DIR / "Omnibook"
+    assert benchmark_batch.sheet_for(folder) == (folder / "omnibook_test.xlsx", "omnibook")
+
+
 def test_every_sidecar_walk_in_the_harness_is_recursive():
     """A structural guard, because the failure it prevents is silent: the run
     still succeeds, it just quietly covers less music than its header claims."""
