@@ -529,6 +529,7 @@ def notation_scores(runs: dict, grids: dict) -> dict:
 
     from swingscribe import mscz
     from swingscribe.benchmark import readability, score_against_notation
+    from swingscribe.score_bars import bar_line_agreement
 
     by_audio = {audio: mscz_name for audio, mscz_name, *_ in score_benchmark.TUNES.values()}
     out = {}
@@ -539,7 +540,8 @@ def notation_scores(runs: dict, grids: dict) -> dict:
         notation = notate_run(name, run, grids[track])
         if notation is None or not notation.bars:
             continue
-        result = score_against_notation(notation, mscz.parse_any(BENCH / by_audio[track]))
+        reference = mscz.parse_any(BENCH / by_audio[track])
+        result = score_against_notation(notation, reference)
         if not result["n_matched"]:
             continue
         out[name] = {
@@ -552,6 +554,9 @@ def notation_scores(runs: dict, grids: dict) -> dict:
             # against a reference can see. Folded in here rather than measured
             # in a pass of its own because the notation is already built.
             **readability(notation),
+            # Rhythm compares gaps and cannot see a page whose every bar line
+            # sits a beat off the reference's; this can (score_bars.py).
+            **{k: round(v, 4) for k, v in bar_line_agreement(notation, reference).items()},
         }
         if is_omnibook(name):
             # A located span can be the wrong take, so its rhythm is never
@@ -743,7 +748,7 @@ def render(card: dict) -> None:
         print("  (pitch and note as the MuseScore set; rhythm and value never without coverage)")
         header = (
             f"  {'tune':<26s} {'pitch':>6s} {'note':>6s} {'bars':>5s} {'cover':>6s} "
-            f"{'rhythm':>7s} {'value':>6s} {'read':>7s}"
+            f"{'rhythm':>7s} {'value':>6s} {'read':>7s} {'bar line':>9s}"
         )
         print(header)
         print("  " + "-" * (len(header) - 2))
@@ -754,10 +759,15 @@ def render(card: dict) -> None:
                 return f"{n[field]:{width}.{digits}f}" if field in n else f"{'-':>{width}s}"
 
             flag = "" if n.get("trusted", 1.0) else "   (untrusted — too little lined up)"
+            # Beats our bar lines sit from the book's, and the share of
+            # matched notes that say so: "+0.0 91%" is a page on its bars.
+            bar_line = (
+                f"{n['beat_offset']:+5.1f} {n['beat_share']:3.0%}" if n.get("beat_n") else "-"
+            )
             print(
                 f"  {Path(name).stem[:26]:<26s} {e['pitch_f1']:6.3f} {e['note_f1']:6.3f} "
                 f"{cell('bars', 5, 0)} {cell('coverage', 6, 3)} {cell('rhythm', 7, 3)} "
-                f"{cell('value', 6, 3)} {cell('readability', 7, 4)}{flag}"
+                f"{cell('value', 6, 3)} {cell('readability', 7, 4)} {bar_line:>9s}{flag}"
             )
         s = card["summary"]
         if "omnibook_pitch_f1" in s:
@@ -769,6 +779,11 @@ def render(card: dict) -> None:
             print(
                 f"  mean rhythm {s['omnibook_rhythm']:.3f}   value {s['omnibook_value']:.3f}"
                 f"   over {int(s['omnibook_rhythm_n'])} trusted"
+            )
+        if "omnibook_on_the_bar_n" in s:
+            print(
+                f"  {int(s['omnibook_on_the_bar'])} of {int(s['omnibook_on_the_bar_n'])} pages "
+                "on the book's bar lines"
             )
         if "omnibook_readability" in s:
             print(
@@ -980,6 +995,13 @@ def main() -> None:
         )
         card["summary"]["omnibook_value"] = round(statistics.fmean(e["value"] for e in trusted), 4)
         card["summary"]["omnibook_rhythm_n"] = float(len(trusted))
+    barred = [e for e in card["omnibook_notation"].values() if e.get("beat_n")]
+    if barred:
+        # A count, not a mean: a page is on the book's bar lines or it is not.
+        card["summary"]["omnibook_on_the_bar"] = float(
+            sum(1 for e in barred if e["beat_offset"] == 0.0)
+        )
+        card["summary"]["omnibook_on_the_bar_n"] = float(len(barred))
     omnibook_pages = [e for e in card["omnibook_notation"].values() if "readability" in e]
     if omnibook_pages:
         card["summary"]["omnibook_readability"] = round(

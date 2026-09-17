@@ -3,6 +3,7 @@
     uv run python scripts/locate_scores.py --folder Omnibook
     uv run python scripts/locate_scores.py --folder Omnibook --file Confirmation.m4a
     uv run python scripts/locate_scores.py --folder Omnibook --dry-run
+    uv run python scripts/locate_scores.py --folder Omnibook --bars-only
 
 The listener's own transcriptions in benchmark/ arrive with a span drawn by
 ear around one solo, so bar 1 of the score is the span's start by
@@ -16,7 +17,12 @@ transcribes the WHOLE file -- ingest, beats, a whole-file separation,
 transcribe, through `pipeline.run`, so every step is cached and a second
 run costs nothing -- and asks `swingscribe.benchmark.locate_score` where the
 score sits: the time-free aligner pairs the score's pitches with what we
-heard, and a robust line through the pairs is the score's clock. A trusted
+heard, and a robust line through the pairs is the score's clock. That line
+says WHERE the score is and not where its bar lines are -- a side's tempo
+breathes, and the line's intercept put eleven of the twenty-two pages one to
+two beats off the book's (2026-09-17) -- so the same pairs then vote on the
+tracked beat grid (`swingscribe.score_bars`): bar 1, the last bar line and
+the downbeat are beats of the grid the page is built on. A trusted
 placement is written into the sidecar exactly as a listener's span would be
 (region, the bar-1 anchor, the score's path, model, stem, ensemble), and
 from then on the track is an ordinary benchmark tune: `benchmark_batch.py
@@ -26,7 +32,9 @@ Two things it refuses to do. It never writes a span below the coverage floor
 -- the wrong take (most Parker sides exist in several), or a transcription
 too poor to place -- and says so instead; and it never replaces a span the
 sidecar already holds unless `--relocate`, because the listener may have
-corrected one by hand.
+corrected one by hand. `--bars-only` is the half-step between: the stored
+span stays exactly as it is (so no transcription or review keyed on it is
+thrown away) and only the downbeat is voted again.
 
 Standing where the cache expects: this chdirs to the cache's parent, as the
 batch scripts do, so the relative paths inside cached Documents resolve the
@@ -92,10 +100,33 @@ def whole_file_notes(audio: Path, config) -> tuple[list[tuple[float, int]], floa
     return sorted((float(n.onset), int(n.pitch)) for n in notes), duration
 
 
-def process(audio: Path, config, relocate: bool, dry_run: bool, log=print) -> dict:
+def tracked_beats(audio: Path, config, duration: float) -> list[float]:
+    """The beat grid the page is built on: tracked, repaired, extended to the
+    file's ends (`meter.bar_grid`, what the roll draws and Export counts)."""
+    from swingscribe import pipeline
+    from swingscribe.stages import beats, ingest, meter
+
+    document = pipeline.run(
+        str(audio), config, stages=[("ingest", ingest.run), ("beats", beats.run)]
+    )
+    grid = document.beat_grid
+    repaired, _sections = meter.bar_grid(grid.beats, grid.downbeats, config.meter, duration)
+    return [beat.time for beat in repaired]
+
+
+# The span opens this share of a beat before bar 1, so a downbeat played a
+# hair ahead of the tracked beat is inside it; `notation.span_anchor` still
+# takes the nearest bar line as bar 1.
+LEAD_BEATS = 0.5
+
+
+def process(
+    audio: Path, config, relocate: bool, dry_run: bool, log=print, bars_only: bool = False
+) -> dict:
     from swingscribe import mscz
     from swingscribe.benchmark import locate_score
     from swingscribe.gui import library
+    from swingscribe.score_bars import bars_on_grid, clock_anchors
 
     score_path = score_beside(audio)
     if score_path is None:
@@ -105,7 +136,8 @@ def process(audio: Path, config, relocate: bool, dry_run: bool, log=print) -> di
     stored = {}
     if sidecar_path.is_file():
         stored = json.loads(sidecar_path.read_text(encoding="utf-8"))
-    if stored.get("region") and not relocate:
+    keeps_span = bool(stored.get("region")) and not relocate
+    if keeps_span and not bars_only:
         lo, hi = stored["region"]
         log(f"{audio.name}: keeps its span {lo:.1f}-{hi:.1f}s (--relocate to place it again)")
         return {"status": "kept"}
@@ -131,16 +163,44 @@ def process(audio: Path, config, relocate: bool, dry_run: bool, log=print) -> di
     )
     if found["start"] < -0.5 or found["end"] > duration + 0.5:
         log("  !! the score runs past the recording's edge — a cut transfer, or a wrong take")
-    region = [round(max(0.0, found["start"]), 3), round(min(duration, found["end"]), 3)]
+    beats = tracked_beats(audio, config, duration)
+    bars = bars_on_grid(
+        clock_anchors(score, notes, found),
+        beats,
+        quarters=score.bars * score.beats_per_bar,
+        pulses_per_bar=round(score.beats_per_bar),
+    )
+    start, end, anchor = found["start"], found["end"], None
+    if bars["trusted"]:
+        lead = LEAD_BEATS * found["seconds_per_quarter"]
+        start = bars["bar_one"] - lead if bars["bar_one"] is not None else 0.0
+        end = bars["end"] if bars["end"] is not None else duration
+        anchor = bars["anchor"]
+        where = "before the file begins" if bars["bar_one"] is None else f"{bars['bar_one']:.2f}s"
+        log(
+            f"  bar 1 on the beat grid: {where} ({bars['share']:.0%} of {bars['votes']} "
+            f"notes agree; the line said {found['start']:.2f}s)"
+        )
+    else:
+        log(
+            f"  !! the beat grid does not carry the score's pulse ({bars['share']:.0%} of "
+            f"{bars['votes']} notes on one beat) -- no downbeat written, the tracker's stands"
+        )
+    region = [round(max(0.0, start), 3), round(min(duration, end), 3)]
+    if keeps_span:
+        region = stored["region"]
     settings = {
         "model": config.separate.model,
         "ensemble": config.transcribe.ensemble,
         "stem": config.transcribe.stem,
         "region": region,
-        # Bar 1 of the score, so the page's bar lines are the book's
-        # (notation.span_anchor reads the anchor's phase off the whole grid).
-        "anchor": region[0],
-        "form_start": region[0],
+        # A beat of the grid that carries the book's bar line, so the page's
+        # bar lines are the book's (notation.span_anchor reads the anchor's
+        # phase off the whole grid). None clears a stored one: a downbeat we
+        # cannot vouch for is worse than the tracker's own, which named the
+        # right beat on all twenty-two sides where ours named eleven.
+        "anchor": None if anchor is None else round(anchor, 3),
+        "form_start": None if anchor is None else round(anchor, 3),
         "score": str(score_path.resolve()),
         "beats_shown": True,
     }
@@ -157,6 +217,9 @@ def main() -> None:
     parser.add_argument("--folder", default="", help="a subfolder of benchmark/ (e.g. Omnibook)")
     parser.add_argument("--file", action="append", default=[], help="only these files (repeatable)")
     parser.add_argument("--relocate", action="store_true", help="replace a span already stored")
+    parser.add_argument(
+        "--bars-only", action="store_true", help="keep a stored span, re-vote its downbeat"
+    )
     parser.add_argument("--dry-run", action="store_true", help="report only, write nothing")
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     parser.add_argument("--model", default=None, help="separation model (default: the config's)")
@@ -198,7 +261,7 @@ def main() -> None:
     tally: dict[str, int] = {}
     for audio in files:
         print(f"\n== {audio.name} ==")
-        outcome = process(audio, base, args.relocate, args.dry_run)
+        outcome = process(audio, base, args.relocate, args.dry_run, bars_only=args.bars_only)
         tally[outcome["status"]] = tally.get(outcome["status"], 0) + 1
     print("\n" + ", ".join(f"{count} {status}" for status, count in sorted(tally.items())))
 

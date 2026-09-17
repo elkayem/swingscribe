@@ -215,6 +215,16 @@ def test_an_empty_score_is_still_a_valid_document():
     assert root.find("part") is not None
 
 
+def test_the_part_name_is_kept_and_not_printed():
+    """MuseScore draws a printed part-name left of the first system; ours is
+    the filename, which the title already carries."""
+    body = to_musicxml(Notation(), part_name="Au_Privave_1")
+    root = ElementTree.fromstring(body[body.index("<score-partwise") :])
+    name = root.find("part-list/score-part/part-name")
+    assert name.text == "Au_Privave_1"
+    assert name.get("print-object") == "no"
+
+
 def test_the_document_declares_itself_musicxml():
     xml = to_musicxml(Notation(bars=[bar_of([note(0.0, 4.0)])]))
     assert xml.startswith("<?xml version=")

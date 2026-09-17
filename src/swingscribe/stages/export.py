@@ -236,7 +236,11 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
 
     part_list = ElementTree.SubElement(root, "part-list")
     score_part = ElementTree.SubElement(part_list, "score-part", {"id": "P1"})
-    ElementTree.SubElement(score_part, "part-name").text = part_name
+    # The schema requires a part-name; a notation program prints it as the
+    # instrument label left of the first system, where the track's filename
+    # (what callers pass) is noise beside a title that already says it.
+    name = ElementTree.SubElement(score_part, "part-name", {"print-object": "no"})
+    name.text = part_name
 
     part = ElementTree.SubElement(root, "part", {"id": "P1"})
     previous_signature = None
