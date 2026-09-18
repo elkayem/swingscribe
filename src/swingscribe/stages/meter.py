@@ -64,7 +64,7 @@ BRIDGE_BEATS = 1
 
 # 2: with no anchor set, the downbeat is voted around the transcribe region
 # rather than over the whole track (`_auto_anchor`, D32).
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -106,6 +106,18 @@ def _rolling_median(values: list[float], window: int) -> list[float]:
     return out
 
 
+# An interval under three quarters of the seed says something about the
+# pulse only when it is HALF of it, within this fraction: a tracker at double
+# rate emits halves, while a swung offbeat or a ghost beat emits neither.
+# Anything else that short is left out of the reference. Longer intervals
+# enter as the whole multiple they round to, as they always did, so the
+# reference still follows a genuine change of tempo.
+REFERENCE_HALF_FIT = 0.15
+# Fitting intervals wanted in a window before the local median is believed;
+# with fewer, the seed stands.
+REFERENCE_MIN_FIT = 3
+
+
 def reference_pulse(intervals: list[float]) -> list[float]:
     """The pulse rate the tune is *actually* running at, per interval.
 
@@ -115,6 +127,18 @@ def reference_pulse(intervals: list[float]) -> list[float]:
     that to guess how many pulses each interval spans, divide it out, and smooth
     the *implied* pulse. Half-rate regions contribute their halved value, so the
     reference stays on the true rate while still following genuine tempo drift.
+
+    A stretch tracked at DOUBLE rate must not pull the reference down with it
+    (2026-09-18, R26): Curtis Fuller's Blue Train solo is tracked at half the
+    pulse for 44% of its length, and a rolling median that followed those
+    intervals called every one of them a beat -- 66 extra beats on the page.
+    So an interval under three quarters of the seed enters the median only
+    as half a pulse, and only when it is one within `REFERENCE_HALF_FIT`. A
+    swung offbeat (0.64 + 0.36 of a pulse), a ghost 80 ms from a real beat,
+    a rubato interval say nothing and are left out; where too few remain in
+    a window, the seed stands. Longer intervals enter as the whole multiple
+    they round to, as before, so a passage at another tempo still moves the
+    reference with it.
     """
     if not intervals:
         return []
@@ -127,60 +151,96 @@ def reference_pulse(intervals: list[float]) -> list[float]:
     seed = max(counts.items(), key=lambda kv: (kv[1], -kv[0]))[0]
     if seed <= 0:
         seed = statistics.median(intervals)
+    if seed <= 0:
+        return list(intervals)
 
-    implied = [value / max(1, round(value / seed)) if seed > 0 else value for value in intervals]
-    return _rolling_median(implied, REFERENCE_WINDOW)
+    implied: list[float | None] = []
+    for value in intervals:
+        ratio = value / seed
+        if ratio >= 0.75:
+            implied.append(value / round(ratio))
+        elif abs(ratio / 0.5 - 1.0) <= REFERENCE_HALF_FIT:
+            implied.append(value * 2.0)
+        else:
+            implied.append(None)
+    out = []
+    for i in range(len(intervals)):
+        lo, hi = max(0, i - REFERENCE_WINDOW), i + REFERENCE_WINDOW + 1
+        window = [value for value in implied[lo:hi] if value is not None]
+        out.append(statistics.median(window) if len(window) >= REFERENCE_MIN_FIT else seed)
+    return out
 
 
-# A doubled beat: one the tracker put between two real ones. Each of its two
-# intervals is under this fraction of the reference pulse, the two together
-# make at most this many pulses, and the intervals either side of the pair are
-# ordinary — so a genuine double-time run, whose short intervals come in a
-# row, is never thinned. Measured need: Red Garland's Billy Boy, bar 107
-# (0.200, 0.140, 0.140, 0.220 s on a 0.220 s pulse), and 306 more of the
-# same shape across the 122 cached grids (docs/benchmark-deficiencies.md D28).
+# A doubled beat: one the tracker put between two real ones. It is judged as
+# a PAIR of intervals against the reference pulse, two ways:
+# - the pair together IS one pulse (within DOUBLED_PAIR_FIT) and one of its
+#   intervals is short: the tracker's beat on a swung offbeat (0.64 + 0.36),
+#   at double rate (0.5 + 0.5), or a ghost 80 ms from a real beat (0.82 +
+#   0.18). A run of these is a stretch tracked at double rate and is thinned
+#   to the pulse -- measured, not assumed (2026-09-18, R26): on six WJazzD
+#   solos such runs put 33 to 91 beats on the page that the annotator does
+#   not have, and no run anywhere in the three benchmarks was the band's;
+# - or, isolated between ordinary intervals, a ragged pair: each under
+#   DOUBLED_SHORT of the pulse and together at most DOUBLED_PAIR_MAX of it.
+#   Measured need: Red Garland's Billy Boy, bar 107 (0.200, 0.140, 0.140,
+#   0.220 s on a 0.220 s pulse), and 306 more of the same shape across the
+#   122 cached grids (docs/benchmark-deficiencies.md R21).
 DOUBLED_SHORT = 0.75
 DOUBLED_PAIR_MAX = 1.4
+DOUBLED_PAIR_FIT = 0.15
+# beat_this places beats on a 20 ms frame grid, so a pair's sum can miss
+# the pulse by a frame before any timing is involved -- at 221 bpm that is
+# 7% of a beat on its own, and Cheese Cake's last three slips were 0.22 +
+# 0.08 s pairs read against a 0.26 s reference (1.154 of it).
+TRACKER_FRAME_S = 0.02
 
 
 def drop_doubled_beats(beats: list[float], tolerance: float) -> list[float]:
-    """Remove the middle beat of an isolated short pair.
+    """Remove the middle beat of a pair of intervals that together make one
+    pulse, or of an isolated ragged short pair.
 
     The mirror of the insertion below, and the same harm: a beat the tracker
     doubled makes its bar a beat short and shifts every bar line after it by
     one beat for the rest of the tune. A doubled beat cannot be seen one
     interval at a time — each of its two short intervals rounds to one pulse
-    on its own — so it is judged as a pair against the reference pulse, and
-    only when the intervals on both sides of the pair are ordinary.
+    on its own — so it is judged as a pair against the reference pulse. The
+    left interval is taken on the KEPT sequence, so a run of doubled beats is
+    thinned one by one and the merged interval then reads as ordinary.
+
+    Not this function's problem: a grid tracked at HALF rate for most of a
+    tune (Kenny Garrett's Brother Hubbard, 0.82 s on a 143 bpm tune). Its
+    seed is the half-rate pulse, so the true beats surfacing in pairs are
+    exactly what this thins -- the octave error is the defect there, open
+    since R21, and a tempo hint (`beats.correct_octave`) is its repair.
     """
     if len(beats) < 4:
         return list(beats)
     intervals = [b - a for a, b in zip(beats, beats[1:], strict=False)]
     reference = reference_pulse(intervals)
     kept = [beats[0]]
-    skip = False
     for i in range(1, len(beats) - 1):
-        if skip:  # the beat after a dropped one: its left interval is the merged one
-            skip = False
+        pulse = reference[i]
+        if pulse <= 0:
             kept.append(beats[i])
             continue
-        pulse = reference[i]
-        before, after = intervals[i - 1], intervals[i]
-        outer_ok = (
-            i >= 2
-            and i + 1 < len(intervals)
-            and abs(intervals[i - 2] - pulse) <= tolerance * pulse
-            and abs(intervals[i + 1] - pulse) <= tolerance * pulse
+        before, after = beats[i] - kept[-1], intervals[i]
+        one_pulse = (
+            abs(before + after - pulse) <= DOUBLED_PAIR_FIT * pulse + TRACKER_FRAME_S
+            and min(before, after) < DOUBLED_SHORT * pulse
         )
-        if (
-            pulse > 0
-            and outer_ok
+        ordinary_left = len(kept) >= 2 and abs((kept[-1] - kept[-2]) - pulse) <= tolerance * pulse
+        ordinary_right = (
+            i + 1 < len(intervals) and abs(intervals[i + 1] - pulse) <= tolerance * pulse
+        )
+        ragged_pair = (
+            ordinary_left
+            and ordinary_right
             and before < DOUBLED_SHORT * pulse
             and after < DOUBLED_SHORT * pulse
             and before + after <= DOUBLED_PAIR_MAX * pulse
-        ):
-            skip = True  # drop beats[i]; beats[i + 1] is kept as is
-            continue
+        )
+        if one_pulse or ragged_pair:
+            continue  # drop beats[i]
         kept.append(beats[i])
     kept.append(beats[-1])
     return kept
@@ -315,6 +375,31 @@ def metrical_spans(beats: list[Beat], config: MeterConfig) -> list[tuple[int, in
         reference > 0 and abs(gap - reference) / reference <= config.stability_tolerance
         for gap, reference in zip(intervals, local, strict=False)
     ]
+    # A run of implied beats is an even subdivision of one detected gap, so
+    # its intervals are within a fraction of the pulse of each other BY
+    # CONSTRUCTION -- a gap of 3.7 pulses cut in four reads as steady on the
+    # test above, and a free intro whose gaps happen to cut that way was
+    # drawn with bar lines (So What's, for 23 seconds). The gap itself has
+    # to be a whole number of pulses, within the tolerance of ONE pulse: the
+    # tracker found both ends of it where the pulse says they are. A gap
+    # that is not has no beats in it that anyone found.
+    index = 0
+    while index < len(beats):
+        if not beats[index].implied or beats[index].extrapolated:
+            index += 1
+            continue
+        end = index
+        while end < len(beats) and beats[end].implied and not beats[end].extrapolated:
+            end += 1
+        first, last = index - 1, end  # the detected beats either side
+        if first >= 0 and last < len(beats):
+            gap = beats[last].time - beats[first].time
+            reference = statistics.median(local[first:last])
+            whole = abs(gap - (last - first) * reference) <= config.stability_tolerance * reference
+            if not whole:
+                for k in range(first, last):
+                    steady[k] = False
+        index = end
 
     spans: list[tuple[int, int]] = []
     start: int | None = None

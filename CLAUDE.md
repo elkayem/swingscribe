@@ -376,14 +376,28 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   beat and a doubled beat each shift every bar line after them by one
   beat; `repair_beats` inserted for the first and ignored the second until
   Billy Boy's bar 107 came up three beats where two belong.
-  `meter.drop_doubled_beats` takes the middle beat of an isolated short
-  pair (each interval under 0.75 of the reference pulse, together at most
-  1.4 of it, ordinary intervals either side — so a double-time run is never
-  thinned). 382 beats on 62 of the 122 cached grids; the page's rhythm
-  measure barely moves (WJazzD 0.6268 -> 0.6272 over 74, 14 up / 5 down)
-  because it is gap-based and cannot see a bar count. A half-rate grid
-  with the true pulse surfacing (Brother Hubbard) is NOT this defect and
-  reads worse after it; that is the octave error's, still open (R21). The
+  `meter.drop_doubled_beats` takes the middle beat of a pair of intervals
+  that together make ONE PULSE (within 0.15 of it plus a 20 ms tracker
+  frame), isolated or not -- a run of them is a stretch tracked at double
+  rate, and every such run in the three benchmarks was the tracker's, not
+  the band's (2026-09-18, R26: Fuller's Blue Train at double rate for 44%
+  of the solo, +66 beats on the page; six WJazzD solos, +33 to +91). The
+  old rule took only an ISOLATED short pair and "never thinned a
+  double-time run"; that isolated rule stays for the ragged pair (Billy
+  Boy's, 1.27 of a pulse). `reference_pulse` admits an interval under
+  three quarters of the seed only as a half within 15%, so a stretch of
+  halves cannot drag the reference down with it; longer intervals still
+  follow a change of tempo. `metrical_spans` asks whether a detected gap
+  is a whole number of pulses before the beats implied inside it count as
+  steady (So What's rubato intro had bar lines). The page's rhythm
+  measure moves only where the grid was wrong (Fuller 0.40 -> 0.56, Totem
+  Pole 0.52 -> 0.77) because it is gap-based and cannot see a bar count.
+  A half-rate grid with the true pulse surfacing (Brother Hubbard, Adam's
+  Apple, Nothing Personal) is NOT this defect and reads worse after it:
+  the seed IS the half-rate pulse, and that is the octave error's, still
+  open (R21). A ragged stretch is still repaired pair by pair, so the
+  count across it can be a beat off (D33, In 'n Out at 300 bpm);
+  `scripts/grid_drift.py` measures both against every reference. The
   harness sees it since 2026-09-11 (R22): `run_eval` builds its page
   through `notation.bar_grid_for_settings`, the same repaired grid under
   the same sidecar meter the Export button uses, and its rhythm is within
@@ -864,10 +878,12 @@ list of what is actually wrong; run everything with one command:
   same reason the page does -- keep them agreeing.
 - **`score_bars.difference_trace` says WHERE a page leaves its bar lines**:
   a constant is a downbeat, a step a slipped beat, a slope a grid at the
-  wrong pulse. It prints under any scorecard row in doubt. On WJazzD 8 of
-  73 grids are off the annotated pulse and 15 more slip part-way, mostly
-  GAINING a beat (37 of 56 steps are +1) -- open (D32.3), and the next
-  thing to fix in the grid repair.
+  wrong pulse. It prints under any scorecard row in doubt. It found R26:
+  on WJazzD 8 of 73 grids were off the annotated pulse and 15 more
+  slipped part-way, mostly GAINING a beat -- six of them stretches tracked
+  at double rate that the repair could not see. Now 70 of 73 on the bar
+  (placement 0.795 -> 0.835); the four half-rate grids (R21) and the
+  ragged stretches at 300 bpm (D33) remain.
 - **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
   this notate the way a human notated it?" It charges the gap between
   performed timing and notated rhythm to the transcriber, so it reads lower

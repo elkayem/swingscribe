@@ -1188,7 +1188,7 @@ Omnibook 22 of 22 (0.856), **WJazzD 62 of 73 (0.747)**.
    live on So What, whose bar lines move one beat, to the annotator's. It
    changes nothing pinned: every benchmark sidecar carries an anchor. It is
    for the listener who never places one.
-3. *Open: the grid itself.* `score_bars.difference_trace` follows (ours -
+3. *The grid itself -- resolved as R26 the next day.* `score_bars.difference_trace` follows (ours -
    theirs) along a page: a wrong downbeat is one constant, a slipped beat a
    STEP at a bar, a chorus the reference omits a step of whole bars, a grid
    at the wrong pulse a SLOPE. It prints under any row in doubt and pins
@@ -1205,9 +1205,123 @@ Omnibook 22 of 22 (0.856), **WJazzD 62 of 73 (0.747)**.
    the Omnibook has two pages with one. A gained beat is either a doubled
    beat `drop_doubled_beats` does not catch or an implied beat
    `repair_beats` should not have inserted; nobody has looked yet, and the
-   trace names the bar to look at.
+   trace names the bar to look at. (Looked at 2026-09-18: it was the
+   first, in stretches, and the repair could not see a stretch -- R26.)
+
+### D33 - A ragged stretch is repaired pair by pair, so the count across it can still be a beat off
+
+Found 2026-09-18 while closing R26. At 300 bpm a tracker frame (20 ms) is
+a tenth of a beat, and Joe Henderson's In 'n Out is tracked in stretches
+whose intervals are 0.3-1.3 of the pulse in no pattern; the pair rule
+thins what it can read, and the page still steps a beat eleven times
+(`on_the_bar` 0.27 -> 0.50, the rest of the solo a beat off one way or
+the other), Kenny Dorham's solo on the same file four times, Totem Pole
+three. Across a stretch the reference pulse is known, so the number of
+beats in it is its duration divided by the pulse, whatever the tracker
+put there; repairing an unsteady stretch by COUNT rather than by pairs is
+the next thing, and `scripts/grid_drift.py` is the instrument. Also still
+open, and now cemented rather than ragged: the four grids tracked at half
+rate for most of the track (both Brother Hubbards, Adam's Apple, Nothing
+Personal), whose seed IS the half-rate pulse -- R21's octave error, for
+`beats.correct_octave` and a tempo hint.
 
 ## Resolved
+
+### R26 - The grid repair could not see a stretch tracked at double rate, and six WJazzD pages carried 33 to 91 beats the annotator does not have
+
+Found 2026-09-18 by following D32's trace to the bar it named.
+`scripts/grid_drift.py` (new) lays the annotator's positions on our RAW
+tracker beats and on the repaired grid through the same true pitch
+matches `downbeat_truth.py` votes with, and the drift of (our beat
+coordinate - their position) over a solo says how many beats our grid
+gained or lost on theirs. Over 73 WJazzD solos the raw tracker drifts by
+a beat or more on 26; the shipped repair fixed the single dropped beats
+(Cherokee -15.5 -> -0.1, Joy Spring -3.8 -> +0.2, both Dolores solos to
+0) and none of the large ones. Classing every raw interval inside each
+solo by its ratio to WJazzD's own tempo: on six solos the tracker runs at
+DOUBLE rate for a stretch -- Curtis Fuller's Blue Train 44% of the solo,
+Totem Pole 40%, both Sidewinders 34%, Cheese Cake 11%, My Favorite Things
+2% -- while the global seed pulse is right on every one (0.97-1.03 of the
+annotated pulse). On four more the whole TRACK is at half rate (Brother
+Hubbard 0.68 and 0.90 of the solo at 2x, Adam's Apple and Nothing
+Personal 0.35), and there the seed itself is the wrong octave.
+
+Two things in `meter.py` kept the six from being repaired. The reference
+pulse (`reference_pulse`) let every interval in as "one beat" when it was
+under 1.5 of the seed, so a rolling median over a stretch of halves
+followed them down and called each half a beat; and `drop_doubled_beats`
+required a short pair to be ISOLATED between ordinary intervals -- written
+so that "a genuine double-time run is never thinned", and no such run
+exists in any of the three benchmarks: every run of halves was the
+tracker's. Cheese Cake's shape is the tracker's extra beat on the swung
+offbeat (0.18 + 0.10 s on a 0.28 s pulse, for bars at a time); My
+Favorite Things' is a ghost 80 ms before a real beat (0.26 + 0.08 on
+0.34); Fuller's and the Sidewinders' are plain halves.
+
+What ships (`meter.CACHE_VERSION` 3):
+
+- **`reference_pulse` admits an interval under three quarters of the seed
+  only as HALF a pulse, and only when it is one within 15%.** Longer
+  intervals enter as the whole multiple they round to, as before, so a
+  passage at another tempo still moves the reference (April In Paris'
+  section at 1.3 of the pulse keeps its bars). A swung offbeat, a ghost, a
+  rubato interval say nothing; with fewer than three fitting intervals in
+  a window the seed stands.
+- **A pair of intervals that together make one pulse holds a beat that is
+  not one, isolated or not** (`DOUBLED_PAIR_FIT` 0.15 of the pulse plus
+  one tracker frame, `TRACKER_FRAME_S` 0.02 -- beat_this places beats on
+  a 20 ms grid, and Cheese Cake's last three slips were 0.22 + 0.08 s
+  pairs read against a 0.26 s reference, 1.154 of it). The left interval
+  is taken on the KEPT sequence, so a run is thinned one beat at a time
+  and the merged interval reads as ordinary. The shipped isolated rule
+  stays for the ragged pair (Billy Boy's, 1.27 of a pulse).
+- **`metrical_spans` asks whether a detected gap is a whole number of
+  pulses before the beats implied inside it can count as steady.** An
+  even subdivision of any gap is within a fraction of the pulse of itself
+  by construction, and once the reference stopped being dragged down by
+  outliers, a synthetic rubato intro read as steady; So What's real one
+  had been drawn with bar lines all along. Coverage over the 144 cached
+  grids 52,313 -> 53,031 s in 1,039 -> 870 spans -- the double-rate
+  stretches used to fragment them -- with the losses at intros and codas
+  (So What's first 2 s and 17.6-23.3 s, My Funny Valentine's first 12 s,
+  April In Paris' intro at 0.6 of the pulse, which the pair rule now
+  thins in part).
+
+Measured before shipping, drift over the solo, shipped -> new: Fuller's
+Blue Train +66.1 -> +0.1, Joe Henderson's Sidewinder +64.9 -> -0.1, Lee
+Morgan's +57.9 -> +0.9, Totem Pole +94.9 -> +5.9, Cheese Cake +44.1 ->
++1.1, My Favorite Things +29.9 -> +0.9, Oleo (Coltrane) +6.9 -> +1.9,
+Speak No Evil +9.1 -> +1.1, So What (Adderley) +5.1 -> +0.2, So What
+(Coltrane) +3.1 -> +0.1, Blue Train (Coltrane) +4.0 -> 0.0, In 'n Out
++19.5 -> +11.5 and +9.9 -> +2.9, Dorham's +9.3 -> +4.3; the listener's
+Dexter Gordon Confirmation +8.0 -> 0.0 (three slips to none). WJazzD
+pages within a beat of the annotator over the whole solo 47 -> 57 of 73;
+the four half-rate grids read worse (-77 -> -101, -123 -> -125, -74 ->
+-145, -100 -> -190), because the pair rule now thins their true beats
+consistently -- R21's open octave error, not this one. The listener's
+twelve and the Omnibook's 22 move nothing else.
+
+Through the harness: `summary/wjazz_placement` 0.795 -> 0.835 and 67 ->
+70 of 73 pages on the bar (Fuller 0.35 -> 0.85, Sidewinder 0.26 -> 0.90,
+Totem Pole 0.22 -> 0.54, My Favorite Things 0.33 -> 0.84, Speak No Evil
+0.61 -> 0.86, In 'n Out 0.27 -> 0.50, nothing off);
+`summary/mscz_placement` 0.867 -> 0.899, Confirmation's `on_the_bar` 0.49
+-> 0.87 with notated rhythm 0.750 -> 0.760 and value 0.664 -> 0.673; the
+Omnibook 22 of 22 at 0.856, unchanged. WJazzD notated rhythm where the
+grid was wrong: Fuller 0.397 -> 0.564, Sidewinder 0.517 -> 0.696 and
+0.625 -> 0.718, Totem Pole 0.523 -> 0.769, My Favorite Things 0.594 ->
+0.638, Cheese Cake 0.610 -> 0.634, Speak No Evil 0.546 -> 0.573; So What
+0.688 -> 0.678 (rhythm is gap-based and nearly phase-immune, so these are
+small by design). The price, on the half-rate grids: Nothing Personal
+0.465 -> 0.119, Adam's Apple 0.356 -> 0.194, Brother Hubbard 0.343 ->
+0.270 -- a grid twice too long, consistently now. Note F1 and beat F1 are
+untouched (the notes and the tracker did not change); the error
+taxonomy's 96 + 55 counts are unchanged. The WJazzD sheet re-ran with
+`--reuse-span` (the batch's voted downbeats sit on the repaired grid).
+Tests: the "genuine double-time run is not thinned" case is now its
+opposite, with the swung, ghost, other-tempo, ragged, rubato-intro and
+half-rate-intro shapes beside it.
+
 
 ### R25 - Two copies of one recording shared a stems digest, and a later whole-file separation changed what a measured span read (was D31)
 

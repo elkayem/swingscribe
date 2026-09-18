@@ -139,22 +139,105 @@ def test_the_billy_boy_bar_is_repaired_to_four_beats():
     assert max(intervals) < 0.30 and min(intervals) > 0.19
 
 
-def test_a_genuine_double_time_run_is_not_thinned():
-    """Eight intervals at half the pulse in a row are a passage, not a doubled
-    beat: only an ISOLATED short pair, with ordinary intervals either side,
-    is a tracker's mistake."""
-    times = steady(21) + [10.0 + 0.25 * k for k in range(1, 8)] + steady(20, start=12.0)
+def test_a_run_tracked_at_double_rate_is_thinned_to_the_pulse():
+    """R26: this used to be 'a genuine double-time run is not thinned'. It was
+    measured the other way -- Curtis Fuller's Blue Train, both Sidewinders,
+    Totem Pole and Cheese Cake are tracked at double rate for a tenth to a
+    half of the solo, 33 to 91 beats the annotator does not have, and no run
+    of halves anywhere in the three benchmarks was the band's."""
+    times = steady(21) + [10.0 + 0.25 * k for k in range(1, 16)] + steady(20, start=14.0)
+    beats = meter.repair_beats(times, MeterConfig())
+    assert [b.time for b in beats] == steady(48)
+    assert not any(b.implied for b in beats)
+
+
+def test_a_swung_doubled_run_is_thinned():
+    """Cheese Cake's shape at 221 bpm: the tracker's extra beat sits on the
+    swung offbeat, 0.18 + 0.10 s on a 0.28 s pulse, for bars at a time. The
+    two halves are unequal, so neither reads as half a pulse on its own; the
+    pair reads as one."""
+    head = steady(30, ibi=0.28)
+    run = []
+    t = head[-1]
+    for _ in range(12):
+        run += [round(t + 0.18, 6), round(t + 0.28, 6)]
+        t = round(t + 0.28, 6)
+    tail = steady(30, ibi=0.28, start=round(t + 0.28, 6))
+    beats = meter.repair_beats(head + run + tail, MeterConfig())
+    intervals = [round(b.time - a.time, 3) for a, b in zip(beats, beats[1:], strict=False)]
+    assert set(intervals) == {0.28}
+    assert not any(b.implied for b in beats)
+
+
+def test_a_ghost_beat_before_a_real_one_is_dropped_even_in_a_run():
+    """My Favorite Things' shape: a beat 80 ms before a real one, 0.26 + 0.08
+    on a 0.34 s pulse, again and again. The long half is over 0.75 of the
+    pulse, so it is not a short pair; the pair is one pulse."""
+    times = steady(20, ibi=0.34)
+    t = times[-1]
+    for _ in range(6):
+        times += [round(t + 0.26, 6), round(t + 0.34, 6), round(t + 0.68, 6)]
+        t = round(t + 0.68, 6)
+    beats = meter.repair_beats(times, MeterConfig())
+    intervals = [round(b.time - a.time, 3) for a, b in zip(beats, beats[1:], strict=False)]
+    assert set(intervals) == {0.34}
+
+
+def test_a_passage_at_another_tempo_is_not_thinned():
+    """Twenty intervals at 0.6 of the pulse are a tempo, not doubled beats: no
+    pair of them makes one pulse, and no pair is isolated."""
+    times = steady(21) + [round(10.0 + 0.3 * k, 6) for k in range(1, 21)] + steady(20, start=16.5)
     beats = meter.repair_beats(times, MeterConfig())
     assert len(beats) == len(times)
 
 
 def test_a_short_pair_in_a_ragged_passage_is_left_alone():
-    """Without ordinary intervals on both sides there is no pulse to say the
-    pair is wrong, and a rubato passage must not be edited into steadiness."""
-    times = [0.0, 0.5, 1.0, 1.4, 1.65, 1.9, 2.2, 2.9, 3.4, 3.9]
+    """Without ordinary intervals on both sides, and with no pair making one
+    pulse, there is no pulse to say a short interval is wrong; a rubato
+    passage must not be edited into steadiness."""
+    times = [0.0, 0.5, 1.0, 1.4, 1.7, 2.15, 2.9, 3.4, 3.9]
     beats = meter.repair_beats(times, MeterConfig())
-    assert 1.65 in [b.time for b in beats]
-    assert 1.9 in [b.time for b in beats]
+    assert 1.7 in [b.time for b in beats]
+    assert 2.15 in [b.time for b in beats]
+
+
+def test_reference_pulse_holds_through_a_double_rate_stretch():
+    """The reference the pair test needs: a rolling median that followed the
+    halves called every one of them a beat."""
+    intervals = [0.5] * 20 + [0.25] * 30 + [0.5] * 20
+    reference = meter.reference_pulse(intervals)
+    assert all(abs(r - 0.5) < 1e-9 for r in reference)
+    # and it still follows a half-rate stretch down to the true pulse
+    intervals = [0.5] * 20 + [1.0] * 30 + [0.5] * 20
+    reference = meter.reference_pulse(intervals)
+    assert all(abs(r - 0.5) < 1e-9 for r in reference)
+    # and it still follows a genuine change of tempo, as it always did
+    intervals = [0.5] * 20 + [0.65] * 30
+    assert meter.reference_pulse(intervals)[-1] == pytest.approx(0.65)
+
+
+def test_a_free_intro_whose_gaps_subdivide_neatly_still_gets_no_bars():
+    """So What's rubato intro: the tracker's few beats there sit 1.6, 2.7
+    and 3.7 pulses apart, and an even subdivision of any of those gaps is
+    within a fraction of the pulse of itself. The gap has to be a whole
+    number of pulses before the beats invented inside it can count."""
+    rubato = [0.0, 0.8, 1.35, 2.15, 2.5, 3.85, 4.15, 4.45, 6.3]
+    times = rubato + [round(9.0 + i * 0.5, 6) for i in range(60)]
+    beats = meter.repair_beats(times, MeterConfig())
+    spans = meter.metrical_spans(beats, MeterConfig())
+    assert len(spans) == 1
+    assert beats[spans[0][0]].time >= 6.3
+
+
+def test_a_half_rate_intro_keeps_its_bars_under_the_whole_gap_test():
+    """The Corner Pocket case again, through metrical_spans: every other beat
+    found, every gap exactly two pulses, so the subdivided intro is a span."""
+    intro = [round(i * 1.0, 6) for i in range(20)]
+    body = [round(20.0 + i * 0.5, 6) for i in range(80)]
+    beats = meter.repair_beats(intro + body, MeterConfig())
+    spans = meter.metrical_spans(beats, MeterConfig())
+    assert len(spans) == 1
+    assert beats[spans[0][0]].time == pytest.approx(0.0)
 
 
 # ── metrical spans ──────────────────────────────────────────────────────────
