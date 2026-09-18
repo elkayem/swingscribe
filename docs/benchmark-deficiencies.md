@@ -1218,12 +1218,29 @@ thins what it can read, and the page still steps a beat eleven times
 the other), Kenny Dorham's solo on the same file four times, Totem Pole
 three. Across a stretch the reference pulse is known, so the number of
 beats in it is its duration divided by the pulse, whatever the tracker
-put there; repairing an unsteady stretch by COUNT rather than by pairs is
-the next thing, and `scripts/grid_drift.py` is the instrument. Also still
+put there. Tried the same day, measured with `scripts/grid_drift.py`, and
+NOT shipped: (a) repairing every unsteady stretch by count -- its duration
+over the reference, when that is whole within the tolerance -- moves one
+more WJazzD page within a beat (58 -> 59 of 73), In 'n Out +11.5 -> +10.5,
+and costs Cherokee two beats (-0.1 -> -2.1) and Kim two-thirds of one: at
+340 bpm the tolerance is a tracker frame, so a stretch's count is a coin
+toss; (b) a reference window measured in seconds (+-4 s) instead of +-8
+intervals, so the rolling median stops wandering with the jitter at 300
+bpm: Orbits +3.2 -> +0.2 and In 'n Out +11.5 -> +8.5, Speak No Evil +0.1
+-> +1.1, 58 -> 58; (c) both together: 58 -> 59. What remains is at the
+level of one frame (a 0.30 s gap on a 0.20 s pulse is one beat or two),
+and a rule at that level needs the audio, not the intervals. Also still
 open, and now cemented rather than ragged: the four grids tracked at half
 rate for most of the track (both Brother Hubbards, Adam's Apple, Nothing
 Personal), whose seed IS the half-rate pulse -- R21's octave error, for
-`beats.correct_octave` and a tempo hint.
+`beats.correct_octave` and a tempo hint. Not readable off the notes
+either (measured 2026-09-18): the phase of our onsets within the grid's
+beat peaks at a half on those four, and just as strongly on So What,
+Blue Train and every tune over 280 bpm, where the eighth notes are. That
+decision needs the audio or the listener; a tempo hint through
+`beats` re-runs the whole chain below it, so the control belongs in
+`meter`, after transcribe, where doubling or halving a grid costs nothing
+cached.
 
 ## Resolved
 
