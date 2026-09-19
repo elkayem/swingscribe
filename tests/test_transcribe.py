@@ -866,6 +866,36 @@ def test_a_blocked_resampy_dll_is_stubbed_not_raised(monkeypatch):
         stub.resample()
 
 
+def test_the_viterbi_path_runs_crepe_on_the_resolved_device(monkeypatch):
+    """torchcrepe.infer MOVES its cached model to its `device` argument, which
+    defaults to cpu. The Viterbi path left it out, so on the first CUDA machine
+    (2026-09-17) the frames went to cuda, the weights to cpu, and every
+    transcription died in conv2d. Fakes torchcrepe: the device plumbing is the
+    whole question, and CI has no GPU to ask it of."""
+    import types
+
+    torch = pytest.importorskip("torch", reason="ml dependency group not installed")
+    np = pytest.importorskip("numpy")
+    from swingscribe.stages import transcribe
+
+    seen = []
+
+    def preprocess(audio, rate, hop_length, batch_size, device):
+        seen.append(("preprocess", device))
+        yield torch.zeros(50, 1024)
+
+    def infer(frames, model="full", device="cpu", embed=False):
+        seen.append(("infer", device))
+        return torch.full((frames.shape[0], 360), 0.5)
+
+    fake = types.SimpleNamespace(preprocess=preprocess, infer=infer)
+    monkeypatch.setattr(transcribe, "_import_torchcrepe", lambda: fake)
+    tc = TranscribeConfig(pitch_step_cost=0.5)
+    f0, _ = transcribe._crepe_track(np.zeros(16000, dtype=np.float32), tc, "cuda")
+    assert seen == [("preprocess", "cuda"), ("infer", "cuda")]
+    assert len(f0) == 50
+
+
 def test_the_piano_oracle_gets_a_passthrough_numba_when_its_dll_is_blocked(monkeypatch):
     import sys
 

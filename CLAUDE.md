@@ -46,10 +46,18 @@ never change a key.
 - **Stage modules must lazy-import heavy libs inside functions** (torch,
   torchaudio, demucs). pipeline/cli/tests must stay importable without the
   ml group, or CI breaks.
-- The original dev machine has NO NVIDIA GPU: torch comes from the CPU wheel
-  index (see pyproject). On a CUDA machine, switch the index URL to cu124
-  (plan §8) — never take CUDA availability for granted; separate.run logs
-  its resolved device.
+- torch comes from the CPU wheel index (see pyproject) and the lock pins
+  `+cpu` — the portable build depends on that. The dev machine has had an
+  RTX 3050 6GB since 2026-09-17 and runs `torch==2.12.1+cu130` /
+  `torchaudio==2.11.0+cu130` installed OVER the lock with `uv pip install
+  --python .venv --no-deps --index-url https://download.pytorch.org/whl/cu130`.
+  **Every `uv sync` puts the `+cpu` wheels back** and `auto` silently falls
+  to cpu — re-run that install after a sync. cu130, not cu124/cu126: SAC
+  refuses 2.12.1+cu126's `shm.dll` and `caffe2_nvrtc.dll` (every other
+  cp311 CUDA wheel 2.4-2.12.1 probed clean). Never take CUDA availability
+  for granted; separate.run logs its resolved device — except the Roformer
+  path, whose "cpu" in that log is a hardcoded string (audio-separator picks
+  cuda itself; check `nvidia-smi`).
 - **numba is unusable on the dev machine** — Windows Application Control
   blocks its compiled DLLs. That rules out librosa (hard numba dependency),
   so f0 is torchcrepe (CREPE) not pYIN, onsets are hand-rolled numpy
@@ -61,8 +69,15 @@ never change a key.
 
 ## This machine (environment traps that cost real time)
 
-Windows, no NVIDIA GPU, repo under OneDrive, and TLS is intercepted. Every one
-of these has broken a tool at least once:
+Windows, an RTX 3050 6GB (since 2026-09-17; see Dependencies for the torch
+install), repo under OneDrive, and TLS is intercepted. Every one of these has
+broken a tool at least once:
+
+- **GPU timings** (2026-09-17): BS-Roformer-SW separates 180 s of audio in
+  105 s (CPU ~7.5 min for a 3-minute side, 4.3x); GEMM 4.0 TFLOP/s fp32,
+  15.5 fp16. Under load the card holds 100%, 61 C, 66 of 70 W. Acronis
+  Active Protection flags the burst of `.pyc` writes after a torch reinstall
+  as ransomware — harmless, but it pauses the process until answered.
 
 - **TLS interception** breaks anything with a bundled cert store:
   - uv → set `UV_SYSTEM_CERTS=true`

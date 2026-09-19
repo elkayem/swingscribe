@@ -599,7 +599,11 @@ def _crepe_track(mono16, tc: TranscribeConfig, device: str, batch_size: int = 25
         ):
             # (frames, 360) per-bin probabilities — sigmoid is already applied
             # inside the model, despite `infer`'s docstring calling them logits.
-            chunks.append(torchcrepe.infer(frames, model=tc.crepe_model).cpu().numpy())
+            # `infer` MOVES its cached model to `device`, defaulting to cpu:
+            # without it the frames sit on cuda and the weights do not.
+            chunks.append(
+                torchcrepe.infer(frames, model=tc.crepe_model, device=device).cpu().numpy()
+            )
     probs = np.concatenate(chunks, axis=0).astype(np.float64)
 
     lo = int(np.floor(_hz_to_bin(tc.fmin_hz)))
