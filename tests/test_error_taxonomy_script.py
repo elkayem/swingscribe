@@ -30,6 +30,23 @@ def aggregate(counts, family_counts=None):
     }
 
 
+def test_a_review_is_the_runs_transcription_within_a_millisecond_of_rounding():
+    """The piano model on the GPU put one of Gingerbread Boy's 613 onsets a
+    millisecond from the CPU's; an exact match then discarded the solo's
+    frame evidence. Pitch and count must still agree exactly."""
+    run = [{"onset": 1.000, "pitch": 60}, {"onset": 304.249, "pitch": 75}]
+    assert error_taxonomy.same_transcription(
+        run, [{"onset": 1.0, "pitch": 60}, {"onset": 304.248, "pitch": 75}]
+    )
+    assert not error_taxonomy.same_transcription(
+        run, [{"onset": 1.0, "pitch": 60}, {"onset": 304.26, "pitch": 75}]
+    )
+    assert not error_taxonomy.same_transcription(
+        run, [{"onset": 1.0, "pitch": 60}, {"onset": 304.249, "pitch": 74}]
+    )
+    assert not error_taxonomy.same_transcription(run, run[:1])
+
+
 def test_flatten_names_every_count_by_class_and_family():
     flat = error_taxonomy.flatten(aggregate({"merged": 4, "gated": 2}))
     assert flat["count/merged"] == 4

@@ -298,6 +298,28 @@ class TrackEvidence(taxonomy.Evidence):
         )
 
 
+# How far a review's onsets may sit from the run's and still be the SAME
+# transcription. The two are computed by the same code from the same stems,
+# but not always on the same device: the piano model on the GPU put one of
+# Gingerbread Boy's 613 onsets a millisecond from where the CPU had it
+# (2026-09-18), and an exact match then threw away a whole solo's frame
+# evidence. A pitch must still agree exactly and the counts must match: a
+# different note list is a different transcription, whatever the device.
+SAME_ONSET_S = 0.002
+
+
+def same_transcription(run_notes, payload_notes) -> bool:
+    """Whether a review payload describes the run's notes: same count, same
+    pitches in order, onsets within `SAME_ONSET_S` (one millisecond of
+    rounding on either side)."""
+    if len(run_notes) != len(payload_notes):
+        return False
+    return all(
+        a["pitch"] == b["pitch"] and abs(a["onset"] - b["onset"]) <= SAME_ONSET_S
+        for a, b in zip(run_notes, payload_notes, strict=True)
+    )
+
+
 def load_evidence(name, run, sidecar, lo, hi, cache_dir, log=print):
     """Everything the classifier may ask about this solo, or as much of it
     as the caches hold."""
@@ -328,9 +350,7 @@ def load_evidence(name, run, sidecar, lo, hi, cache_dir, log=print):
         key = review.review_key(document, cfg, sidecar["model"])
         payload = review._cache(cfg).get_json(key)
         if payload is not None:
-            ours = [(round(n["onset"], 3), n["pitch"]) for n in run["notes"]]
-            theirs = [(n["onset"], n["pitch"]) for n in payload["notes"]]
-            if ours == theirs:
+            if same_transcription(run["notes"], payload["notes"]):
                 diagnostics = payload["diagnostics"]
             else:
                 log(f"  {name}: review cache holds a DIFFERENT transcription; no frame evidence")

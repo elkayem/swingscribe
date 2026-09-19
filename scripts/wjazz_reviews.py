@@ -38,6 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+import error_taxonomy  # noqa: E402
 import run_eval  # noqa: E402
 
 DEFAULT_CACHE_DIR = Path("benchmark/.swingscribe-cache")
@@ -102,9 +103,10 @@ def main() -> None:
         payload = review.analyze_and_cache(document, cfg, sidecar["model"])
         verdict = ""
         if name in runs:
-            ours = [(round(n["onset"], 3), n["pitch"]) for n in runs[name]["notes"]]
-            theirs = [(n["onset"], n["pitch"]) for n in payload["notes"]]
-            verdict = "matches run_eval" if ours == theirs else "DIFFERS from run_eval"
+            # The taxonomy's own test, so a payload this calls a match is one
+            # the taxonomy will read (a millisecond of device rounding allowed).
+            same = error_taxonomy.same_transcription(runs[name]["notes"], payload["notes"])
+            verdict = "matches run_eval" if same else "DIFFERS from run_eval"
         print(
             f"  {name}: {len(payload['notes'])} notes in {time.time() - started:.0f}s {verdict}",
             flush=True,
