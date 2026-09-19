@@ -701,7 +701,7 @@ def test_the_oracle_corrects_an_octave_and_drops_a_phantom(monkeypatch):
         NoteEvent(onset=5.0, duration=0.2, pitch=43, confidence=0.5, source="other:crepe"),
     ]
     got, extra, _pool = stage._consult_piano_oracle(
-        None, 44100, TranscribeConfig(ensemble="trio"), 0.0, notes
+        None, 44100, TranscribeConfig(ensemble="trio", piano_line="crepe"), 0.0, notes
     )
     assert [n.pitch for n in got] == [72]
     assert got[0].source == "other:crepe+piano"
@@ -727,7 +727,7 @@ def test_the_second_voice_is_opt_in_and_never_joins_the_line(monkeypatch):
         ],
     )
     notes = [NoteEvent(onset=1.0, duration=0.2, pitch=72, confidence=0.9, source="other:crepe")]
-    tc = TranscribeConfig(ensemble="trio", piano_second_voice=True)
+    tc = TranscribeConfig(ensemble="trio", piano_line="crepe", piano_second_voice=True)
     line, extra, _pool = stage._consult_piano_oracle(None, 44100, tc, 0.0, notes)
 
     assert [n.pitch for n in line] == [72]  # the line is untouched
@@ -803,18 +803,30 @@ def test_an_unavailable_oracle_falls_back_to_crepe_for_the_oracle_line(monkeypat
 
 
 def test_the_crepe_line_keys_exactly_as_before_the_line_fields_existed():
-    """Every transcribe cache key is a hash of this dump. The default line
-    leaves the new fields out, so no cached CREPE pass — the batch's hours,
-    the listener's open reviews — becomes a miss for a change that alters no
-    note. The oracle line dumps them and keys differently, as it must."""
-    crepe = TranscribeConfig(ensemble="trio").model_dump(mode="json")
+    """Every transcribe cache key is a hash of this dump. The CREPE line
+    leaves the line fields out, so no cached CREPE pass — the batch's hours,
+    the listener's open reviews — became a miss when the fields arrived. The
+    oracle line dumps them and keys differently, as it must; those keys were
+    the second take's before it became the default, so the flip moved none."""
+    crepe = TranscribeConfig(ensemble="trio", piano_line="crepe").model_dump(mode="json")
     assert "piano_line" not in crepe
     assert "piano_line_continuity" not in crepe
 
-    oracle = TranscribeConfig(ensemble="trio", piano_line="oracle").model_dump(mode="json")
+    oracle = TranscribeConfig(ensemble="trio").model_dump(mode="json")
     assert oracle["piano_line"] == "oracle"
     assert oracle["piano_line_continuity"] == 0.02
     assert {k: v for k, v in oracle.items() if not k.startswith("piano_line")} == crepe
+
+
+def test_a_horn_never_carries_the_line_in_its_key():
+    """A horn ignores `piano_line` (uses_piano_oracle gates every read), so
+    the default line must not enter its dump: every horn key across two
+    caches would otherwise have moved when the pianist default flipped."""
+    horn = TranscribeConfig().model_dump(mode="json")
+    assert TranscribeConfig().piano_line == "oracle"
+    assert "piano_line" not in horn
+    assert TranscribeConfig(piano_line="oracle").model_dump(mode="json") == horn
+    assert TranscribeConfig(piano_line="crepe").model_dump(mode="json") == horn
 
 
 def test_the_line_fields_survive_a_round_trip_through_config():
@@ -823,8 +835,8 @@ def test_the_line_fields_survive_a_round_trip_through_config():
     config = Config(transcribe={"ensemble": "trio", "piano_line": "oracle"})
     assert config.stage_config("transcribe")["piano_line"] == "oracle"
     assert Config.model_validate(config.model_dump()).transcribe.piano_line == "oracle"
-    assert Config().stage_config("transcribe").get("piano_line") is None
-    assert Config().transcribe.piano_line == "crepe"
+    assert Config().stage_config("transcribe").get("piano_line") is None  # horn-led
+    assert Config().transcribe.piano_line == "oracle"
 
 
 class _RefusesImport:

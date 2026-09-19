@@ -243,12 +243,14 @@ class TranscribeConfig(BaseModel):
     # simultaneity, chosen as a sequence by loudness rank and register
     # continuity, with silence allowed between phrases. Measured over the ten
     # piano spans with references: mean pitch F1 0.8017 -> 0.8655, better or
-    # equal on 9 of 10 (docs/issue8-line-selection.md). Only the pitch
-    # question is measured; notation and WJazzD audio scores are not, which
-    # is why "crepe" is still the default and the GUI offers "oracle" as a
-    # second take to compare by ear. Meaningless for a horn: it is read only
-    # where `uses_piano_oracle` is true.
-    piano_line: Literal["crepe", "oracle"] = "crepe"  # one of LINES
+    # equal on 9 of 10; then as NOTATION against the seven hand scores:
+    # pitch F1 0.788 -> 0.838, note F1 0.486 -> 0.515, notated rhythm 0.780
+    # -> 0.824 on all seven, WJazzD note F1 level (0.904 -> 0.898 over four)
+    # (docs/issue8-line-selection.md). The pianist default since 2026-09-18,
+    # the listener's call on that table; the GUI offers "crepe" as the other
+    # take to compare by ear. Meaningless for a horn: it is read only where
+    # `uses_piano_oracle` is true, and it never enters a horn's cache key.
+    piano_line: Literal["crepe", "oracle"] = "oracle"  # one of LINES
     # The picker's two weights, in velocity-rank units. A semitone of leap
     # costs about two percentile points of loudness; a note must beat silence
     # by ten. The surface is smooth (0.83-0.87 across continuity <= 0.05).
@@ -266,17 +268,22 @@ class TranscribeConfig(BaseModel):
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
         """Leave the line-selection fields OUT of the dump while the line is
-        CREPE's, so the default keys exactly as it did before they existed.
+        CREPE's or the track is a horn's, so those key exactly as they did
+        before the fields existed.
 
         Every transcribe cache key — the pipeline's stage key, the GUI's
         review key, run_eval's note fingerprint — is a hash of this dump. A
         new field with a default would otherwise turn every cached CREPE pass
         into a miss for a change that alters no note: hours of the batch and
-        every review the listener has open. The oracle line dumps its fields
-        and keys differently, as it must.
+        every review the listener has open. A pianist's oracle line dumps its
+        fields and keys differently, as it must -- and those were already the
+        second take's keys when it became the default (2026-09-18), so that
+        flip moved no key either. A horn never reads the line
+        (`uses_piano_oracle` gates every use of it), so its dump must not
+        carry the default, whatever the default is.
         """
         data = handler(self)
-        if data.get("piano_line") == "crepe":
+        if data.get("piano_line") == "crepe" or not self.uses_piano_oracle:
             for name in (
                 "piano_line",
                 "piano_line_continuity",

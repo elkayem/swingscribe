@@ -1133,10 +1133,11 @@ def test_a_payload_without_a_second_voice_still_has_the_key(tmp_path):
 
 
 def test_the_line_choice_reaches_the_transcribe_config_and_its_key(world, monkeypatch):
-    """`line=oracle` asks for the line picked from the piano model (issue
-    #8). It changes every note, so it must reach the config the review is
-    keyed on — and the default must key exactly as it did before the choice
-    existed, or every open review becomes a miss."""
+    """`line=crepe` asks for CREPE's line, corrected by the piano model
+    (issue #8; the oracle line is the pianist default). It changes every
+    note, so it must reach the config the review is keyed on — and naming
+    the default must key exactly as leaving it unnamed does, or every open
+    review becomes a miss."""
     from swingscribe.gui import review
 
     track = open_track(world)
@@ -1153,9 +1154,9 @@ def test_the_line_choice_reaches_the_transcribe_config_and_its_key(world, monkey
     world["client"].get(f"/api/tracks/{track['id']}/review", params={**base, "line": "crepe"})
     world["client"].get(f"/api/tracks/{track['id']}/review", params={**base, "line": "oracle"})
 
-    assert [line for line, _ in seen] == ["crepe", "crepe", "oracle"]
-    assert seen[0][1] == seen[1][1]  # naming the default is the default
-    assert seen[2][1] != seen[0][1]  # the other take is another review
+    assert [line for line, _ in seen] == ["oracle", "crepe", "oracle"]
+    assert seen[0][1] == seen[2][1]  # naming the default is the default
+    assert seen[1][1] != seen[0][1]  # the other take is another review
 
 
 def test_an_unknown_line_is_refused(world):
@@ -1173,13 +1174,13 @@ def test_the_config_offers_the_line_choices(world):
 
     payload = world["client"].get("/api/config").json()
     assert payload["lines"] == list(LINES)
-    assert payload["default_line"] == "crepe"
+    assert payload["default_line"] == "oracle"
 
 
 def test_a_transcribe_job_carries_the_line_choice(world, monkeypatch):
     """The job and the review GET must agree on the key, or the job's work
-    is never found: a job run for the oracle line answers a review asked
-    for the oracle line, and not the one asked for CREPE's."""
+    is never found: a job run for CREPE's line answers a review asked
+    for CREPE's line, and not the one asked for the default (the oracle)."""
     from dataclasses import dataclass
 
     from swingscribe.model import NoteEvent
@@ -1219,7 +1220,7 @@ def test_a_transcribe_job_carries_the_line_choice(world, monkeypatch):
             "stem": "other",
             "start": 1.0,
             "end": 3.0,
-            "line": "oracle",
+            "line": "crepe",
         },
     )
     assert response.status_code == 200, response.text
@@ -1230,11 +1231,11 @@ def test_a_transcribe_job_carries_the_line_choice(world, monkeypatch):
             break
         time.sleep(0.02)
     assert state["state"] == "done", state.get("error")
-    assert seen["line"] == "oracle"
+    assert seen["line"] == "crepe"
 
     base = {"model": "htdemucs_ft", "stem": "other", "start": "1.000", "end": "3.000"}
     asked = world["client"].get(
-        f"/api/tracks/{track['id']}/review", params={**base, "line": "oracle"}
+        f"/api/tracks/{track['id']}/review", params={**base, "line": "crepe"}
     )
     other = world["client"].get(f"/api/tracks/{track['id']}/review", params=base)
     assert asked.json()["ready"] is True
@@ -1243,18 +1244,19 @@ def test_a_transcribe_job_carries_the_line_choice(world, monkeypatch):
 
 def test_the_take_is_in_the_filename_when_it_is_not_the_default():
     """The pianists' second take must not overwrite the first: exporting
-    CREPE's line and then the oracle's is two files, not one file twice."""
+    the oracle's line and then CREPE's is two files, not one file twice."""
     from swingscribe.gui.musicxml import export_path, take_of
 
     config = Config()
     assert take_of(config, None) is None
     assert take_of(config, config.transcribe.piano_line) is None
-    assert take_of(config, "oracle") == "oracle"
+    assert take_of(config, "oracle") is None
+    assert take_of(config, "crepe") == "crepe"
     plain = export_path("C:/music/Tune.m4a", (275.2, 351.0))
-    oracle = export_path("C:/music/Tune.m4a", (275.2, 351.0), "oracle")
+    crepe = export_path("C:/music/Tune.m4a", (275.2, 351.0), "crepe")
     assert plain.name == "Tune.275-351s.musicxml"
-    assert oracle.name == "Tune.275-351s.oracle.musicxml"
-    assert export_path("C:/music/Tune.m4a", None, "oracle").name == "Tune.oracle.musicxml"
+    assert crepe.name == "Tune.275-351s.crepe.musicxml"
+    assert export_path("C:/music/Tune.m4a", None, "crepe").name == "Tune.crepe.musicxml"
 
 
 # ── the candidate pool and additions ───────────────────────────────────────

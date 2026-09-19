@@ -934,3 +934,36 @@ reads back `all 59 counts unchanged`.
 7. **n = 22, one player, one decade.** Every share above is Charlie Parker
    on 78-era transfers; the bootstrap sd says how far a class would move on
    another 22 of his sides, not on another player.
+
+### 10.9 Re-pinned 2026-09-18: the pianist default is the oracle line
+
+`TranscribeConfig.piano_line` now defaults to `"oracle"` (docs/issue8-line-
+selection.md, "The default"), so the four WJazzD pianists' default notes are
+the line picked from the piano model rather than CREPE's corrected line.
+Nothing else in the run changed: every horn's counts are identical, the
+Omnibook block is unchanged on all 55 counts, and the WJazzD mean note F1
+is 0.8580 (0.8583 before; the pianists 0.9042 -> 0.8985).
+The piano family's errors went 302 -> 343 over
+4 solos, and their classes moved the way the picker's
+mechanism says they should:
+
+- **`absorbed` 89 -> 9, `timing_early` 14 -> 2, `timing_late` 26 -> 17,
+  `squeezed` 98 -> 77.** Those are CREPE's frame-level classes -- a note
+  swallowed into its neighbour's pitch track, or placed off its onset --
+  and the picked line does not come from CREPE's frames at all.
+- **`not_picked` 28 -> 171.** The class that names the picker's own
+  mechanism: the piano model HEARD the note (within 100 ms, at that pitch)
+  and the line did not take it. It is now the pianists' leading class by a
+  wide margin, which is exactly where the next lever on a pianist lies
+  (D24: the picker takes the loudest note of a chord, the human writes the
+  top one).
+
+The frame evidence is complete (73 of 73) because the four reviews were
+recomputed under the new key first (`wjazz_reviews.py`, 14-40 s a solo on
+the GPU). One trap found on the way: the piano model on the GPU put ONE of
+Gingerbread Boy's 613 onsets a millisecond from where the CPU run in the
+notes cache had it, and the exact note-for-note test then discarded the
+whole solo's frame evidence (16 `unclassified`). `same_transcription` now
+allows 2 ms on an onset and nothing on pitch or count -- a different note
+list is still a different transcription, whatever the device -- and
+`wjazz_reviews.py` reports its match through the same function.

@@ -175,3 +175,38 @@ already exist in both caches, so the cost is the sidecars' and the
 baselines', not CREPE's), moves the pinned piano numbers, and changes what
 the Transcribe button produces for a trio. It is not taken here; it is the
 listener's call, on this table.
+
+## The default (2026-09-18)
+
+The listener took it. `TranscribeConfig.piano_line` defaults to `"oracle"`;
+the GUI's Line picker offers `"crepe"` as the other take, and the harness's
+second take is now `<track> [line=crepe]` (`run_eval.SECOND_LINE`, held by
+a test to be whichever line the default is not). What moved, and what did
+not:
+
+- **No cache key.** The oracle line's dump already carried the line
+  fields, so a pianist's default key is the key the oracle take had; the
+  CREPE line still dumps without them; and a horn's dump now drops them
+  whatever the default is (`uses_piano_oracle` gates every read of the
+  line, so a horn's key must not depend on it). The harness's notes cache
+  was renamed in place -- the eleven `[line=oracle]` entries became the
+  default entries and the old defaults became `[line=crepe]`, every
+  fingerprint checked against what `transcribe_fingerprint` now asks for
+  before the write -- so nothing was re-transcribed.
+- **The pinned pianist rows swapped takes**, and the means over the
+  default take moved with them: hand-score note F1 0.5171 -> 0.5363 over
+  12, placement 0.8988 -> 0.9080; `pianist_pitch_f1` 0.7868 -> 0.8396,
+  `pianist_note_f1` 0.4834 -> 0.5163, `pianist_rhythm` 0.7784 -> 0.8179
+  over 7, with the CREPE line's numbers now under `*_crepe`. Readability
+  0.9901 -> 0.9908 over 85 pages: three of the seven pianist pages lost
+  every sub-eighth rest and the other four read fewer. WJazzD's mean note
+  F1 over 73 is 0.8583 -> 0.8580: the four pianists read 0.9042 -> 0.8985,
+  which is the onset lead of section 3b.2 corrected and nothing else.
+- **The Omnibook did not move** (all horns), and neither did any horn row.
+- The four WJazzD pianists' review payloads were recomputed under the new
+  key (`scripts/wjazz_reviews.py`, 14 s a solo on the GPU) so the error
+  taxonomy keeps its frame evidence for them.
+
+The CREPE line stays a take, not a fallback: on Sonny Clark's *There Will
+Never Be Another You* it still reads a hundredth better on pitch, and the
+listener can pick it per track.

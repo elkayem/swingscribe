@@ -130,83 +130,85 @@
     },
     "piano": {
       "counts": {
-        "absorbed": 89,
+        "absorbed": 9,
         "attack_transient": 1,
         "between_notes": 4,
-        "between_phrases": 2,
-        "bleed_cross_stem": 1,
+        "bleed_cross_stem": 2,
+        "dropped": 7,
         "fragment_neighbour": 4,
-        "fragment_other": 5,
-        "loose": 1,
-        "merged": 7,
-        "neighbour": 9,
-        "not_picked": 28,
-        "other_pitch": 2,
-        "squeezed": 98,
-        "timing_early": 14,
-        "timing_late": 26,
-        "too_short": 1,
-        "tracked_other": 10
+        "fragment_other": 3,
+        "loose": 2,
+        "merged": 1,
+        "neighbour": 14,
+        "not_picked": 171,
+        "other_pitch": 6,
+        "split_sustain": 1,
+        "squeezed": 77,
+        "timing_early": 2,
+        "timing_late": 17,
+        "too_short": 7,
+        "tracked_other": 15
       },
       "f1_deficit": {
-        "absorbed": 0.02447,
-        "attack_transient": 0.00073,
-        "between_notes": 0.00145,
-        "between_phrases": 0.00073,
-        "bleed_cross_stem": 0.00028,
-        "fragment_neighbour": 0.00101,
-        "fragment_other": 0.0014,
-        "loose": 0.00073,
-        "merged": 0.00201,
-        "neighbour": 0.00536,
-        "not_picked": 0.00726,
-        "other_pitch": 0.0011,
-        "squeezed": 0.02422,
-        "timing_early": 0.00735,
-        "timing_late": 0.01456,
-        "too_short": 0.00019,
-        "tracked_other": 0.00295
+        "absorbed": 0.0022,
+        "attack_transient": 0.00069,
+        "between_notes": 0.00138,
+        "bleed_cross_stem": 0.00069,
+        "dropped": 0.00138,
+        "fragment_neighbour": 0.00113,
+        "fragment_other": 0.00091,
+        "loose": 0.00138,
+        "merged": 0.00019,
+        "neighbour": 0.00873,
+        "not_picked": 0.04294,
+        "other_pitch": 0.00383,
+        "split_sustain": 0.00035,
+        "squeezed": 0.01837,
+        "timing_early": 0.00076,
+        "timing_late": 0.01101,
+        "too_short": 0.00158,
+        "tracked_other": 0.00399
       },
-      "mean_note_f1": 0.9042,
-      "n_errors": 302,
-      "n_estimate": 1947,
-      "n_matched": 1878,
+      "mean_note_f1": 0.8985,
+      "n_errors": 343,
+      "n_estimate": 1891,
+      "n_matched": 1835,
       "n_reference": 2164,
       "n_solos": 4,
       "populations": {
-        "fp": 16,
-        "miss": 233,
-        "pair": 53
+        "fp": 14,
+        "miss": 287,
+        "pair": 42
       }
     }
   },
   "flat": {
-    "count/absorbed": 333,
+    "count/absorbed": 253,
     "count/attack_transient": 204,
     "count/between_notes": 263,
-    "count/between_phrases": 103,
-    "count/bleed_cross_stem": 100,
+    "count/between_phrases": 101,
+    "count/bleed_cross_stem": 101,
     "count/bleed_register": 30,
     "count/body_late": 170,
-    "count/dropped": 172,
+    "count/dropped": 179,
     "count/dropped_register": 47,
     "count/fragment_neighbour": 632,
     "count/fragment_octave": 20,
-    "count/fragment_other": 191,
+    "count/fragment_other": 189,
     "count/gated": 3,
-    "count/loose": 228,
-    "count/merged": 479,
-    "count/neighbour": 836,
-    "count/not_picked": 28,
+    "count/loose": 229,
+    "count/merged": 473,
+    "count/neighbour": 841,
+    "count/not_picked": 171,
     "count/octave": 146,
-    "count/other_pitch": 179,
-    "count/split_sustain": 578,
-    "count/squeezed": 1145,
-    "count/timing_early": 284,
-    "count/timing_late": 369,
-    "count/too_short": 765,
+    "count/other_pitch": 183,
+    "count/split_sustain": 579,
+    "count/squeezed": 1124,
+    "count/timing_early": 272,
+    "count/timing_late": 360,
+    "count/too_short": 771,
     "count/tracked_octave": 18,
-    "count/tracked_other": 252,
+    "count/tracked_other": 257,
     "count/unvoiced": 8,
     "family/guitar/absorbed": 2,
     "family/guitar/attack_transient": 2,
@@ -255,33 +257,34 @@
     "family/horn/tracked_octave": 18,
     "family/horn/tracked_other": 235,
     "family/horn/unvoiced": 6,
-    "family/piano/absorbed": 89,
+    "family/piano/absorbed": 9,
     "family/piano/attack_transient": 1,
     "family/piano/between_notes": 4,
-    "family/piano/between_phrases": 2,
-    "family/piano/bleed_cross_stem": 1,
+    "family/piano/bleed_cross_stem": 2,
+    "family/piano/dropped": 7,
     "family/piano/fragment_neighbour": 4,
-    "family/piano/fragment_other": 5,
-    "family/piano/loose": 1,
-    "family/piano/merged": 7,
-    "family/piano/neighbour": 9,
-    "family/piano/not_picked": 28,
-    "family/piano/other_pitch": 2,
-    "family/piano/squeezed": 98,
-    "family/piano/timing_early": 14,
-    "family/piano/timing_late": 26,
-    "family/piano/too_short": 1,
-    "family/piano/tracked_other": 10,
-    "n_errors": 7583,
+    "family/piano/fragment_other": 3,
+    "family/piano/loose": 2,
+    "family/piano/merged": 1,
+    "family/piano/neighbour": 14,
+    "family/piano/not_picked": 171,
+    "family/piano/other_pitch": 6,
+    "family/piano/split_sustain": 1,
+    "family/piano/squeezed": 77,
+    "family/piano/timing_early": 2,
+    "family/piano/timing_late": 17,
+    "family/piano/too_short": 7,
+    "family/piano/tracked_other": 15,
+    "n_errors": 7624,
     "n_solos": 73,
-    "population/fp": 2087,
-    "population/miss": 3250,
-    "population/pair": 2246
+    "population/fp": 2085,
+    "population/miss": 3304,
+    "population/pair": 2235
   },
   "noise": {
     "absorbed": {
-      "count_sd": 58.016,
-      "share_sd": 0.008
+      "count_sd": 35.65,
+      "share_sd": 0.004
     },
     "attack_transient": {
       "count_sd": 41.914,
@@ -292,11 +295,11 @@
       "share_sd": 0.005
     },
     "between_phrases": {
-      "count_sd": 31.843,
+      "count_sd": 31.895,
       "share_sd": 0.004
     },
     "bleed_cross_stem": {
-      "count_sd": 16.825,
+      "count_sd": 16.744,
       "share_sd": 0.002
     },
     "bleed_register": {
@@ -308,7 +311,7 @@
       "share_sd": 0.005
     },
     "dropped": {
-      "count_sd": 17.794,
+      "count_sd": 17.443,
       "share_sd": 0.002
     },
     "dropped_register": {
@@ -316,7 +319,7 @@
       "share_sd": 0.001
     },
     "fragment_neighbour": {
-      "count_sd": 57.88,
+      "count_sd": 57.866,
       "share_sd": 0.007
     },
     "fragment_octave": {
@@ -324,7 +327,7 @@
       "share_sd": 0.001
     },
     "fragment_other": {
-      "count_sd": 44.846,
+      "count_sd": 44.98,
       "share_sd": 0.005
     },
     "gated": {
@@ -332,47 +335,47 @@
       "share_sd": 0.0
     },
     "loose": {
-      "count_sd": 24.64,
+      "count_sd": 24.544,
       "share_sd": 0.002
     },
     "merged": {
-      "count_sd": 60.139,
+      "count_sd": 60.628,
       "share_sd": 0.006
     },
     "neighbour": {
-      "count_sd": 88.568,
+      "count_sd": 88.517,
       "share_sd": 0.009
     },
     "not_picked": {
-      "count_sd": 15.783,
-      "share_sd": 0.002
+      "count_sd": 86.35,
+      "share_sd": 0.012
     },
     "octave": {
       "count_sd": 46.076,
       "share_sd": 0.005
     },
     "other_pitch": {
-      "count_sd": 28.701,
+      "count_sd": 28.772,
       "share_sd": 0.003
     },
     "split_sustain": {
-      "count_sd": 71.692,
-      "share_sd": 0.009
+      "count_sd": 71.553,
+      "share_sd": 0.008
     },
     "squeezed": {
-      "count_sd": 130.796,
-      "share_sd": 0.013
+      "count_sd": 130.208,
+      "share_sd": 0.012
     },
     "timing_early": {
-      "count_sd": 40.514,
+      "count_sd": 40.876,
       "share_sd": 0.005
     },
     "timing_late": {
-      "count_sd": 48.653,
+      "count_sd": 49.082,
       "share_sd": 0.006
     },
     "too_short": {
-      "count_sd": 105.722,
+      "count_sd": 105.053,
       "share_sd": 0.011
     },
     "tracked_octave": {
@@ -380,7 +383,7 @@
       "share_sd": 0.001
     },
     "tracked_other": {
-      "count_sd": 35.847,
+      "count_sd": 35.913,
       "share_sd": 0.004
     },
     "unvoiced": {
@@ -1342,76 +1345,76 @@
   },
   "overall": {
     "counts": {
-      "absorbed": 333,
+      "absorbed": 253,
       "attack_transient": 204,
       "between_notes": 263,
-      "between_phrases": 103,
-      "bleed_cross_stem": 100,
+      "between_phrases": 101,
+      "bleed_cross_stem": 101,
       "bleed_register": 30,
       "body_late": 170,
-      "dropped": 172,
+      "dropped": 179,
       "dropped_register": 47,
       "fragment_neighbour": 632,
       "fragment_octave": 20,
-      "fragment_other": 191,
+      "fragment_other": 189,
       "gated": 3,
-      "loose": 228,
-      "merged": 479,
-      "neighbour": 836,
-      "not_picked": 28,
+      "loose": 229,
+      "merged": 473,
+      "neighbour": 841,
+      "not_picked": 171,
       "octave": 146,
-      "other_pitch": 179,
-      "split_sustain": 578,
-      "squeezed": 1145,
-      "timing_early": 284,
-      "timing_late": 369,
-      "too_short": 765,
+      "other_pitch": 183,
+      "split_sustain": 579,
+      "squeezed": 1124,
+      "timing_early": 272,
+      "timing_late": 360,
+      "too_short": 771,
       "tracked_octave": 18,
-      "tracked_other": 252,
+      "tracked_other": 257,
       "unvoiced": 8
     },
     "f1_deficit": {
-      "absorbed": 0.00485,
+      "absorbed": 0.00363,
       "attack_transient": 0.00595,
-      "between_notes": 0.00349,
-      "between_phrases": 0.00124,
-      "bleed_cross_stem": 0.00144,
+      "between_notes": 0.00348,
+      "between_phrases": 0.0012,
+      "bleed_cross_stem": 0.00147,
       "bleed_register": 0.00023,
       "body_late": 0.00255,
-      "dropped": 0.00279,
+      "dropped": 0.00287,
       "dropped_register": 0.00058,
-      "fragment_neighbour": 0.01037,
+      "fragment_neighbour": 0.01038,
       "fragment_octave": 0.00019,
-      "fragment_other": 0.00231,
+      "fragment_other": 0.00228,
       "gated": 5e-05,
-      "loose": 0.0068,
-      "merged": 0.00677,
-      "neighbour": 0.02369,
-      "not_picked": 0.0004,
+      "loose": 0.00684,
+      "merged": 0.00667,
+      "neighbour": 0.02387,
+      "not_picked": 0.00235,
       "octave": 0.00317,
-      "other_pitch": 0.00469,
-      "split_sustain": 0.00955,
-      "squeezed": 0.01576,
-      "timing_early": 0.00902,
-      "timing_late": 0.01135,
-      "too_short": 0.01064,
+      "other_pitch": 0.00484,
+      "split_sustain": 0.00957,
+      "squeezed": 0.01544,
+      "timing_early": 0.00866,
+      "timing_late": 0.01115,
+      "too_short": 0.01071,
       "tracked_octave": 0.00026,
-      "tracked_other": 0.00345,
+      "tracked_other": 0.00351,
       "unvoiced": 9e-05
     },
-    "mean_note_f1": 0.8583,
-    "n_errors": 7583,
-    "n_estimate": 32670,
-    "n_matched": 28337,
+    "mean_note_f1": 0.858,
+    "n_errors": 7624,
+    "n_estimate": 32614,
+    "n_matched": 28294,
     "n_reference": 33833,
     "n_solos": 73,
     "populations": {
-      "fp": 2087,
-      "miss": 3250,
-      "pair": 2246
+      "fp": 2085,
+      "miss": 3304,
+      "pair": 2235
     }
   },
-  "pairs_alternative_differ": 87,
+  "pairs_alternative_differ": 81,
   "solos": {
     "wjazzd/Cannonball_Adderley_High_Fly_solo_47.m4a": {
       "counts": {
@@ -1957,49 +1960,44 @@
     },
     "wjazzd/Herbie_Hancock_Dolores_solo_185.m4a": {
       "counts": {
-        "absorbed": 20,
+        "absorbed": 3,
+        "dropped": 2,
+        "fragment_neighbour": 2,
         "fragment_other": 1,
-        "neighbour": 1,
-        "not_picked": 7,
-        "squeezed": 24,
-        "timing_late": 5,
-        "tracked_other": 1
+        "not_picked": 44,
+        "squeezed": 27,
+        "tracked_other": 2
       },
       "family": "piano",
-      "note_f1": 0.9447
+      "note_f1": 0.9296
     },
     "wjazzd/Herbie_Hancock_Gingerbread_Boy_solo_186.m4a": {
       "counts": {
-        "absorbed": 25,
-        "fragment_neighbour": 2,
-        "fragment_other": 1,
-        "merged": 3,
-        "neighbour": 2,
-        "not_picked": 10,
+        "absorbed": 3,
+        "dropped": 5,
+        "merged": 1,
+        "neighbour": 3,
+        "not_picked": 49,
         "other_pitch": 1,
-        "squeezed": 36,
-        "timing_early": 5,
-        "timing_late": 7,
-        "too_short": 1,
-        "tracked_other": 3
+        "squeezed": 26,
+        "timing_early": 2,
+        "timing_late": 2,
+        "too_short": 5,
+        "tracked_other": 6
       },
       "family": "piano",
-      "note_f1": 0.9172
+      "note_f1": 0.916
     },
     "wjazzd/Herbie_Hancock_Orbits_solo_188.m4a": {
       "counts": {
-        "absorbed": 5,
-        "bleed_cross_stem": 1,
-        "fragment_neighbour": 1,
-        "fragment_other": 1,
-        "neighbour": 1,
-        "not_picked": 1,
-        "squeezed": 16,
-        "timing_early": 6,
-        "timing_late": 2
+        "absorbed": 1,
+        "not_picked": 52,
+        "squeezed": 13,
+        "timing_late": 1,
+        "too_short": 1
       },
       "family": "piano",
-      "note_f1": 0.9526
+      "note_f1": 0.9197
     },
     "wjazzd/JJ_Johnson_Blues_In_The_Closet_solo_191.m4a": {
       "counts": {
@@ -2690,24 +2688,24 @@
     },
     "wjazzd/Red_Garland_Oleo_solo_365.m4a": {
       "counts": {
-        "absorbed": 39,
+        "absorbed": 2,
         "attack_transient": 1,
         "between_notes": 4,
-        "between_phrases": 2,
-        "fragment_neighbour": 1,
+        "bleed_cross_stem": 2,
+        "fragment_neighbour": 2,
         "fragment_other": 2,
-        "loose": 1,
-        "merged": 4,
-        "neighbour": 5,
-        "not_picked": 10,
-        "other_pitch": 1,
-        "squeezed": 22,
-        "timing_early": 3,
-        "timing_late": 12,
-        "tracked_other": 6
+        "loose": 2,
+        "neighbour": 11,
+        "not_picked": 26,
+        "other_pitch": 5,
+        "split_sustain": 1,
+        "squeezed": 11,
+        "timing_late": 14,
+        "too_short": 1,
+        "tracked_other": 7
       },
       "family": "piano",
-      "note_f1": 0.8023
+      "note_f1": 0.8287
     },
     "wjazzd/Sidney_Bechet_Limehouse_Blues_solo_375.m4a": {
       "counts": {
@@ -3235,78 +3233,78 @@
     },
     "UP": {
       "counts": {
-        "absorbed": 206,
+        "absorbed": 126,
         "attack_transient": 44,
         "between_notes": 149,
-        "between_phrases": 54,
-        "bleed_cross_stem": 53,
+        "between_phrases": 52,
+        "bleed_cross_stem": 54,
         "bleed_register": 18,
         "body_late": 28,
-        "dropped": 79,
+        "dropped": 86,
         "dropped_register": 19,
         "fragment_neighbour": 252,
         "fragment_octave": 12,
-        "fragment_other": 122,
+        "fragment_other": 120,
         "gated": 1,
-        "loose": 104,
-        "merged": 196,
-        "neighbour": 450,
-        "not_picked": 28,
+        "loose": 105,
+        "merged": 190,
+        "neighbour": 455,
+        "not_picked": 171,
         "octave": 49,
-        "other_pitch": 94,
-        "split_sustain": 219,
-        "squeezed": 575,
-        "timing_early": 68,
-        "timing_late": 91,
-        "too_short": 288,
+        "other_pitch": 98,
+        "split_sustain": 220,
+        "squeezed": 554,
+        "timing_early": 56,
+        "timing_late": 82,
+        "too_short": 294,
         "tracked_octave": 2,
-        "tracked_other": 118,
+        "tracked_other": 123,
         "unvoiced": 7
       },
       "f1_deficit": {
-        "absorbed": 0.00681,
+        "absorbed": 0.00394,
         "attack_transient": 0.00283,
-        "between_notes": 0.0039,
-        "between_phrases": 0.00111,
-        "bleed_cross_stem": 0.00138,
+        "between_notes": 0.00389,
+        "between_phrases": 0.00102,
+        "bleed_cross_stem": 0.00143,
         "bleed_register": 0.00027,
         "body_late": 0.00098,
-        "dropped": 0.00289,
+        "dropped": 0.00307,
         "dropped_register": 0.00048,
-        "fragment_neighbour": 0.00919,
+        "fragment_neighbour": 0.0092,
         "fragment_octave": 0.00026,
-        "fragment_other": 0.00303,
+        "fragment_other": 0.00296,
         "gated": 4e-05,
-        "loose": 0.00634,
-        "merged": 0.00541,
-        "neighbour": 0.02705,
-        "not_picked": 0.00094,
+        "loose": 0.00642,
+        "merged": 0.00518,
+        "neighbour": 0.02749,
+        "not_picked": 0.00554,
         "octave": 0.00213,
-        "other_pitch": 0.00574,
-        "split_sustain": 0.00745,
-        "squeezed": 0.01837,
-        "timing_early": 0.00422,
-        "timing_late": 0.0058,
-        "too_short": 0.00949,
+        "other_pitch": 0.0061,
+        "split_sustain": 0.0075,
+        "squeezed": 0.01761,
+        "timing_early": 0.00337,
+        "timing_late": 0.00534,
+        "too_short": 0.00967,
         "tracked_octave": 8e-05,
-        "tracked_other": 0.00357,
+        "tracked_other": 0.00371,
         "unvoiced": 0.00019
       },
-      "mean_note_f1": 0.87,
-      "n_errors": 3326,
-      "n_estimate": 15724,
-      "n_matched": 13917,
+      "mean_note_f1": 0.8693,
+      "n_errors": 3367,
+      "n_estimate": 15668,
+      "n_matched": 13874,
       "n_reference": 16336,
       "n_solos": 31,
       "populations": {
-        "fp": 907,
-        "miss": 1519,
-        "pair": 900
+        "fp": 905,
+        "miss": 1573,
+        "pair": 889
       }
     }
   },
   "timing_residual": {
-    "explained_by_residual": 170,
-    "pairs": 653
+    "explained_by_residual": 162,
+    "pairs": 632
   }
 }

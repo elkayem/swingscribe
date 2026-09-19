@@ -211,10 +211,13 @@ a saxophone vouches for nothing useful. The hint text next to the menu says
 whether the piano model will be consulted for the current choice.
 
 **Line** (pianists only) picks which detector supplies the melody:
-"CREPE, checked by piano model" (the default, monophonic pitch tracking
-corroborated by the piano model) or "Piano model, melody picked" (a
-sequence chosen from everything the polyphonic model heard). They're two
-takes of the same span — compare them by ear.
+"Piano model, melody picked" (the default: a sequence chosen from
+everything the polyphonic model heard) or "CREPE, checked by piano model"
+(monophonic pitch tracking corroborated by the piano model). They're two
+takes of the same span — compare them by ear. Against the hand
+transcriptions the picked line has more of the right notes on six
+pianists of seven, which is why it is the default; the CREPE take is
+still there for the passage where it hears better.
 
 **The piano roll** draws notes over the bar grid, with opacity tracking
 confidence, and carries the same beat strip along its bottom edge as the

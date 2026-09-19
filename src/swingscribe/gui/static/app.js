@@ -1872,7 +1872,7 @@ function erasureList() {
         model: state.model,
         // Which detector's line the judgement was made on: an erasure is a
         // label, and a label that cannot describe its example is worth less.
-        line: state.line || 'crepe',
+        line: state.line || defaultLine,
       });
     }
   }
@@ -1897,7 +1897,7 @@ function additionList() {
         reason: 'added',
         stem: state.leadStem,
         model: state.model,
-        line: state.line || 'crepe',
+        line: state.line || defaultLine,
       });
     }
   }
@@ -2338,7 +2338,7 @@ async function loadChoices() {
   // Asked of the server, never listed here: the UI must not be the second
   // place the routing is written down.
   pianoOracleEnsembles = choices.piano_oracle_ensembles ?? [];
-  fillLineSelect(choices.lines ?? [], choices.default_line ?? 'crepe');
+  fillLineSelect(choices.lines ?? [], choices.default_line ?? defaultLine);
   fillSelect($('transpose-select'), choices.transpositions ?? [], choices.default_transposition ?? 'C');
   renderChoices();
 }
@@ -2349,8 +2349,13 @@ const LINE_LABELS = {
   crepe: 'CREPE, checked by piano model',
   oracle: 'Piano model, melody picked',
 };
+// The pipeline's default line, as /api/config reports it: what a sidecar
+// with no `line` gets, and what an erasure made with the picker untouched
+// is labelled with. Never decided here -- the server owns the default.
+let defaultLine = 'oracle';
 
 function fillLineSelect(values, fallback) {
+  defaultLine = fallback;
   const node = $('line-select');
   node.innerHTML = '';
   for (const value of values) {

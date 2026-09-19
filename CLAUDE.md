@@ -571,14 +571,18 @@ things not to re-derive:
   docs/issue8-line-selection.md): velocity as a within-track percentile
   rank, a leap-capped register-continuity cost, and a skip state so comping
   emits nothing. It ships as `line_selection.pick_line` behind
-  `TranscribeConfig.piano_line = "oracle"`, offered in the GUI as a second
-  take (the **Line** picker, pianists only) beside the CREPE line — NOT the
-  default, because only the pitch question is measured. The default dumps
-  WITHOUT the line fields (a `model_serializer` on `TranscribeConfig`) so
-  every existing cache key survived; do not "simplify" that away, it is
-  hours of CREPE across two caches. The oracle take applies the picker
-  alone — no CREPE corroboration, no register floor — because that is what
-  was measured.
+  `TranscribeConfig.piano_line = "oracle"` — **the pianist default since
+  2026-09-18** (it was a second take until the notation question was
+  measured, 2026-09-10, further down); the GUI's **Line** picker (pianists
+  only) offers the CREPE line as the other take. The CREPE line AND every
+  horn dump WITHOUT the line fields (a `model_serializer` on
+  `TranscribeConfig`; a horn never reads the line, so its key must not
+  carry the default), and a pianist's oracle line dumps them — so no cache
+  key moved when the fields arrived, and none moved when the default
+  flipped, because the oracle keys were already the second take's. Do not
+  "simplify" that away, it is hours of CREPE across two caches. The oracle
+  take applies the picker alone — no CREPE corroboration, no register
+  floor — because that is what was measured.
 - **A note the line itself disowns is bleed: an octave-plus under the local
   register, or (horns only) 14 dB under the local loudness.** The comping
   that CREPE picks up between a horn's phrases can sit INSIDE the horn's
@@ -902,10 +906,11 @@ list of what is actually wrong; run everything with one command:
 - **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
   this notate the way a human notated it?" It charges the gap between
   performed timing and notated rhythm to the transcriber, so it reads lower
-  and always will. Currently mean note F1 0.519 over the 12 hand scores
-  (2026-09-10, Red Garland's Billy Boy joined at pitch F1 0.730; 0.514 over
-  11 and 0.539 over ten before that — pitch-only F1 0.866 on those ten; the
-  gap between the two IS the notation charge). The set changed on
+  and always will. Currently mean note F1 0.536 over the 12 hand scores
+  (2026-09-18, the seven pianists on the oracle line by default; 0.519 on
+  2026-09-10 when Red Garland's Billy Boy joined at pitch F1 0.730, 0.514
+  over 11 and 0.539 over ten before that — pitch-only F1 0.866 on those
+  ten; the gap between the two IS the notation charge). The set changed on
   2026-09-07: Birks Works joined (pitch F1 0.923) and Soul Station left
   because the listener cleared its score link in the GUI; relinked the next
   morning, it scores pitch F1 0.599 and note F1 0.263 (0.584/0.234 on
@@ -916,19 +921,26 @@ list of what is actually wrong; run everything with one command:
   the horns up to +0.070 (Confirmation), the pianists within 0.03; WJazzD
   untouched.
 - **A pianist is scored on BOTH lines** (2026-09-10). `run_eval` transcribes
-  every oracle-routed sidecar twice — the default take, and the oracle take
-  keyed `<track> [line=oracle]` (`ORACLE_TAKE`; `track_of`/`take_of`/
-  `pin_name` keep the track and the pinned name apart) — pins the second
-  per track under its own keys, keeps every mean over the default take,
-  and summarises the pair over the same tracks (`summary/pianist_*`,
-  `*_oracle`, `*_n`). Seven pianists with hand scores: pitch F1 0.788 ->
+  every oracle-routed sidecar twice — the default take, and the OTHER line
+  keyed `<track> [line=crepe]` (`SECOND_TAKE`, whichever line the default
+  is not, and a test holds it to that; `track_of`/`take_of`/`pin_name`
+  keep the track and the pinned name apart) — pins the second per track
+  under its own keys, keeps every mean over the default take, and
+  summarises the pair over the same tracks (`summary/pianist_*`,
+  `*_crepe`, `*_n`). Seven pianists with hand scores: pitch F1 0.788 ->
   0.838 (6 of 7 up), note F1 0.486 -> 0.515, notated rhythm 0.780 -> 0.824
   (7 of 7, more notes lined up on six); WJazzD note F1 level, 0.904 ->
-  0.898 over the four (docs/issue8-line-selection.md). That is the
-  measurement the picker was waiting for to become the pianist default; it
-  is the listener's call. `benchmark_batch.py` sends the sidecar's `line`
-  the way the frontend does (a `line` column), so a sheet row IS the Score
-  button's take; `run_eval` reads no sidecar `line` and scores both.
+  0.898 over the four (docs/issue8-line-selection.md). **On that table the
+  listener made the oracle line the pianist default (2026-09-18)**: the
+  pinned pianist rows swapped takes (the old `[line=oracle]` rows are the
+  default rows now, the old default rows are `[line=crepe]`), the
+  twelve-score mean note F1 moved 0.519 -> 0.536 and placement 0.899 ->
+  0.908, WJazzD's mean over 73 did not (0.8583 -> 0.8580), and no cache key
+  moved (the oracle keys already existed; a horn's key never carries the
+  line). The notes cache was renamed in place rather than re-run.
+  `benchmark_batch.py` sends the sidecar's `line` the way the frontend
+  does (a `line` column), so a sheet row IS the Score button's take;
+  `run_eval` reads no sidecar `line` and scores both.
 
 Reading the second as a transcription failure is exactly the mistake that was
 made. Both are kept; neither subsumes the other.

@@ -69,8 +69,8 @@ class JobRequest(BaseModel):
     stem: str | None = None
     start: float | None = None
     end: float | None = None
-    # For a pianist: "crepe" (default) or "oracle", the line picked from the
-    # piano model's full output (issue #8). Ignored for a horn.
+    # For a pianist: "oracle" (the default: the line picked from the piano
+    # model's full output) or "crepe" (issue #8). Ignored for a horn.
     line: str | None = None
 
 

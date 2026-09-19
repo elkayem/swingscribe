@@ -99,17 +99,18 @@ def sidecar_name(sidecar_path: Path, sidecar: dict) -> str:
     return name if folder == Path(".") else f"{folder.as_posix()}/{name}"
 
 
-# A pianist is scored TWICE: on the pipeline's default line (CREPE, corrected
-# by the piano model) and on the oracle take (the line picked from the piano
-# model's full output, issue #8). The GUI has offered the second as a "Line"
-# picker since it was measured on pitch alone, and two listeners' sidecars
-# now ask for it — but the harness scored only the default, so the Score
-# button and the sheet were describing different takes with nothing saying
-# so. The take rides in the run's KEY, after the track's name, so every
-# consumer that is keyed by track (grids, sidecars, scores on disk) looks up
-# the track and every pinned number stays distinct. The default take's keys
-# are exactly what they were; the oracle take's are new.
-ORACLE_TAKE = " [line=oracle]"
+# A pianist is scored TWICE: on the pipeline's default line and on the other
+# one (issue #8). Since 2026-09-18 the default is the oracle line, picked
+# from the piano model's full output, and the second take is CREPE's line
+# corrected by the piano model; it was the other way round from 2026-09-10,
+# when the harness began scoring both so the default could be decided on a
+# table (docs/issue8-line-selection.md). The take rides in the run's KEY,
+# after the track's name, so every consumer that is keyed by track (grids,
+# sidecars, scores on disk) looks up the track and every pinned number stays
+# distinct. `SECOND_LINE` is whichever line the pipeline's default is NOT
+# (a test holds it to that); its take is keyed "<track> [line=crepe]".
+SECOND_LINE = "crepe"
+SECOND_TAKE = f" [line={SECOND_LINE}]"
 
 # The Omnibook set lives in this subfolder of benchmark/ (module docstring).
 # Its rows are split out of the MuseScore sections by track key, which
@@ -128,16 +129,19 @@ def track_of(key: str) -> str:
 
 
 def take_of(key: str) -> str | None:
-    """Which line a run key transcribed: None for the default, "oracle" for
-    the oracle take."""
-    return "oracle" if ORACLE_TAKE in key else None
+    """Which line a run key transcribed: None for the default, else the line
+    its "[line=...]" suffix names."""
+    marker = " [line="
+    if marker not in key:
+        return None
+    return key.split(marker, 1)[1].split("]", 1)[0]
 
 
-def oracle_key(key: str) -> str:
-    """The oracle take's key for a default-take key, whatever other suffix
+def second_key(key: str) -> str:
+    """The second take's key for a default-take key, whatever other suffix
     (a performer, for a file holding several solos) it carries."""
     track = track_of(key)
-    return track + ORACLE_TAKE + key[len(track) :]
+    return track + SECOND_TAKE + key[len(track) :]
 
 
 def pin_name(key: str) -> str:
@@ -151,9 +155,9 @@ def pin_name(key: str) -> str:
 def transcribe_settings(sidecar: dict, step_cost: float, dip_db: float, line: str | None = None):
     """The exact TranscribeConfig this sidecar asks for. One definition, used
     both to fingerprint a cached run and to compute a fresh one, so the two can
-    never drift apart. `line` names a pianist's take (ORACLE_TAKE); None is the
-    pipeline's default, and leaves the config's serialization exactly as it was
-    so no default-take fingerprint moves."""
+    never drift apart. `line` names a pianist's take (SECOND_TAKE); None is the
+    pipeline's default and leaves the config's serialization alone, so a
+    default-take fingerprint moves only when the default does."""
     from swingscribe.config import Config
 
     base = Config()
@@ -205,12 +209,12 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
         name = sidecar_name(sidecar_path, sidecar)
         if not (BENCH / name).is_file():
             continue
-        # A pianist is transcribed on both lines (ORACLE_TAKE); a horn has no
+        # A pianist is transcribed on both lines (SECOND_TAKE); a horn has no
         # second take, because the picker reads the piano model and a piano
         # model asked about a saxophone vouches for nothing.
         takes = [(name, None)]
         if transcribe_settings(sidecar, step_cost, dip_db).uses_piano_oracle:
-            takes.append((oracle_key(name), "oracle"))
+            takes.append((second_key(name), SECOND_LINE))
         for key, line in takes:
             live.add(key)
             # Re-transcribe when ANYTHING the transcriber reads has changed.
@@ -591,7 +595,7 @@ def wjazz_notation_scores(db_path: Path, card_wjazz: dict, runs: dict, grids: di
         if "melid" not in entry:
             continue
         # The row may be keyed "file [performer]" when one file holds several
-        # annotated solos, and "file [line=oracle]" for a pianist's second
+        # annotated solos, and "file [line=crepe]" for a pianist's second
         # take; the notes are the run's and the grid is the file's.
         name = entry.get("run") or key.split(" [")[0]
         track = track_of(name)
@@ -645,7 +649,7 @@ def readable_pages(card: dict) -> dict:
     pages = {}
     for section, prefix in (("notation", ""), ("wjazz_notation", "wjazz:")):
         for name, entry in card.get(section, {}).items():
-            # The oracle take's pages are pinned per track but kept out of the
+            # The second take's pages are pinned per track but kept out of the
             # mean, which is a mean over what SHIPS by default; folding a
             # second page per pianist in would move it without the pipeline
             # having changed.
@@ -882,17 +886,17 @@ def render(card: dict) -> None:
                 f"{int(s['omnibook_readability_n'])} notation(s)"
             )
 
-    takes = sorted(k for k in card["mscz"] if take_of(k) is None and oracle_key(k) in card["mscz"])
+    takes = sorted(k for k in card["mscz"] if take_of(k) is None and second_key(k) in card["mscz"])
     if takes:
-        print("\n== Pianists: the default line against the oracle take (issue #8) ==")
-        print("  (crepe / oracle; rhythm with its matched count, hand score as notation)")
+        print(f"\n== Pianists: the default line against the {SECOND_LINE} take (issue #8) ==")
+        print(f"  (default / {SECOND_LINE}; rhythm with its matched count, hand score as notation)")
         header = f"  {'tune':<30s} {'pitch':>15s} {'note':>15s} {'rhythm':>17s}"
         print(header)
         print("  " + "-" * (len(header) - 2))
         for name in takes:
-            a, b = card["mscz"][name], card["mscz"][oracle_key(name)]
+            a, b = card["mscz"][name], card["mscz"][second_key(name)]
             na = card.get("notation", {}).get(name)
-            nb = card.get("notation", {}).get(oracle_key(name))
+            nb = card.get("notation", {}).get(second_key(name))
             rhythm = "-"
             if na and nb:
                 matched = f"({int(na['n_matched'])}/{int(nb['n_matched'])})"
@@ -903,37 +907,37 @@ def render(card: dict) -> None:
             )
         s = card["summary"]
         if "pianist_pitch_f1" in s:
-            pitch = f"{s['pianist_pitch_f1']:.3f} / {s['pianist_pitch_f1_oracle']:.3f}"
-            note = f"{s['pianist_note_f1']:.3f} / {s['pianist_note_f1_oracle']:.3f}"
+            pitch = f"{s['pianist_pitch_f1']:.3f} / {s['pianist_pitch_f1_crepe']:.3f}"
+            note = f"{s['pianist_note_f1']:.3f} / {s['pianist_note_f1_crepe']:.3f}"
             print(
                 f"\n  mean pitch F1 {pitch}   note F1 {note}"
                 f"   over {int(s['pianist_pitch_f1_n'])} pianists"
             )
         if "pianist_rhythm" in s:
             print(
-                f"  mean rhythm {s['pianist_rhythm']:.3f} / {s['pianist_rhythm_oracle']:.3f}"
+                f"  mean rhythm {s['pianist_rhythm']:.3f} / {s['pianist_rhythm_crepe']:.3f}"
                 f" over {int(s['pianist_rhythm_n'])}"
             )
         if "wjazz_pianist_note_f1" in s:
             print(
                 f"  WJazzD note F1 {s['wjazz_pianist_note_f1']:.3f} / "
-                f"{s['wjazz_pianist_note_f1_oracle']:.3f} over {int(s['wjazz_pianist_note_f1_n'])}"
+                f"{s['wjazz_pianist_note_f1_crepe']:.3f} over {int(s['wjazz_pianist_note_f1_n'])}"
             )
 
 
 def paired_takes(section: dict, field: str) -> tuple[list[float], list[float]]:
-    """`field` for every default-take row whose oracle take is also in
-    `section` and carries the field: (default values, oracle values), aligned."""
-    default, oracle = [], []
+    """`field` for every default-take row whose second take is also in
+    `section` and carries the field: (default values, second values), aligned."""
+    default, second = [], []
     for key, entry in sorted(section.items()):
         if take_of(key) is not None or field not in entry:
             continue
-        other = section.get(oracle_key(key))
+        other = section.get(second_key(key))
         if other is None or field not in other:
             continue
         default.append(float(entry[field]))
-        oracle.append(float(other[field]))
-    return default, oracle
+        second.append(float(other[field]))
+    return default, second
 
 
 def flatten(card: dict) -> dict[str, float]:
@@ -1042,7 +1046,7 @@ def main() -> None:
         "summary": {},
     }
     # Every mean below is over the DEFAULT take: it describes what ships. The
-    # oracle take is pinned per track and summarised paired, further down.
+    # second take is pinned per track and summarised paired, further down.
     scored = [e for k, e in card["wjazz"].items() if "skipped" not in e and take_of(k) is None]
     if scored:
         card["summary"]["wjazz_note_f1"] = round(statistics.fmean(e["note_f1"] for e in scored), 4)
@@ -1103,10 +1107,10 @@ def main() -> None:
         ("notation", "rhythm", "pianist_rhythm"),
         ("wjazz", "note_f1", "wjazz_pianist_note_f1"),
     ):
-        default, oracle = paired_takes(card.get(section, {}), field)
+        default, second = paired_takes(card.get(section, {}), field)
         if default:
             card["summary"][label] = round(statistics.fmean(default), 4)
-            card["summary"][f"{label}_oracle"] = round(statistics.fmean(oracle), 4)
+            card["summary"][f"{label}_{SECOND_LINE}"] = round(statistics.fmean(second), 4)
             card["summary"][f"{label}_n"] = float(len(default))
 
     render(card)
