@@ -24,109 +24,146 @@ path -- and each note is compared with where the annotator filed it. The one
 constant not being asked (which of our bars is their bar 1) is the mode of
 the differences. 452 solos in one quarter-note metre, 16 seconds to run.
 
-### WJazzD's tatum is more literal than a page
+### WJazzD's tatum is more literal than a page, in both directions
 
-This changed the reading of the result. The Jazzomat annotation files each
-onset at the nearest tatum of a per-beat `division` chosen to fit that
+This changed the reading of the result twice. The Jazzomat annotation files
+each onset at the nearest tatum of a per-beat `division` chosen to fit that
 beat's onsets, so it records the performance, not a transcriber's choice:
 the offbeat of a two-onset beat sits at 1/2 in 22,577 beats, at 2/3 in
 5,102 and at 3/4 in 2,500; a laid-back downbeat is filed at 1/4, a pushed
 one at 3/4 of the beat before. A page writes an eighth, a beat and a beat.
-So the instrument reports two numbers and names its classes on both sides:
+
+So a raw tatum match is the wrong target in both directions. Where the
+annotator filed 3/4 and we wrote the eighth, we are right and the tatum is
+literal. Where the annotator filed 3/4 and we wrote 3/4 too, we are BOTH
+literal, and the page has the dotted eighth plus sixteenth the listener
+complained of. The first version of this instrument counted that second
+case as a hit; a rule that wrote more of them then read four points better
+here while notated rhythm fell on eleven of twelve hand scores and 19 of 22
+Omnibook sides. The instrument now reports:
 
 - **tatum hit**: on the annotator's tatum exactly.
-- **page hit**: tatum hit, or the *swing convention* (a two-onset beat's
-  offbeat at 1/2, 2/3 or 3/4 on either side), with the *annotation
-  literal* class -- we wrote the beat, the annotator filed the note within
-  a sixteenth of it -- set aside rather than charged.
+- **page hit**: tatum hit, or the *swing convention* -- a two-onset beat's
+  offbeat filed at 2/3 or 3/4 and written by us at 1/2 -- with the
+  *annotation literal* class (we wrote the beat; the annotator filed the
+  note within a sixteenth of it) set aside rather than charged. Our 3/4 in
+  such a beat is charged as *late offbeat as dotted* whatever the annotator
+  filed.
 
-## The shipped quantizer, 2026-09-20
+## The quantizer before and after, 2026-09-20
 
-| tempo band | solos | notes | tatum hit | page hit | dropped |
-|---|---|---|---|---|---|
-| SLOW | 38 | 17,797 | 43.7% | 47.5% | 3,607 |
-| MEDIUM SLOW | 31 | 12,917 | 58.1% | 64.6% | 985 |
-| MEDIUM | 86 | 36,220 | 56.3% | 66.3% | 1,881 |
-| MEDIUM UP | 96 | 34,049 | 61.7% | 73.5% | 1,227 |
-| UP | 201 | 98,000 | 72.9% | 85.0% | 1,299 |
-| **all** | **452** | **198,983** | **64.8%** | **75.6%** | **8,999** |
+| tempo band | solos | notes | page hit before | page hit after |
+|---|---|---|---|---|
+| SLOW | 38 | 17,797 | 45.6% | 46.5% |
+| MEDIUM SLOW | 31 | 12,917 | 60.7% | 63.2% |
+| MEDIUM | 86 | 36,220 | 61.8% | 66.0% |
+| MEDIUM UP | 96 | 34,049 | 68.6% | 73.2% |
+| UP | 201 | 98,000 | 79.3% | 85.1% |
+| **all** | **452** | **198,983** | **70.7%** | **75.3%** |
 
-The classes, as a share of the 189,984 matched notes:
+The classes, as a share of the ~190,000 matched notes:
 
-| class | n | share | what it is |
+| class | before | after | what it is |
 |---|---|---|---|
-| hit | 123,191 | 64.8% | |
-| swing convention | 13,503 | 7.1% | the same eighth, filed differently |
-| annotation literal | 9,192 | 4.8% | we wrote the beat; the tatum is a sixteenth off it |
-| early offbeat as 16th | 5,875 | 3.1% | an eighth played at 0.3-0.5 of the beat, written a sixteenth or thirty-second early |
-| laid-back beat after it | 3,111 | 1.6% | a beat played 0.2-0.3 late, written on the "e" |
-| pushed beat before it | 1,246 | 0.7% | a beat played early, written in the beat before |
-| late offbeat as dotted | 117 | 0.1% | the dotted eighth of the complaint |
-| triplet as binary | 3,104 | 1.6% | thirds written as halves or quarters |
-| binary as triplet | 3,452 | 1.8% | the other way |
-| below the grid | 18,847 | 9.9% | the annotator's division is 5 or finer; the page has no such value |
-| other | 8,346 | 4.4% | |
-| dropped | 8,999 | 4.5% of annotated | two onsets in one grid step; one is lost |
+| hit | 61.7% | 63.9% | |
+| swing convention | 5.5% | 6.6% | the annotator's 2/3 or 3/4, our eighth |
+| annotation literal | 4.8% | 4.8% | we wrote the beat; the tatum is a sixteenth off it |
+| late offbeat as dotted | 4.7% | 2.1% | a swung offbeat played at 0.7-0.9, written 3/4: the dotted rhythm of bar 4 |
+| early offbeat as 16th | 3.1% | 1.8% | an eighth played at 0.3-0.5, written a sixteenth or thirty-second early |
+| laid-back beat after it | 1.6% | 0.8% | a beat played 0.2-0.3 late, written on the "e": the tied pickup of bar 16 |
+| pushed beat before it | 0.7% | 0.4% | a beat played early, written in the beat before |
+| triplet as binary | 1.6% | 1.6% | thirds written as halves or quarters |
+| binary as triplet | 1.9% | 1.9% | the other way |
+| below the grid | 9.9% | 9.9% | the annotator's division is 5 or finer; the page has no such value |
+| other | 4.4% | 4.7% | |
+| dropped | 4.5% | 4.4% of annotated | two onsets in one grid step; one is lost |
 
-Three readings:
+Three readings of the "before" column:
 
-1. **The dotted rhythm of bar 4 is not the quantizer's prior.** Given a
-   clean grid and the whole solo, a late swung offbeat is written as an
-   eighth 99 times in 100 (the *swing convention* row is where those go).
-   On Birks Works it arrives from somewhere else -- the swing reading's
-   confidence over a short span, or the transcriber's onsets -- and the
-   instrument that will say which is `run_eval`'s per-track rows, not this.
-2. **The genuine quantizer classes are the early offbeat, the laid-back
-   beat and the triplet confusions**: about 9% of matched notes at medium
-   and up tempos. The early offbeat is the swing warp's doing: a phase of
-   0.4 or 0.5 (an eighth played straight or ahead) is mapped to 0.33-0.42
-   by a warp built to bring 0.65 to 0.5, and the sixteenth or
-   thirty-second grid then fits it better. The laid-back beat is the
-   coarsest-within-slack rule with one onset to judge by.
+1. **The dotted rhythm of bar 4 was the quantizer's own, and the largest
+   class it owned.** Half of the 8,880 came from beats the swing reading
+   never reached (a window with too few offbeats, or a span read straight
+   inside a swinging solo) so no warp applied and 0.7 fell to the sixteenth
+   grid; the other half were offbeats played at 0.8-0.9, which even the
+   warp only brings to 0.75. Either way the beat held one or two onsets.
+2. **The early offbeat was the swing warp's doing**: a phase of 0.4 or 0.5
+   (an eighth played straight or ahead) is mapped to 0.33-0.42 by a warp
+   built to bring 0.65 to 0.5, and the sixteenth or thirty-second grid then
+   fits it better. The laid-back beat was the coarsest-within-slack rule
+   with one onset to judge by.
 3. **Ballads are a different problem.** At SLOW, 43% of notes are below
    our finest grid and 20% are dropped for want of one: the tempo-blind
    candidate set (nothing finer than a sixteenth unless a beat cannot keep
-   its onsets apart) that D11 already names. A rhythm prior does not touch
-   this; a tempo-aware candidate set or the double-time reading does.
+   its onsets apart) that D11 already names. Nothing here touches it.
 
-## Trials, measured on the instrument, not shipped here
+## What shipped
 
-Each variant is a monkeypatch of `quantize` (scratchpad `quantize_trials*.py`);
-the shipped numbers are the table above.
+Two rules in `quantize`, both measured on this instrument first and then on
+the hand scores and the Omnibook through `run_eval` (`CACHE_VERSION` 3):
 
-| variant | tatum | page | early offbeat | laid-back | other | dropped |
-|---|---|---|---|---|---|---|
-| shipped | 64.8% | 75.6% | 3.1% | 1.6% | 4.4% | 4.5% |
-| one-sided warp | 67.8% | 77.5% | 1.1% | 3.1% | 4.0% | 5.4% |
-| lone onset: eighth grid only | 65.6% | 77.1% | 2.5% | 0.7% | 4.5% | 4.9% |
-| **two hypotheses per beat** | **70.2%** | **79.6%** | **1.2%** | 2.2% | **3.1%** | **4.4%** |
-| two hypotheses + lone onset (guarded) | 71.2% | 81.3% | 0.6% | 1.0% | 3.2% | 4.7% |
+- **A sparse beat cannot demonstrate a sixteenth**
+  (`QuantizeConfig.min_onsets_for_sixteenth`, 3). A beat holding one or
+  two onsets is offered the eighth grid and the ternary one only, the same
+  reasoning as the three-onset gate on tuplets, one grid coarser. Two
+  escapes keep it from ever losing a note: the eighth grid must keep the
+  onsets apart, and its reading must not land an onset on the neighbouring
+  beat's own note (`_collides_on_eighths`, which looks both ways -- a late
+  note pushed onto the next beat's first onset, or an early first note
+  pulled onto the beat the previous beat's late note is being pushed to;
+  the one-way guard lost 1,456 notes). This is what moves the table above.
+- **Each binary grid is scored under both timing readings, the raw phase
+  and the warped one** (`choose_reading`), the coarsest grid within slack
+  of the best pair wins, and the note is snapped and replayed under that
+  reading. The straight reading is offered only to a beat whose onsets all
+  sit at or before the span's swung offbeat: past it, a raw 0.75 is a
+  perfect sixteenth, and the ungated version wrote the dotted rhythm back
+  (that was the four-points-better-and-every-page-worse result). Gated, it
+  is worth 0.3 of a point here and takes the early-offbeat class from 3.1%
+  to 2.5% on its own.
 
-- **One-sided warp** (phases at or before 0.5 untouched, [0.5, φ*]
-  collapsed onto 0.5): fixes the early offbeat but the flat region merges
-  onsets, so a note is lost on 1,800 more beats. Rejected on the drops.
-- **Lone onset** (a beat holding one onset is offered the eighth grid
-  only: one onset cannot demonstrate a sixteenth, the same reasoning as
-  the three-onset gate on tuplets): halves the laid-back class, but a
-  late note snapped onto the next beat collides with that beat's own
-  first note and one is dropped. Needs the collision guard below.
-- **Two hypotheses per beat**: every binary grid is scored under BOTH
-  timing models, the raw phase (the beat is straight) and the warped one
-  (the beat is swung); the coarsest grid within slack of the best (grid,
-  hypothesis) wins and the note is snapped under that hypothesis. No note
-  is ever moved away from the eighth it was played nearest. Every band
-  up, `other` down a third, fewer drops than shipped. This is the
-  principled form of the fix: the swing warp is a hypothesis about a beat,
-  and a beat that was played straight should not be charged for it.
-- **Both, with a guard** (the lone-onset rule declines when the eighth
-  reading would land the note on the next beat's first onset): 81.3%,
-  drops 4.7% -- the guard is not yet tight enough (an onset at 0.15 of
-  the next beat snaps to its beat and still collides).
+Through `run_eval`, with our own notes on our own grid:
 
-The next step is to ship the two-hypothesis rule in `quantize` with tests,
-bump its `CACHE_VERSION`, and read the hand scores and the Omnibook through
-`run_eval` before pinning: this instrument measures the quantizer on a
-human's onsets and grid, and the page the listener sees is built on ours.
+| measure | before | after |
+|---|---|---|
+| Omnibook notated rhythm, over 22 | 0.730 | 0.758 (21 of 22 up) |
+| Omnibook notated value | 0.656 | 0.689 |
+| hand-score rhythm, 12 scores | | up on 9, down on 3 (Melody for C -0.015, Soul Station -0.018, Giant Steps -0.005) |
+| Birks Works rhythm / value | 0.704 / 0.650 | 0.748 / 0.708 |
+| pianist rhythm, over 7 | 0.818 | 0.828 |
+| readability, over 85 pages | 0.9908 | 0.9945 |
+| placement (mscz / Omnibook / WJazzD) | 0.908 / 0.856 / 0.835 | 0.895 / 0.848 / 0.825 |
+
+The placement dip is the one cost, and it is named: a lone late offbeat in
+a beat the swing reading did not reach snaps to the NEXT beat on the eighth
+grid (0.8 with no warp is nearer 1.0 than 0.5), where the annotator has it
+as the "and" of the beat before. Nothing changed in `wjazz_on_the_bar` (70
+of 73). The fix is a prior on the "and" for a lone late offbeat, and it is
+the next thing on this instrument.
+
+## Measured and not shipped
+
+| variant | page hit | dotted | laid-back | dropped |
+|---|---|---|---|---|
+| one-sided warp (phases at or before 0.5 untouched, [0.5, φ*] collapsed onto 0.5) | 77.5%* | | 3.1% | 5.4% |
+| two readings, ungated | 79.6%* | | 2.2% | 4.4% |
+| sparse = 1 (a lone onset only) | 73.8% | 3.5% | 1.1% | 4.4% |
+
+\* under the first version of the instrument, which counted our 3/4 as a hit.
+The one-sided warp's flat region merges onsets (1,800 more beats lose a
+note); the ungated straight reading writes the dotted rhythm for every
+offbeat past the swing point; sparse = 1 is strictly less than sparse = 2 on
+every class with the same drops.
+
+## What is left, for this instrument to measure next
+
+- **The lone late offbeat in an unswung beat** (the placement dip above):
+  a prior that a lone onset at 0.75-0.9 is the "and", not the next beat.
+- **The triplet confusions**, 3.5% both ways, untouched by either rule.
+- **Ballads**: below the grid and dropped, 60% of SLOW notes between them;
+  a tempo-aware candidate set or the double-time reading.
+- **"other"**, 4.7%: the largest cell is the annotator's 1/3 in a
+  two-onset beat written by us at 1/4 (2,338), which a page would write as
+  an eighth or a triplet, never a sixteenth.
 
 ## What it is not
 

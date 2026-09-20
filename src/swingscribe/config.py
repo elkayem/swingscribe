@@ -409,6 +409,20 @@ class QuantizeConfig(BaseModel):
     # notated a swung pair as a triplet on a third of all intervals. 1 or 2
     # restores the pre-M6 behaviour.
     min_onsets_for_tuplet: int = 3
+    # How many onsets a beat needs before a SIXTEENTH grid (or finer) may be
+    # chosen for it; below that only the eighth grid and the ternary one are
+    # offered. The same reasoning as the tuplet gate, one grid coarser: one
+    # or two onsets cannot demonstrate a sixteenth, and read on one they
+    # became the dotted eighth plus sixteenth (a swung offbeat played at
+    # 0.8) and the note on the "e" (a downbeat played 0.2 late) that no
+    # transcriber writes. Measured on the quantizer alone over 452 WJazzD
+    # solos (docs/wjazz-quantize.md, 2026-09-20): page hit 70.7% -> 75.3%,
+    # the dotted class 4.7% -> 2.1%, the laid-back class 1.6% -> 0.8%, no
+    # note lost. Two escapes keep it from losing notes: a beat the eighth
+    # grid cannot keep apart, and an eighth reading that would land on the
+    # neighbouring beat's own note (the collision guard in quantize_notes).
+    # 1 restores the old behaviour.
+    min_onsets_for_sixteenth: int = 3
     # How much worse, in SECONDS of mean snap error, a COARSER grid may be
     # and still win. Parsimony: reading a sixteenth out of a beat that only
     # shows an eighth pair is how a swung pair becomes a dotted eighth. 0

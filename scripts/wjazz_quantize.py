@@ -42,9 +42,13 @@ within the beat and how many annotated onsets share the beat:
 
 - **hit**: the same position, to a 24th of a quarter.
 - **swing convention**: the offbeat of a beat with at most two onsets,
-  filed at 1/2, 2/3 or 3/4 by one side and at another of those by the
-  other. A page writes an eighth either way; counted WITH the hits as
-  `page_hit`.
+  filed at 2/3 or 3/4 by the annotator and written at 1/2 by us. A page
+  writes an eighth; counted WITH the hits as `page_hit`. The other way
+  round is not a convention: OUR 3/4 in such a beat is the dotted eighth
+  plus sixteenth of the complaint even where the annotator filed 3/4 too,
+  and is charged as `late offbeat as dotted` (the first version of this
+  instrument counted it as a hit, and a rule that wrote more of them read
+  4 points better here while every hand score got worse, 2026-09-20).
 - **annotation literal**: we wrote a beat and the annotator filed the note
   within a sixteenth of it (a laid-back or pushed beat, tatum'd). The page
   writes the beat; not charged to us, reported apart.
@@ -224,11 +228,17 @@ def align(theirs, ours):
 def classify(h_pos: float, o_pos: float, division: int, onsets_in_beat: int) -> str:
     """One class for one matched note (module docstring)."""
     delta = round((o_pos - h_pos) * GRID) / GRID
-    if abs(delta) < EPS:
-        return "hit"
     h, o = frac_of(h_pos), frac_of(o_pos)
     same_beat = int(h_pos // 1) == int(o_pos // 1)
-    if same_beat and onsets_in_beat <= 2 and h in OFFBEAT and o in OFFBEAT:
+    # Our 3/4 in a beat of at most two onsets is the dotted eighth plus
+    # sixteenth of the complaint, whatever the annotator filed: a page writes
+    # that offbeat as an eighth (the annotator's 3/4 is the tatum's
+    # literalness, and is a convention when WE wrote the eighth).
+    if same_beat and onsets_in_beat <= 2 and h in OFFBEAT and o == Fraction(3, 4):
+        return "late offbeat as dotted"
+    if abs(delta) < EPS:
+        return "hit"
+    if same_beat and onsets_in_beat <= 2 and h in OFFBEAT and o == Fraction(1, 2):
         return "swing convention"
     if o == 0 and abs(delta) <= 0.25 + EPS:
         return "annotation literal"

@@ -1242,7 +1242,71 @@ decision needs the audio or the listener; a tempo hint through
 `meter`, after transcribe, where doubling or halving a grid costs nothing
 cached.
 
+### D34 - What the quantizer still gets wrong on a human's own onsets
+
+Measured 2026-09-20 on `scripts/wjazz_quantize.py` (docs/wjazz-quantize.md),
+after R27. On the annotator's onsets and grid, 452 WJazzD solos: page hit
+75.3%. What remains, as shares of the 190,000 matched notes:
+
+1. **A lone late offbeat in a beat the swing reading did not reach** goes
+   to the NEXT beat on the eighth grid (0.8 with no warp is nearer 1.0
+   than 0.5) where the annotator has it as the "and" of the beat before.
+   It is why placement dipped 0.01 on all three sets when R27 shipped
+   (`wjazz_on_the_bar` itself unchanged, 70 of 73). A prior on the "and"
+   for a lone onset at 0.75-0.9 is the fix, and the instrument measures it.
+2. **The triplet confusions**, 1.6% thirds written binary and 1.9% binary
+   written as thirds, untouched by R27.
+3. **Ballads**: 43% of SLOW notes are below our finest grid and 20% are
+   dropped for want of one (D11's tempo-blind candidate set; the double
+   time reading exists but nothing chooses it).
+4. **`other`**, 4.7%, led by the annotator's 1/3 in a two-onset beat
+   written by us at 1/4 (2,338 notes): a page writes that as an eighth or
+   a triplet, never a sixteenth.
+5. **The dotted rhythm is not gone**: 2.1% (was 4.7%), now in beats of
+   three or more onsets, where the sparse rule does not reach.
+
 ## Resolved
+
+### R27 - The quantizer wrote the dotted eighth for a swung offbeat and the "e" for a laid-back beat, on a clean grid (was the listener's complaint of 2026-09-19)
+
+The listener: "even when it gets the notes right, it chooses timing no
+human transcriber would ever use" -- Birks Works bar 4 as dotted-eighth-
+sixteenth pairs where the hand score has eighths, bar 16 with tied
+thirty-seconds. Found and fixed 2026-09-20 with a new instrument:
+`scripts/wjazz_quantize.py` runs swing, quantize and notate over the
+annotator's OWN onsets on the annotator's OWN beat grid, 452 WJazzD solos,
+and compares every note with where the annotator filed it -- the quantizer
+alone, no audio, no CREPE, no alignment, 16 seconds.
+
+Two things it taught before it could be read. WJazzD's tatum is a
+per-beat quantization of the performance, more literal than a page in both
+directions: the offbeat of a two-onset beat is filed at 1/2, 2/3 or 3/4,
+so an exact match undercounts us where we wrote the eighth and overcounts
+us where we wrote 3/4 too. The first version counted our 3/4 as a hit, and
+the first rule tried -- scoring every beat under the raw phase as well as
+the warped one -- read four points better on it while notated rhythm fell
+on eleven of twelve hand scores and 19 of 22 Omnibook sides: read raw, a
+swung offbeat at 0.75 is a perfect sixteenth. The instrument now charges
+our 3/4 in a sparse beat as the dotted rhythm whatever the annotator
+filed, and the straight reading is offered only to a beat whose onsets all
+sit at or before the swing point.
+
+With the counting right, the dotted rhythm was the quantizer's largest
+own class: 4.7% of 190,000 notes, half of them in beats the swing reading
+never reached and half offbeats played at 0.8-0.9 that even the warp only
+brings to 0.75, all in beats of one or two onsets. The rule that ships is
+the tuplet gate's reasoning one grid coarser: a beat of one or two onsets
+cannot demonstrate a sixteenth (`QuantizeConfig.min_onsets_for_sixteenth`,
+3), with two escapes so it never costs a note -- the eighth grid must keep
+the onsets apart, and its reading must not land on a neighbouring beat's
+own note, checked both ways (the one-way guard lost 1,456 notes). Page hit
+70.7 -> 75.3%; the dotted class 4.7 -> 2.1%, the laid-back beat 1.6 ->
+0.8%, the early offbeat 3.1 -> 1.8%; drops unchanged. Through `run_eval`
+on our own notes: Omnibook rhythm 0.730 -> 0.758 (21 of 22 up) and value
+0.656 -> 0.689, hand-score rhythm up on 9 of 12 (Birks Works 0.704 ->
+0.748, value 0.650 -> 0.708), pianist rhythm 0.818 -> 0.828, readability
+0.9908 -> 0.9945, placement down 0.01 on each set (D34.1). Baselines
+re-pinned; `quantize.CACHE_VERSION` 3.
 
 ### R26 - The grid repair could not see a stretch tracked at double rate, and six WJazzD pages carried 33 to 91 beats the annotator does not have
 

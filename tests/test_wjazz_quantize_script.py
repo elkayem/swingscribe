@@ -22,7 +22,9 @@ def test_the_swung_offbeat_is_one_eighth_however_it_is_filed():
     writes an eighth for all three, so no pairing of them is charged."""
     assert wq.classify(4 + 2 / 3, 4.5, 3, 2) == "swing convention"
     assert wq.classify(4.75, 4.5, 4, 2) == "swing convention"
-    assert wq.classify(4.5, 4.75, 2, 1) == "swing convention"
+    # Our 3/4 is the dotted rhythm of the complaint, whatever the annotator filed.
+    assert wq.classify(4.5, 4.75, 2, 1) == "late offbeat as dotted"
+    assert wq.classify(4.75, 4.75, 4, 2) == "late offbeat as dotted"
     # With three onsets in the beat the thirds are a triplet, not a swing.
     assert wq.classify(4 + 2 / 3, 4.5, 3, 3) == "triplet as binary"
 

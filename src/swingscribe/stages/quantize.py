@@ -28,6 +28,14 @@ rather than assumed:
   triplet figure and a swung eighth pair are dangerously similar (plan §5), so
   the grid is not assumed: whichever subdivision the beat's own notes actually
   fit gets used, and the residual records how well.
+- **It reads each beat as straight OR swung, whichever its notes fit.** The
+  warp is a hypothesis about a beat, and a beat played straight inside a
+  swinging solo — an offbeat at 0.5 — must not be charged for it: warped to
+  0.38 it became a sixteenth or a thirty-second, 3.1% of 190,000 WJazzD
+  notes (docs/wjazz-quantize.md, 2026-09-20). Every binary grid is scored
+  under the raw phases and the warped ones, the coarsest grid within slack
+  of the best pair wins, and the note is snapped and replayed under that
+  reading.
 
 Pure arithmetic, no heavy imports — the whole stage runs in CI.
 """
@@ -40,7 +48,7 @@ from swingscribe.model import Document, MeterSection, QuantizedNote, SwingSpan
 
 # Bump when this stage's behavior changes without a config change (see
 # pipeline._cache_name).
-CACHE_VERSION = 2  # 2: the quarter-note triplet over a beat pair (D28)
+CACHE_VERSION = 3  # 3: each beat read straight or swung; a sparse beat shows no sixteenth
 
 STRAIGHT_PHASE = 0.5
 
@@ -188,14 +196,17 @@ def snap(position: float, divisions: int) -> tuple[float, float]:
     return snapped, position - snapped
 
 
-def choose_grid(
+def choose_reading(
     offsets: list[float],
     candidates: tuple[int, ...],
     min_onsets_for_tuplet: int = 3,
     slack: float = 0.05,
     raw_offsets: list[float] | None = None,
-) -> int:
-    """Pick the subdivision that the notes in one beat actually fit.
+    star: float | None = None,
+) -> tuple[int, str]:
+    """Pick the subdivision the notes in one beat actually fit, and under
+    which timing reading: ("warped", the beat is swung) or ("raw", the beat
+    is straight or ternary).
 
     Post-warp, a swung eighth pair (0, 0.5) and a triplet figure (0, 1/3, 2/3)
     are close enough that assuming a binary grid silently rewrites the second
@@ -223,19 +234,35 @@ def choose_grid(
       error wins, rather than the best. Parsimony, and the coarser reading is
       the one a musician writes.
 
-    `raw_offsets`, when given, are the same notes UNWARPED, and the ternary
-    candidate is scored on them instead (D12). The swing warp is a hypothesis
-    about BINARY beats — it maps the swung offbeat to 0.5 — and applying it
-    to a genuine triplet drags the thirds off-lattice before this function
-    ever votes: {0, 1/3, 2/3} warped at φ*=0.6 reads {0, .28, .59}, which
-    loses ternary to sixteenths on pure arithmetic. A performed triplet
-    already sits at thirds in raw time and needs no warp. Each hypothesis is
-    scored under its own timing model; the convention gate stays — two notes
-    still cannot vote a tuplet, because a swung PAIR in raw time also lands
-    near {0, 2/3} and the page writes that as eighths (CLAUDE.md).
+    `raw_offsets`, when given, are the same notes UNWARPED, and they carry
+    two hypotheses. The ternary candidate is scored on them alone (D12): the
+    swing warp is a story about BINARY beats — it maps the swung offbeat to
+    0.5 — and applying it to a genuine triplet drags the thirds off-lattice
+    before this function ever votes; a performed triplet already sits at
+    thirds in raw time. **Every binary candidate is scored on BOTH** (2026-09-20,
+    docs/wjazz-quantize.md): the warp is a hypothesis about a beat, and a
+    beat played straight inside a swinging solo must not be charged for it.
+    An offbeat at 0.5 with a span reading φ* = 0.65 warps to 0.38, where the
+    sixteenth or thirty-second grid fits it better than the eighth — 3.1% of
+    190,000 WJazzD notes were written a sixteenth or thirty-second early
+    that way. Under the raw phase it is an eighth with no error at all. The
+    convention gate stays — two notes still cannot vote a tuplet, because a
+    swung PAIR in raw time also lands near {0, 2/3} and the page writes that
+    as eighths (CLAUDE.md).
+
+    **The straight reading is offered only to a beat whose onsets all sit at
+    or before `star`**, the span's swung offbeat. A note PAST the swing point
+    is not straight: read raw, an offbeat played at 0.75 is a perfect
+    sixteenth, and the first version of this rule wrote the dotted eighth
+    plus sixteenth for exactly the late swung offbeats the warp exists to
+    fold into an eighth — notated rhythm fell on eleven of twelve hand
+    scores and 19 of 22 Omnibook sides while the WJazzD instrument, which
+    then counted the annotator's own 3/4 tatum as a hit, read four points
+    better. Before the swing point the two readings differ only in which
+    way an early offbeat is pushed, and the raw one keeps it an eighth.
     """
     if not offsets:
-        return candidates[0]
+        return candidates[0], "warped"
     allowed = [
         divisions
         for divisions in candidates
@@ -244,16 +271,32 @@ def choose_grid(
     if not allowed:
         allowed = [candidates[0]]
 
-    def for_grid(divisions: int) -> list[float]:
-        if raw_offsets is not None and divisions % 3 == 0:
-            return raw_offsets
-        return offsets
+    straight_allowed = raw_offsets is not None and (star is None or max(raw_offsets) <= star + 1e-9)
 
-    errors = {
-        divisions: sum(abs(snap(offset, divisions)[1]) for offset in for_grid(divisions))
-        / len(offsets)
-        for divisions in allowed
-    }
+    def readings(divisions: int) -> list[tuple[str, list[float]]]:
+        if raw_offsets is None:
+            return [("warped", offsets)]
+        if divisions % 3 == 0:
+            return [("raw", raw_offsets)]
+        if not straight_allowed:
+            return [("warped", offsets)]
+        return [("raw", raw_offsets), ("warped", offsets)]
+
+    # Per grid: the reading that fits it best among those that keep the
+    # onsets apart on it; a grid no reading can keep apart is scored on its
+    # best error and marked as merging.
+    errors: dict[int, float] = {}
+    chosen: dict[int, str] = {}
+    separating: list[int] = []
+    for divisions in allowed:
+        scored = []
+        for name, values in readings(divisions):
+            error = sum(abs(snap(offset, divisions)[1]) for offset in values) / len(values)
+            scored.append((not _keeps_apart(values, divisions), error, name))
+        merges, error, name = min(scored)
+        errors[divisions], chosen[divisions] = error, name
+        if not merges:
+            separating.append(divisions)
     best_error = min(errors.values())
     # A grid that cannot keep two onsets apart is too coarse for this beat,
     # whatever its snap error says. Two notes on one grid position are one
@@ -261,12 +304,24 @@ def choose_grid(
     # hard constraint and not a preference. Without it, buying notated rhythm
     # by coarsening the grid quietly costs notes: 4.8% of All The Things
     # disappeared before this rule existed.
-    separating = [d for d in allowed if _keeps_apart(for_grid(d), d)] or allowed
+    separating = separating or allowed
     # Coarsest first: a smaller number of divisions is a coarser grid.
     for divisions in sorted(separating):
         if errors[divisions] <= best_error + slack + 1e-12:
-            return divisions
-    return min(separating, key=lambda d: errors[d])
+            return divisions, chosen[divisions]
+    divisions = min(separating, key=lambda d: errors[d])
+    return divisions, chosen[divisions]
+
+
+def choose_grid(
+    offsets: list[float],
+    candidates: tuple[int, ...],
+    min_onsets_for_tuplet: int = 3,
+    slack: float = 0.05,
+    raw_offsets: list[float] | None = None,
+) -> int:
+    """The grid `choose_reading` picks, without the reading."""
+    return choose_reading(offsets, candidates, min_onsets_for_tuplet, slack, raw_offsets)[0]
 
 
 def _keeps_apart(offsets: list[float], divisions: int) -> bool:
@@ -380,6 +435,7 @@ def quantize_notes(
     grid_slack_s: float = 0.02,
     chords: list[list[int]] | None = None,
     quarter_triplets: bool = False,
+    min_onsets_for_sixteenth: int = 3,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -439,7 +495,8 @@ def quantize_notes(
     # in beats and fine grids stay reachable; a burner's beat gets a large
     # one and the coarse reading wins — which is the direction the 456-solo
     # tempo staircase says humans notate (D11).
-    grids = {}
+    grids: dict[int, int] = {}
+    readings: dict[int, str] = {}
     for index, offsets in per_beat.items():
         # A beat the finest binary grid cannot keep apart holds a genuine
         # 32nd run — Bird on a ballad — and merging is silent note LOSS on
@@ -451,12 +508,26 @@ def quantize_notes(
         cands = candidates
         if not _keeps_apart(offsets, finest):
             cands = candidates + (finest * 2,)
-        grids[index] = choose_grid(
+        # A sparse beat is offered the eighth grid (and the ternary one) only:
+        # one or two onsets cannot demonstrate a sixteenth, and read on one
+        # they become the dotted eighth of a late swung offbeat or the "e"
+        # of a laid-back downbeat (docs/wjazz-quantize.md). Never at the cost
+        # of a note: the eighth grid must keep the onsets apart, and its
+        # reading must not land an onset on the neighbouring beat's own note.
+        if len(offsets) < min_onsets_for_sixteenth and _keeps_apart(offsets, 2):
+            neighbours = (
+                per_beat.get(index - 1, []) + per_beat_raw.get(index - 1, []),
+                per_beat.get(index + 1, []) + per_beat_raw.get(index + 1, []),
+            )
+            if not _collides_on_eighths(offsets, *neighbours):
+                cands = tuple(d for d in cands if d <= 2 or d % 3 == 0) or cands
+        grids[index], readings[index] = choose_reading(
             offsets,
             cands,
             min_onsets_for_tuplet,
             grid_slack_s / _beat_length(beats, index),
             raw_offsets=per_beat_raw[index],
+            star=by_beat.get(index, STRAIGHT_PHASE),
         )
     if allow_triplets and quarter_triplets:
         # A beat pair that reads as a quarter-note triplet is two ternary
@@ -469,11 +540,12 @@ def quantize_notes(
     out, positions = [], []
     for index, position, duration, pitch, raw, chord in warped:
         grid = grids.get(index, finest)
-        if grid % 3 == 0:
-            # Ternary: the NOTATION is the raw third (a performed triplet
-            # sits at thirds; no warp applies), but the replay position and
+        if grid % 3 == 0 or readings.get(index) == "raw":
+            # Ternary, or a binary beat read STRAIGHT: the NOTATION is the raw
+            # position snapped (a performed triplet sits at thirds; a straight
+            # eighth at 0.5; no warp applies), but the replay position and
             # the residual stay in WARPED space, so replay_onsets' unwarp
-            # recovers exactly the raw third with no changes there — and
+            # recovers exactly the raw position with no changes there — and
             # restore_residual stays exact by construction:
             # unwarp(warp(k/3) + (warped - warp(k/3))) is the raw position.
             star = by_beat.get(index, STRAIGHT_PHASE)
@@ -500,6 +572,22 @@ def quantize_notes(
             )
         )
     return out, positions
+
+
+def _collides_on_eighths(offsets: list[float], before: list[float], after: list[float]) -> bool:
+    """Would reading this beat on the eighth grid put a note on a neighbour's?
+
+    A late onset (0.75 and up) snaps to the NEXT beat's 1.0, where that
+    beat's own first note may sit; an early one (under 0.25) snaps to this
+    beat's 0, where the previous beat's late note may be pushed. Either
+    collision is one note fewer on the page (notate keeps one note per grid
+    position), so the beat keeps its finer grid instead. `before` and
+    `after` are the neighbours' offsets, warped and raw together, so the
+    test does not depend on which reading they end up under."""
+    on_eighths = [snap(offset, 2)[0] for offset in offsets]
+    late = any(position >= 1.0 for position in on_eighths) and any(o < 0.25 for o in after)
+    early = any(position <= 0.0 for position in on_eighths) and any(o >= 0.75 for o in before)
+    return late or early
 
 
 def _beat_length(beats: list[float], index: int) -> float:
@@ -571,6 +659,7 @@ def run(document: Document, config: Config) -> Document:
         allow_triplets=qc.allow_triplets,
         min_onsets_for_tuplet=qc.min_onsets_for_tuplet,
         grid_slack_s=qc.grid_slack_s,
+        min_onsets_for_sixteenth=qc.min_onsets_for_sixteenth,
         chords=[list(n.chord) for n in notes],
         quarter_triplets=qc.quarter_triplets,
     )

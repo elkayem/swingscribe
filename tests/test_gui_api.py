@@ -816,11 +816,14 @@ def test_export_counts_bars_from_the_downbeat_the_roll_draws(world, monkeypatch)
     written = world["client"].post(f"/api/tracks/{track['id']}/export", params=params).json()
     placed = {n.pitch: (n.bar, n.position) for n in mscz.parse_any(written["path"]).melody}
     # The bar line nearest the span start (1.0 s) is 0.5 s: bar 1. The note at
-    # 1.1 s sits a sixteenth after its second beat, and the note at 2.6 s a
-    # sixteenth into bar 2 (2.5 s). Anchored on the margin's first beat (0.0 s)
+    # 1.1 s is a fifth of a beat after its second beat, and the note at 2.6 s
+    # the same into bar 2 (2.5 s). Anchored on the margin's first beat (0.0 s)
     # instead, both would read a beat later.
-    assert placed[60] == (1, 1.25)
-    assert placed[65] == (2, 4.25)
+    # Each note is alone in its beat and played a fifth of a beat late, so
+    # since 2026-09-20 it is written ON its beat (docs/wjazz-quantize.md);
+    # the bar numbers are what this test is about.
+    assert placed[60] == (1, 1.0)
+    assert placed[65] == (2, 4.0)
 
 
 def test_the_span_is_in_the_filename(world, monkeypatch):

@@ -713,20 +713,17 @@ Results and limits: `docs/m5-quantize.md`.
   annotator's grid** (2026-09-20, `scripts/wjazz_quantize.py`,
   docs/wjazz-quantize.md, pinned in `wjazz-quantize-baseline.json`): 452
   WJazzD solos, 199k notes, no audio, 16 seconds. Two numbers, because
-  WJazzD's tatum is more LITERAL than a page -- it files a swung offbeat
-  at 1/2, 2/3 OR 3/4 and a laid-back downbeat at 1/4 -- so the raw
-  tatum hit (64.8%) undercounts us and the page hit (75.6%, the swing
-  convention allowed, the literal tatums set aside) is the one to move.
-  It names the classes: the early offbeat written as a sixteenth (3.1%,
-  the swing warp dragging a straight-played eighth to 0.33-0.42), the
-  laid-back beat written on the "e" (1.6%), the triplet confusions
-  (3.4%), and at SLOW 43% of notes below our finest grid (D11). The
-  dotted rhythm of the listener's complaint is 0.1% here -- on a clean
-  grid the quantizer writes the late offbeat as an eighth. Measured and
-  not yet shipped: scoring each beat under BOTH timing hypotheses (raw =
-  straight, warped = swung) lifts page hit to 79.6% on every band with
-  fewer drops; a lone onset offered the eighth grid only adds 1.7 more
-  but needs a collision guard. Run it after any quantize change.
+  WJazzD's tatum is more LITERAL than a page IN BOTH DIRECTIONS -- it
+  files a swung offbeat at 1/2, 2/3 OR 3/4 and a laid-back downbeat at
+  1/4 -- so the tatum hit undercounts us where we wrote the eighth, and
+  OVERCOUNTS us where we wrote 3/4 too: that is the dotted eighth of the
+  listener's complaint, charged whatever the annotator filed. The first
+  version counted it as a hit, and a rule that wrote more of them read
+  four points better on the instrument while notated rhythm fell on
+  eleven of twelve hand scores. `page_hit` is the number to move (70.7%
+  -> 75.3% the same day, R27); the classes say which choice is wrong;
+  run it after any quantize change, and then `run_eval`, because this
+  instrument sees a human's onsets and the page is built on ours.
 
 M6 — Notate + Export + the eval harness. All three landed together; the plan
 and this file had drifted apart on what M6 even was (plan §7's table says M6
@@ -804,6 +801,22 @@ Results and limits: `docs/m6-notate.md`.
   won a dotted-eighth instead. `choose_grid` now needs three onsets before a
   tuplet is allowed, offers an eighth-note grid at all, and takes the
   coarsest grid within `grid_slack` of the best. Rhythm 0.54 → 0.73.
+  **And a beat of one or two onsets cannot demonstrate a SIXTEENTH
+  either** (2026-09-20, `min_onsets_for_sixteenth` 3, R27): read on one, a
+  lone swung offbeat at 0.8 was the dotted eighth plus sixteenth of the
+  listener's complaint (4.7% of 190k WJazzD notes on the quantizer's own
+  instrument) and a lone downbeat played 0.2 late sat on the "e" (1.6%).
+  A sparse beat gets the eighth grid and the ternary one, with two escapes
+  so it never costs a note: the eighth grid must keep the onsets apart,
+  and its reading must not land on a neighbouring beat's own note
+  (`_collides_on_eighths`, both ways). Page hit 70.7 -> 75.3%, Omnibook
+  rhythm 0.730 -> 0.758 (21 of 22 up), hand-score rhythm up on 9 of 12,
+  Birks Works 0.704 -> 0.748. Each binary grid is also scored under the
+  RAW phase as well as the warped one (`choose_reading`), so a beat
+  played straight inside a swinging solo is not dragged to a sixteenth
+  -- but only where every onset sits at or before the span's swung
+  offbeat: past it, a raw 0.75 is a perfect sixteenth, and the ungated
+  version wrote the dotted rhythm back on every page.
 - **A grid that merges two onsets is too coarse, whatever its snap error.**
   Two notes on one grid position are one note in a single-line score. Without
   this, coarsening bought notated rhythm by silently deleting 4.8% of the
@@ -849,7 +862,8 @@ list of what is actually wrong; run everything with one command:
   the MuseScore set's code but pinned under `omnibook/` and
   `omnibook-notation/` with `summary/omnibook_*` means of its own, so the
   listener's twelve-track means never absorb it. Mean pitch F1 0.790, note
-  F1 0.537, rhythm 0.730 / value 0.656 at coverage 0.76, over 22. Nobody
+  F1 0.537, rhythm 0.758 / value 0.689 at coverage 0.76, over 22
+  (2026-09-20, the sparse-beat rule; 0.730 / 0.656 before it). Nobody
   drew its spans: `scripts/locate_scores.py` places each score by content
   (`benchmark.locate_score` -- the time-free aligner's true matches, a
   Theil-Sen line through them as the clock) and writes the sidecar; the

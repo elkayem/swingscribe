@@ -94,6 +94,27 @@ binary and a ternary subdivision are tried and whichever the beat's own notes
 fit better wins. Ties go to binary — the commoner reading, and the one a
 notation program renders without argument.
 
+**A beat of one or two onsets is read on eighths** (2026-09-20,
+`docs/wjazz-quantize.md`). The same reasoning as the tuplet gate, one grid
+coarser: one or two onsets cannot demonstrate a sixteenth, and read on the
+sixteenth grid a lone swung offbeat at 0.8 became a dotted eighth plus
+sixteenth and a lone downbeat played 0.2 late sat on the "e" -- 4.7% and
+1.6% of 190,000 WJazzD notes, on the quantizer's own instrument. Two
+escapes keep it from ever losing a note (the eighth grid must keep the
+onsets apart, and must not land an onset on a neighbouring beat's own
+note). Page hit 70.7% -> 75.3% on WJazzD; Omnibook rhythm 0.730 -> 0.758.
+
+**Each binary grid is scored under both readings of the beat, straight and
+swung.** The warp is a hypothesis; a beat played straight inside a swinging
+solo -- an offbeat at 0.5 -- warps to 0.38 and the sixteenth grid then fits
+it better. `choose_reading` scores every binary grid on the raw phases as
+well and snaps under whichever reading it took, but offers the straight
+reading only to a beat whose onsets all sit at or before the span's swung
+offbeat: past it, a raw 0.75 is a perfect sixteenth, and without the gate
+the rule wrote the dotted rhythm back on eleven of twelve hand scores while
+the WJazzD instrument -- then counting the annotator's own 3/4 tatum as a
+hit -- read four points better. The gate is the day's second lesson.
+
 ## Known limits
 
 - **At burning tempos we will usually notate straight.** WJazzD puts real

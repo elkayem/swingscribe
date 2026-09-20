@@ -484,23 +484,26 @@ def test_the_same_figure_is_written_finer_on_a_slow_beat():
     tempo staircase (16ths under 120 bpm, eighths over 160, across 456 solos,
     while the interval in SECONDS stays put).
 
-    The figure: an offbeat landing at 0.68 of its beat. On a ballad beat
-    (60 bpm, 1s) that placement is ~180ms from the eighth position — a real
-    dotted rhythm, written to the sixteenth grid. On a burner's beat
-    (200 bpm, 300ms) the same fraction is ~54ms of lateness — a played
-    eighth pair, written as one. A constant slack in beats cannot say both.
+    The figure: three onsets at 0, 0.5 and 0.8 of the beat. On a ballad
+    beat (60 bpm, 1s) the third is 200ms past the eighth position and 50ms
+    from the sixteenth -- a real dotted rhythm, written to the sixteenth
+    grid. On a burner's beat (200 bpm, 300ms) the same fraction is 60ms of
+    earliness on the next beat -- a pushed downbeat, written as one. A
+    constant slack in beats cannot say both. (Three onsets, because since
+    2026-09-20 a beat of one or two is read on eighths at every tempo:
+    docs/wjazz-quantize.md.)
     """
 
-    def second_note_beat(bpm):
+    def third_note_beat(bpm):
         period = 60.0 / bpm
         beats = [i * period for i in range(6)]
-        onsets = [beats[1], beats[1] + 0.68 * period]
-        quantized, _ = quantize_notes(onsets, [0.05, 0.05], [60, 62], beats, [], [])
-        assert len(quantized) == 2
-        return quantized[1].beat - int(quantized[1].beat)
+        onsets = [beats[1], beats[1] + 0.5 * period, beats[1] + 0.8 * period]
+        quantized, _ = quantize_notes(onsets, [0.05] * 3, [60, 62, 64], beats, [], [])
+        assert len(quantized) == 3
+        return quantized[2].beat
 
-    assert second_note_beat(60.0) == pytest.approx(0.75)  # sixteenth grid: dotted figure
-    assert second_note_beat(200.0) == pytest.approx(0.5)  # eighth grid: an eighth pair
+    assert third_note_beat(60.0) == pytest.approx(1.75)  # sixteenth grid: dotted figure
+    assert third_note_beat(200.0) == pytest.approx(2.0)  # eighth grid: the next beat
 
 
 def test_a_chord_rides_through_quantize_on_its_head_note():
@@ -561,7 +564,8 @@ def test_a_swung_pair_and_a_downbeat_are_not_a_quarter_note_triplet():
 def test_the_pair_must_start_on_a_half_note_unit():
     """Beats 2 and 3 of a bar (0-based 1 and 2) are not a unit notate can
     bracket -- the bar halves at beat 3 -- so the figure there keeps its
-    beat-level reading, a sixteenth after the second beat's downbeat."""
+    beat-level reading, an eighth after the second beat's downbeat (a lone
+    onset is read on eighths, docs/wjazz-quantize.md)."""
     period = 0.4
     beats = [i * period for i in range(9)]
     spans = [SwingSpan(start_beat=0, end_beat=8, bur=2.0, confidence=0.95, is_swung=True)]
@@ -569,7 +573,7 @@ def test_the_pair_must_start_on_a_half_note_unit():
     quantized, _ = quantize_notes(
         onsets, [0.05] * 4, [60, 62, 64, 65], beats, spans, [], quarter_triplets=True
     )
-    assert [q.beat for q in quantized] == pytest.approx([1.0, 1.5, 2.25, 3.0])
+    assert [q.beat for q in quantized] == pytest.approx([1.0, 1.5, 2.5, 3.0])
 
 
 def test_a_three_four_bar_has_no_half_note_unit():
@@ -590,7 +594,7 @@ def test_a_three_four_bar_has_no_half_note_unit():
         onsets, [0.05] * 4, [60] * 4, beats, spans, [section], quarter_triplets=True
     )
     fractions = [q.beat - int(q.beat) for q in quantized]
-    assert fractions == pytest.approx([0.0, 0.5, 0.25, 0.0])
+    assert fractions == pytest.approx([0.0, 0.5, 0.5, 0.0])
 
 
 def test_the_pair_reading_needs_the_whole_figure():
@@ -622,11 +626,132 @@ def test_the_pair_reading_wants_equal_spacing_not_the_lattice():
 
 def test_the_reading_is_off_unless_asked_for():
     """The flag ships off (config.py says why): the same figure is written
-    beat by beat -- an eighth pair and a sixteenth after the downbeat."""
+    beat by beat -- an eighth pair and an eighth after the downbeat."""
     period = 0.4
     beats = [i * period for i in range(9)]
     spans = [SwingSpan(start_beat=0, end_beat=8, bur=2.0, confidence=0.95, is_swung=True)]
     onsets = _pair_figure(beats, 2, period)
     quantized, _ = quantize_notes(onsets, [0.05] * 4, [60, 62, 64, 65], beats, spans, [])
-    assert [q.beat for q in quantized] == pytest.approx([2.0, 2.5, 3.25, 4.0])
+    assert [q.beat for q in quantized] == pytest.approx([2.0, 2.5, 3.5, 4.0])
     assert Config().quantize.quarter_triplets is False
+
+
+# ── each beat read straight or swung (docs/wjazz-quantize.md) ───────────────
+
+
+def test_a_beat_played_straight_is_read_straight_inside_a_swinging_solo():
+    """An offbeat at 0.5 with a span reading φ* = 0.65 warps to 0.38, which
+    the sixteenth grid fits better than the eighth: the swung-pair convention
+    turned a straight eighth into a sixteenth on 3.1% of WJazzD's notes. Read
+    under the raw phase it is an eighth with no error; a swung pair is still
+    read under the warp."""
+    from swingscribe.stages.quantize import choose_reading
+
+    star = 0.65
+    straight = [0.0, 0.5]
+    warped = [warp_phase(p, star) for p in straight]
+    assert choose_reading(warped, (2, 4, 3), 3, 0.05, raw_offsets=straight) == (2, "raw")
+    swung = [0.0, 0.65]
+    warped = [warp_phase(p, star) for p in swung]
+    assert choose_reading(warped, (2, 4, 3), 3, 0.05, raw_offsets=swung) == (2, "warped")
+    # An offbeat PAST the swing point is not straight: read raw, 0.75 is a
+    # perfect sixteenth and the page would get the dotted eighth back.
+    late = [0.0, 0.75]
+    warped = [warp_phase(p, star) for p in late]
+    assert choose_reading(warped, (2, 4, 3), 3, 0.05, raw_offsets=late, star=star) == (
+        2,
+        "warped",
+    )
+    assert choose_reading(warped, (2, 4, 3), 3, 0.05, raw_offsets=late) == (4, "raw")
+    # Without the raw phases there is only the warped reading, as before.
+    assert choose_reading([0.0, 0.5], (4, 3)) == (4, "warped")
+
+
+def test_the_straight_reading_is_notated_and_replayed_where_it_was_played():
+    """One straight offbeat inside a swinging line: on the page it is the
+    same eighth as its swung neighbours (not the sixteenth it warped to),
+    and the round trip puts it back at 0.5, not at the span's φ*."""
+    beat = 0.4  # 150 bpm
+    beats = [i * beat for i in range(24)]
+    onsets = []
+    for i in range(2, 20):
+        onsets.append(beats[i])
+        onsets.append(beats[i] + (0.5 if i == 10 else 0.66) * beat)
+    spans = swing_spans(onsets, beats)
+    quantized, positions = quantize_notes(
+        onsets, [0.1] * len(onsets), [60] * len(onsets), beats, spans, []
+    )
+    by_position = dict(zip(positions, quantized, strict=True))
+    notated = sorted(round(q.beat, 3) for p, q in by_position.items() if 10 <= p < 11)
+    assert notated == [10.0, 10.5]
+    replayed = replay_onsets(quantized, positions, beats, spans)
+    played = {round(o, 6) for o in onsets}
+    straight = beats[10] + 0.5 * beat
+    assert any(abs(r - straight) < 1e-6 for r in replayed)
+    swung = beats[11] + 0.66 * beat
+    assert min(abs(r - swung) for r in replayed) < 0.02 * beat
+    assert played  # the line was swung everywhere else and replays as such
+
+
+# ── a sparse beat cannot demonstrate a sixteenth (docs/wjazz-quantize.md) ────
+
+
+def _sparse_line(offbeat: float, count: int = 12, beat: float = 0.4):
+    """A swung line with one beat whose lone offbeat sits at `offbeat`."""
+    beats = [i * beat for i in range(count + 4)]
+    onsets = []
+    for i in range(2, count + 2):
+        if i == 8:
+            onsets.append(beats[i] + offbeat * beat)
+            continue
+        onsets.append(beats[i])
+        onsets.append(beats[i] + 0.66 * beat)
+    spans = swing_spans(onsets, beats)
+    quantized, positions = quantize_notes(
+        onsets, [0.1] * len(onsets), [60] * len(onsets), beats, spans, []
+    )
+    return [round(q.beat, 3) for q, p in zip(quantized, positions, strict=True) if 8 <= p < 9]
+
+
+def test_a_lone_late_offbeat_is_an_eighth_not_a_dotted_figure():
+    """Played at 0.82 of the beat, alone in it, a swung "and" warps to about
+    0.75 and the sixteenth grid fits it exactly: the dotted eighth plus
+    sixteenth of the listener's complaint, 4.7% of WJazzD's notes. One
+    onset cannot demonstrate a sixteenth, so the beat is read on eighths."""
+    assert _sparse_line(0.82) == [8.5]
+
+
+def test_a_lone_laid_back_downbeat_is_on_the_beat():
+    """Played 0.2 late and alone in its beat, the note was on the "e" (1.6%
+    of WJazzD's notes). On the eighth grid it is the beat."""
+    assert _sparse_line(0.2) == [8.0]
+
+
+def test_the_sparse_rule_never_costs_a_note():
+    """A lone onset at 0.85 of beat 8 reads as beat 9 on the eighth grid --
+    where beat 9's own first note sits. The collision guard keeps the finer
+    grid, and both notes reach the page. (At 75 bpm, where the slack is
+    small enough that the shipped reading was the sixteenth; at 150 the
+    coarsest-within-slack rule already read it as the next beat, D29.)"""
+    beat = 0.8
+    beats = [i * beat for i in range(20)]
+    onsets = [beats[i] for i in range(2, 16) if i != 8] + [beats[8] + 0.85 * beat]
+    onsets.sort()
+    quantized, positions = quantize_notes(
+        onsets, [0.1] * len(onsets), [60] * len(onsets), beats, [], []
+    )
+    assert len(quantized) == len(onsets)
+    near = sorted(
+        round(q.beat, 3) for q, p in zip(quantized, positions, strict=True) if 8 <= p <= 9
+    )
+    assert near == [8.75, 9.0]
+
+
+def test_min_onsets_for_sixteenth_of_one_restores_the_old_reading():
+    from swingscribe.stages.quantize import choose_reading  # noqa: F401 - documents the knob
+
+    beat = 0.4
+    beats = [i * beat for i in range(20)]
+    onsets = [beats[8] + 0.2 * beat]
+    quantized, _ = quantize_notes(onsets, [0.1], [60], beats, [], [], min_onsets_for_sixteenth=1)
+    assert round(quantized[0].beat, 3) == 8.25
