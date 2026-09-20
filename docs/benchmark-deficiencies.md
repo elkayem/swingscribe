@@ -1252,8 +1252,16 @@ after R27. On the annotator's onsets and grid, 452 WJazzD solos: page hit
    to the NEXT beat on the eighth grid (0.8 with no warp is nearer 1.0
    than 0.5) where the annotator has it as the "and" of the beat before.
    It is why placement dipped 0.01 on all three sets when R27 shipped
-   (`wjazz_on_the_bar` itself unchanged, 70 of 73). A prior on the "and"
-   for a lone onset at 0.75-0.9 is the fix, and the instrument measures it.
+   (`wjazz_on_the_bar` itself unchanged, 70 of 73). Tried the same day
+   (docs/wjazz-quantize.md, "The counted rule"): the annotator's own
+   choice counted by raw phase -- the "and" up to 0.85, the next beat from
+   there unless that beat's downbeat is taken -- read +1.4 on the
+   instrument and WORSE on every page-side measure of our own notes
+   (hand-score rhythm down on six of ten pages that moved, Omnibook on 13
+   of 20, placement down again). A phase threshold near a beat line is
+   calibrated on a human's onsets and grid and does not transfer to ours,
+   whose beats sit on a 20 ms frame. Still open; the next candidate must
+   be judged on our onsets first.
 2. **The triplet confusions**, 1.6% thirds written binary and 1.9% binary
    written as thirds, untouched by R27.
 3. **Ballads**: 43% of SLOW notes are below our finest grid and 20% are

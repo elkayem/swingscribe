@@ -154,10 +154,52 @@ note); the ungated straight reading writes the dotted rhythm for every
 offbeat past the swing point; sparse = 1 is strictly less than sparse = 2 on
 every class with the same drops.
 
+### The counted rule for the sparse beat (D34.1), measured and not shipped
+
+The truth table behind it, over 452 solos -- for a sparse beat whose last
+onset sits at 0.65-0.95 of the beat, where the annotator filed that note:
+
+| beat | next beat's downbeat | raw phase | n | annotator: the "and" / the next beat | ours (R27): and / next / dotted |
+|---|---|---|---|---|---|
+| unwarped | free | 0.65-0.75 | 827 | 100% / 0% | 58% / 0% / 42% |
+| unwarped | free | 0.75-0.85 | 2,634 | 98% / 2% | 0% / 90% / 10% |
+| unwarped | free | 0.85-0.95 | 4,634 | 27% / 73% | 0% / 99% / 1% |
+| unwarped | taken | 0.75-0.85 | 805 | 100% / 0% | 0% / 4% / 96% |
+| unwarped | taken | 0.85-0.95 | 190 | 79% / 21% | 0% / 84% / 16% |
+| warped | free | 0.75-0.85 | 5,609 | 99% / 1% | 75% / 5% / 20% |
+| warped | free | 0.85-0.95 | 4,670 | 36% / 64% | 4% / 76% / 20% |
+| warped | taken | 0.85-0.95 | 570 | 85% / 15% | 8% / 9% / 83% |
+
+So a rule was written from it: in a sparse beat, an onset before 0.25 is the
+beat, up to 0.85 the "and", from 0.85 the next beat unless the next beat
+already holds a note before 0.25 of itself, in which case the "and"; stored
+in warped space so the swing replays. On the instrument: page hit 75.3% ->
+76.7%, the dotted class 2.1% -> 1.7%, the laid-back beat 0.8% -> 0.3%, the
+early offbeat 1.8% -> 1.4%, drops 8,787 -> 8,657; 0.80 and 0.90 as the
+boundary read 76.3% and 75.9%.
+
+Through `run_eval`, on OUR notes on OUR grid, it read worse on every
+page-side measure: hand-score rhythm down on six of the ten pages that
+moved (Birks Works 0.748 -> 0.716, All The Things 0.716 -> 0.681), Omnibook
+rhythm down on 13 of 20, placement 0.895 -> 0.886 (mscz), 0.848 -> 0.840
+(Omnibook), 0.825 -> 0.822 (WJazzD). Reverted.
+
+The lesson is about the instrument, not the rule. R27's two rules change
+which GRID a beat is read on, and a human's onsets and ours agree about
+that. The counted rule moves notes ACROSS beat boundaries by a raw-phase
+threshold, and there a human's onsets on a human's grid are not ours on
+ours: the tracker's beats sit on a 20 ms frame and CREPE's onsets carry
+their own scatter, so a note at 0.85 of an annotated beat is anywhere from
+0.75 to 0.95 of ours, and a boundary calibrated on the clean side sends
+the wrong notes over. Any rule that decides by a phase threshold near a
+beat line has to be measured on our onsets before it is believed.
+
 ## What is left, for this instrument to measure next
 
-- **The lone late offbeat in an unswung beat** (the placement dip above):
-  a prior that a lone onset at 0.75-0.9 is the "and", not the next beat.
+- **The lone late offbeat in an unswung beat** (the placement dip above).
+  The counted rule is above, measured and reverted: whatever replaces it
+  must be judged on our onsets, and the next candidate is a threshold that
+  moves with the grid's own jitter (a beat's neighbours, not a constant).
 - **The triplet confusions**, 3.5% both ways, untouched by either rule.
 - **Ballads**: below the grid and dropped, 60% of SLOW notes between them;
   a tempo-aware candidate set or the double-time reading.
