@@ -48,7 +48,7 @@ from swingscribe.model import Document, MeterSection, QuantizedNote, SwingSpan
 
 # Bump when this stage's behavior changes without a config change (see
 # pipeline._cache_name).
-CACHE_VERSION = 3  # 3: each beat read straight or swung; a sparse beat shows no sixteenth
+CACHE_VERSION = 4  # 4: the off-beat pair may vote a tuplet; a tuplet's onsets sit inside the beat
 
 STRAIGHT_PHASE = 0.5
 
@@ -203,6 +203,8 @@ def choose_reading(
     slack: float = 0.05,
     raw_offsets: list[float] | None = None,
     star: float | None = None,
+    offbeat_pair_fit: float = 0.0,
+    inside: bool = False,
 ) -> tuple[int, str]:
     """Pick the subdivision the notes in one beat actually fit, and under
     which timing reading: ("warped", the beat is swung) or ("raw", the beat
@@ -263,11 +265,26 @@ def choose_reading(
     """
     if not offsets:
         return candidates[0], "warped"
-    allowed = [
-        divisions
-        for divisions in candidates
-        if divisions % 3 != 0 or len(offsets) >= min_onsets_for_tuplet
-    ]
+    raw = raw_offsets if raw_offsets is not None else offsets
+    gate = min_onsets_for_tuplet
+    # Two more things about the tuplet gate, both counted on the quantizer's
+    # own instrument (docs/wjazz-quantize.md, 2026-09-20). A two-onset beat
+    # whose first onset is OFF the beat and whose onsets fit thirds is the
+    # second and third of a triplet after a rest -- the swung-pair
+    # convention is about {0, 2/3} and says nothing about {1/3, 2/3} -- so
+    # it may vote. And an onset the thirds grid sends to 1.0 is the next
+    # beat's note, not the third of a triplet: laid-back sixteenths at
+    # (0.3, 0.55, 0.85) are not a triplet, and four onsets never are.
+    if (
+        offbeat_pair_fit > 0
+        and len(raw) == 2
+        and min(raw) >= 0.25
+        and sum(abs(snap(r, 3)[1]) for r in raw) / 2 <= offbeat_pair_fit
+    ):
+        gate = 2
+    voting = sum(1 for r in raw if snap(r, 3)[0] < 1.0 - 1e-9) if inside else len(raw)
+    ternary_ok = voting >= gate and voting == len(raw)
+    allowed = [divisions for divisions in candidates if divisions % 3 != 0 or ternary_ok]
     if not allowed:
         allowed = [candidates[0]]
 
@@ -436,6 +453,8 @@ def quantize_notes(
     chords: list[list[int]] | None = None,
     quarter_triplets: bool = False,
     min_onsets_for_sixteenth: int = 3,
+    offbeat_pair_tuplet_fit: float = 0.0,
+    tuplet_needs_onsets_inside: bool = False,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -528,6 +547,8 @@ def quantize_notes(
             grid_slack_s / _beat_length(beats, index),
             raw_offsets=per_beat_raw[index],
             star=by_beat.get(index, STRAIGHT_PHASE),
+            offbeat_pair_fit=offbeat_pair_tuplet_fit,
+            inside=tuplet_needs_onsets_inside,
         )
     if allow_triplets and quarter_triplets:
         # A beat pair that reads as a quarter-note triplet is two ternary
@@ -660,6 +681,8 @@ def run(document: Document, config: Config) -> Document:
         min_onsets_for_tuplet=qc.min_onsets_for_tuplet,
         grid_slack_s=qc.grid_slack_s,
         min_onsets_for_sixteenth=qc.min_onsets_for_sixteenth,
+        offbeat_pair_tuplet_fit=qc.offbeat_pair_tuplet_fit,
+        tuplet_needs_onsets_inside=qc.tuplet_needs_onsets_inside,
         chords=[list(n.chord) for n in notes],
         quarter_triplets=qc.quarter_triplets,
     )

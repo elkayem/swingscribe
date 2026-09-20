@@ -1263,7 +1263,11 @@ after R27. On the annotator's onsets and grid, 452 WJazzD solos: page hit
    whose beats sit on a 20 ms frame. Still open; the next candidate must
    be judged on our onsets first.
 2. **The triplet confusions**, 1.6% thirds written binary and 1.9% binary
-   written as thirds, untouched by R27.
+   written as thirds after R27; 2.4% and 0.7% after R28, which put the
+   laid-back sixteenths back on the binary grid. What is left is mostly
+   the two-onset beat at (0.35, 0.75) that the annotator files as the
+   second and third of a triplet: the rule that admits it (+1.1 on the
+   instrument) read worse on every page (docs/wjazz-quantize.md, R28).
 3. **Ballads**: 43% of SLOW notes are below our finest grid and 20% are
    dropped for want of one (D11's tempo-blind candidate set; the double
    time reading exists but nothing chooses it).
@@ -1274,6 +1278,28 @@ after R27. On the annotator's onsets and grid, 452 WJazzD solos: page hit
    three or more onsets, where the sparse rule does not reach.
 
 ## Resolved
+
+### R28 - A ternary reading counted an onset on the NEXT beat as the third of its triplet
+
+Found 2026-09-20 on the quantizer instrument, behind the "binary written
+as triplet" class (1.9% of notes after R27): laid-back sixteenths such as
+(0.3, 0.55, 0.85) and (0.1, 0.35, 0.6, 0.85), filed by the annotator at
+division 4. The thirds grid sends 0.85 to 1.0 and the tuplet gate counted
+it as the third onset a triplet needs; parsimony then preferred thirds to
+sixteenths. 597 of the 1,910 beats held four onsets, which no triplet can,
+and the ternary reading's onset at 1.0 collided with the next beat's own
+note, so one was dropped. `QuantizeConfig.tuplet_needs_onsets_inside`: a
+ternary reading needs every onset of the beat inside it on thirds. On the
+instrument it swaps one triplet class for the other (binary-as-triplet 1.9
+-> 0.7%, triplet-as-binary 1.6 -> 2.4%) and puts 1,700 more notes on the
+page (dropped 4.4 -> 3.6%); through `run_eval` on our own notes every
+measure is up a little: Omnibook rhythm 0.758 -> 0.761, value 0.689 ->
+0.693, hand-score rhythm 5 up and 2 down, pianist rhythm 0.828 -> 0.830,
+placement 0.895 -> 0.898 (mscz) and 0.848 -> 0.856 (Omnibook). The
+companion rule -- a two-onset beat starting off the beat may vote a tuplet
+-- was measured with it and rejected (D34.2). Baselines re-pinned;
+`quantize.CACHE_VERSION` 4; the instrument gained `page_hit_all`, which
+counts a dropped note as a miss.
 
 ### R27 - The quantizer wrote the dotted eighth for a swung offbeat and the "e" for a laid-back beat, on a clean grid (was the listener's complaint of 2026-09-19)
 

@@ -104,6 +104,13 @@ escapes keep it from ever losing a note (the eighth grid must keep the
 onsets apart, and must not land an onset on a neighbouring beat's own
 note). Page hit 70.7% -> 75.3% on WJazzD; Omnibook rhythm 0.730 -> 0.758.
 
+**A ternary reading needs every onset of the beat inside it on thirds**
+(2026-09-20, R28). An onset the thirds grid sends to 1.0 is the next beat's
+note early, not the third of a triplet: laid-back sixteenths at (0.3, 0.55,
+0.85) read as a triplet that way, and the onset at 1.0 collided with the
+next beat's own note and was dropped. 1,700 more notes on the page over
+WJazzD, every page-side measure up a little.
+
 **Each binary grid is scored under both readings of the beat, straight and
 swung.** The warp is a hypothesis; a beat played straight inside a swinging
 solo -- an offbeat at 0.5 -- warps to 0.38 and the sixteenth grid then fits

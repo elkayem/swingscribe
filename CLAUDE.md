@@ -791,7 +791,16 @@ Results and limits: `docs/m6-notate.md`.
   hand-score rhythm 0.773 -> 0.704. The human writes ONE dotted-eighth +
   sixteenth pair in 4,234 notes; we write 2.5 per hundred, and that IS the
   unread quarter-note triplet. Do not turn the flag on for a number; build
-  the truth from WJazzD's tatum positions first.
+  the truth from WJazzD's tatum positions first. **And a ternary reading
+  needs every onset of the beat INSIDE it on thirds** (2026-09-20, R28,
+  `tuplet_needs_onsets_inside`): an onset the thirds grid sends to 1.0 is
+  the next beat's note, not the third of a triplet -- laid-back sixteenths
+  at (0.3, 0.55, 0.85) read as a triplet that way, four-onset beats too,
+  and the note at 1.0 collided with the next beat's own and was dropped.
+  1,700 more notes on the page, every page-side measure up a little. The
+  companion rule (a two-onset beat starting off the beat may vote a tuplet,
+  `offbeat_pair_tuplet_fit`) is OFF: +1.1 on the instrument, worse on every
+  page.
 - **24 divisions per quarter** in MusicXML — the smallest divisible by 8 (a
   thirty-second) and 3 (a triplet).
 - **Never read more resolution out of a beat than its notes demonstrate.**
@@ -862,8 +871,9 @@ list of what is actually wrong; run everything with one command:
   the MuseScore set's code but pinned under `omnibook/` and
   `omnibook-notation/` with `summary/omnibook_*` means of its own, so the
   listener's twelve-track means never absorb it. Mean pitch F1 0.790, note
-  F1 0.537, rhythm 0.758 / value 0.689 at coverage 0.76, over 22
-  (2026-09-20, the sparse-beat rule; 0.730 / 0.656 before it). Nobody
+  F1 0.537, rhythm 0.761 / value 0.693 at coverage 0.76, over 22
+  (2026-09-20, the sparse-beat and inside-the-beat rules; 0.730 / 0.656
+  before them). Nobody
   drew its spans: `scripts/locate_scores.py` places each score by content
   (`benchmark.locate_score` -- the time-free aligner's true matches, a
   Theil-Sen line through them as the clock) and writes the sidecar; the

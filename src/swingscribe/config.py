@@ -423,6 +423,27 @@ class QuantizeConfig(BaseModel):
     # neighbouring beat's own note (the collision guard in quantize_notes).
     # 1 restores the old behaviour.
     min_onsets_for_sixteenth: int = 3
+    # A two-onset beat whose FIRST onset is off the beat (raw phase 0.25 or
+    # later) and whose onsets fit thirds within this mean error may vote a
+    # tuplet: the second and third of a triplet after a rest or a held
+    # note. The tuplet gate exists for the swung pair at {0, 2/3}, which is
+    # an eighth pair by convention; this figure starts at 1/3 and the
+    # convention says nothing about it. Counted on the quantizer's own
+    # instrument (docs/wjazz-quantize.md, 2026-09-20): 1,129 of the 1,600
+    # beats where the annotator's triplet was written binary were this pair,
+    # at (0.35, 0.75). OFF, measured: +1.2 on the instrument at 0.05, and
+    # through run_eval on our own notes hand-score rhythm down on 8 of 12,
+    # Omnibook on 14 of 17 that moved, placement down on both sets -- the
+    # pairs it admits on our onsets are not the annotator's triplets. 0.05
+    # is the fit it was measured at.
+    offbeat_pair_tuplet_fit: float = 0.0
+    # A ternary reading needs its onsets INSIDE the beat: an onset the
+    # thirds grid sends to 1.0 is the next beat's note, early, and is not
+    # evidence of a triplet. Without this, laid-back sixteenths at (0.3,
+    # 0.55, 0.85) read as a triplet because 0.85 "fits" 1.0 -- 1,910 beats
+    # on the instrument, 597 of them holding four onsets, which no triplet
+    # can.
+    tuplet_needs_onsets_inside: bool = True
     # How much worse, in SECONDS of mean snap error, a COARSER grid may be
     # and still win. Parsimony: reading a sixteenth out of a beat that only
     # shows an eighth pair is how a swung pair becomes a dotted eighth. 0

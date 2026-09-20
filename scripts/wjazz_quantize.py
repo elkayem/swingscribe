@@ -316,6 +316,13 @@ def aggregate(results):
         "dropped": total["dropped"],
         "hit": round(total["hit"] / matched, 4),
         "page_hit": round(sum(total[c] for c in PAGE_HITS) / max(1, charged), 4),
+        # The same over every annotated note we are charged for: a dropped
+        # note is a miss here, not an absence. A rule that keeps notes on the
+        # page at the cost of a few positions reads better on this one and
+        # worse on `page_hit`, and the pages agree with this one (R28).
+        "page_hit_all": round(
+            sum(total[c] for c in PAGE_HITS) / max(1, charged + total["dropped"]), 4
+        ),
         "classes": {c: total[c] for c in CLASSES},
     }
 
@@ -328,15 +335,17 @@ def render(by_band, overall):
     )
     print(
         f"  on the annotator's tatum: {overall['hit']:.1%}; on the page's position "
-        f"(swing convention allowed, literal tatums set aside): {overall['page_hit']:.1%}"
+        f"(swing convention allowed, literal tatums set aside): {overall['page_hit']:.1%}; "
+        f"counting a dropped note as a miss: {overall['page_hit_all']:.1%}"
     )
     print(
-        f"\n  {'tempo band':12} {'solos':>5} {'notes':>7} {'tatum':>7} {'page':>7} {'dropped':>8}"
+        f"\n  {'tempo band':12} {'solos':>5} {'notes':>7} {'tatum':>7} {'page':>7} "
+        f"{'page+drop':>9} {'dropped':>8}"
     )
     for band, agg in by_band.items():
         print(
             f"  {band:12} {agg['n_solos']:5d} {agg['n_notes']:7d} {agg['hit']:7.1%} "
-            f"{agg['page_hit']:7.1%} {agg['dropped']:8d}"
+            f"{agg['page_hit']:7.1%} {agg['page_hit_all']:9.1%} {agg['dropped']:8d}"
         )
     print(f"\n  {'class':26} {'all':>7} {'share':>6}  " + " ".join(f"{b[:6]:>7}" for b in by_band))
     matched = overall["matched"]
@@ -367,7 +376,7 @@ def compare(current: dict, pinned: dict) -> int:
     moved = 0
     for band in sorted(set(current) | set(pinned)):
         a, b = pinned.get(band, {}), current.get(band, {})
-        for field in ("hit", "page_hit", "n_solos", "dropped"):
+        for field in ("hit", "page_hit", "page_hit_all", "n_solos", "dropped"):
             if a.get(field) != b.get(field):
                 print(f"  {band}/{field}: {a.get(field)} -> {b.get(field)}")
                 moved += 1

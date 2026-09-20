@@ -755,3 +755,48 @@ def test_min_onsets_for_sixteenth_of_one_restores_the_old_reading():
     onsets = [beats[8] + 0.2 * beat]
     quantized, _ = quantize_notes(onsets, [0.1], [60], beats, [], [], min_onsets_for_sixteenth=1)
     assert round(quantized[0].beat, 3) == 8.25
+
+
+# ── the tuplet gate, two refinements (docs/wjazz-quantize.md) ────────────────
+
+
+def test_a_pair_starting_off_the_beat_that_fits_thirds_may_vote_a_tuplet():
+    """The second and third of a triplet after a rest: (0.35, 0.75). The
+    swung-pair convention is about {0, 2/3}; this figure starts at 1/3."""
+    from swingscribe.stages.quantize import choose_reading
+
+    pair = [0.35, 0.7]
+    assert choose_reading(pair, (2, 4, 3), 3, 0.05, raw_offsets=pair, offbeat_pair_fit=0.05) == (
+        3,
+        "raw",
+    )
+    # Off by default, and the swung pair is still an eighth pair.
+    assert choose_reading(pair, (2, 4, 3), 3, 0.05, raw_offsets=pair)[0] != 3
+    swung = [0.0, 0.66]
+    assert (
+        choose_reading(swung, (2, 4, 3), 3, 0.05, raw_offsets=swung, offbeat_pair_fit=0.05)[0] != 3
+    )
+
+
+def test_laid_back_sixteenths_are_not_a_triplet_when_the_last_lands_on_the_next_beat():
+    """(0.3, 0.55, 0.85): the thirds grid sends 0.85 to 1.0, which is the
+    next beat's note early, not the third of a triplet. Four onsets never
+    are one."""
+    from swingscribe.stages.quantize import choose_reading
+
+    late = [0.3, 0.55, 0.85]
+    assert choose_reading(late, (2, 4, 3), 3, 0.05, raw_offsets=late)[0] == 3
+    assert choose_reading(late, (2, 4, 3), 3, 0.05, raw_offsets=late, inside=True)[0] == 4
+    four = [0.1, 0.35, 0.6, 0.85]
+    assert choose_reading(four, (2, 4, 3), 3, 0.05, raw_offsets=four, inside=True)[0] == 4
+    # A real triplet, all three inside, is still a triplet.
+    real = [0.0, 1 / 3, 2 / 3]
+    assert choose_reading(real, (2, 4, 3), 3, 0.05, raw_offsets=real, inside=True) == (3, "raw")
+
+
+def test_the_inside_rule_is_on_and_the_pair_rule_is_off_by_default():
+    """Both measured on the instrument and then on the pages: the inside
+    rule lifts every page-side measure a little, the pair rule lowers them
+    all (docs/wjazz-quantize.md)."""
+    assert Config().quantize.offbeat_pair_tuplet_fit == 0.0
+    assert Config().quantize.tuplet_needs_onsets_inside is True

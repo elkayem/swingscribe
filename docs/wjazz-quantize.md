@@ -140,6 +140,48 @@ as the "and" of the beat before. Nothing changed in `wjazz_on_the_bar` (70
 of 73). The fix is a prior on the "and" for a lone late offbeat, and it is
 the next thing on this instrument.
 
+## The tuplet's onsets sit inside the beat (R28, the same day)
+
+The two triplet classes after R27 were 1.6% thirds written binary and 1.9%
+binary written as thirds. Behind the second: laid-back sixteenths such as
+(0.3, 0.55, 0.85) and (0.1, 0.35, 0.6, 0.85), which the annotator files at
+division 4. The thirds grid sends 0.85 to 1.0 -- the next beat -- and still
+counted it as the third onset a tuplet needs, and parsimony then preferred
+thirds to sixteenths; 597 of those 1,910 beats held FOUR onsets, which no
+triplet can. Behind the first: 1,129 two-onset beats at (0.35, 0.75), the
+second and third of a triplet after a rest, which the tuplet gate refuses
+because two onsets cannot vote one.
+
+Two rules were written and measured, on the instrument and then on the
+pages, together and each alone:
+
+| setting | instrument page hit | page hit counting drops | dropped | hand-score rhythm | Omnibook rhythm | placement (mscz / Omnibook) |
+|---|---|---|---|---|---|---|
+| R27 | 75.3% | 71.8% | 4.4% | | 0.758 | 0.895 / 0.848 |
+| inside only (`tuplet_needs_onsets_inside`) | 74.4% | 71.6% | 3.6% | 5 up, 2 down | 0.761 (10 up, 6 down) | 0.898 / 0.856 |
+| pair only (`offbeat_pair_tuplet_fit` 0.05) | 76.4% | | 4.4% | 0 up, 8 down | 0.748 (3 up, 14 down) | 0.890 / 0.843 |
+| both | 75.5% | | 3.6% | 4 up, 5 down | 0.752 (5 up, 15 down) | 0.892 / 0.853 |
+| pair 0.08, no inside | 76.5% | | 4.3% | 1 up, 8 down | 0.738 | 0.885 / 0.834 |
+
+**The inside rule ships** (`QuantizeConfig.tuplet_needs_onsets_inside`,
+`CACHE_VERSION` 4): a ternary reading needs every onset of the beat to
+land inside it on thirds. On the instrument it trades one triplet class for
+the other (binary-as-triplet 1.9% -> 0.7%, triplet-as-binary 1.6% -> 2.4%)
+and loses a point of `page_hit`, but it puts 1,700 more notes on the page
+(a ternary reading with an onset at 1.0 collided with the next beat's note
+and one was dropped), and every page-side measure agrees: Omnibook rhythm
+0.758 -> 0.761 and value 0.689 -> 0.693, pianist rhythm 0.828 -> 0.830,
+placement up on both sets. `page_hit_all`, which counts a dropped note as
+a miss, was added to the instrument for exactly this: 71.8% -> 71.6% is
+the honest instrument reading of a rule the pages like.
+
+**The pair rule does not ship** (off at 0.0, measured at 0.05): +1.1 on the
+instrument, and on our own notes hand-score rhythm down on 8 of 12,
+Omnibook on 14 of 17 that moved, placement down on both sets. The pairs it
+admits on our onsets are not the annotator's triplets. Same lesson as the
+counted rule below: a threshold on raw phase does not transfer from a
+human's onsets to ours.
+
 ## Measured and not shipped
 
 | variant | page hit | dotted | laid-back | dropped |
@@ -200,7 +242,9 @@ beat line has to be measured on our onsets before it is believed.
   The counted rule is above, measured and reverted: whatever replaces it
   must be judged on our onsets, and the next candidate is a threshold that
   moves with the grid's own jitter (a beat's neighbours, not a constant).
-- **The triplet confusions**, 3.5% both ways, untouched by either rule.
+- **The triplet confusions**: 2.4% thirds written binary after R28
+  (1,129 of them the (0.35, 0.75) pair, whose rule did not transfer) and
+  0.7% the other way.
 - **Ballads**: below the grid and dropped, 60% of SLOW notes between them;
   a tempo-aware candidate set or the double-time reading.
 - **"other"**, 4.7%: the largest cell is the annotator's 1/3 in a
