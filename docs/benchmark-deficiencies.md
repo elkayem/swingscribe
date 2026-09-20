@@ -1277,6 +1277,43 @@ after R27. On the annotator's onsets and grid, 452 WJazzD solos: page hit
 5. **The dotted rhythm is not gone**: 2.1% (was 4.7%), now in beats of
    three or more onsets, where the sparse rule does not reach.
 
+### D35 - What we write INSTEAD: the notation survey against three human corpora
+
+Measured 2026-09-20, `scripts/notation_survey.py` (docs/notation-survey.md):
+the written vocabulary of our pages under R28 beside the listener's twelve
+hand scores, LORIA's Omnibook over the 22 sides on hand, and WJazzD's
+positions over the 77 located solos, each over the SAME tracks. The
+rhythm and value scores say how often we agree with a human; this says
+what we write when we do not. Five differences, in the order they cost
+the page:
+
+1. **The laid-back downbeat is written on the "e"** -- 6.2% of our onsets
+   against the listener's 1.8% and the Omnibook's 2.5% -- **and the note
+   before it becomes a dotted eighth** (2.6-3.0% of our notes against
+   0.1%; 289 of our 394 dotted eighths on the hand-score set start on the
+   "and" or the "e"). The line sits behind the tracked beat: over 108
+   tracks the median per-track offset of the near-beat onsets is +0.033
+   beats (quartiles +0.016 / +0.050, range -0.050 to +0.095), and 44
+   tracks have over a fifth of them more than 0.18 late. Birks Works is
+   +0.088: bar 4 is played 0.22-0.33 behind throughout and the listener
+   writes it on the beat. The rule to measure is a downbeat phase beside
+   the swing model's offbeat phase, a window statistic rather than a
+   threshold at one beat line (the shape that failed to transfer, D34.1).
+2. **No sixteenth-triplet grid.** The Omnibook writes 4.9% of its notes as
+   sixteenth triplets, the listener 1.0%, WJazzD 4.9% of its gaps; we
+   write none, and a beat of six goes to sixteenths or 32nds -- most of
+   our 32nds (2.0-2.1% against 0.2-0.3%) and dotted sixteenths (0.8-0.9%
+   against 0). Birks Works bar 16's "tied 32nds" are the listener's
+   sixteenth triplet.
+3. **Rests are not split at the beat.** 10-11% of our rests are dotted
+   quarters (the listener 1.8%, the Omnibook 0), most starting on the
+   "and"; a human writes an eighth rest to the beat line and a quarter
+   after it. Notate, not quantize; readability only, no score can see it.
+4. **Triplets under-written**: 5.7% against 9.0% (listener), 5.3% against
+   8.7% (Omnibook); known parts are D28 and the pair that did not transfer.
+5. **Ties**: 0.049 against the listener's 0.023 but level with the
+   Omnibook's 0.045. A symptom of 1 and 2, not a lever; closes D14.
+
 ## Resolved
 
 ### R28 - A ternary reading counted an onset on the NEXT beat as the third of its triplet

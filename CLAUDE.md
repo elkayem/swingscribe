@@ -724,6 +724,19 @@ Results and limits: `docs/m5-quantize.md`.
   -> 75.3% the same day, R27); the classes say which choice is wrong;
   run it after any quantize change, and then `run_eval`, because this
   instrument sees a human's onsets and the page is built on ours.
+- **And the page's VOCABULARY is surveyed against three human corpora**
+  (2026-09-20, `scripts/notation_survey.py`, docs/notation-survey.md,
+  D35): what we write INSTEAD when a position or value disagrees. Our
+  pages beside the listener's twelve hand scores, LORIA's Omnibook and
+  WJazzD's positions, over the same tracks. The order of the differences
+  is the order of the work: the laid-back downbeat written on the "e"
+  (6.2% of our onsets against 1.8-2.5%; the line sits +0.033 beats behind
+  the tracked grid at the median track, Birks Works +0.088) with the
+  dotted eighth before it (2.6-3.0% against 0.1%); no sixteenth-triplet
+  grid (the Omnibook writes 4.9% of its notes as one; our 32nds and dotted
+  sixteenths are those); rests not split at the beat (10% dotted quarter
+  rests against 0-1.8%); triplets under-written; ties level with the
+  Omnibook. Run it after any quantize or notate change.
 
 M6 — Notate + Export + the eval harness. All three landed together; the plan
 and this file had drifted apart on what M6 even was (plan §7's table says M6
