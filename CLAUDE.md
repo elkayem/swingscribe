@@ -709,6 +709,24 @@ Results and limits: `docs/m5-quantize.md`.
   thresholding put a 25.6ms spike in the round trip at exactly the threshold.
 - **`replay_onsets(restore_residual=True)` is exact by construction.** Only
   the default (replaying the notation) measures anything.
+- **The quantizer is measured ALONE, on the annotator's onsets and the
+  annotator's grid** (2026-09-20, `scripts/wjazz_quantize.py`,
+  docs/wjazz-quantize.md, pinned in `wjazz-quantize-baseline.json`): 452
+  WJazzD solos, 199k notes, no audio, 16 seconds. Two numbers, because
+  WJazzD's tatum is more LITERAL than a page -- it files a swung offbeat
+  at 1/2, 2/3 OR 3/4 and a laid-back downbeat at 1/4 -- so the raw
+  tatum hit (64.8%) undercounts us and the page hit (75.6%, the swing
+  convention allowed, the literal tatums set aside) is the one to move.
+  It names the classes: the early offbeat written as a sixteenth (3.1%,
+  the swing warp dragging a straight-played eighth to 0.33-0.42), the
+  laid-back beat written on the "e" (1.6%), the triplet confusions
+  (3.4%), and at SLOW 43% of notes below our finest grid (D11). The
+  dotted rhythm of the listener's complaint is 0.1% here -- on a clean
+  grid the quantizer writes the late offbeat as an eighth. Measured and
+  not yet shipped: scoring each beat under BOTH timing hypotheses (raw =
+  straight, warped = swung) lifts page hit to 79.6% on every band with
+  fewer drops; a lone onset offered the eighth grid only adds 1.7 more
+  but needs a collision guard. Run it after any quantize change.
 
 M6 — Notate + Export + the eval harness. All three landed together; the plan
 and this file had drifted apart on what M6 even was (plan §7's table says M6

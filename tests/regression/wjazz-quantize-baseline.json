@@ -1,0 +1,130 @@
+{
+  "band": {
+    "MEDIUM": {
+      "classes": {
+        "annotation literal": 1969,
+        "below the grid": 5372,
+        "binary as triplet": 939,
+        "early offbeat as 16th": 1457,
+        "hit": 19334,
+        "laid-back beat after it": 638,
+        "late offbeat as dotted": 36,
+        "other": 1934,
+        "pushed beat before it": 81,
+        "swing convention": 2113,
+        "triplet as binary": 466
+      },
+      "dropped": 1881,
+      "hit": 0.563,
+      "matched": 34339,
+      "n_notes": 36220,
+      "n_solos": 86,
+      "page_hit": 0.6626
+    },
+    "MEDIUM SLOW": {
+      "classes": {
+        "annotation literal": 683,
+        "below the grid": 2259,
+        "binary as triplet": 381,
+        "early offbeat as 16th": 396,
+        "hit": 6932,
+        "laid-back beat after it": 163,
+        "late offbeat as dotted": 20,
+        "other": 624,
+        "pushed beat before it": 7,
+        "swing convention": 339,
+        "triplet as binary": 128
+      },
+      "dropped": 985,
+      "hit": 0.581,
+      "matched": 11932,
+      "n_notes": 12917,
+      "n_solos": 31,
+      "page_hit": 0.6464
+    },
+    "MEDIUM UP": {
+      "classes": {
+        "annotation literal": 1740,
+        "below the grid": 3704,
+        "binary as triplet": 862,
+        "early offbeat as 16th": 1049,
+        "hit": 20244,
+        "laid-back beat after it": 609,
+        "late offbeat as dotted": 25,
+        "other": 1543,
+        "pushed beat before it": 100,
+        "swing convention": 2594,
+        "triplet as binary": 352
+      },
+      "dropped": 1227,
+      "hit": 0.6168,
+      "matched": 32822,
+      "n_notes": 34049,
+      "n_solos": 96,
+      "page_hit": 0.7348
+    },
+    "SLOW": {
+      "classes": {
+        "annotation literal": 766,
+        "below the grid": 6057,
+        "binary as triplet": 114,
+        "early offbeat as 16th": 218,
+        "hit": 6207,
+        "laid-back beat after it": 117,
+        "late offbeat as dotted": 21,
+        "other": 446,
+        "pushed beat before it": 0,
+        "swing convention": 174,
+        "triplet as binary": 70
+      },
+      "dropped": 3607,
+      "hit": 0.4374,
+      "matched": 14190,
+      "n_notes": 17797,
+      "n_solos": 38,
+      "page_hit": 0.4753
+    },
+    "UP": {
+      "classes": {
+        "annotation literal": 4034,
+        "below the grid": 1455,
+        "binary as triplet": 1156,
+        "early offbeat as 16th": 2755,
+        "hit": 70474,
+        "laid-back beat after it": 1584,
+        "late offbeat as dotted": 15,
+        "other": 3799,
+        "pushed beat before it": 1058,
+        "swing convention": 8283,
+        "triplet as binary": 2088
+      },
+      "dropped": 1299,
+      "hit": 0.7288,
+      "matched": 96701,
+      "n_notes": 98000,
+      "n_solos": 201,
+      "page_hit": 0.8499
+    }
+  },
+  "overall": {
+    "classes": {
+      "annotation literal": 9192,
+      "below the grid": 18847,
+      "binary as triplet": 3452,
+      "early offbeat as 16th": 5875,
+      "hit": 123191,
+      "laid-back beat after it": 3111,
+      "late offbeat as dotted": 117,
+      "other": 8346,
+      "pushed beat before it": 1246,
+      "swing convention": 13503,
+      "triplet as binary": 3104
+    },
+    "dropped": 8999,
+    "hit": 0.6484,
+    "matched": 189984,
+    "n_notes": 198983,
+    "n_solos": 452,
+    "page_hit": 0.7561
+  }
+}
