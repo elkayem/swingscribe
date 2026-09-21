@@ -530,6 +530,13 @@ class NotateConfig(BaseModel):
     # nothing (mean note-value agreement 0.4628 off, 0.4665 at 0.75) and
     # ships OFF. Kept because the measurement is worth not repeating.
     legato_fill: float = 0.0
+    # A gap to the next note no longer than this, in beats, is written INTO
+    # the note (notate.notated_durations): short enough to be a note value,
+    # so it becomes one. 0 is off. Measured on WJazzD's durations first
+    # (docs/m6-notate.md); on our own path the biggest single value error
+    # against the hand scores is an eighth where the human wrote a quarter,
+    # 119 of them a note we followed with a rest the human did not write.
+    legato_cap: float = 0.0
 
     @property
     def transpose(self) -> int:

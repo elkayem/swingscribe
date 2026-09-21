@@ -748,6 +748,17 @@ and this file had drifted apart on what M6 even was (plan §7's table says M6
 is the eval harness, this file said Notate), so both readings were satisfied.
 Results and limits: `docs/m6-notate.md`.
 
+- **The value score's errors are mostly rhythm wearing a value, and the
+  duration knobs do not move it** (2026-09-21, `scripts/value_confusion.py`,
+  docs/notation-survey.md): 842 wrong lengths on the hand scores, 61%
+  with no rest on either side (an extra or missing note beside the match,
+  a triplet read binary); the one phrasing class, an eighth-and-rest the
+  human writes as a quarter, is 68 notes. `legato_cap` at a quarter reads
+  value 0.777 -> 0.752 (it mends those 68 and breaks the eighth-and-rest
+  figures the human also writes); `legato_fill` at 0.75 or 0.6 is flat,
+  because the player held a median 0.42 of the gap where the human wrote
+  a quarter and 0.36 where they wrote the rest. Both stay off; the cap is
+  a `NotateConfig` field now so it can be measured again.
 - **A rest shows the beat and never straddles one** (2026-09-21, R30,
   `split_for_meter(rest=True)`): the syncopation allowance -- a quarter on
   the "and" written whole, a dotted quarter on its dot-grid -- is for

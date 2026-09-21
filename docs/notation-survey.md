@@ -268,6 +268,54 @@ quarter became an eighth and a quarter; the remaining gap to the human is
 the rest we write at all where the human writes a longer note value
 (difference 3's second half, `legato_cap`, not a priority).
 
+## The value score: what we write instead (2026-09-21)
+
+`value` reads 0.777 over the twelve hand scores: 842 of 3,783 matched
+notes carry a different written length from the human's.
+`scripts/value_confusion.py` tallies what we wrote and what they wrote,
+with the one context that decides most of it -- whether a rest follows
+our note, and whether one follows theirs.
+
+| ours | theirs | rest after ours | rest after theirs | count | share |
+|---|---|---|---|---|---|
+| eighth | 16th | no | no | 73 | 8.7% |
+| eighth | quarter | **yes** | **no** | 68 | 8.1% |
+| eighth | quarter | no | no | 65 | 7.7% |
+| eighth | triplet eighth | no | no | 59 | 7.0% |
+| 16th | eighth | no | no | 56 | 6.7% |
+| triplet eighth | eighth | no | no | 49 | 5.8% |
+| eighth | quarter | yes | yes | 39 | 4.6% |
+| quarter | eighth | no | yes | 31 | 3.7% |
+| eighth | quarter-note triplet | no | no | 23 | 2.7% |
+
+By context over all 842: no rest on either side 61.5%, a rest on both
+14.6%, a rest after ours only 14.1%, a rest after theirs only 9.7%.
+
+Three fifths of the value errors have no rest anywhere near them, so
+they are rhythm differences wearing a value: an extra or missing note
+beside the matched one, a triplet read binary or the reverse, the
+quarter-note triplet (D28). Those move with the quantizer, not with any
+duration rule. The one phrasing class is the second row: an eighth we
+followed with a rest where the human wrote the note through as a
+quarter, 68 notes. Two knobs already built for it were measured on the
+pages:
+
+- `NotateConfig.legato_cap` (a gap to the next onset short enough to be a
+  note value is written into the note): at an eighth it changes nothing,
+  because a gap that short never holds a rest; at a quarter it turns
+  every eighth-plus-eighth-rest into a quarter, the 68 right ones and the
+  many the human also writes as eighth and rest -- value 0.777 -> 0.752,
+  Omnibook 0.714 -> 0.681.
+- `NotateConfig.legato_fill` (the player held at least this share of the
+  gap): at 0.75 and at 0.6 value is flat (+0.0002) and the tie rate rises;
+  the probe behind it says why -- the notes the human wrote as quarters
+  were held a median 0.42 of the gap and the ones written eighth-and-rest
+  0.36. The player's hold does not tell the two apart; the human's choice
+  is phrasing.
+
+Both stay off. The value score's next movement comes from the rhythm
+side, and the page is the judge of the remaining 68.
+
 ## What it means for the plan
 
 The line phase (1) shipped the same day as R29, above; it was the largest

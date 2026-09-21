@@ -781,3 +781,27 @@ def test_inside_a_beat_a_rest_keeps_the_ordinary_rule():
     those is upstream in the note value, not here."""
     assert _rest_pieces(0.25, 0.75) == [(0.25, 0.75)]
     assert _rest_pieces(0.0, 0.75) == [(0.0, 0.75)]
+
+
+def test_the_cap_reaches_build_from_the_config():
+    """`NotateConfig.legato_cap` is off by default and, when set, `run` hands
+    it to `build`: Dexter's 0.52 of a beat becomes the quarter the lead
+    sheet writes, and a two-beat phrase break stays a rest."""
+    from swingscribe.config import Config
+    from swingscribe.model import Document
+    from swingscribe.stages import notate
+
+    assert Config().notate.legato_cap == 0.0
+    notes = [_q(1, 0.0, 0.52, 60), _q(1, 1.0, 0.52, 62), _q(1, 2.0, 0.5, 64), _q(2, 0.0, 0.5, 65)]
+    document = Document(audio_path="solo.wav", sample_rate=44100, quantized={"other": notes})
+    plain = notate.run(document, Config()).notation
+    assert plain.bars[0].notes[0].duration == pytest.approx(0.52) or any(
+        n.is_rest and n.beat < 1.0 for n in plain.bars[0].notes
+    )
+    config = Config()
+    config.notate.legato_cap = 1.0
+    capped = notate.run(document, config).notation
+    assert capped.bars[0].notes[0].duration == pytest.approx(1.0)
+    assert capped.bars[0].notes[1].duration == pytest.approx(1.0)
+    # Beat three's note has a two-beat gap to the next: a real rest.
+    assert any(n.is_rest and n.beat >= 2.5 for n in capped.bars[0].notes)

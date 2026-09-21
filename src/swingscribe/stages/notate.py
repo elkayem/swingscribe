@@ -892,6 +892,7 @@ def run(document: Document, config: Config) -> Document:
         transpose=config.notate.transpose,
         title=config.notate.title,
         legato_fill=config.notate.legato_fill,
+        legato_cap=config.notate.legato_cap,
     )
     print(
         f"notate: {len(notation.bars)} bars, key {notation.key_fifths:+d} fifths, "

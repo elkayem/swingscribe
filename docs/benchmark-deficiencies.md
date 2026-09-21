@@ -1313,6 +1313,15 @@ the page:
    8.7% (Omnibook); known parts are D28 and the pair that did not transfer.
 5. **Ties**: 0.049 against the listener's 0.023 but level with the
    Omnibook's 0.045. A symptom of 1 and 2, not a lever; closes D14.
+6. **The value score's residue** (2026-09-21, `scripts/value_confusion.py`,
+   docs/notation-survey.md): of 842 value errors on the hand scores, 61%
+   have no rest on either side and are rhythm differences wearing a
+   value; the one phrasing class -- an eighth we followed with a rest
+   where the human wrote a quarter through -- is 68 notes, and the two
+   duration knobs built for it (`legato_cap`, `legato_fill`) were measured
+   on the pages and rejected: the cap breaks more eighth-and-rest figures
+   than it mends (value 0.777 -> 0.752), and the player's hold does not
+   separate the two (0.42 against 0.36 of the gap). Both off.
 
 ## Resolved
 
