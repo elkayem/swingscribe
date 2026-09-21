@@ -19,6 +19,21 @@ two eighths under a *Swing* marking, not as a triplet figure, and it keeps
 the player's actual timing as data instead of throwing it away. Everything
 runs on your own machine. Nothing is uploaded anywhere.
 
+## What a transcription looks like
+
+![The first twelve bars of Art Pepper's solo on Birks Works, as SwingScribe wrote them: swung eighth-note lines under a Swing marking, a triplet where he played one, a laid-back beat written on the beat](docs/images/birks-works.png)
+
+This is the first chorus of Art Pepper's solo on *Birks Works*, exactly as
+SwingScribe wrote it and MuseScore drew it. The listener selected the solo
+and clicked its first downbeat; the notes, the key, the *Swing* marking,
+the triplet in bar 2, and the rhythm of every bar are the program's.
+Compare it with a transcription made by ear and the two agree on the
+rhythm of 84% of the notes they share; bar 4, where Pepper plays a third of
+a beat behind the band, is written note for note the way a transcriber
+writes it — on the beat, not on the sixteenth he actually landed on. This is
+what the tool is for: a page you would read from, not a piano-roll dump
+with the timing spelled out in tied thirty-second notes.
+
 ## Find the solo
 
 Open a track and the whole recording is in front of you. Drag out the solo
@@ -83,12 +98,22 @@ transcriber would?
 ## How well does it work
 
 Measured against the Weimar Jazz Database's human-annotated solos, where
-every note has a time and a pitch:
+every note has a time and a pitch, and against pages written by people:
+twelve hand transcriptions made by ear in MuseScore and twenty-two solos
+from the Charlie Parker Omnibook.
 
 | measure | result |
 |---|---|
-| Note F1 (did we hear what was played) | 0.855, mean over 73 solos |
-| Beat F1 (is the grid right) | 0.941, over the same 73 |
+| Note F1 (did we hear what was played) | 0.858, mean over 73 solos |
+| Beat F1 (is the grid right) | 0.942, over the same 73 |
+| Notated rhythm against the hand transcriptions (did we write it the way a transcriber did) | 0.845, mean over 12 |
+| Notated rhythm against the Omnibook | 0.787, mean over 22 |
+
+Notated rhythm is the share of matched notes whose written position agrees
+with the human's, on the human's grid. It reads lower than note F1 and
+always will: it charges the transcriber for every place a player's timing
+and a page's rhythm differ, which is the question this project exists to
+answer.
 
 Those numbers come from a single command that scores every solo on disk,
 and the project keeps a running list of what is still wrong in
