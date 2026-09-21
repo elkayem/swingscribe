@@ -271,6 +271,24 @@ too fine; pulling it back is coarsening the grid by hand, one note at a time,
 after the fact. **That is D11 arriving from a second direction** - the fix is
 `choose_grid` knowing the tempo, not a repair pass downstream of it.
 
+## A rest shows the beat (R30, 2026-09-21)
+
+`fill_rests` handed a rest to `split_for_meter` under the rules written
+for notes, syncopation allowance included, so a rest from the "and" to
+beat three was one dotted quarter rest and a quarter rest on the "and"
+was one symbol across the beat line. The notation survey
+(docs/notation-survey.md) counted it: 10% of our rests were dotted
+quarters against the listener's 1.8% and the Omnibook's none. A rest is
+written to show the beat, and the allowance is for notes: with
+`rest=True`, at the beat level and above a rest is emitted only when it
+fills its metrical unit, and is otherwise divided at the unit's points;
+inside one beat the ordinary rule stands, so no sixteenth rest is
+manufactured out of a dotted eighth rest. No onset moves and no score
+moves. The one cost readability can see: a dotted eighth rest that used
+to straddle a beat line (its dot-grid allowance) now shows its sixteenth
+on the far side, a few per set, 0.9954 -> 0.9947 over the 85 pages -- and
+that sixteenth is the truth about where the note before it ended.
+
 ## Measuring readability: the one number that needs no reference
 
 `benchmark.readability(notation)` asks whether the page is **writable at all**.

@@ -735,3 +735,49 @@ def test_three_notes_in_half_a_beat_are_a_sixteenth_triplet():
     assert [t for _s, _d, t in pieces] == [(3, 2)] * 3
     assert all(abs(d - 1.0 / 6.0) < 1e-9 for _s, d, _t in pieces)
     assert abs(tuplet_value(1.0 / 6.0, (3, 2)) - 0.25) < 1e-9  # drawn as a sixteenth
+
+
+# ── rests show the beat (docs/notation-survey.md, D35.3) ─────────────────────
+
+
+def _rest_pieces(start, length, bar=4.0):
+    return [
+        (round(s, 6), round(d, 6)) for s, d, _t in split_for_meter(start, length, bar, rest=True)
+    ]
+
+
+def test_a_rest_from_the_and_to_beat_three_is_an_eighth_and_a_quarter():
+    """The listener writes an eighth rest to the beat line and a quarter rest
+    after it; we wrote one dotted quarter rest, 10% of all our rests."""
+    assert _rest_pieces(0.5, 1.5) == [(0.5, 0.5), (1.0, 1.0)]
+    # A NOTE in the same place keeps its syncopation and is one symbol.
+    assert [d for _s, d, _t in split_for_meter(0.5, 1.5, 4.0)] == [1.5]
+
+
+def test_a_quarter_rest_on_the_and_is_two_eighth_rests():
+    assert _rest_pieces(0.5, 1.0) == [(0.5, 0.5), (1.0, 0.5)]
+    assert _rest_pieces(2.5, 1.0) == [(2.5, 0.5), (3.0, 0.5)]
+
+
+def test_a_rest_that_fills_its_unit_is_one_symbol():
+    assert _rest_pieces(0.0, 4.0) == [(0.0, 4.0)]  # the whole bar
+    assert _rest_pieces(2.0, 2.0) == [(2.0, 2.0)]  # a half rest on beat three
+    assert _rest_pieces(0.0, 2.0) == [(0.0, 2.0)]
+    assert _rest_pieces(1.0, 1.0) == [(1.0, 1.0)]
+
+
+def test_a_dotted_rest_at_the_beat_level_is_written_to_the_beat():
+    # Beats 1-2 and half of 3: half rest, then a quarter.
+    assert _rest_pieces(0.0, 3.0) == [(0.0, 2.0), (2.0, 1.0)]
+    # Beat 1 and half of 2: quarter, then an eighth.
+    assert _rest_pieces(0.0, 1.5) == [(0.0, 1.0), (1.0, 0.5)]
+    # A half rest starting on beat 2 crosses the bar's middle: two quarters.
+    assert _rest_pieces(1.0, 2.0) == [(1.0, 1.0), (2.0, 1.0)]
+
+
+def test_inside_a_beat_a_rest_keeps_the_ordinary_rule():
+    """A dotted eighth rest inside one beat stays one symbol: splitting it
+    would make a sixteenth rest, which readability counts, and the fix for
+    those is upstream in the note value, not here."""
+    assert _rest_pieces(0.25, 0.75) == [(0.25, 0.75)]
+    assert _rest_pieces(0.0, 0.75) == [(0.0, 0.75)]

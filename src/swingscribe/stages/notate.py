@@ -208,8 +208,13 @@ def split_for_meter(
     duration: float,
     bar_length: float,
     triplet_halves: frozenset[float] | set[float] = frozenset(),
+    rest: bool = False,
 ) -> list[tuple[float, float, tuple[int, int] | None]]:
     """One note's span → the tied pieces it must be written as.
+
+    `rest` asks for a REST's pieces: the same metre, without the
+    syncopation allowance, because a rest is written to show the beat and
+    never straddles one (the comment in `_subdivide`).
 
     A note is written as one symbol when a symbol of that length exists and
     sitting there does not hide the beat. Otherwise it is tied, and where to
@@ -227,7 +232,7 @@ def split_for_meter(
     those, and only those, a 3:2 tuplet may span the two beats.
     """
     pieces: list[tuple[float, float, tuple[int, int] | None]] = []
-    _subdivide(start, start + duration, 0.0, bar_length, pieces, triplet_halves)
+    _subdivide(start, start + duration, 0.0, bar_length, pieces, triplet_halves, rest)
     return pieces
 
 
@@ -311,6 +316,7 @@ def _subdivide(
     unit_end: float,
     out: list,
     triplet_halves: frozenset[float] | set[float] = frozenset(),
+    rest: bool = False,
 ) -> None:
     if b - a <= TICK:
         return
@@ -323,7 +329,21 @@ def _subdivide(
     # on, and hiding a ternary beat is exactly what the conservative rule is
     # for. len(points) == 1 is "this unit halves".
     halving = len(points) == 1
-    if is_notatable(length) and (
+    if rest and unit_end - unit_start > QUARTER + TICK:
+        # A REST is written to show the beat, and never straddles one: the
+        # syncopation allowance is for notes. The listener's rests are 90%
+        # eighth, quarter and half; ours were 10% DOTTED QUARTERS, most of
+        # them starting on the "and" and running to the bar's third beat,
+        # where a human writes an eighth rest to the beat line and a quarter
+        # after it (docs/notation-survey.md, D35.3). At the beat level and
+        # above a rest is emitted only when it fills its unit; anything else
+        # is divided until it does, or until it is inside one beat, where
+        # the ordinary rule stands so no sub-eighth rest is created that
+        # readability would count.
+        if _close(a, unit_start) and _close(b, unit_end):
+            out.append((a, length, None))
+            return
+    elif is_notatable(length) and (
         flush or not crosses or (halving and _symmetric_syncopation(a, length, unit_start))
     ):
         out.append((a, length, None))
@@ -363,7 +383,7 @@ def _subdivide(
     bounds = [unit_start, *points, unit_end]
     for lo, hi in zip(bounds, bounds[1:], strict=False):
         if a >= lo - TICK and b <= hi + TICK:
-            _subdivide(a, b, lo, hi, out, triplet_halves)
+            _subdivide(a, b, lo, hi, out, triplet_halves, rest)
             return
     # Straddles a division: cut at the first one crossed. The head lands inside
     # the sub-unit ending there; the tail is re-divided against everything still
@@ -377,8 +397,8 @@ def _subdivide(
         out.append((a, length, None))
         return
     head_start = max((lo for lo in bounds if lo <= a + TICK), default=unit_start)
-    _subdivide(a, cut, head_start, cut, out, triplet_halves)
-    _subdivide(cut, b, cut, unit_end, out, triplet_halves)
+    _subdivide(a, cut, head_start, cut, out, triplet_halves, rest)
+    _subdivide(cut, b, cut, unit_end, out, triplet_halves, rest)
 
 
 def fill_rests(
@@ -393,14 +413,14 @@ def fill_rests(
     for note in sorted(notes, key=lambda n: n.beat):
         if note.beat > cursor + TICK:
             for start, length, tuplet in split_for_meter(
-                cursor, note.beat - cursor, bar_length, triplet_halves
+                cursor, note.beat - cursor, bar_length, triplet_halves, rest=True
             ):
                 filled.append(NotatedNote(beat=start, duration=length, is_rest=True, tuplet=tuplet))
         filled.append(note)
         cursor = max(cursor, note.beat + note.duration)
     if cursor < bar_length - TICK:
         for start, length, tuplet in split_for_meter(
-            cursor, bar_length - cursor, bar_length, triplet_halves
+            cursor, bar_length - cursor, bar_length, triplet_halves, rest=True
         ):
             filled.append(NotatedNote(beat=start, duration=length, is_rest=True, tuplet=tuplet))
     return filled

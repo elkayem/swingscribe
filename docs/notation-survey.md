@@ -242,6 +242,32 @@ What is left of difference 1 is the residue between our 3.3% and the
 listener's 1.8%: beats lagging past the cap, beats the floor leaves
 alone, and the genuine "e".
 
+## After the rest rule (R30, the next morning)
+
+Difference 3 shipped in notate: at the beat level and above a rest is
+written only when it fills its metrical unit, and is otherwise divided at
+the unit's own points, so a rest never straddles a beat line. Inside a
+beat the ordinary rule stands (a dotted eighth rest stays one symbol; the
+sixteenth rest a split would make is what readability counts, and the fix
+for those is upstream). No note moves, so rhythm and value cannot move,
+and did not: 0 up, 0 down on every page.
+
+| rest | ours before | ours after | hand scores | Omnibook |
+|---|---|---|---|---|
+| eighth | 58.1 | 69.0 | 42.3 | 43.8 |
+| quarter | 18.9 | 21.2 | 30.1 | 34.5 |
+| half | 7.1 | 7.0 | 17.5 | 17.5 |
+| dotted quarter | 9.9 | **0** | 1.8 | 0 |
+| dotted half | 1.8 | 0.4 | 2.2 | 0 |
+| dotted eighth | 1.8 | 1.1 | 0 | 0.2 |
+| rests, hand-score set | 856 | 1006 | 674 | |
+
+The dotted quarter rest is gone and the page shows its beats. We now
+write more eighth rests than a human, not fewer, because every dotted
+quarter became an eighth and a quarter; the remaining gap to the human is
+the rest we write at all where the human writes a longer note value
+(difference 3's second half, `legato_cap`, not a priority).
+
 ## What it means for the plan
 
 The line phase (1) shipped the same day as R29, above; it was the largest

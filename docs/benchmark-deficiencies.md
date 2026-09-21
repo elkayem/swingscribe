@@ -1305,7 +1305,7 @@ the page:
    our 32nds (2.0-2.1% against 0.2-0.3%) and dotted sixteenths (0.8-0.9%
    against 0). Birks Works bar 16's "tied 32nds" are the listener's
    sixteenth triplet.
-3. **Rests are not split at the beat.** 10-11% of our rests are dotted
+3. **(Resolved the next morning, R30.) Rests are not split at the beat.** 10-11% of our rests are dotted
    quarters (the listener 1.8%, the Omnibook 0), most starting on the
    "and"; a human writes an eighth rest to the beat line and a quarter
    after it. Notate, not quantize; readability only, no score can see it.
@@ -1315,6 +1315,25 @@ the page:
    Omnibook's 0.045. A symptom of 1 and 2, not a lever; closes D14.
 
 ## Resolved
+
+### R30 - A rest was allowed the syncopation a note is, and straddled the beat (was D35.3)
+
+Found by the notation survey: 10-11% of our rests were dotted quarters
+(the listener writes 1.8%, the Omnibook none), most starting on the "and"
+and running to the bar's third beat, where a human writes an eighth rest
+to the beat line and a quarter after it; another 117 quarter rests on the
+hand-score set started on the "and" across a beat line. `fill_rests` was
+handing rests to `split_for_meter` under the same rules as notes,
+including `_symmetric_syncopation`, which is an engraving allowance for
+NOTES. Now (2026-09-21) `split_for_meter(..., rest=True)`: at the beat
+level and above a rest is emitted only when it fills its unit and is
+otherwise divided at the unit's points; inside a beat the ordinary rule
+stands, so no sub-eighth rest is created. Rest values on the hand-score
+set: dotted quarter 9.9% -> 0, eighth 58 -> 69%, quarter 19 -> 21%; Birks
+Works bar 15 reads eighth, quarter, eighth where it read eighth and
+dotted quarter. No onset moves: rhythm and value 0 up, 0 down on every
+page; only `events`, `short_rests` (a rate per event) and `readability`
+shifted in the last digit, and the baselines were re-pinned for those.
 
 ### R29 - The line's lag behind the beat was written as the "e" and the dotted eighth (was D35.1, and the listener's bar 4)
 

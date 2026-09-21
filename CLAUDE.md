@@ -748,6 +748,14 @@ and this file had drifted apart on what M6 even was (plan §7's table says M6
 is the eval harness, this file said Notate), so both readings were satisfied.
 Results and limits: `docs/m6-notate.md`.
 
+- **A rest shows the beat and never straddles one** (2026-09-21, R30,
+  `split_for_meter(rest=True)`): the syncopation allowance -- a quarter on
+  the "and" written whole, a dotted quarter on its dot-grid -- is for
+  notes. Rests took it too, and 10% of ours were dotted quarters from the
+  "and" to beat three (the listener 1.8%, the Omnibook none). At the beat
+  level and above a rest is written only when it fills its unit; inside a
+  beat the ordinary rule stands so no sixteenth rest is manufactured. No
+  onset moves, so no score moves; the survey's rest table does.
 - **A metrical unit is halved, UNLESS it is three of something.**
   `split_points` — 4/4 halves, 3/4 divides in three, 5/4 peels off the largest
   whole value. Bare halving is unimplemented triple metre, not an
