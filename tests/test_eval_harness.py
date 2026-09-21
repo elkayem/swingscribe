@@ -546,3 +546,16 @@ def test_a_re_tracked_grid_that_disagrees_keeps_the_cached_beats(tmp_path, monke
         "source": "mix",
     }
     assert any("keeping the cached grid" in line for line in said)
+
+
+def test_parallel_map_is_a_map_in_order_at_any_job_count():
+    """The per-track scorers are pure functions of their task tuple, so the
+    pool can only change the wall clock, never the card. One job is an
+    in-process map; more than one goes through a process pool and must
+    come back in the same order."""
+    keys = ["A.m4a [line=crepe]", "B.m4a", "wjazzd/C.m4a [Bird]"]
+    expected = [run_eval.pin_name(k) for k in keys]
+    assert run_eval.parallel_map(run_eval.pin_name, keys, 1) == expected
+    assert run_eval.parallel_map(run_eval.pin_name, keys, 2) == expected
+    assert run_eval.parallel_map(run_eval.pin_name, [], 4) == []
+    assert 1 <= run_eval.default_jobs() <= 4

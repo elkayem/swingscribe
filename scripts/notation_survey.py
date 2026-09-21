@@ -314,7 +314,7 @@ def survey(db_path: Path | None, step_cost: float, dip_db: float, grids_path: Pa
 
     if db_path is not None:
         db = sqlite3.connect(db_path)
-        located = run_eval.wjazz_scores(db_path, runs, grids)
+        located = run_eval.wjazz_scores(db_path, runs, grids, run_eval.default_jobs())
         ours = tally("ours vs WJazzD")
         theirs = tally("WJazzD (annotation, located)")
         for key, entry in sorted(located.items()):

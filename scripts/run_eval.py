@@ -363,17 +363,93 @@ def beat_grids(cache: Path = GRIDS_CACHE, log=print) -> dict:
     return grids
 
 
-def wjazz_scores(db_path: Path, runs: dict, grids: dict) -> dict:
-    """Note and beat scores against WJazzD, for every take we can identify."""
+def parallel_map(fn, tasks, jobs: int) -> list:
+    """`fn` over `tasks`, in order, in `jobs` processes; one is a plain map.
+
+    Every per-track scorer below is a pure function of its task tuple (the
+    run's notes, its grid, the paths it reads), so the card cannot depend
+    on the pool -- it was checked byte-identical against a single-process
+    card when this landed (2026-09-21). What the pool buys: the harness is
+    arithmetic and alignment on one core, ten minutes a run, and a rule is
+    measured on the pages several times a day.
+    """
+    tasks = list(tasks)
+    if jobs <= 1 or len(tasks) <= 1:
+        return [fn(task) for task in tasks]
+    from concurrent.futures import ProcessPoolExecutor
+
+    with ProcessPoolExecutor(max_workers=min(jobs, len(tasks))) as pool:
+        return list(pool.map(fn, tasks, chunksize=1))
+
+
+def _worker_setup(cache_dir: str) -> None:
+    """A spawned worker re-imports this script fresh: give it the CLI's
+    cache directory and the scripts folder on its path."""
+    global CACHE_DIR
+    CACHE_DIR = Path(cache_dir)
+    scripts = str(Path(__file__).parent)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+
+
+def _wjazz_one(task: tuple) -> dict:
+    name, run, grid, db_path, cache_dir = task
     import sqlite3
 
     import numpy as np
 
-    sys.path.insert(0, str(Path(__file__).parent))
+    _worker_setup(cache_dir)
     from score_wjazz import identify_all, score, score_beats
 
     db = sqlite3.connect(db_path)
+    track = track_of(name)
+    onsets = np.array([n["onset"] for n in run["notes"]])
+    pitches = np.array([int(n["pitch"]) for n in run["notes"]])
+    order = np.argsort(onsets)
+    onsets, pitches = onsets[order], pitches[order]
+    ordered = [run["notes"][i] for i in order]
+
+    found, why = identify_all(db, track, onsets, pitches, run["region"])
+    if not found:
+        return {name: {"skipped": why}}
     out = {}
+    for solo in found:
+        result = score(solo, onsets, ordered)
+        entry = {
+            # The run these numbers came from: the notation scorer needs
+            # its notes and grid, and cannot get the key back from a row
+            # keyed "file [take] [performer]" by splitting.
+            "run": name,
+            "performer": solo["performer"],
+            "instrument": solo["instrument"],
+            "tempo": solo["tempo"],
+            "melid": solo["melid"],
+            # Where the annotated solo actually sits in OUR timeline. The
+            # notation scorer needs it: a whole-track region notates the
+            # head and every other soloist too, and a global aligner given
+            # 450 reference notes against 1500 of ours is not measuring
+            # notation any more.
+            "solo_start": round(float(solo["ref_on"][0]) * solo["rate"] + solo["offset"], 3),
+            "solo_end": round(float(solo["ref_on"][-1]) * solo["rate"] + solo["offset"], 3),
+            "note_f1": round(result["note_f1"], 4),
+            "note_precision": round(result["note_precision"], 4),
+            "note_recall": round(result["note_recall"], 4),
+            "onset_f1": round(result["onset_f1"], 4),
+        }
+        if grid is not None:
+            beats = score_beats(db, solo["melid"], grid["beats"], solo["offset"], solo["rate"])
+            if beats:
+                entry["beat_f1"] = round(beats["f_measure"], 4)
+        # One audio file can hold several annotated solos, so the row is
+        # keyed by the solo, not by the file.
+        key = name if len(found) == 1 else f"{name} [{solo['performer']}]"
+        out[key] = entry
+    return out
+
+
+def wjazz_scores(db_path: Path, runs: dict, grids: dict, jobs: int = 1) -> dict:
+    """Note and beat scores against WJazzD, for every take we can identify."""
+    tasks = []
     for name, run in sorted(runs.items()):
         if is_omnibook(name):
             # The sets stay disjoint. WJazzD annotated six of these very
@@ -382,77 +458,54 @@ def wjazz_scores(db_path: Path, runs: dict, grids: dict) -> dict:
             # recording twice and move the WJazzD mean's population without
             # the pipeline having changed.
             continue
+        tasks.append((name, run, grids.get(track_of(name)), str(db_path), str(CACHE_DIR)))
+    results = {
+        task[0]: result
+        for task, result in zip(
+            [t for t in tasks if t[1]["notes"]],
+            parallel_map(_wjazz_one, [t for t in tasks if t[1]["notes"]], jobs),
+            strict=True,
+        )
+    }
+    out = {}
+    for name, run, *_rest in tasks:
         if not run["notes"]:
             # A span that transcribed to nothing is a finding, not a crash:
             # the fit has no onsets to place and indexes an empty array.
             out[name] = {"skipped": "transcribed no notes"}
             continue
-        track = track_of(name)
-        onsets = np.array([n["onset"] for n in run["notes"]])
-        pitches = np.array([int(n["pitch"]) for n in run["notes"]])
-        order = np.argsort(onsets)
-        onsets, pitches = onsets[order], pitches[order]
-        ordered = [run["notes"][i] for i in order]
-
-        found, why = identify_all(db, track, onsets, pitches, run["region"])
-        if not found:
-            out[name] = {"skipped": why}
-            continue
-        for solo in found:
-            result = score(solo, onsets, ordered)
-            entry = {
-                # The run these numbers came from: the notation scorer needs
-                # its notes and grid, and cannot get the key back from a row
-                # keyed "file [take] [performer]" by splitting.
-                "run": name,
-                "performer": solo["performer"],
-                "instrument": solo["instrument"],
-                "tempo": solo["tempo"],
-                "melid": solo["melid"],
-                # Where the annotated solo actually sits in OUR timeline. The
-                # notation scorer needs it: a whole-track region notates the
-                # head and every other soloist too, and a global aligner given
-                # 450 reference notes against 1500 of ours is not measuring
-                # notation any more.
-                "solo_start": round(float(solo["ref_on"][0]) * solo["rate"] + solo["offset"], 3),
-                "solo_end": round(float(solo["ref_on"][-1]) * solo["rate"] + solo["offset"], 3),
-                "note_f1": round(result["note_f1"], 4),
-                "note_precision": round(result["note_precision"], 4),
-                "note_recall": round(result["note_recall"], 4),
-                "onset_f1": round(result["onset_f1"], 4),
-            }
-            if track in grids:
-                beats = score_beats(
-                    db, solo["melid"], grids[track]["beats"], solo["offset"], solo["rate"]
-                )
-                if beats:
-                    entry["beat_f1"] = round(beats["f_measure"], 4)
-            # One audio file can hold several annotated solos, so the row is
-            # keyed by the solo, not by the file.
-            key = name if len(found) == 1 else f"{name} [{solo['performer']}]"
-            out[key] = entry
+        out.update(results[name])
     return out
 
 
-def mscz_scores(runs: dict) -> dict:
+def _mscz_one(task: tuple) -> dict:
+    key, run, cache_dir = task
+    _worker_setup(cache_dir)
+    import score_benchmark
+
+    scored = score_benchmark.score_tune(key, run)
+    return {
+        "pitch_f1": round(scored["pitch_f1"], 4),
+        "chroma_f1": round(scored["chroma_f1"], 4),
+        "onset_f1": round(scored["onset_f1"], 4),
+        "note_f1": round(scored["note_f1"], 4),
+    }
+
+
+def mscz_scores(runs: dict, jobs: int = 1) -> dict:
     """Pitch, onset and note scores against the hand transcriptions."""
     sys.path.insert(0, str(Path(__file__).parent))
     import score_benchmark
 
     by_audio = {audio: key for key, (audio, *_rest) in score_benchmark.TUNES.items()}
-    out = {}
+    names, tasks = [], []
     for name, run in sorted(runs.items()):
         key = by_audio.get(track_of(name))
         if key is None:
             continue
-        scored = score_benchmark.score_tune(key, run)
-        out[name] = {
-            "pitch_f1": round(scored["pitch_f1"], 4),
-            "chroma_f1": round(scored["chroma_f1"], 4),
-            "onset_f1": round(scored["onset_f1"], 4),
-            "note_f1": round(scored["note_f1"], 4),
-        }
-    return out
+        names.append(name)
+        tasks.append((key, run, str(CACHE_DIR)))
+    return dict(zip(names, parallel_map(_mscz_one, tasks, jobs), strict=True))
 
 
 # How far either side of the located solo to notate. Enough that a bar is not
@@ -521,7 +574,7 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
     )
 
 
-def notation_scores(runs: dict, grids: dict) -> dict:
+def notation_scores(runs: dict, grids: dict, jobs: int = 1) -> dict:
     """Our notation against the hand transcription's, as notation.
 
     The comparison itself lives in `swingscribe.benchmark` -- anything that
@@ -531,48 +584,59 @@ def notation_scores(runs: dict, grids: dict) -> dict:
     sys.path.insert(0, str(Path(__file__).parent))
     import score_benchmark
 
-    from swingscribe import mscz
-    from swingscribe.benchmark import readability, score_against_notation
-    from swingscribe.score_bars import bar_line_agreement, bar_line_trace
-
     by_audio = {audio: mscz_name for audio, mscz_name, *_ in score_benchmark.TUNES.values()}
-    out = {}
+    names, tasks = [], []
     for name, run in sorted(runs.items()):
         track = track_of(name)
         if track not in by_audio or track not in grids:
             continue
-        notation = notate_run(name, run, grids[track])
-        if notation is None or not notation.bars:
-            continue
-        reference = mscz.parse_any(BENCH / by_audio[track])
-        result = score_against_notation(notation, reference)
-        if not result["n_matched"]:
-            continue
-        out[name] = {
-            "rhythm": round(result["rhythm"], 4),
-            "value": round(result["value"], 4),
-            "n_matched": result["n_matched"],
-            "bars": float(len(notation.bars)),
-            "key_fifths": float(notation.key_fifths),
-            # Whether the page is writable at all -- a question no comparison
-            # against a reference can see. Folded in here rather than measured
-            # in a pass of its own because the notation is already built.
-            **readability(notation),
-            # Rhythm compares gaps and cannot see a page whose every bar line
-            # sits a beat off the reference's; this can (score_bars.py).
-            **{k: round(v, 4) for k, v in bar_line_agreement(notation, reference).items()},
-            **traced(bar_line_trace(notation, reference), reference.beats_per_bar),
-        }
-        if is_omnibook(name):
-            # A located span can be the wrong take, so its rhythm is never
-            # read without its coverage (CLAUDE.md). The listener's rows
-            # carry none: their spans were drawn by ear around one solo.
-            out[name]["coverage"] = round(result["coverage"], 4)
-            out[name]["trusted"] = float(bool(result["trusted"]))
-    return out
+        names.append(name)
+        tasks.append((name, run, grids[track], str(BENCH / by_audio[track]), str(CACHE_DIR)))
+    results = parallel_map(_notation_one, tasks, jobs)
+    return {name: entry for name, entry in zip(names, results, strict=True) if entry}
 
 
-def wjazz_notation_scores(db_path: Path, card_wjazz: dict, runs: dict, grids: dict) -> dict:
+def _notation_one(task: tuple) -> dict | None:
+    name, run, grid, score_path, cache_dir = task
+    _worker_setup(cache_dir)
+    from swingscribe import mscz
+    from swingscribe.benchmark import readability, score_against_notation
+    from swingscribe.score_bars import bar_line_agreement, bar_line_trace
+
+    notation = notate_run(name, run, grid)
+    if notation is None or not notation.bars:
+        return None
+    reference = mscz.parse_any(score_path)
+    result = score_against_notation(notation, reference)
+    if not result["n_matched"]:
+        return None
+    entry = {
+        "rhythm": round(result["rhythm"], 4),
+        "value": round(result["value"], 4),
+        "n_matched": result["n_matched"],
+        "bars": float(len(notation.bars)),
+        "key_fifths": float(notation.key_fifths),
+        # Whether the page is writable at all -- a question no comparison
+        # against a reference can see. Folded in here rather than measured
+        # in a pass of its own because the notation is already built.
+        **readability(notation),
+        # Rhythm compares gaps and cannot see a page whose every bar line
+        # sits a beat off the reference's; this can (score_bars.py).
+        **{k: round(v, 4) for k, v in bar_line_agreement(notation, reference).items()},
+        **traced(bar_line_trace(notation, reference), reference.beats_per_bar),
+    }
+    if is_omnibook(name):
+        # A located span can be the wrong take, so its rhythm is never
+        # read without its coverage (CLAUDE.md). The listener's rows
+        # carry none: their spans were drawn by ear around one solo.
+        entry["coverage"] = round(result["coverage"], 4)
+        entry["trusted"] = float(bool(result["trusted"]))
+    return entry
+
+
+def wjazz_notation_scores(
+    db_path: Path, card_wjazz: dict, runs: dict, grids: dict, jobs: int = 1
+) -> dict:
     """Our notation against WJazzD's metrical annotation, per identified solo.
 
     This is the notation benchmark the MuseScore set cannot be on its own: ten
@@ -583,14 +647,7 @@ def wjazz_notation_scores(db_path: Path, card_wjazz: dict, runs: dict, grids: di
 
     Only `rhythm`: WJazzD stores metrical position, not notated value.
     """
-    import sqlite3
-
-    from swingscribe.benchmark import readability, score_against_wjazz_notation
-    from swingscribe.score_bars import wjazz_bar_line_agreement, wjazz_bar_line_trace
-    from swingscribe.wjazz import notated_beats, notated_positions
-
-    db = sqlite3.connect(db_path)
-    out = {}
+    keys, tasks = [], []
     for key, entry in sorted(card_wjazz.items()):
         if "melid" not in entry:
             continue
@@ -601,39 +658,55 @@ def wjazz_notation_scores(db_path: Path, card_wjazz: dict, runs: dict, grids: di
         track = track_of(name)
         if name not in runs or track not in grids:
             continue
-        # Notate ONLY the located solo, not the whole track. The alignment
-        # underneath is global on purpose (both sides are meant to cover the
-        # same music), so handing it a five-minute notation against a
-        # one-chorus annotation measures nothing about notation.
-        window = (entry["solo_start"] - SOLO_MARGIN_S, entry["solo_end"] + SOLO_MARGIN_S)
-        notation = notate_run(name, runs[name], grids[track], region=window)
-        if notation is None or not notation.bars:
-            continue
-        # Readability is a property of OUR page and needs no reference, so it
-        # is recorded even for a solo the alignment could not line up. That is
-        # the point of having it: it is the one number every notation the
-        # harness can build contributes to.
-        out[key] = dict(readability(notation))
-        result = score_against_wjazz_notation(notation, notated_positions(db, entry["melid"]))
-        if not result["n_matched"]:
-            continue
-        out[key].update(
-            {
-                "rhythm": round(result["rhythm"], 4),
-                "n_matched": result["n_matched"],
-                "coverage": round(result["coverage"], 4),
-                "trusted": float(bool(result["trusted"])),
-            }
-        )
-        # Whether our bar lines are the annotator's. Rhythm above is
-        # gap-based and cannot see a page that starts on the wrong beat;
-        # WJazzD's bar/beat/tatum can (score_bars.py). Absent for a solo
-        # whose beat is not a quarter or whose metre is not the page's.
-        positions, bar = notated_beats(db, entry["melid"])
-        agreement = wjazz_bar_line_agreement(notation, positions, bar)
-        if agreement["beat_n"]:
-            out[key].update({k: round(v, 4) for k, v in agreement.items()})
-            out[key].update(traced(wjazz_bar_line_trace(notation, positions, bar), bar))
+        keys.append(key)
+        tasks.append((name, entry, runs[name], grids[track], str(db_path), str(CACHE_DIR)))
+    results = parallel_map(_wjazz_notation_one, tasks, jobs)
+    return {key: entry for key, entry in zip(keys, results, strict=True) if entry}
+
+
+def _wjazz_notation_one(task: tuple) -> dict | None:
+    name, entry, run, grid, db_path, cache_dir = task
+    import sqlite3
+
+    _worker_setup(cache_dir)
+    from swingscribe.benchmark import readability, score_against_wjazz_notation
+    from swingscribe.score_bars import wjazz_bar_line_agreement, wjazz_bar_line_trace
+    from swingscribe.wjazz import notated_beats, notated_positions
+
+    db = sqlite3.connect(db_path)
+    # Notate ONLY the located solo, not the whole track. The alignment
+    # underneath is global on purpose (both sides are meant to cover the
+    # same music), so handing it a five-minute notation against a
+    # one-chorus annotation measures nothing about notation.
+    window = (entry["solo_start"] - SOLO_MARGIN_S, entry["solo_end"] + SOLO_MARGIN_S)
+    notation = notate_run(name, run, grid, region=window)
+    if notation is None or not notation.bars:
+        return None
+    # Readability is a property of OUR page and needs no reference, so it
+    # is recorded even for a solo the alignment could not line up. That is
+    # the point of having it: it is the one number every notation the
+    # harness can build contributes to.
+    out = dict(readability(notation))
+    result = score_against_wjazz_notation(notation, notated_positions(db, entry["melid"]))
+    if not result["n_matched"]:
+        return out
+    out.update(
+        {
+            "rhythm": round(result["rhythm"], 4),
+            "n_matched": result["n_matched"],
+            "coverage": round(result["coverage"], 4),
+            "trusted": float(bool(result["trusted"])),
+        }
+    )
+    # Whether our bar lines are the annotator's. Rhythm above is
+    # gap-based and cannot see a page that starts on the wrong beat;
+    # WJazzD's bar/beat/tatum can (score_bars.py). Absent for a solo
+    # whose beat is not a quarter or whose metre is not the page's.
+    positions, bar = notated_beats(db, entry["melid"])
+    agreement = wjazz_bar_line_agreement(notation, positions, bar)
+    if agreement["beat_n"]:
+        out.update({k: round(v, 4) for k, v in agreement.items()})
+        out.update(traced(wjazz_bar_line_trace(notation, positions, bar), bar))
     return out
 
 
@@ -997,6 +1070,18 @@ def compare(card: dict) -> int:
     return 1
 
 
+def default_jobs() -> int:
+    import os
+
+    # Half the cores, capped: each worker imports numpy, scipy and mir_eval,
+    # and on the 16 GB dev machine ten of them pushed the commit charge past
+    # the page file ("DLL load failed ... paging file is too small" from
+    # scipy's HiGHS wrapper) with 23 GB of 32 already in use by the
+    # browser, MuseScore and the app. Four is well inside it and takes the
+    # run from ten minutes to about three.
+    return max(1, min(4, (os.cpu_count() or 2) // 2))
+
+
 def main() -> None:
     global CACHE_DIR
 
@@ -1016,6 +1101,12 @@ def main() -> None:
         help=f"stage cache to read stems from (default {CACHE_DIR}; the batch's is "
         "benchmark/.swingscribe-cache)",
     )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=default_jobs(),
+        help="processes for the per-track scoring (default: half the cores); 1 is in-process",
+    )
     args = parser.parse_args()
     if args.cache_dir is not None:
         CACHE_DIR = args.cache_dir.resolve()
@@ -1026,11 +1117,12 @@ def main() -> None:
     print(f"== Beat grids, cache {args.grids} ==")
     grids = beat_grids(args.grids)
 
-    wjazz = wjazz_scores(args.db, runs, grids) if args.db else {}
+    print(f"== Scoring in {args.jobs} process(es) ==")
+    wjazz = wjazz_scores(args.db, runs, grids, args.jobs) if args.db else {}
     # The Omnibook set is scored by the same two functions and then kept
     # apart (OMNIBOOK_FOLDER), so the MuseScore sections stay the listener's.
-    scored = mscz_scores(runs)
-    notated = notation_scores(runs, grids) if grids else {}
+    scored = mscz_scores(runs, args.jobs)
+    notated = notation_scores(runs, grids, args.jobs) if grids else {}
     card = {
         "settings": {"step_cost": args.step_cost, "dip_db": args.dip_db},
         "wjazz": wjazz,
@@ -1041,7 +1133,9 @@ def main() -> None:
         # WJazzD carries a human's NOTATION as well as their onsets, so the
         # same solos answer both questions.
         "wjazz_notation": (
-            wjazz_notation_scores(args.db, wjazz, runs, grids) if args.db and grids else {}
+            wjazz_notation_scores(args.db, wjazz, runs, grids, args.jobs)
+            if args.db and grids
+            else {}
         ),
         "summary": {},
     }

@@ -892,6 +892,15 @@ list of what is actually wrong; run everything with one command:
 
     uv run python scripts/run_eval.py --db wjazz/wjazzd.db
 
+  With everything cached that is arithmetic and alignment, not GPU work:
+  ten and a half minutes on one core, four with the per-track scoring in
+  `--jobs 4` processes (the default since 2026-09-21; the card is
+  byte-identical at any job count, a test holds `parallel_map` to that).
+  Not more on this machine: ten workers pushed the commit charge past the
+  page file and scipy's HiGHS DLL refused to load in them ("paging file
+  is too small"), with 23 GB of 32 already held by the browser, MuseScore
+  and the app.
+
 - **WJazzD (`score_wjazz.py`) is audio against audio** — a human's per-note
   onsets in seconds for the same recording. Asks "did we hear what was
   played?" and is the right measure of `transcribe`. Currently **mean note F1
