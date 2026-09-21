@@ -268,6 +268,66 @@ quarter became an eighth and a quarter; the remaining gap to the human is
 the rest we write at all where the human writes a longer note value
 (difference 3's second half, `legato_cap`, not a priority).
 
+## After the ballad grids and the octave repair (R31, R32, 2026-09-21)
+
+Re-run under both. The hand-score and Omnibook columns did not move (the
+harness said the same: no page in either set changed). The WJazzD column
+did, on the four grids that were tracked at half the pulse and are read
+on the right octave now (R32), and on the ballads offered the finer grids
+(R31); this column's "before" is the main table's, so it also carries
+R29 and R30.
+
+| ours on the WJazzD set (77 solos) | before | after | WJazzD located |
+|---|---|---|---|
+| on the beat | 41.8 | 44.7 | 34.6 |
+| the "and" | 36.0 | 37.0 | 27.3 |
+| the "e" | 8.2 | 6.0 | 7.2 |
+| the "a" | 6.2 | 4.2 | 10.4 |
+| thirds | 2.6 | 3.6 | 13.1 |
+| sixths | 0 | 0.2 | 3.1 |
+| odd 32nds | 5.1 | 4.0 | 1.5 |
+| next onset an eighth | 47.4 | 50.3 | 35.0 |
+| next onset a sixteenth | 17.8 | 14.5 | 15.0 |
+| next onset a triplet eighth | 3.5 | 4.7 | 11.2 |
+| next onset a sixteenth triplet | 0 | 0.4 | 4.9 |
+| next onset a dotted eighth | 2.8 | 1.6 | 4.0 |
+| next onset a 32nd | 4.2 | 3.1 | 2.3 |
+| tie rate | | 0.064 | |
+| notes | 36718 | 36619 | 35997 |
+
+Read the WJazzD column as the annotator's tatum, not a page: it files a
+swung pair at 3/4 and a laid-back beat at 1/4 (docs/wjazz-quantize.md),
+so our "e" and "a" are BELOW it now and should be. The sixths and the
+sixteenth triplet appear for the first time, from the ballads.
+
+### What is left of difference 1 is isolated, not a phrase
+
+The residue of the "e" (3.1% of the 3,783 matched notes on the twelve
+hand scores, 118 notes) was paired note by note with what the human
+wrote there (scratchpad `position_confusion.py`, same pairing as
+`value_confusion.py`): 48 are on the beat in the score, 21 on a triplet
+third, 17 on the "and", and 28 ARE on the "e" -- a quarter of them are
+right. 103 of the 118 are not the first onset of their beat; 93 follow
+our previous note by exactly a sixteenth, so the shape is a two-note
+figure (0, 1/4) in a beat of two to four onsets where the human has (and,
+beat) or a triplet -- the line's late "and" arriving on the beat line and
+the beat's own note a quarter after it, which is a lag of a quarter beat
+on the SECOND note only, past `lag_cap` and not what a window median can
+see.
+
+Wider than the "e": every matched note whose position class differs
+from the human's, taken as a shift modulo the beat and grouped into runs
+of consecutive shifted notes. Of 547 shifted notes, 463 are ISOLATED (a
+single note between agreeing neighbours) and 84 sit in runs of three or
+more; the longest runs are Peterson's bars 22-40 and Mobley's bars 51-53
+at +0.75 (we are a sixteenth early, mostly our "and" against the
+human's 2/3 or "a": the swing convention, not a defect). A phrase-level
+rule -- a lag, a grid octave, a candidate set -- has nothing left to
+move here; what remains is one note at a time, a sixteenth or an eighth
+from where the human put it, and is the quantizer's per-beat decision
+on an ambiguous onset or a note the aligner paired with its neighbour.
+That is the reading the hand-score rhythm of 0.845 should be given.
+
 ## The value score: what we write instead (2026-09-21)
 
 `value` reads 0.777 over the twelve hand scores: 842 of 3,783 matched
