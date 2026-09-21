@@ -1240,7 +1240,10 @@ Blue Train and every tune over 280 bpm, where the eighth notes are. That
 decision needs the audio or the listener; a tempo hint through
 `beats` re-runs the whole chain below it, so the control belongs in
 `meter`, after transcribe, where doubling or halving a grid costs nothing
-cached.
+cached. (Resolved 2026-09-21, R32: it needed neither the audio nor the
+listener -- the tracker's own DOWNBEAT layer, already on the cached
+grid, marks every second beat where the grid is at half rate, and the
+control went into `meter` exactly as this paragraph asked.)
 
 ### D34 - What the quantizer still gets wrong on a human's own onsets
 
@@ -1325,6 +1328,74 @@ the page:
 
 ## Resolved
 
+### R32 - Four WJazzD grids were tracked at half the pulse, and the repair thinned the true beats away (the octave error, open since R21)
+
+Kenny Garrett's two Brother Hubbard solos, Wayne Shorter's Adam's Apple
+and Pat Metheny's Nothing Personal: `grid_drift.py` read slope 0.5 on all
+four -- our repaired grid gained half a beat on the annotator's per beat
+of theirs -- and 100 to 190 beats short over the solo, with the repaired
+grid WORSE than the raw one (Adam's Apple raw -98, repaired -190). The
+raw grids are not at half rate throughout: the tracker runs at the true
+pulse for 33-47% of each track in long runs (Adam's Apple 174 beats in a
+row) and at half rate for the rest, and `reference_pulse`'s modal seed
+falls on the half-rate octave. R26's thinning then takes every fine run
+for a stretch tracked at double rate and removes the true pulse wherever
+it surfaced. That is the octave error R21 left open: "the seed IS the
+half-rate pulse."
+
+Two kinds of evidence were measured before a rule was written
+(scratchpad `octave_activation.py`, `octave_downbeats.py`; aggregates
+here):
+
+- **The tracker's own activation says nothing.** beat_this's framewise
+  beat probability read at the MIDPOINTS of the coarse intervals is
+  0.05-0.14 on the four half-rate grids and 0.60-0.77 on the 300 bpm
+  tunes (In 'n Out, Cherokee, Giant Steps), where the coarse grid is
+  right and the model simply hears the eighths. A sub-threshold peak
+  between two beats means a fast tune, not a wrong octave. Refuted.
+- **The downbeat layer does.** Counted in grid beats, on the coarse
+  stretches of the four half-rate grids the tracker's downbeat marks
+  come every SECOND beat in 0.64-0.80 of consecutive pairs -- a 4/4 bar
+  at half rate -- against 0.08-0.14 on the coarse stretches of Blue
+  Train, Totem Pole and both Sidewinders, whose coarse pulse is the
+  right one and whose fine runs are the tracker's (R26). Every other
+  live grid, 108 in all across the three sets, reads 0.27 or under
+  except Embraceable You (0.56, a 70 bpm ballad), Gingerbread Boy
+  (0.48) and the three Dolores solos (0.45-0.47), and none of those has
+  a fine run at all (0-3% of intervals against 33-47%).
+
+What ships (`meter.CACHE_VERSION` 4, `meter.pulse_octave`): the
+downbeat layer is consulted for one question before the repair, whether
+the grid's modal interval is the wrong octave. It is when at least 20%
+of the intervals sit at half the seed (within `REFERENCE_HALF_FIT`) AND,
+over at least 20 downbeat pairs that start in a coarse interval, at
+least half are two grid beats apart. The seed then becomes the median
+fine interval and is threaded through `drop_doubled_beats` and
+`reference_pulse`: the surfaced pairs read as two beats and stay, and
+each coarse interval is a gap of two pulses that `repair_beats` fills.
+Bars are still never counted from the layer (open-issue #5 stands);
+`bar_grid` passes the downbeats to the repair, so `/beats`, Export and
+the harness all get the same grid. Both tests are required: Totem Pole's
+fine runs are 18% and its marks come in fours; Embraceable You's marks
+come in twos and it has no fine runs. A grid at half rate THROUGHOUT,
+with no fine run to compare against, is not seen by this and still
+wants a tempo hint (`beats.correct_octave`); none of the 108 is one.
+
+Measured: exactly the four grids fire and none of the other 104. On
+those four, drift over the solo -100.6, -124.7, -144.8 and -190.3
+beats -> -0.1, +0.1, +0.1, +0.1 with no steps; beat counts over the
+solo 104 -> 207 (annotated ~207), 152 -> 303 (~303), 194 -> 388
+(~389). Through `run_eval` nothing but those four rows moved: page
+rhythm 0.114 -> 0.738 (Nothing Personal), 0.210 -> 0.672 and 0.260 ->
+0.591 (Brother Hubbard), 0.220 -> 0.608 (Adam's Apple); on_the_bar
+0.13-0.20 -> 0.77-0.91; sub-eighth rests 1.6-3.8 -> 0-0.6 per hundred
+notes. WJazzD placement 0.818 -> 0.855 over 77, pages on the bar 71 ->
+73 of 77; the hand-scored, Omnibook and WJazzD audio-against-audio
+numbers are byte-identical. Brother Hubbard 257 still slips twice
+(beat_steps 2, on_the_bar 0.77) -- a separate defect, on the record.
+R31's note that the ballad grids "still look like a ballad" to Brother
+Hubbard is moot: its median beat is 0.40 s now. Baselines re-pinned.
+
 ### R31 - The candidate set was tempo-blind, and a ballad lost a fifth of its notes (the last half of D11)
 
 D11 closed the slack's tempo blindness and left the candidate SET's: nothing
@@ -1340,10 +1411,11 @@ drops 35.8 -> 40.6%, dropped 3,545 -> 2,227; overall 71.9 -> 72.3% and
 7,155 -> 5,770. On the pages the three located WJazzD ballads read 0.847
 -> 0.870 (3 of 3 up, 28, 29 and 2 more notes matched) and no hand-scored
 or Omnibook page moves -- the median, because a per-beat rule reached
-Soul Station's long beats at 100 bpm. It still reaches Brother Hubbard's
-two takes, whose grid is tracked at half rate (R21) and whose median beat
-therefore looks like a ballad's: 0.276 -> 0.210 / 0.260 on a page already
-off its pulse; that is R21's. Baselines re-pinned.
+Soul Station's long beats at 100 bpm. It still reached Brother Hubbard's
+two takes, whose grid was tracked at half rate (R21) and whose median beat
+therefore looked like a ballad's: 0.276 -> 0.210 / 0.260 on a page already
+off its pulse; that was R21's, and R32 fixed the grid the same day.
+Baselines re-pinned.
 
 ### R30 - A rest was allowed the syncopation a note is, and straddled the beat (was D35.3)
 
@@ -1532,7 +1604,8 @@ Dexter Gordon Confirmation +8.0 -> 0.0 (three slips to none). WJazzD
 pages within a beat of the annotator over the whole solo 47 -> 57 of 73;
 the four half-rate grids read worse (-77 -> -101, -123 -> -125, -74 ->
 -145, -100 -> -190), because the pair rule now thins their true beats
-consistently -- R21's open octave error, not this one. The listener's
+consistently -- R21's open octave error, not this one (R32 closed it
+three days later, all four to within 0.1 beat). The listener's
 twelve and the Omnibook's 22 move nothing else.
 
 Through the harness: `summary/wjazz_placement` 0.795 -> 0.835 and 67 ->
@@ -1738,7 +1811,8 @@ removed. Kenny Garrett's Brother Hubbard is the one that is NOT a doubled
 beat: its grid is tracked at half rate (0.82 s on a 143 bpm tune) and the
 0.40 + 0.42 "pairs" are the true pulse surfacing -- the octave error is the
 defect there, and removing its true beats makes a wrong grid differently
-wrong. That is `beats.correct_octave`'s job with a tempo hint, and open.
+wrong. That was `beats.correct_octave`'s job with a tempo hint, and open
+until R32 read the octave off the downbeat layer (2026-09-21).
 
 What it moved, through the page (the harness notates on the raw grid, D27,
 so `run_eval` saw nothing): the hand-score sheet moved on one of eleven

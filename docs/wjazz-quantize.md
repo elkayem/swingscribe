@@ -284,10 +284,12 @@ located WJazzD ballads (Don't Blame Me, Embraceable You, I Fall In Love
 Too Easily) 0.847 -> 0.870 on page rhythm, 3 of 3 up, with 28, 29 and 2
 more notes matched; no hand-scored or Omnibook page moves, and Soul
 Station and Adam's Apple are untouched. The one thing it still reaches
-that it should not is Brother Hubbard's two takes, whose tracked grid is
-at HALF rate (R21) and whose median beat therefore looks like a ballad's:
+that it should not is Brother Hubbard's two takes, whose tracked grid was
+at HALF rate (R21) and whose median beat therefore looked like a ballad's:
 0.276 -> 0.210 and 0.260 on a page that was already off its pulse. That
-is R21's to fix, and a rule cannot see it from the grid it is given. Beat threshold 0.6 and 0.75 were measured too and read the same
+was R21's to fix, and a rule cannot see it from the grid it is given; R32
+fixed the grid the same day (its median beat is 0.40 s now, and its
+page rhythm 0.67 and 0.59). Beat threshold 0.6 and 0.75 were measured too and read the same
 on the SLOW band; 0.7 sits between Soul Station's 0.60 and the slowest
 real ballad's 0.84.
 

@@ -412,9 +412,26 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   measure moves only where the grid was wrong (Fuller 0.40 -> 0.56, Totem
   Pole 0.52 -> 0.77) because it is gap-based and cannot see a bar count.
   A half-rate grid with the true pulse surfacing (Brother Hubbard, Adam's
-  Apple, Nothing Personal) is NOT this defect and reads worse after it:
-  the seed IS the half-rate pulse, and that is the octave error's, still
-  open (R21). A ragged stretch is still repaired pair by pair, so the
+  Apple, Nothing Personal) is NOT this defect and read WORSE after it:
+  the seed was the half-rate pulse, and the thinning took the true beats
+  out wherever they surfaced. **The pulse's octave is judged from the
+  DOWNBEAT layer before the repair** (2026-09-21, R32,
+  `meter.pulse_octave`, `meter.CACHE_VERSION` 4): on a 4/4 tune tracked
+  at half rate the tracker's marks come every SECOND grid beat where the
+  grid is coarse (0.64-0.80 of pairs on those four, 0.08-0.14 on Blue
+  Train's and Totem Pole's coarse stretches, whose coarse pulse is
+  right), and the true pulse shows in runs of halves (33-47% of the
+  intervals). Both are required -- Embraceable You's marks come in twos
+  with no fine run, Totem Pole's fine runs are 18% with marks in fours
+  -- and then the fine median is the seed, so the coarse intervals are
+  two-pulse gaps the insertion fills. Exactly the four fire of 108
+  grids; their drift -100 to -190 beats -> 0.1, page rhythm 0.11-0.26 ->
+  0.59-0.74, WJazzD placement 0.818 -> 0.855, nothing else moves. The
+  tracker's own activation at the midpoints was measured first and says
+  nothing (0.05-0.14 there, 0.6-0.8 on the 300 bpm tunes where the grid
+  is right). Bars are still never COUNTED from the layer. A grid at half
+  rate throughout, with no fine run, is still the tempo hint's
+  (`beats.correct_octave`). A ragged stretch is still repaired pair by pair, so the
   count across it can be a beat off (D33, In 'n Out at 300 bpm);
   `scripts/grid_drift.py` measures both against every reference. The
   harness sees it since 2026-09-11 (R22): `run_eval` builds its page
@@ -803,8 +820,8 @@ Results and limits: `docs/m6-notate.md`.
   ballads 0.847 -> 0.870 and no hand-scored or Omnibook page moves. The
   MEDIAN beat, not each beat: per beat it reached Soul Station's long
   beats at 100 bpm and read worse there. A HALF-RATE grid (Brother
-  Hubbard, R21) still looks like a ballad to it and reads worse; the
-  grid is the defect, not the rule.
+  Hubbard) looked like a ballad to it and read worse; the grid was the
+  defect, not the rule, and R32 fixed the grid the same day.
 - **The triplet deficit is mostly gone, and the 4x frame was wrong (D12).**
   Post-D11 we write 12.0% tuplet notes; only 59.8% of WJazzD's ternary notes
   are real 3+-onset triplet figures (the rest are swung pairs annotated at
@@ -1019,8 +1036,9 @@ list of what is actually wrong; run everything with one command:
   on WJazzD 8 of 73 grids were off the annotated pulse and 15 more
   slipped part-way, mostly GAINING a beat -- six of them stretches tracked
   at double rate that the repair could not see. Now 70 of 73 on the bar
-  (placement 0.795 -> 0.835); the four half-rate grids (R21) and the
-  ragged stretches at 300 bpm (D33) remain.
+  (placement 0.795 -> 0.835), and 73 of 77 (0.855) once the four
+  half-rate grids were read on the right octave (R32); the ragged
+  stretches at 300 bpm (D33) remain.
 - **MuseScore (`score_benchmark.py`) is audio against notation.** Asks "would
   this notate the way a human notated it?" It charges the gap between
   performed timing and notated rhythm to the transcriber, so it reads lower

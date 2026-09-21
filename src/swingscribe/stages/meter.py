@@ -22,6 +22,7 @@ the same answer through the cache key, not so the GUI can ask the question.
 No heavy imports at all — this module is stdlib-only and always importable.
 """
 
+import bisect
 import statistics
 from dataclasses import dataclass
 
@@ -64,7 +65,11 @@ BRIDGE_BEATS = 1
 
 # 2: with no anchor set, the downbeat is voted around the transcribe region
 # rather than over the whole track (`_auto_anchor`, D32).
-CACHE_VERSION = 3
+# 3: a stretch tracked at double rate is thinned to the pulse (R26).
+# 4: the pulse's OCTAVE is judged from the downbeat layer before the repair
+# (`pulse_octave`, R32): a grid at half rate with the true pulse surfacing
+# is subdivided to it instead of thinned to the half.
+CACHE_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -118,8 +123,26 @@ REFERENCE_HALF_FIT = 0.15
 REFERENCE_MIN_FIT = 3
 
 
-def reference_pulse(intervals: list[float]) -> list[float]:
+def modal_interval(intervals: list[float]) -> float:
+    """The grid's own seed pulse: the mode at 10 ms resolution, which is robust
+    to a minority of intervals sitting at a multiple of the true pulse.
+    Falls back to the median when the mode is degenerate."""
+    counts: dict[float, int] = {}
+    for value in intervals:
+        bucket = round(value, 2)
+        counts[bucket] = counts.get(bucket, 0) + 1
+    seed = max(counts.items(), key=lambda kv: (kv[1], -kv[0]))[0] if counts else 0.0
+    if seed <= 0 and intervals:
+        seed = statistics.median(intervals)
+    return seed
+
+
+def reference_pulse(intervals: list[float], seed: float | None = None) -> list[float]:
     """The pulse rate the tune is *actually* running at, per interval.
+
+    `seed` overrides the grid's own modal interval: the octave the mode
+    picks is the tracker's, and on a grid tracked at half rate for most of
+    a tune it is the wrong one (`pulse_octave`).
 
     Cannot be a plain local median. Corner Pocket's first 23 seconds are tracked
     at half rate, so the local median there is itself the wrong answer and no
@@ -142,15 +165,8 @@ def reference_pulse(intervals: list[float]) -> list[float]:
     """
     if not intervals:
         return []
-    # Global seed: mode at 10ms resolution, which is robust to a minority of
-    # intervals sitting at a multiple of the true pulse.
-    counts: dict[float, int] = {}
-    for value in intervals:
-        bucket = round(value, 2)
-        counts[bucket] = counts.get(bucket, 0) + 1
-    seed = max(counts.items(), key=lambda kv: (kv[1], -kv[0]))[0]
-    if seed <= 0:
-        seed = statistics.median(intervals)
+    if seed is None or seed <= 0:
+        seed = modal_interval(intervals)
     if seed <= 0:
         return list(intervals)
 
@@ -169,6 +185,61 @@ def reference_pulse(intervals: list[float]) -> list[float]:
         window = [value for value in implied[lo:hi] if value is not None]
         out.append(statistics.median(window) if len(window) >= REFERENCE_MIN_FIT else seed)
     return out
+
+
+# The pulse's octave (2026-09-21, R32). A tracker at half rate for most of a
+# tune -- Kenny Garrett's Brother Hubbard at 0.82 s on a 148 bpm tune, Adam's
+# Apple, Nothing Personal -- puts the seed on the wrong octave, and R26's
+# thinning then removes the true pulse wherever it surfaces. Its own
+# activation says nothing about it: read at the midpoints of its beats the
+# model hears 0.05-0.14 on those grids and 0.6-0.8 on the 300 bpm tunes,
+# where the grid is right. What does say it is the DOWNBEAT layer, on the
+# grids that hold both octaves: in the half-rate stretches it marks every
+# SECOND grid beat (0.64-0.80 of consecutive marks, the bar of a 4/4 tune
+# at half rate), against 0.08-0.14 on Blue Train's, Totem Pole's and the
+# Sidewinders' coarse stretches, whose coarse pulse is the right one. Both
+# tests are required: Embraceable You's ballad grid has marks in twos
+# (0.56) and no fine runs at all, and stays; Totem Pole's fine runs are
+# 18% of its intervals and its marks come in fours, and it is thinned as
+# before. A grid at half rate THROUGHOUT, with no fine run to compare, is
+# not seen by this and still wants a tempo hint (`beats.correct_octave`).
+OCTAVE_FINE_SHARE = 0.2  # of the grid's intervals near half the seed
+OCTAVE_TWO_SHARE = 0.5  # of downbeat pairs in the coarse stretches two beats apart
+OCTAVE_MIN_MARKS = 20  # such pairs before the layer is believed at all
+
+
+def pulse_octave(beats: list[float], downbeats: list[float]) -> float | None:
+    """The seed pulse when the grid's modal interval is the wrong octave,
+    else None. Judged from the downbeat layer: on a 4/4 tune tracked at half
+    rate the marks come every two grid beats where the grid is coarse, and
+    the true pulse shows in runs of half-length intervals."""
+    if len(beats) < 4 or not downbeats:
+        return None
+    intervals = [b - a for a, b in zip(beats, beats[1:], strict=False)]
+    seed = modal_interval(intervals)
+    if seed <= 0:
+        return None
+    fine = [v for v in intervals if abs(v / seed / 0.5 - 1.0) <= REFERENCE_HALF_FIT]
+    if len(fine) < OCTAVE_FINE_SHARE * len(intervals):
+        return None
+
+    marks = sorted({nearest_index(beats, d) for d in downbeats})
+    coarse_pairs = twos = 0
+    for a, b in zip(marks, marks[1:], strict=False):
+        if a >= len(intervals) or abs(intervals[a] / seed - 1.0) > REFERENCE_HALF_FIT:
+            continue
+        coarse_pairs += 1
+        twos += b - a == 2
+    if coarse_pairs < OCTAVE_MIN_MARKS or twos < OCTAVE_TWO_SHARE * coarse_pairs:
+        return None
+    return statistics.median(fine)
+
+
+def nearest_index(times: list[float], when: float) -> int:
+    """Index of the time nearest `when` in a sorted list."""
+    i = bisect.bisect_left(times, when)
+    candidates = [j for j in (i - 1, i) if 0 <= j < len(times)]
+    return min(candidates, key=lambda j: abs(times[j] - when))
 
 
 # A doubled beat: one the tracker put between two real ones. It is judged as
@@ -195,7 +266,9 @@ DOUBLED_PAIR_FIT = 0.15
 TRACKER_FRAME_S = 0.02
 
 
-def drop_doubled_beats(beats: list[float], tolerance: float) -> list[float]:
+def drop_doubled_beats(
+    beats: list[float], tolerance: float, seed: float | None = None
+) -> list[float]:
     """Remove the middle beat of a pair of intervals that together make one
     pulse, or of an isolated ragged short pair.
 
@@ -207,16 +280,17 @@ def drop_doubled_beats(beats: list[float], tolerance: float) -> list[float]:
     left interval is taken on the KEPT sequence, so a run of doubled beats is
     thinned one by one and the merged interval then reads as ordinary.
 
-    Not this function's problem: a grid tracked at HALF rate for most of a
-    tune (Kenny Garrett's Brother Hubbard, 0.82 s on a 143 bpm tune). Its
-    seed is the half-rate pulse, so the true beats surfacing in pairs are
-    exactly what this thins -- the octave error is the defect there, open
-    since R21, and a tempo hint (`beats.correct_octave`) is its repair.
+    A grid tracked at HALF rate for most of a tune (Kenny Garrett's Brother
+    Hubbard, 0.82 s on a 148 bpm tune) has the half-rate pulse for its
+    seed, so the true beats surfacing in pairs are exactly what this would
+    thin. `seed` is the caller's answer to that (`pulse_octave`, R32): with
+    the fine pulse as the seed those pairs are two beats, and the coarse
+    intervals are the gaps the insertion below fills.
     """
     if len(beats) < 4:
         return list(beats)
     intervals = [b - a for a, b in zip(beats, beats[1:], strict=False)]
-    reference = reference_pulse(intervals)
+    reference = reference_pulse(intervals, seed)
     kept = [beats[0]]
     for i in range(1, len(beats) - 1):
         pulse = reference[i]
@@ -246,9 +320,15 @@ def drop_doubled_beats(beats: list[float], tolerance: float) -> list[float]:
     return kept
 
 
-def repair_beats(beats: list[float], config: MeterConfig) -> list[Beat]:
+def repair_beats(
+    beats: list[float], config: MeterConfig, downbeats: list[float] | None = None
+) -> list[Beat]:
     """Insert beats the tracker dropped, and drop the ones it doubled, so the
     bar count stays true.
+
+    `downbeats` is the tracker's downbeat layer, consulted for one thing
+    only: whether the grid's modal interval is the wrong octave
+    (`pulse_octave`). Bars are still never counted from it.
 
     This is correctness, not cosmetics: a single missed beat shifts every bar
     line after it by one beat for the rest of the tune — and so does a single
@@ -265,9 +345,10 @@ def repair_beats(beats: list[float], config: MeterConfig) -> list[Beat]:
     if not config.repair_beats:
         return [Beat(t) for t in beats]
 
-    beats = drop_doubled_beats(beats, config.stability_tolerance)
+    seed = pulse_octave(beats, downbeats or [])
+    beats = drop_doubled_beats(beats, config.stability_tolerance, seed)
     intervals = [b - a for a, b in zip(beats, beats[1:], strict=False)]
-    reference = reference_pulse(intervals)
+    reference = reference_pulse(intervals, seed)
 
     out = [Beat(beats[0])]
     for index, gap in enumerate(intervals):
@@ -574,7 +655,7 @@ def bar_grid(
     beat of its margin instead, and every bar on the page sat one beat off
     the bar lines on screen.
     """
-    repaired = repair_beats(beats, config)
+    repaired = repair_beats(beats, config, downbeats)
     repaired = extend_beats(repaired, config, 0.0, duration)
     return repaired, derive_sections(repaired, downbeats, config, near)
 

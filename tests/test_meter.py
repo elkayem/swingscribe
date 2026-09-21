@@ -216,6 +216,74 @@ def test_reference_pulse_holds_through_a_double_rate_stretch():
     assert meter.reference_pulse(intervals)[-1] == pytest.approx(0.65)
 
 
+def _half_rate_grid(fine_runs: int = 3) -> tuple[list[float], list[float]]:
+    """Brother Hubbard's shape: a 0.4 s pulse tracked at 0.8 s for most of the
+    track, the true pulse surfacing in runs. The tracker's downbeat layer
+    marks every second grid beat in the coarse stretches (a 4/4 bar at half
+    rate) and every fourth in the fine ones. Returns (beats, downbeats)."""
+    beats: list[float] = []
+    downbeats: list[float] = []
+    t = 0.0
+    for run in range(fine_runs * 2 + 1):
+        if run % 2 == 0:  # coarse stretch: 40 beats at 0.8 s
+            for k in range(40):
+                beats.append(round(t, 6))
+                if k % 2 == 0:
+                    downbeats.append(round(t, 6))
+                t += 0.8
+        else:  # fine stretch: 40 beats at 0.4 s
+            for k in range(40):
+                beats.append(round(t, 6))
+                if k % 4 == 0:
+                    downbeats.append(round(t, 6))
+                t += 0.4
+    return beats, downbeats
+
+
+def test_a_grid_at_half_rate_with_the_pulse_surfacing_is_subdivided_to_it():
+    """R32: the seed is the tracker's octave, and on Brother Hubbard, Adam's
+    Apple and Nothing Personal it was the wrong one -- R26's thinning then
+    took out the true pulse wherever it surfaced (Brother Hubbard 100 beats
+    short of the annotator's over the solo). The downbeat layer says which
+    octave is the bar: marks every second grid beat where the grid is coarse."""
+    beats, downbeats = _half_rate_grid()
+    assert meter.pulse_octave(beats, downbeats) == pytest.approx(0.4)
+    repaired = meter.repair_beats(beats, MeterConfig(), downbeats)
+    intervals = [round(b.time - a.time, 3) for a, b in zip(repaired, repaired[1:], strict=False)]
+    assert set(intervals) == {0.4}
+    # the surfaced beats are the tracker's; only the coarse gaps were filled
+    assert sum(b.implied for b in repaired) == 4 * 39 + 3
+    assert all(not b.implied for b in repaired if b.time in set(beats))
+
+
+def test_a_double_rate_stretch_under_downbeats_in_fours_is_still_thinned():
+    """Blue Train's shape with its downbeat layer: the marks come every four
+    coarse beats, so the coarse pulse is the bar's and the halves are the
+    tracker's, exactly as R26 measured."""
+    times = steady(21) + [10.0 + 0.25 * k for k in range(1, 16)] + steady(20, start=14.0)
+    downbeats = [t for i, t in enumerate(steady(24)) if i % 4 == 0]
+    assert meter.pulse_octave(times, downbeats) is None
+    beats = meter.repair_beats(times, MeterConfig(), downbeats)
+    assert [b.time for b in beats] == steady(48)
+
+
+def test_marks_in_twos_alone_do_not_double_a_grid():
+    """Embraceable You at 70 bpm: the downbeat layer marks every second beat
+    (0.56 of its pairs) and no run of halves exists anywhere in the grid.
+    A ballad is not doubled on the downbeat layer's word alone."""
+    times = steady(120, ibi=0.86)
+    downbeats = times[::2]
+    assert meter.pulse_octave(times, downbeats) is None
+    beats = meter.repair_beats(times, MeterConfig(), downbeats)
+    assert [b.time for b in beats] == times
+
+
+def test_the_octave_needs_enough_marks_to_be_believed():
+    beats, downbeats = _half_rate_grid()
+    assert meter.pulse_octave(beats, downbeats[:8]) is None
+    assert meter.pulse_octave(beats, []) is None
+
+
 def test_a_free_intro_whose_gaps_subdivide_neatly_still_gets_no_bars():
     """So What's rubato intro: the tracker's few beats there sit 1.6, 2.7
     and 3.7 pulses apart, and an even subdivision of any of those gaps is
