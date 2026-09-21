@@ -246,7 +246,10 @@ alone, and the genuine "e".
 
 The line phase (1) shipped the same day as R29, above; it was the largest
 single difference in every table and it is what the listener's bar 4
-showed. The sixteenth-triplet grid (2) is next and
+showed. The sixteenth-triplet grid (2) was built and measured the same
+night and is OFF: +2.1 on the instrument and worse on every Omnibook side
+it touched (docs/wjazz-quantize.md), because on our onsets the figure is
+not three notes at sixths. It stays a candidate-set change and
 is a candidate-set change like the ballad work. The rest splitting (3) is
 a notate change that costs an afternoon and moves no score, only the page.
 The triplet deficit (4) is known and partly deliberate. Ties (5) are not a

@@ -244,7 +244,11 @@ broken a tool at least once:
   them, say so explicitly and explain why.
 - **No audio in git, ever** (plan §12) — not committed-then-deleted, not in a
   private repo. Same for MIDI/MusicXML/note lists derived from commercial
-  recordings; only aggregate metrics may be committed.
+  recordings; only aggregate metrics may be committed. A rendered IMAGE of
+  a few bars for illustration (the README's twelve bars of Birks Works,
+  `docs/images/birks-works.png`) is allowed: the listener's decision,
+  2026-09-20, on the record as not a copyright problem. A full solo, or
+  the file behind the picture, still is not.
 
 ## Testing (plan §6, §12)
 
@@ -855,7 +859,12 @@ Results and limits: `docs/m6-notate.md`.
   pianists 0.830 -> 0.866, tie rate 0.050 -> 0.033. The instrument reads
   only +0.4 because WJazzD's annotators write the "e" themselves; it
   judged the collateral (three earlier versions failed on it), the pages
-  judged the rule.
+  judged the rule. **The six-per-beat grid (`sixteenth_triplets`) is OFF,
+  measured the same night**: +2.1 on the instrument, the largest of the
+  week, and 0 up / 15 down on the Omnibook, the book that writes the
+  figure most -- on our onsets a sixteenth triplet is not three notes at
+  sixths, and a grid finer than a sixteenth is where our onsets stop being
+  a human's. The first grid-choice rule that did not transfer.
 - **A grid that merges two onsets is too coarse, whatever its snap error.**
   Two notes on one grid position are one note in a single-line score. Without
   this, coarsening bought notated rhythm by silently deleting 4.8% of the

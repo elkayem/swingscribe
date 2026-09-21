@@ -1299,7 +1299,7 @@ the page:
    writes it on the beat. The rule to measure is a downbeat phase beside
    the swing model's offbeat phase, a window statistic rather than a
    threshold at one beat line (the shape that failed to transfer, D34.1).
-2. **No sixteenth-triplet grid.** The Omnibook writes 4.9% of its notes as
+2. **(Measured and off, the same night; docs/wjazz-quantize.md.) No sixteenth-triplet grid.** The Omnibook writes 4.9% of its notes as
    sixteenth triplets, the listener 1.0%, WJazzD 4.9% of its gaps; we
    write none, and a beat of six goes to sixteenths or 32nds -- most of
    our 32nds (2.0-2.1% against 0.2-0.3%) and dotted sixteenths (0.8-0.9%

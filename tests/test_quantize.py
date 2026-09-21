@@ -903,3 +903,73 @@ def test_the_lag_is_on_by_default_in_the_config():
     assert QuantizeConfig().lag_window_beats == 4
     assert QuantizeConfig().lag_cap == 0.2
     assert QuantizeConfig().lag_floor == 0.08
+
+
+# ── the sixteenth triplet: six to the beat (docs/notation-survey.md, D35.2) ──
+
+
+def test_three_notes_in_half_a_beat_are_read_on_sixths():
+    """A sixteenth triplet at (0.5, 2/3, 5/6) after a note on the beat: the
+    sixteenth grid cannot keep the last two apart, so the finer grids are
+    offered, and sixths fit exactly where 32nds would write 0.625 and 0.875."""
+    from swingscribe.stages.quantize import choose_reading
+
+    figure = [0.0, 0.5, 2 / 3, 5 / 6]
+    assert choose_reading(figure, (2, 4, 3, 6, 8), 3, 0.02, raw_offsets=figure, inside=True) == (
+        6,
+        "raw",
+    )
+    # Without the six-per-beat grid on offer, it is a 32nd figure.
+    assert choose_reading(figure, (2, 4, 3, 8), 3, 0.02, raw_offsets=figure, inside=True)[0] == 8
+    # Inside is judged on sixths: 5/6 is inside on the six grid although the
+    # thirds grid would send it to the next beat.
+    assert choose_reading(figure, (2, 4, 3, 6), 3, 0.02, raw_offsets=figure, inside=True)[0] == 6
+
+
+def test_the_six_grid_is_offered_only_where_sixteenths_cannot_keep_the_beat_apart():
+    beat = 0.4
+    beats = [i * beat for i in range(16)]
+    onsets = []
+    for i in range(2, 14):
+        if i == 8:
+            onsets.extend(beats[i] + f * beat for f in (0.0, 0.5, 2 / 3, 5 / 6))
+        else:
+            onsets.extend(beats[i] + f * beat for f in (0.0, 0.5))
+    spans = swing_spans(onsets, beats)
+    on, positions = quantize_notes(
+        onsets,
+        [0.05] * len(onsets),
+        [60] * len(onsets),
+        beats,
+        spans,
+        [],
+        tuplet_needs_onsets_inside=True,
+        sixteenth_triplets=True,
+    )
+    read = sorted(round(q.beat, 3) for q, p in zip(on, positions, strict=True) if 8 <= p < 9)
+    assert read == [8.0, 8.5, 8.667, 8.833]
+    off, positions = quantize_notes(
+        onsets,
+        [0.05] * len(onsets),
+        [60] * len(onsets),
+        beats,
+        spans,
+        [],
+        tuplet_needs_onsets_inside=True,
+        sixteenth_triplets=False,
+    )
+    read = sorted(round(q.beat, 3) for q, p in zip(off, positions, strict=True) if 8 <= p < 9)
+    assert read == [8.0, 8.5, 8.625, 8.875]
+    # The swung pairs around it are untouched either way.
+    assert sorted(round(q.beat, 3) for q, p in zip(on, positions, strict=True) if 6 <= p < 7) == [
+        6.0,
+        6.5,
+    ]
+
+
+def test_sixteenth_triplets_are_off_by_default_in_the_config():
+    """Measured and rejected on the pages (docs/wjazz-quantize.md): the
+    reading exists for when a figure deserves it."""
+    from swingscribe.config import QuantizeConfig
+
+    assert QuantizeConfig().sixteenth_triplets is False

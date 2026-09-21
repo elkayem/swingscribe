@@ -723,3 +723,15 @@ def test_build_writes_a_quarter_note_triplet_whole():
     assert [n.tuplet for n in sounding] == [(3, 2), (3, 2), (3, 2), None]
     assert not any(n.tie_start or n.tie_stop for n in sounding)
     assert sum(n.duration for n in bar.notes) == pytest.approx(4.0)
+
+
+def test_three_notes_in_half_a_beat_are_a_sixteenth_triplet():
+    """Quantize's six-per-beat grid puts a sixteenth triplet at (0.5, 2/3,
+    5/6): sixths of the beat, thirds of its second half. Written as
+    sixteenths under a 3:2 in the half-beat unit, never as tied 32nds."""
+    pieces = []
+    for i in range(3):
+        pieces += split_for_meter(0.5 + i / 6.0, 1.0 / 6.0, 4.0)
+    assert [t for _s, _d, t in pieces] == [(3, 2)] * 3
+    assert all(abs(d - 1.0 / 6.0) < 1e-9 for _s, d, _t in pieces)
+    assert abs(tuplet_value(1.0 / 6.0, (3, 2)) - 0.25) < 1e-9  # drawn as a sixteenth

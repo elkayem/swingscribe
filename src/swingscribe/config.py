@@ -462,6 +462,23 @@ class QuantizeConfig(BaseModel):
     # Below this median the window shows scatter, not lag, and none is
     # taken out.
     lag_floor: float = 0.08
+    # Offer a six-per-beat grid -- sixteenth triplets -- wherever the 32nd
+    # grid is offered, i.e. only where sixteenths cannot keep the beat's
+    # onsets apart. The Omnibook writes 4.9% of its notes as sixteenth
+    # triplets and the listener 1.0%; we wrote none, and three notes in
+    # half a beat came out as a dotted sixteenth, a sixteenth and a dotted
+    # sixteenth, which MuseScore draws as tied 32nds (docs/notation-survey.md,
+    # D35.2; Birks Works bar 16). Same evidence rule as the 32nd grid, and
+    # the tuplet gate applies: three onsets, all inside the beat. OFF,
+    # measured (docs/wjazz-quantize.md): offered everywhere sixteenths
+    # merge it read +2.1 on the instrument and worse on 15 of 22 Omnibook
+    # sides (rhythm 0.787 -> 0.779); restricted to a beat of three or four
+    # onsets that fit sixths within `sixteenth_triplet_fit` beats of mean
+    # snap error, +0.4 on the instrument and still 0 up, 6 down on the
+    # Omnibook. On our onsets the figure the Omnibook writes as a sixteenth
+    # triplet is not three notes at sixths; what sixths fit is scatter.
+    sixteenth_triplets: bool = False
+    sixteenth_triplet_fit: float = 0.03
     # How much worse, in SECONDS of mean snap error, a COARSER grid may be
     # and still win. Parsimony: reading a sixteenth out of a beat that only
     # shows an eighth pair is how a swung pair becomes a dotted eighth. 0

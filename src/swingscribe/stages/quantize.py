@@ -48,7 +48,7 @@ from swingscribe.model import Document, MeterSection, QuantizedNote, SwingSpan
 
 # Bump when this stage's behavior changes without a config change (see
 # pipeline._cache_name).
-CACHE_VERSION = 5  # 5: the line's lag behind the beat is taken out before the snap (line_lag)
+CACHE_VERSION = 5  # 5: the line's lag is taken out before the snap (the six-per-beat grid is off)
 
 STRAIGHT_PHASE = 0.5
 
@@ -282,9 +282,14 @@ def choose_reading(
         and sum(abs(snap(r, 3)[1]) for r in raw) / 2 <= offbeat_pair_fit
     ):
         gate = 2
-    voting = sum(1 for r in raw if snap(r, 3)[0] < 1.0 - 1e-9) if inside else len(raw)
-    ternary_ok = voting >= gate and voting == len(raw)
-    allowed = [divisions for divisions in candidates if divisions % 3 != 0 or ternary_ok]
+
+    def ternary_ok(divisions: int) -> bool:
+        # Inside is judged on the grid in question: the sixth that lands a
+        # sixteenth-triplet's last note at 5/6 is inside, whatever thirds say.
+        voting = sum(1 for r in raw if snap(r, divisions)[0] < 1.0 - 1e-9) if inside else len(raw)
+        return voting >= gate and voting == len(raw)
+
+    allowed = [d for d in candidates if d % 3 != 0 or ternary_ok(d)]
     if not allowed:
         allowed = [candidates[0]]
 
@@ -458,6 +463,8 @@ def quantize_notes(
     lag_window_beats: int = 0,
     lag_cap: float = 0.2,
     lag_floor: float = 0.0,
+    sixteenth_triplets: bool = False,
+    sixteenth_triplet_fit: float = 0.03,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -550,9 +557,22 @@ def quantize_notes(
         # behind-the-beat sixteenth line (four onsets keep apart on the
         # sixteenth grid) can never be promoted to 32nds — the listener's
         # rule, both halves (D16/D11).
+        # The sixteenth triplet -- six to the beat -- is admitted on the same
+        # evidence, and tried before the 32nd grid because it is coarser:
+        # three notes in half a beat sat at 0, 3/8, 5/8 before it, tied
+        # 32nds on the page where the Omnibook writes 4.9% of its notes.
         cands = candidates
         if not _keeps_apart(offsets, finest):
-            cands = candidates + (finest * 2,)
+            raw = per_beat_raw[index]
+            sixths = finest * 3 // 2
+            finer: tuple[int, ...] = (finest * 2,)
+            if (
+                sixteenth_triplets
+                and 3 <= len(raw) <= 4
+                and sum(abs(snap(r, sixths)[1]) for r in raw) / len(raw) <= sixteenth_triplet_fit
+            ):
+                finer = (sixths, finest * 2)
+            cands = candidates + finer
         # A sparse beat is offered the eighth grid (and the ternary one) only:
         # one or two onsets cannot demonstrate a sixteenth, and read on one
         # they become the dotted eighth of a late swung offbeat or the "e"
@@ -817,6 +837,8 @@ def run(document: Document, config: Config) -> Document:
         lag_window_beats=qc.lag_window_beats,
         lag_cap=qc.lag_cap,
         lag_floor=qc.lag_floor,
+        sixteenth_triplets=qc.sixteenth_triplets,
+        sixteenth_triplet_fit=qc.sixteenth_triplet_fit,
         chords=[list(n.chord) for n in notes],
         quarter_triplets=qc.quarter_triplets,
     )

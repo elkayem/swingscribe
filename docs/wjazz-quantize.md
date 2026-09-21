@@ -245,6 +245,33 @@ better on the instrument and the pages were not run on it), `LAG_PUSH_MIN`
 
 ## Measured and not shipped
 
+### The six-per-beat grid (D35.2), measured and off
+
+The Omnibook writes 4.9% of its notes as sixteenth triplets and we had no
+grid for them (docs/notation-survey.md), so `QuantizeConfig.sixteenth_triplets`
+offers six to the beat wherever the 32nd grid is offered -- where
+sixteenths cannot keep the onsets apart -- under the tuplet gate, tried
+before 32nds because it is coarser. Notate writes the figure as sixteenths
+under a 3:2 in the half-beat unit.
+
+| version | instrument page hit | below the grid | binary as triplet | Omnibook rhythm | Omnibook pages | hand-score pages |
+|---|---|---|---|---|---|---|
+| off (R29) | 74.8% | 20,036 | 2,637 | 0.787 | | |
+| wherever sixteenths merge | 77.0% | 16,394 | 3,908 | 0.779 | 0 up, 15 down | 4 up, 4 down |
+| 3-4 onsets, count alone | 76.1% | 17,997 | 3,897 | 0.779 | 0 up, 15 down | 4 up, 4 down |
+| 3-4 onsets, fit within 0.03 | 75.2% | 19,319 | 2,997 | 0.786 | 0 up, 6 down | 2 up, 1 down |
+
+The largest instrument gain of the week -- the SLOW band alone 45 -> 51 --
+and a loss on every Omnibook side it touches, the book that writes the
+figure most. On the annotator's onsets a sixteenth triplet sits at sixths;
+on ours the figure the Omnibook writes that way is not three notes at
+sixths (CREPE's onsets scatter, and the fast Parker sides are where the
+book writes them), and what sixths fit instead is a scattered sixteenth
+or 32nd run, which then reads a third late. The flag is off. It is the
+first GRID-CHOICE rule that did not transfer, so the transfer lesson is
+sharper than it was: the instrument sees a human's onsets, and a grid
+finer than a sixteenth is exactly where ours stop being a human's.
+
 | variant | page hit | dotted | laid-back | dropped |
 |---|---|---|---|---|
 | one-sided warp (phases at or before 0.5 untouched, [0.5, φ*] collapsed onto 0.5) | 77.5%* | | 3.1% | 5.4% |
