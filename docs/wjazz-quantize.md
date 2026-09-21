@@ -243,6 +243,54 @@ Settings: `QuantizeConfig.lag_window_beats` 4 (2 and 8 measured within
 better on the instrument and the pages were not run on it), `LAG_PUSH_MIN`
 0.88.
 
+## Ballads: the candidate set follows the tempo (R31, 2026-09-21)
+
+The SLOW band -- 38 solos at 37-79 bpm, 17,797 notes -- was the
+instrument's worst by far: page hit 45.3%, 35.8% counting drops, a fifth
+of the annotated notes dropped and 43.7% "below the grid". A probe of what
+those solos hold: the annotator files 20% of the notes at sixths of the
+beat, 18% at eighths, 11% at tenths and 6% at twelfths; beats hold four
+to eight onsets; and of the notes our page LOSES, 61% sit a sixteenth or
+an eighth of a beat from the note before (60-100 ms at this tempo), at
+divisions 8, 10, 12 and 6. Our candidate set stopped at the sixteenth,
+and offered 32nds only where sixteenths could not keep the onsets apart,
+which at 64 bpm is a beat of 32nd-triplets, already merging.
+
+`QuantizeConfig.slow_beat_s` (0.7 s, 86 bpm and under) and
+`slow_beat_grids` ((6, 8, 12)): a solo whose median beat is that long
+has every beat offered those grids outright, under the tuplet gate and
+the slack, which in beats is small at this tempo. Notate writes twelfths
+as 32nds under a 3:2 in the sixteenth.
+
+| grids on offer | SLOW page hit | counting drops | dropped | below the grid | binary as triplet |
+|---|---|---|---|---|---|
+| none (R30) | 45.3% | 35.8% | 3,545 | 6,227 | 53 |
+| 6, 8 | 47.5% | 37.9% | 3,459 | 5,443 | 269 |
+| **6, 8, 12** | 46.6% | **40.6%** | **2,227** | 6,164 | 238 |
+| 6, 8, 10, 12 | 45.4% | 40.9% | 1,697 | 6,435 | 191 |
+| 8, 12 | 42.7% | 37.3% | 2,186 | 6,786 | 77 |
+
+The twelfth is what puts notes back on the page: 1,300 fewer drops for
+a point of page hit. The tenth takes 500 more but reads a point lower on
+page hit and, on the three located WJazzD ballads, 0.864 against 0.870;
+left out. Overall the instrument reads 74.8 -> 74.6% page hit and 71.9 ->
+72.3% counting drops, 7,155 -> 5,770 dropped.
+
+Judged per BEAT the rule reached the wrong solos: Soul Station at 100 bpm
+has a third of its beats past 0.6 s and read 0.820 -> 0.812, and two
+half-rate grids (Brother Hubbard, Adam's Apple; R21) read worse still.
+Judged on the solo's MEDIAN beat it reaches the ballads: the three
+located WJazzD ballads (Don't Blame Me, Embraceable You, I Fall In Love
+Too Easily) 0.847 -> 0.870 on page rhythm, 3 of 3 up, with 28, 29 and 2
+more notes matched; no hand-scored or Omnibook page moves, and Soul
+Station and Adam's Apple are untouched. The one thing it still reaches
+that it should not is Brother Hubbard's two takes, whose tracked grid is
+at HALF rate (R21) and whose median beat therefore looks like a ballad's:
+0.276 -> 0.210 and 0.260 on a page that was already off its pulse. That
+is R21's to fix, and a rule cannot see it from the grid it is given. Beat threshold 0.6 and 0.75 were measured too and read the same
+on the SLOW band; 0.7 sits between Soul Station's 0.60 and the slowest
+real ballad's 0.84.
+
 ## Measured and not shipped
 
 ### The six-per-beat grid (D35.2), measured and off
@@ -333,8 +381,11 @@ beat line has to be measured on our onsets before it is believed.
 - **The triplet confusions**: 2.4% thirds written binary after R28
   (1,129 of them the (0.35, 0.75) pair, whose rule did not transfer) and
   0.7% the other way.
-- **Ballads**: below the grid and dropped, 60% of SLOW notes between them;
-  a tempo-aware candidate set or the double-time reading.
+- **Ballads**, after R31: 2,227 notes still dropped and 6,164 below the
+  grid in the SLOW band (47% between them, from 60%). What is left is
+  the annotator's tenths (the quintuplet 32nd, writable and measured
+  above) and divisions past twelve, and the ballad's own scatter, which
+  no grid fits.
 - **"other"**, 4.7%: the largest cell is the annotator's 1/3 in a
   two-onset beat written by us at 1/4 (2,338), which a page would write as
   an eighth or a triplet, never a sixteenth.

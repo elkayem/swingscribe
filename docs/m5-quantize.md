@@ -104,6 +104,15 @@ escapes keep it from ever losing a note (the eighth grid must keep the
 onsets apart, and must not land an onset on a neighbouring beat's own
 note). Page hit 70.7% -> 75.3% on WJazzD; Omnibook rhythm 0.730 -> 0.758.
 
+**A ballad is offered the finer grids outright** (2026-09-21, R31,
+`slow_beat_s`, `slow_beat_grids`). The candidate set stopped at the
+sixteenth at every tempo and offered 32nds only on evidence of collision;
+at 64 bpm a beat holds four to eight notes at the annotator's sixths,
+eighths, tenths and twelfths, and a fifth of them fell off the page. A
+solo whose median beat is 0.7 s or longer has every beat offered 6, 8 and
+12 divisions; the tuplet gate and the slack still decide. Dropped notes in
+the SLOW band 3,545 -> 2,227; the three located ballads 0.847 -> 0.870.
+
 **The line's lag behind the beat is taken out before the snap**
 (2026-09-20, R29, `line_lag`). A soloist sits behind the drummer, and a
 human writes the line on the beat; a sixteenth grid wrote it on the "e",

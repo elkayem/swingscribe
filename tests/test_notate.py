@@ -805,3 +805,20 @@ def test_the_cap_reaches_build_from_the_config():
     assert capped.bars[0].notes[1].duration == pytest.approx(1.0)
     # Beat three's note has a two-beat gap to the next: a real rest.
     assert any(n.is_rest and n.beat >= 2.5 for n in capped.bars[0].notes)
+
+
+def test_ballad_grids_are_writable_as_tuplet_32nds():
+    """The ballad grids quantize offers (docs/wjazz-quantize.md) put notes on
+    tenths and twelfths of a beat: a quintuplet of 32nds in an eighth, a
+    triplet of 32nds in a sixteenth. Both are written, never slivers."""
+    twelfths = []
+    for i in range(3):
+        twelfths += split_for_meter(0.5 + i / 12.0, 1.0 / 12.0, 4.0)
+    assert [t for _s, _d, t in twelfths] == [(3, 2)] * 3
+    assert abs(tuplet_value(1.0 / 12.0, (3, 2)) - 0.125) < 1e-9
+    tenths = []
+    for i in range(5):
+        tenths += split_for_meter(1.0 + i / 10.0, 1.0 / 10.0, 4.0)
+    assert [t for _s, _d, t in tenths] == [(5, 4)] * 5
+    assert abs(tuplet_value(1.0 / 10.0, (5, 4)) - 0.125) < 1e-9
+    assert abs(sum(d for _s, d, _t in tenths) - 0.5) < 1e-9

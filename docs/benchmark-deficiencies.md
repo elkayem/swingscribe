@@ -1325,6 +1325,26 @@ the page:
 
 ## Resolved
 
+### R31 - The candidate set was tempo-blind, and a ballad lost a fifth of its notes (the last half of D11)
+
+D11 closed the slack's tempo blindness and left the candidate SET's: nothing
+finer than a sixteenth at any tempo, while under 100 bpm humans put 43.6%
+of values below it. On the quantizer instrument the SLOW band (38 solos,
+37-79 bpm) dropped 20% of its annotated notes and read 45% page hit; the
+lost notes sit 60-100 ms from their neighbours at the annotator's eighths,
+tenths, twelfths and sixths of the beat. `QuantizeConfig.slow_beat_s` (0.7
+s) and `slow_beat_grids` ((6, 8, 12)): a solo whose MEDIAN beat is 0.7 s or
+longer has every beat offered sixths, 32nds and triplet 32nds outright
+(2026-09-21, docs/wjazz-quantize.md, the table). SLOW page hit counting
+drops 35.8 -> 40.6%, dropped 3,545 -> 2,227; overall 71.9 -> 72.3% and
+7,155 -> 5,770. On the pages the three located WJazzD ballads read 0.847
+-> 0.870 (3 of 3 up, 28, 29 and 2 more notes matched) and no hand-scored
+or Omnibook page moves -- the median, because a per-beat rule reached
+Soul Station's long beats at 100 bpm. It still reaches Brother Hubbard's
+two takes, whose grid is tracked at half rate (R21) and whose median beat
+therefore looks like a ballad's: 0.276 -> 0.210 / 0.260 on a page already
+off its pulse; that is R21's. Baselines re-pinned.
+
 ### R30 - A rest was allowed the syncopation a note is, and straddled the beat (was D35.3)
 
 Found by the notation survey: 10-11% of our rests were dotted quarters

@@ -465,6 +465,8 @@ def quantize_notes(
     lag_floor: float = 0.0,
     sixteenth_triplets: bool = False,
     sixteenth_triplet_fit: float = 0.03,
+    slow_beat_s: float = 0.0,
+    slow_beat_grids: tuple[int, ...] = (6, 8),
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -547,6 +549,13 @@ def quantize_notes(
     # in beats and fine grids stay reachable; a burner's beat gets a large
     # one and the coarse reading wins — which is the direction the 456-solo
     # tempo staircase says humans notate (D11).
+    # A ballad is a TEMPO, not a long beat: judged on the median beat under
+    # the notes, so a slipped or half-rate stretch inside a fast solo, or a
+    # 100 bpm track with a third of its beats past the line (Soul Station,
+    # 0.60 s), is not read as one (docs/wjazz-quantize.md).
+    ballad = slow_beat_s > 0 and bool(per_beat)
+    if ballad:
+        ballad = statistics.median(_beat_length(beats, i) for i in per_beat) >= slow_beat_s
     grids: dict[int, int] = {}
     readings: dict[int, str] = {}
     for index, offsets in per_beat.items():
@@ -562,6 +571,11 @@ def quantize_notes(
         # three notes in half a beat sat at 0, 3/8, 5/8 before it, tied
         # 32nds on the page where the Omnibook writes 4.9% of its notes.
         cands = candidates
+        if ballad:
+            # A ballad beat is long enough to hold a run of sixths or 32nds
+            # that the annotator files at those divisions; the tuplet gate
+            # and the slack (in beats, small at this tempo) still decide.
+            cands = tuple(dict.fromkeys(candidates + tuple(slow_beat_grids)))
         if not _keeps_apart(offsets, finest):
             raw = per_beat_raw[index]
             sixths = finest * 3 // 2
@@ -572,7 +586,7 @@ def quantize_notes(
                 and sum(abs(snap(r, sixths)[1]) for r in raw) / len(raw) <= sixteenth_triplet_fit
             ):
                 finer = (sixths, finest * 2)
-            cands = candidates + finer
+            cands = tuple(dict.fromkeys(cands + finer))
         # A sparse beat is offered the eighth grid (and the ternary one) only:
         # one or two onsets cannot demonstrate a sixteenth, and read on one
         # they become the dotted eighth of a late swung offbeat or the "e"
@@ -839,6 +853,8 @@ def run(document: Document, config: Config) -> Document:
         lag_floor=qc.lag_floor,
         sixteenth_triplets=qc.sixteenth_triplets,
         sixteenth_triplet_fit=qc.sixteenth_triplet_fit,
+        slow_beat_s=qc.slow_beat_s,
+        slow_beat_grids=qc.slow_beat_grids,
         chords=[list(n.chord) for n in notes],
         quarter_triplets=qc.quarter_triplets,
     )

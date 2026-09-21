@@ -973,3 +973,75 @@ def test_sixteenth_triplets_are_off_by_default_in_the_config():
     from swingscribe.config import QuantizeConfig
 
     assert QuantizeConfig().sixteenth_triplets is False
+
+
+# ── a ballad beat is offered the finer grids outright (docs/wjazz-quantize.md) ──
+
+
+def _ballad_beat(slow_beat_s: float, grids=(6, 8, 12)):
+    """A 64 bpm line: swung pairs, and beat 8 holding six even notes."""
+    beat = 0.94
+    beats = [i * beat for i in range(16)]
+    onsets = []
+    for i in range(2, 14):
+        if i == 8:
+            onsets.extend(beats[i] + k / 6 * beat for k in range(6))
+        else:
+            onsets.extend(beats[i] + f * beat for f in (0.0, 0.5))
+    spans = swing_spans(onsets, beats)
+    quantized, positions = quantize_notes(
+        onsets,
+        [0.05] * len(onsets),
+        [60] * len(onsets),
+        beats,
+        spans,
+        [],
+        tuplet_needs_onsets_inside=True,
+        slow_beat_s=slow_beat_s,
+        slow_beat_grids=grids,
+    )
+    return sorted(round(q.beat, 3) for q, p in zip(quantized, positions, strict=True) if 8 <= p < 9)
+
+
+def test_a_ballad_beat_of_six_is_written_on_sixths():
+    assert _ballad_beat(0.6) == [8.0, 8.167, 8.333, 8.5, 8.667, 8.833]
+    # Off, the sixteenth grid merges pairs, the 32nd grid is admitted on that
+    # evidence, and the six notes land on 32nds a sliver off.
+    assert _ballad_beat(0.0) == [8.0, 8.125, 8.375, 8.5, 8.625, 8.875]
+    # A beat shorter than the threshold is not a ballad beat.
+    assert _ballad_beat(1.5) == [8.0, 8.125, 8.375, 8.5, 8.625, 8.875]
+
+
+def test_the_ballad_grids_ship_on_at_86_bpm_and_under():
+    from swingscribe.config import QuantizeConfig
+
+    assert QuantizeConfig().slow_beat_s == 0.7
+    assert QuantizeConfig().slow_beat_grids == (6, 8, 12)
+
+
+def test_a_ballad_is_a_tempo_not_a_long_beat():
+    """One stretched beat inside a fast line does not make a ballad: the
+    median beat decides, so a slipped or half-rate stretch is not offered
+    the ballad grids."""
+    beat = 0.4
+    beats = [i * beat for i in range(16)]
+    beats[9:] = [beats[8] + 0.94 + (i - 9) * beat for i in range(9, 16)]  # beat 8 is 0.94 s
+    onsets = []
+    for i in range(2, 14):
+        if i == 8:
+            onsets.extend(beats[i] + k / 6 * (beats[9] - beats[8]) for k in range(6))
+        else:
+            onsets.extend(beats[i] + f * beat for f in (0.0, 0.5))
+    spans = swing_spans(onsets, beats)
+    quantized, positions = quantize_notes(
+        onsets,
+        [0.05] * len(onsets),
+        [60] * len(onsets),
+        beats,
+        spans,
+        [],
+        tuplet_needs_onsets_inside=True,
+        slow_beat_s=0.7,
+    )
+    read = sorted(round(q.beat, 3) for q, p in zip(quantized, positions, strict=True) if 8 <= p < 9)
+    assert read == [8.0, 8.125, 8.375, 8.5, 8.625, 8.875]

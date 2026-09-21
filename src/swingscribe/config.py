@@ -479,6 +479,27 @@ class QuantizeConfig(BaseModel):
     # triplet is not three notes at sixths; what sixths fit is scatter.
     sixteenth_triplets: bool = False
     sixteenth_triplet_fit: float = 0.03
+    # A solo whose MEDIAN beat is at least this long, in seconds (86 bpm and
+    # under), is a BALLAD and every beat is offered `slow_beat_grids`
+    # outright: at 37-79 bpm the WJazzD annotator files 20% of notes at
+    # sixths, 18% at eighths of a beat and 11% at tenths, and beats hold
+    # four to eight onsets, while the candidate set stops at the sixteenth
+    # unless sixteenths cannot keep the onsets apart (D11's last half).
+    # Measured 2026-09-21 (docs/wjazz-quantize.md): the instrument's SLOW
+    # band 35.8 -> 40.6 counting drops, 3,545 -> 2,227 notes dropped; the
+    # three located WJazzD ballads 0.847 -> 0.870, 3 of 3 up, 20 more
+    # notes matched each. The median, not the beat: judged per beat, a
+    # 100 bpm track with a third of its beats past 0.6 s (Soul Station)
+    # and two half-rate grids read worse. 0 is off.
+    slow_beat_s: float = 0.7
+    # The grids a ballad beat is offered, in divisions of the beat. 12 is
+    # the annotator's triplet 32nd (11% of the notes our page LOST at slow
+    # tempos, 60-100 ms from their neighbours; notate writes it as a 32nd
+    # under a 3:2 in the sixteenth). 10, the quintuplet 32nd (17% of those
+    # notes), is writable too (5:4 in the eighth) and was measured: 500
+    # fewer drops on the instrument, and the three ballad pages read
+    # 0.864 against 0.870 with it -- left out.
+    slow_beat_grids: tuple[int, ...] = (6, 8, 12)
     # How much worse, in SECONDS of mean snap error, a COARSER grid may be
     # and still win. Parsimony: reading a sixteenth out of a beat that only
     # shows an eighth pair is how a swung pair becomes a dotted eighth. 0

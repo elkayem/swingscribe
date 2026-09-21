@@ -793,9 +793,18 @@ Results and limits: `docs/m6-notate.md`.
   eighth (over 160). The slack is a TIME budget now — `grid_slack_s` (0.02
   SECONDS, the round-trip criterion), converted per beat at that beat's own
   length — measured: rhythm up at both tempo extremes, tie rate down at
-  speed, pitch untouched (D11 in docs/benchmark-deficiencies.md). Still
-  tempo-blind: the candidate SET (nothing finer than a sixteenth, while
-  under 100 bpm humans put 43.6% of values below it).
+  speed, pitch untouched (D11 in docs/benchmark-deficiencies.md). **The
+  candidate SET follows the tempo too, since 2026-09-21 (R31)**: a solo
+  whose MEDIAN beat is 0.7 s or longer (`slow_beat_s`, 86 bpm and under)
+  has every beat offered sixths, 32nds and triplet 32nds
+  (`slow_beat_grids`), because at 37-79 bpm the annotator files half the
+  notes at divisions past four and our page dropped a fifth of them. SLOW
+  band page hit counting drops 35.8 -> 40.6%, the three located WJazzD
+  ballads 0.847 -> 0.870 and no hand-scored or Omnibook page moves. The
+  MEDIAN beat, not each beat: per beat it reached Soul Station's long
+  beats at 100 bpm and read worse there. A HALF-RATE grid (Brother
+  Hubbard, R21) still looks like a ballad to it and reads worse; the
+  grid is the defect, not the rule.
 - **The triplet deficit is mostly gone, and the 4x frame was wrong (D12).**
   Post-D11 we write 12.0% tuplet notes; only 59.8% of WJazzD's ternary notes
   are real 3+-onset triplet figures (the rest are swung pairs annotated at
