@@ -104,6 +104,16 @@ escapes keep it from ever losing a note (the eighth grid must keep the
 onsets apart, and must not land an onset on a neighbouring beat's own
 note). Page hit 70.7% -> 75.3% on WJazzD; Omnibook rhythm 0.730 -> 0.758.
 
+**The line's lag behind the beat is taken out before the snap**
+(2026-09-20, R29, `line_lag`). A soloist sits behind the drummer, and a
+human writes the line on the beat; a sixteenth grid wrote it on the "e",
+with a dotted eighth before it (docs/notation-survey.md). The lag is a
+window median of downbeat offsets, symmetric so a line on the beat reads
+none, floored, capped, and applied as a shift so the beat's spacing is
+kept; an onset still at 0.88 or later is a pushed downbeat and stays. It
+replays as feel, like the swing, and the round trip is exact. Hand-score
+rhythm 0.794 -> 0.845, Omnibook 0.761 -> 0.787.
+
 **A ternary reading needs every onset of the beat inside it on thirds**
 (2026-09-20, R28). An onset the thirds grid sends to 1.0 is the next beat's
 note early, not the third of a triplet: laid-back sixteenths at (0.3, 0.55,

@@ -800,3 +800,106 @@ def test_the_inside_rule_is_on_and_the_pair_rule_is_off_by_default():
     all (docs/wjazz-quantize.md)."""
     assert Config().quantize.offbeat_pair_tuplet_fit == 0.0
     assert Config().quantize.tuplet_needs_onsets_inside is True
+
+
+# ── the line's lag behind the beat is taken out first (docs/notation-survey.md) ──
+
+
+def _laid_back_line(lag: float, window: int = 4, count: int = 12, beat: float = 0.38):
+    """A straight sixteenth-ish line played `lag` beats behind the grid:
+    every beat holds onsets at lag, lag + 0.25 and lag + 0.5, except beat 8,
+    which holds the same three on time. Returns the notated positions of
+    beats 6 and 8 and everything needed to replay."""
+    beats = [i * beat for i in range(count + 4)]
+    onsets = []
+    for i in range(2, count + 2):
+        late = 0.0 if i == 8 else lag
+        onsets.extend(beats[i] + (late + k) * beat for k in (0.0, 0.25, 0.5))
+    spans = swing_spans(onsets, beats)
+    quantized, positions = quantize_notes(
+        onsets,
+        [0.05] * len(onsets),
+        [60] * len(onsets),
+        beats,
+        spans,
+        [],
+        lag_window_beats=window,
+    )
+    by_beat = {}
+    for q, p in zip(quantized, positions, strict=True):
+        by_beat.setdefault(int(p), []).append(round(q.beat, 3))
+    return by_beat, (onsets, beats, spans, quantized, positions)
+
+
+def test_a_line_played_behind_the_beat_is_written_on_the_beat():
+    """Played 0.2 of a beat late throughout, the sixteenth grid faithfully
+    wrote every downbeat on the "e" (6.2% of our onsets, against a human's
+    1.8-2.5%). With the lag taken out, beat 6 is 0, 0.25, 0.5 -- and beat
+    8, the one beat played on time, keeps its own first onset where it was."""
+    by_beat, _ = _laid_back_line(0.2)
+    assert by_beat[6] == [6.0, 6.25, 6.5]
+    assert by_beat[8] == [8.0, 8.25, 8.5]
+    without, _ = _laid_back_line(0.2, window=0)
+    assert without[6] == [6.25, 6.5, 6.75]
+
+
+def test_the_lag_replays_as_feel_and_the_round_trip_stays_exact():
+    """The notation replays with its lag put back (it is feel, like swing),
+    and with the residual restored the performance comes back exactly."""
+    _, (onsets, beats, spans, quantized, positions) = _laid_back_line(0.2)
+    exact = replay_onsets(quantized, positions, beats, spans, restore_residual=True)
+    assert max(abs(a - b) for a, b in zip(exact, onsets, strict=True)) < 1e-9
+    notation = replay_onsets(quantized, positions, beats, spans)
+    beat = beats[1] - beats[0]
+    # Beat 6's downbeat is notated ON the beat and replays 0.2 late. (The
+    # replay positions carry the lag, so the note is found by its notation.)
+    played = [
+        r
+        for r, p, q in zip(notation, positions, quantized, strict=True)
+        if int(p) == 6 and abs(q.beat - 6.0) < 1e-9
+    ]
+    assert len(played) == 1
+    assert abs(played[0] - (beats[6] + 0.2 * beat)) < 1e-6
+
+
+def test_line_lag_is_a_capped_window_median_that_never_moves_a_note_before_its_beat():
+    from swingscribe.stages.quantize import line_lag
+
+    raw = {i: [0.2, 0.45, 0.7] for i in range(10)}
+    raw[4] = [0.05, 0.3]  # one beat nearly on time
+    raw[5] = [0.6]  # no downbeat candidate at all
+    lags = line_lag(raw, window=4, cap=0.2)
+    assert abs(lags[2] - 0.2) < 1e-9
+    assert abs(lags[4] - 0.05) < 1e-9  # never more than the beat's own first onset
+    assert abs(lags[5] - 0.2) < 1e-9  # a beat without a downbeat still lags with its line
+    # A beat whose downbeat was pushed -- played at the end of the beat
+    # before -- is not shifted onto it.
+    pushed = {i: [0.2, 0.45, 0.7] for i in range(10)}
+    pushed[6] = [0.2, 0.9]
+    assert 7 not in line_lag(pushed, window=4, cap=0.2)
+    assert abs(line_lag(pushed, window=4, cap=0.2)[8] - 0.2) < 1e-9
+    # The cap.
+    assert abs(line_lag({i: [0.3] for i in range(10)}, 4, 0.2)[3] - 0.2) < 1e-9
+    # One "e" among on-time beats moves nothing, and nothing goes negative.
+    on_time = {i: [0.0, 0.5] for i in range(10)}
+    on_time[5] = [0.25, 0.5]
+    assert line_lag(on_time, 4, 0.2) == {}
+    # A line that scatters both ways is not late: the downbeat played early
+    # sits at the END of the previous beat and counts against the lag.
+    scatter = {i: [0.06, 0.5, 0.94] for i in range(10)}
+    assert line_lag(scatter, 4, 0.2) == {}
+    # Under the floor it is scatter.
+    slight = {i: [0.05, 0.55] for i in range(10)}
+    assert abs(line_lag(slight, 4, 0.2)[4] - 0.05) < 1e-9
+    assert line_lag(slight, 4, 0.2, floor=0.08) == {}
+    # Too few candidates is no evidence; a window of 0 is off.
+    assert line_lag({0: [0.2], 1: [0.2]}, 4, 0.2) == {}
+    assert line_lag(raw, 0, 0.2) == {}
+
+
+def test_the_lag_is_on_by_default_in_the_config():
+    from swingscribe.config import QuantizeConfig
+
+    assert QuantizeConfig().lag_window_beats == 4
+    assert QuantizeConfig().lag_cap == 0.2
+    assert QuantizeConfig().lag_floor == 0.08

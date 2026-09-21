@@ -211,11 +211,42 @@ sixteenth that should be an eighth on the beat (1), and tied 32nds that
 should be a sixteenth triplet (2). Ties are a symptom here, not a lever;
 D14 is closed by this survey rather than by a rule.
 
+## After the lag rule (R29, the same evening)
+
+Difference 1 shipped as `quantize.line_lag` (docs/wjazz-quantize.md has
+the four versions and the instrument's verdict). The survey re-run under
+it, same tracks:
+
+| | ours before | ours after | hand scores | | ours before | ours after | Omnibook |
+|---|---|---|---|---|---|---|---|
+| onsets on the "e" | 6.2 | **3.3** | 1.8 | | 6.6 | **4.7** | 2.5 |
+| odd 32nd positions | 2.5 | 2.0 | 0.1 | | 2.8 | 2.2 | 0.2 |
+| dotted eighths | 2.6 | **1.1** | 0.1 | | 3.0 | **1.7** | 0.1 |
+| triplet eighths | 5.7 | **8.4** | 9.0 | | 5.3 | **7.6** | 8.7 |
+| sixteenths | 12.2 | 8.0 | 8.6 | | 14.6 | 11.3 | 11.8 |
+| 32nds | 2.1 | 1.6 | 0.2 | | 2.0 | 1.6 | 0.3 |
+| on the beat | 43.1 | 46.5 | 47.4 | | 42.4 | 44.9 | 40.8 |
+| tie rate | 0.049 | **0.032** | 0.023 | | 0.053 | **0.042** | 0.045 |
+| notes | 4747 | 4664 | 4332 | | 9469 | 9347 | 9974 |
+
+The "e" halves, the dotted eighth falls by more than half, and two
+things the rule was not written for moved with them: the triplet deficit
+closed by half (a laid-back triplet had been read as sixteenths, and the
+sixteenth share is now the human's), and the tie rate fell to within a
+hundredth of the listener's. The cost is 1.3-1.7% fewer notes on the page
+(the instrument's dropped count 7,079 -> 7,155): a beat shifted onto a
+line a pushed note already holds still loses one where the guard does not
+see it. Rests did not move, as expected: difference 3 is notate's.
+
+What is left of difference 1 is the residue between our 3.3% and the
+listener's 1.8%: beats lagging past the cap, beats the floor leaves
+alone, and the genuine "e".
+
 ## What it means for the plan
 
-The next quantizer rule is the line phase (1): it is the largest single
-difference in every table, it is what the listener's bar 4 shows, and it
-has a clean measurement path. The sixteenth-triplet grid (2) is next and
+The line phase (1) shipped the same day as R29, above; it was the largest
+single difference in every table and it is what the listener's bar 4
+showed. The sixteenth-triplet grid (2) is next and
 is a candidate-set change like the ballad work. The rest splitting (3) is
 a notate change that costs an afternoon and moves no score, only the page.
 The triplet deficit (4) is known and partly deliberate. Ties (5) are not a

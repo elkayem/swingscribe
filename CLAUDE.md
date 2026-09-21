@@ -732,7 +732,8 @@ Results and limits: `docs/m5-quantize.md`.
   is the order of the work: the laid-back downbeat written on the "e"
   (6.2% of our onsets against 1.8-2.5%; the line sits +0.033 beats behind
   the tracked grid at the median track, Birks Works +0.088) with the
-  dotted eighth before it (2.6-3.0% against 0.1%); no sixteenth-triplet
+  dotted eighth before it (2.6-3.0% against 0.1%) -- taken out by R29 the
+  same day; no sixteenth-triplet
   grid (the Omnibook writes 4.9% of its notes as one; our 32nds and dotted
   sixteenths are those); rests not split at the beat (10% dotted quarter
   rests against 0-1.8%); triplets under-written; ties level with the
@@ -839,6 +840,22 @@ Results and limits: `docs/m6-notate.md`.
   -- but only where every onset sits at or before the span's swung
   offbeat: past it, a raw 0.75 is a perfect sixteenth, and the ungated
   version wrote the dotted rhythm back on every page.
+  **And the line's LAG behind the beat is taken out before the snap**
+  (2026-09-20, R29, `quantize.line_lag`): a soloist sits behind the
+  drummer (median track +0.033 beats, Birks Works +0.088 with bar 4 at
+  0.22-0.33) and a human writes the line on the beat, where we wrote the
+  "e" (6.2% of onsets against 1.8-2.5%) and the dotted eighth before it.
+  The lag is a window median of downbeat offsets, SYMMETRIC (a pushed
+  downbeat at the end of the beat before counts negative, or a line on
+  the beat reads its own scatter as lag), floored at 0.08, capped at 0.2,
+  never more than the beat's own first onset; the beat's onsets are
+  SHIFTED by it, never stretched (a stretch turned sixteenth spacing into
+  thirds); an onset still at 0.88 or later is the next downbeat, early,
+  and stays. Hand-score rhythm 0.794 -> 0.845, Omnibook 0.761 -> 0.787,
+  pianists 0.830 -> 0.866, tie rate 0.050 -> 0.033. The instrument reads
+  only +0.4 because WJazzD's annotators write the "e" themselves; it
+  judged the collateral (three earlier versions failed on it), the pages
+  judged the rule.
 - **A grid that merges two onsets is too coarse, whatever its snap error.**
   Two notes on one grid position are one note in a single-line score. Without
   this, coarsening bought notated rhythm by silently deleting 4.8% of the
@@ -884,9 +901,9 @@ list of what is actually wrong; run everything with one command:
   the MuseScore set's code but pinned under `omnibook/` and
   `omnibook-notation/` with `summary/omnibook_*` means of its own, so the
   listener's twelve-track means never absorb it. Mean pitch F1 0.790, note
-  F1 0.537, rhythm 0.761 / value 0.693 at coverage 0.76, over 22
-  (2026-09-20, the sparse-beat and inside-the-beat rules; 0.730 / 0.656
-  before them). Nobody
+  F1 0.537, rhythm 0.787 / value 0.714 at coverage 0.76, over 22
+  (2026-09-20, the sparse-beat, inside-the-beat and lag rules; 0.730 /
+  0.656 before them). Nobody
   drew its spans: `scripts/locate_scores.py` places each score by content
   (`benchmark.locate_score` -- the time-free aligner's true matches, a
   Theil-Sen line through them as the clock) and writes the sidecar; the

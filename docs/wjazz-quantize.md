@@ -182,6 +182,67 @@ admits on our onsets are not the annotator's triplets. Same lesson as the
 counted rule below: a threshold on raw phase does not transfer from a
 human's onsets to ours.
 
+## The line's lag behind the beat (R29, the same evening)
+
+The notation survey (docs/notation-survey.md) put a number on the
+listener's bar 4: 6.2% of our onsets on the "e" against a human's
+1.8-2.5%, and 2.6-3.0% of our notes dotted eighths against 0.1%, because
+the line sits behind the tracked beat and a sixteenth grid writes that
+faithfully. `quantize.line_lag` reads the lag as a window median of
+downbeat offsets and the beat's onsets are shifted by it before the warp
+and the snap. Four versions were measured here before one shipped, and
+the instrument's verdict on the rule itself is the interesting part.
+
+| version | page hit | page hit counting drops | dropped | laid-back beat | late offbeat as dotted | early offbeat as 16th | pushed beat | binary as triplet |
+|---|---|---|---|---|---|---|---|---|
+| R28 (none) | 74.4% | 71.6% | 7,079 | 1,554 | 4,268 | 3,752 | 884 | 1,250 |
+| one-sided estimate, shift | 67.7% | 65.4% | 6,050 | 708 | 2,477 | 7,182 | 3,275 | 4,877 |
+| symmetric, stretch onto [0, 1] | 74.6% | 71.1% | 8,528 | 649 | 4,656 | 4,260 | 646 | 2,218 |
+| symmetric, shift, no push guard | 74.6% | 70.9% | 9,075 | 661 | 2,596 | 5,035 | 558 | 2,611 |
+| symmetric, shift, guard, push 0.85 | 75.1% | 72.2% | 7,304 | 821 | 2,760 | 4,680 | 657 | 2,173 |
+| **shipped: push 0.88** | **74.8%** | **71.9%** | **7,155** | **693** | **2,510** | **4,983** | **644** | **2,637** |
+
+What each row taught:
+
+- **The evidence must be symmetric.** Taking the lag as the median of
+  first-onset offsets alone reads every line's scatter as lag (an on-time
+  downbeat is 0 to 0.1 late, never early, because an early one lands at
+  the end of the beat before), and shifting a line by its scatter wrote
+  every pushed note a sixteenth early. A last onset from the push
+  threshold on now counts as the next downbeat played early, negative, and
+  a line played dead on the beat reads no lag at all.
+- **Shift, never stretch.** Mapping [lag, 1] onto [0, 1] keeps the next
+  beat line fixed, which looked principled, and turned a sixteenth's 0.25
+  into a third's 0.31: binary-as-triplet doubled.
+- **A beat whose downbeat was pushed has no late downbeat to pull back.**
+  Shifted, its first onset landed on the beat line the pushed note snaps
+  to and one of the two was dropped: +2,600 drops.
+- **The push threshold is where the instrument and the pages disagree.**
+  The instrument prefers 0.85; every page measure prefers 0.88 (Omnibook
+  rhythm 0.780 against 0.787, pianists 0.858 against 0.866), because a
+  laid-back beat's own "a" sits at 0.86 -- Birks Works bar 4's last
+  sixteenth -- and at 0.85 it was pushed onto the next beat line.
+
+**The instrument cannot judge this rule, only its collateral.** WJazzD's
+annotators write the "e" themselves: 7.2% of their onsets, against 1.8%
+in the listener's scores and 2.5% in the Omnibook, so every laid-back
+downbeat we now write on the beat is charged as "annotation literal"
+(11,475 -> 13,443) and the instrument reads +0.4 for a rule the pages
+read as the largest gain since the notation was first scored: hand-score
+rhythm 0.794 -> 0.845 (17 up, 1 down over 18 rows), value 0.735 ->
+0.777, tie rate 0.050 -> 0.033; Omnibook rhythm 0.761 -> 0.787 (20 up, 1
+down), value 0.693 -> 0.714; pianists 0.830 -> 0.866; placement up on
+both sets, WJazzD's own placement -0.008 (the literal annotator again).
+Birks Works rhythm 0.762 -> 0.835, and bar 4 is the listener's note for
+note. The rows above are what the instrument is for here: the first
+three versions would each have shipped a defect the pages might have
+averaged away.
+
+Settings: `QuantizeConfig.lag_window_beats` 4 (2 and 8 measured within
+0.2 of it), `lag_cap` 0.2 (0.3 the same), `lag_floor` 0.08 (0 reads +0.3
+better on the instrument and the pages were not run on it), `LAG_PUSH_MIN`
+0.88.
+
 ## Measured and not shipped
 
 | variant | page hit | dotted | laid-back | dropped |
@@ -239,9 +300,9 @@ beat line has to be measured on our onsets before it is believed.
 ## What is left, for this instrument to measure next
 
 - **The lone late offbeat in an unswung beat** (the placement dip above).
-  The counted rule is above, measured and reverted: whatever replaces it
-  must be judged on our onsets, and the next candidate is a threshold that
-  moves with the grid's own jitter (a beat's neighbours, not a constant).
+  The counted rule is above, measured and reverted; R29's lag takes a
+  share of these (late offbeat as dotted 4,268 -> 2,510) where the line
+  lags as a whole. What is left must be judged on our onsets.
 - **The triplet confusions**: 2.4% thirds written binary after R28
   (1,129 of them the (0.35, 0.75) pair, whose rule did not transfer) and
   0.7% the other way.

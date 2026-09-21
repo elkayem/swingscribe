@@ -1287,7 +1287,7 @@ rhythm and value scores say how often we agree with a human; this says
 what we write when we do not. Five differences, in the order they cost
 the page:
 
-1. **The laid-back downbeat is written on the "e"** -- 6.2% of our onsets
+1. **(Resolved the same day, R29.) The laid-back downbeat is written on the "e"** -- 6.2% of our onsets
    against the listener's 1.8% and the Omnibook's 2.5% -- **and the note
    before it becomes a dotted eighth** (2.6-3.0% of our notes against
    0.1%; 289 of our 394 dotted eighths on the hand-score set start on the
@@ -1315,6 +1315,40 @@ the page:
    Omnibook's 0.045. A symptom of 1 and 2, not a lever; closes D14.
 
 ## Resolved
+
+### R29 - The line's lag behind the beat was written as the "e" and the dotted eighth (was D35.1, and the listener's bar 4)
+
+Found by the notation survey (D35, 2026-09-20): 6.2% of our onsets on
+the "e" against a human's 1.8-2.5%, 2.6-3.0% of our notes dotted eighths
+against 0.1%, and the two are one thing -- the soloist sits behind the
+tracked beat (median track +0.033, Birks Works +0.088, its bar 4 played
+0.22-0.33 behind throughout) and a sixteenth grid writes that faithfully.
+`quantize.line_lag` reads the lag off the line as a window median of
+downbeat offsets (4 beats either side, symmetric evidence so a line played
+dead on the beat reads none, a floor of 0.08 under which it is scatter,
+capped at 0.2 and never more than the beat's own first onset), and the
+beat's onsets are SHIFTED by it before the warp and the snap; an onset
+still at 0.88 or later is the next downbeat played early and stays. The
+replay puts it back as feel and the round trip is exact by construction.
+
+Three versions were measured before this one, on the instrument
+(docs/wjazz-quantize.md): a one-sided estimate read every line's scatter
+as lag (page hit 74.4 -> 67.7); a stretch onto [0, 1] instead of a shift
+turned sixteenth spacing into thirds (binary-as-triplet doubled, 1,500
+more drops); and without the pushed-downbeat guard a shifted first onset
+landed on the beat line a pushed note already held (+2,600 drops). On the
+instrument the rule is worth +0.4 (74.4 -> 74.8), because WJazzD's
+annotators write the "e" themselves (7.2% of their onsets: the "annotation
+literal" class grows), and the instrument judged the collateral, not the
+rule. The pages judged the rule: hand-score rhythm 0.794 -> 0.845 over the
+twelve (17 up, 1 down over 18 rows), value 0.735 -> 0.777, tie rate 0.050
+-> 0.033, sub-eighth rests 0.24 -> 0.10 per hundred; Omnibook rhythm
+0.761 -> 0.787 and value 0.693 -> 0.714 (20 up, 1 down); pianists 0.830
+-> 0.866; placement 0.898 -> 0.903 and 0.856 -> 0.859; WJazzD's page
+rhythm level (0.642 -> 0.644 over 77) and its placement -0.008 (the
+literal annotator again). Birks Works: rhythm 0.762 -> 0.835, and bar 4
+is now note for note the listener's -- eighth, sixteenth, sixteenth, then
+eighths on the beat. Baselines re-pinned; `quantize.CACHE_VERSION` 5.
 
 ### R28 - A ternary reading counted an onset on the NEXT beat as the third of its triplet
 

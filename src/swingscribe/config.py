@@ -444,6 +444,24 @@ class QuantizeConfig(BaseModel):
     # on the instrument, 597 of them holding four onsets, which no triplet
     # can.
     tuplet_needs_onsets_inside: bool = True
+    # The line's LAG behind the tracked beat, taken out before the snap. A
+    # soloist sits behind the drummer and a human writes the line on the
+    # beat: over 108 tracks the median per-track offset of the near-beat
+    # onsets is +0.033 beats and Birks Works is +0.088, with bar 4 played
+    # 0.22-0.33 behind throughout -- which a sixteenth grid reads,
+    # faithfully, as the "e" and a dotted eighth (docs/notation-survey.md,
+    # D35: 6.2% of our onsets on the "e" against a human's 1.8-2.5%). The
+    # lag is the median first-onset offset over a window of beats either
+    # side (quantize.line_lag), a window statistic rather than a threshold
+    # at one beat line -- the shape that failed to transfer from the
+    # annotator's onsets to ours (D34.1). Capped, and never more than the
+    # beat's own first onset, so no note moves before its beat line. 0
+    # beats of window turns it off.
+    lag_window_beats: int = 4
+    lag_cap: float = 0.2
+    # Below this median the window shows scatter, not lag, and none is
+    # taken out.
+    lag_floor: float = 0.08
     # How much worse, in SECONDS of mean snap error, a COARSER grid may be
     # and still win. Parsimony: reading a sixteenth out of a beat that only
     # shows an eighth pair is how a swung pair becomes a dotted eighth. 0

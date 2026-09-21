@@ -48,7 +48,7 @@ from swingscribe.model import Document, MeterSection, QuantizedNote, SwingSpan
 
 # Bump when this stage's behavior changes without a config change (see
 # pipeline._cache_name).
-CACHE_VERSION = 4  # 4: the off-beat pair may vote a tuplet; a tuplet's onsets sit inside the beat
+CACHE_VERSION = 5  # 5: the line's lag behind the beat is taken out before the snap (line_lag)
 
 STRAIGHT_PHASE = 0.5
 
@@ -455,6 +455,9 @@ def quantize_notes(
     min_onsets_for_sixteenth: int = 3,
     offbeat_pair_tuplet_fit: float = 0.0,
     tuplet_needs_onsets_inside: bool = False,
+    lag_window_beats: int = 0,
+    lag_cap: float = 0.2,
+    lag_floor: float = 0.0,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -474,11 +477,14 @@ def quantize_notes(
     coarse = [d for d in (2, finest) if d <= finest]
     candidates = tuple(dict.fromkeys(coarse + ([3] if allow_triplets else [])))
 
-    # Warp first, then group by beat so the grid choice sees the whole beat.
-    # The RAW fractional offset rides along: the ternary hypothesis is scored
-    # and snapped in raw time (see choose_grid — the warp is a binary story).
-    warped: list[tuple[int, float, float, int, float, list[int]]] = []
+    # Place first, so the line's lag behind the beat can be read off the
+    # whole window before anything is warped (line_lag). Then warp, and
+    # group by beat so the grid choice sees the whole beat. The RAW
+    # fractional offset rides along: the ternary hypothesis is scored and
+    # snapped in raw time (see choose_grid — the warp is a binary story).
     extras = chords if chords is not None else [[] for _ in onsets]
+    placed: list[tuple[int, float, float, int, list[int]]] = []
+    raw_by_beat: dict[int, list[float]] = {}
     for onset, duration, pitch, chord in zip(onsets, durations, pitches, extras, strict=True):
         position = beat_position(onset, beats)
         if position is None:
@@ -492,20 +498,40 @@ def quantize_notes(
         else:
             end_index = int(end)
             warped_end = end_index + warp_phase(end - end_index, by_beat.get(end_index, 0.5))
+        placed.append((index, position - index, max(0.0, warped_end - warped_start), pitch, chord))
+        raw_by_beat.setdefault(index, []).append(position - index)
+    lags = line_lag(raw_by_beat, lag_window_beats, lag_cap, lag_floor)
+
+    # Per note: beat index, lag-corrected warped position, duration, pitch,
+    # lag-corrected raw offset, chord, and what the replay needs to put the
+    # lag and the swing back: the ORIGINAL warped position, the beat's φ*
+    # as measured, the φ* the corrected beat was warped under, and the lag.
+    warped: list[tuple[int, float, float, int, float, list[int], float, float, float, float]] = []
+    for index, raw, duration, pitch, chord in placed:
+        star = by_beat.get(index, STRAIGHT_PHASE)
+        lag = lags.get(index, 0.0)
+        # The measured offbeat carries the lag too, so the corrected beat is
+        # warped under φ* less the lag -- never below straight: a line that
+        # lags past its own swing is not evidence of an early offbeat.
+        star_l = max(STRAIGHT_PHASE, star - lag)
         warped.append(
             (
                 index,
-                warped_start,
-                max(0.0, warped_end - warped_start),
+                index + warp_phase(unlag_phase(raw, lag), star_l),
+                duration,
                 pitch,
-                position - index,
+                unlag_phase(raw, lag),
                 list(chord),
+                index + warp_phase(raw, star),
+                star,
+                star_l,
+                lag,
             )
         )
 
     per_beat: dict[int, list[float]] = {}
     per_beat_raw: dict[int, list[float]] = {}
-    for index, position, _duration, _pitch, raw, _chord in warped:
+    for index, position, _duration, _pitch, raw, *_rest in warped:
         per_beat.setdefault(index, []).append(position - index)
         per_beat_raw.setdefault(index, []).append(raw)
     # The slack is a time budget (config.py: it absorbs a player's motor
@@ -546,7 +572,7 @@ def quantize_notes(
             min_onsets_for_tuplet,
             grid_slack_s / _beat_length(beats, index),
             raw_offsets=per_beat_raw[index],
-            star=by_beat.get(index, STRAIGHT_PHASE),
+            star=max(STRAIGHT_PHASE, by_beat.get(index, STRAIGHT_PHASE) - lags.get(index, 0.0)),
             offbeat_pair_fit=offbeat_pair_tuplet_fit,
             inside=tuplet_needs_onsets_inside,
         )
@@ -559,25 +585,28 @@ def quantize_notes(
             grids[index] = grids[index + 1] = 3
 
     out, positions = [], []
-    for index, position, duration, pitch, raw, chord in warped:
+    for index, position, duration, pitch, raw, chord, original, star, star_l, lag in warped:
         grid = grids.get(index, finest)
+        # The NOTATION is the lag-corrected position snapped: in raw time
+        # for a ternary beat or a binary beat read STRAIGHT (a performed
+        # triplet sits at thirds; a straight eighth at 0.5; no warp
+        # applies), in warped time otherwise. The replay position and the
+        # residual stay in the ORIGINAL warped space -- the notated phase
+        # put back through the corrected beat's warp, plus the lag, through
+        # the beat's measured warp -- so replay_onsets' one unwarp gives the
+        # notation its feel back (swing AND lag) with no changes there, and
+        # restore_residual stays exact by construction: unwarp(replay +
+        # (original - replay)) is the raw position.
         if grid % 3 == 0 or readings.get(index) == "raw":
-            # Ternary, or a binary beat read STRAIGHT: the NOTATION is the raw
-            # position snapped (a performed triplet sits at thirds; a straight
-            # eighth at 0.5; no warp applies), but the replay position and
-            # the residual stay in WARPED space, so replay_onsets' unwarp
-            # recovers exactly the raw position with no changes there — and
-            # restore_residual stays exact by construction:
-            # unwarp(warp(k/3) + (warped - warp(k/3))) is the raw position.
-            star = by_beat.get(index, STRAIGHT_PHASE)
             notated_offset, _ = snap(raw, grid)
-            replay_position = index + warp_phase(notated_offset, star)
-            snapped = index + notated_offset
-            residual = position - replay_position
-            positions.append(replay_position)
+            played = relag_phase(notated_offset, lag)
         else:
-            snapped, residual = snap(position, grid)
-            positions.append(snapped)
+            notated_offset, _ = snap(position - index, grid)
+            played = relag_phase(unwarp_phase(notated_offset, star_l), lag)
+        replay_position = index + warp_phase(played, star)
+        snapped = index + notated_offset
+        residual = original - replay_position
+        positions.append(replay_position)
         length, _ = snap(duration, grid)
         bar, beat = bar_and_beat(snapped, beats, sections)
         out.append(
@@ -593,6 +622,108 @@ def quantize_notes(
             )
         )
     return out, positions
+
+
+LAG_CANDIDATE_MAX = 0.35  # a beat's first onset past this has no downbeat to be late
+# A beat's last onset from here is the NEXT downbeat, played early, and is
+# neither lag evidence nor shifted. Measured (2026-09-20, R29): the
+# instrument prefers 0.85 (page hit 75.1 against 74.8 here) and every page
+# measure prefers 0.88 -- Omnibook rhythm 0.780 against 0.787, pianists
+# 0.858 against 0.866 -- because a laid-back beat's own "a" sits at 0.86
+# (Birks Works bar 4) and at 0.85 it was pushed onto the next beat line.
+LAG_PUSH_MIN = 0.88
+
+
+def unlag_phase(phase: float, lag: float) -> float:
+    """Take the line's lag out of a beat-internal phase: a SHIFT, so the
+    beat's onsets keep their spacing (a stretch onto [0, 1] turned a
+    sixteenth's 0.25 into a third's 0.31 and doubled the instrument's
+    "binary as triplet" class). An onset that still sits from LAG_PUSH_MIN
+    on AFTER the shift is the next downbeat played early, relative to the
+    line itself, and is left where it is: it belongs to the next beat's
+    story, and shifted it was written a sixteenth early. Judged after the
+    shift, not before: in Birks Works bar 4 the whole beat is 0.2 behind
+    and its last note at 0.86 is the "a", which the listener writes, not a
+    pushed downbeat. The lag is never more than the beat's own first onset
+    (line_lag), so nothing goes negative.
+    """
+    if lag <= 0.0 or phase >= LAG_PUSH_MIN:
+        return phase
+    return max(0.0, phase - lag)
+
+
+def relag_phase(phase: float, lag: float) -> float:
+    """Inverse of `unlag_phase` where it moved anything: the replay puts
+    the lag back as feel. A notated phase from LAG_PUSH_MIN on was not
+    shifted."""
+    if lag <= 0.0 or phase + lag >= LAG_PUSH_MIN:
+        return phase
+    return phase + lag
+
+
+def line_lag(
+    raw_by_beat: dict[int, list[float]],
+    window: int,
+    cap: float,
+    floor: float = 0.0,
+    min_candidates: int = 3,
+) -> dict[int, float]:
+    """How far behind the tracked beat the line sits, per beat, in beats.
+
+    A soloist plays behind the drummer, and a human writes the line on the
+    beat: Birks Works sits +0.088 behind its grid, with whole bars at
+    0.22-0.33, which a sixteenth grid faithfully writes on the "e"
+    (docs/notation-survey.md). The lag at a beat is the MEDIAN downbeat
+    offset over `window` beats either side: a median, so one genuine "e"
+    among on-time beats does not move it, and a window, so it is a
+    statistic of the line and not a threshold on one beat (the shape that
+    did not transfer, D34.1).
+
+    The evidence is SYMMETRIC, or the estimate is biased late: a beat's
+    first onset near the beat line counts as it stands (LAG_CANDIDATE_MAX),
+    and a beat's last onset from LAG_PUSH_MIN counts as the next downbeat
+    played early, negative. Without the second, a line played dead on the
+    beat reads a lag of its own scatter, and every pushed note was written a
+    sixteenth early on the instrument. A median under `floor` is scatter,
+    not lag, and nothing is applied. Capped at `cap`, never negative, and
+    never more than the beat's own first onset, so no note is moved before
+    its beat line and the beat's onsets keep their spacing. Fewer than
+    `min_candidates` in the window is no evidence; such beats are absent.
+    """
+    if window <= 0 or cap <= 0:
+        return {}
+    first: dict[int, float] = {}
+    candidates: dict[int, list[float]] = {}
+    for index, offsets in raw_by_beat.items():
+        if not offsets:
+            continue
+        first[index] = min(offsets)
+        found = []
+        if first[index] <= LAG_CANDIDATE_MAX:
+            found.append(first[index])
+        if max(offsets) >= LAG_PUSH_MIN:
+            found.append(max(offsets) - 1.0)
+        if found:
+            candidates[index] = found
+    lags: dict[int, float] = {}
+    for index in raw_by_beat:
+        near = [c for j in range(index - window, index + window + 1) for c in candidates.get(j, ())]
+        if len(near) < min_candidates:
+            continue
+        median = statistics.median(near)
+        if median < max(floor, 1e-9):
+            continue
+        # A beat whose downbeat was already played, early, at the end of
+        # the beat before has no late downbeat to pull back: shifted, its
+        # first onset landed on the beat line the pushed note snaps to and
+        # one of the two was dropped (+2,600 on the instrument).
+        before = raw_by_beat.get(index - 1)
+        if before and max(before) >= LAG_PUSH_MIN:
+            continue
+        lag = min(cap, median, first[index])
+        if lag > 0.0:
+            lags[index] = lag
+    return lags
 
 
 def _collides_on_eighths(offsets: list[float], before: list[float], after: list[float]) -> bool:
@@ -683,6 +814,9 @@ def run(document: Document, config: Config) -> Document:
         min_onsets_for_sixteenth=qc.min_onsets_for_sixteenth,
         offbeat_pair_tuplet_fit=qc.offbeat_pair_tuplet_fit,
         tuplet_needs_onsets_inside=qc.tuplet_needs_onsets_inside,
+        lag_window_beats=qc.lag_window_beats,
+        lag_cap=qc.lag_cap,
+        lag_floor=qc.lag_floor,
         chords=[list(n.chord) for n in notes],
         quarter_triplets=qc.quarter_triplets,
     )
