@@ -1354,6 +1354,83 @@ the page:
    than it mends (value 0.777 -> 0.752), and the player's hold does not
    separate the two (0.42 against 0.36 of the gap). Both off.
 
+### D36 - WJazzD's tatum layer is Flex-Q's quantisation, not a transcription, and one shipped rule had only its word
+
+Found 2026-09-23 by the listener, from one bar. Miles Davis's So What,
+solo bar 47 in WJazzD's numbering: six notes filed at 1/4, 3/4, 1, 7/4,
+9/4 and 11/4 of the bar -- rendered, a sixteenth rest, an eighth, a
+sixteenth, a dotted eighth, a sixteenth, a sixteenth rest, an eighth, a
+sixteenth -- for what a transcriber writes as three swung eighth pairs a
+fifth of a beat behind the drums (a published transcription of the same
+solo writes exactly that). The listener's words: "way too literal, and
+not how most transcribers would ever write it."
+
+This file, CLAUDE.md, docs/wjazzd.md, docs/wjazz-quantize.md and
+docs/notation-survey.md all said the layer was "a human's notation" and
+"the control the MuseScore set cannot be". It is not. The Jazzomat
+documentation for `melconv` says the `flexq` block "is used by the
+metrical annotation algorithm (Flex-Q)" when reading the Sonic Visualiser
+transcriptions: the onsets, pitches and beat grid are a human's, and the
+bar/beat/tatum/division of every note is an algorithm's flexible
+quantisation of those onsets, per beat, at whatever division fits. The
+counts over all 456 solos say the same: of 32,299 two-note beats whose
+first note is on the beat, the second is filed at 1/2 in 69.9%, at 2/3
+in 15.8%, at 3/4 in 7.7% and at 1/4 in 2.9%; of 32,609 one-note beats,
+10.2% are filed on the "a"; the division itself is 1 on 16% of beats, 2
+on 37%, 3 on 13%, 4 on 25%, 6 on 5%. No transcriber writes a lone note
+on the "a" one time in ten or changes the subdivision forty times a
+chorus. The layer is MORE literal than our own quantizer, at a resolution
+of a few tatums, and it is the listener's exact complaint of 2026-09-19.
+
+What in this project rested on it, and what was done (2026-09-23):
+
+- **`benchmark.score_against_wjazz_notation` and the harness's
+  `wjazz_notation` rhythm rows** (0.667 over 77): agreement with Flex-Q.
+  A page that writes bar 47 the way a transcriber does loses points on
+  it, and a rule that writes the "e" gains. Demoted to a collateral
+  instrument -- dropped notes, bar count, placement -- and printed under
+  "Flex-Q" with that caveat; the rows and summary keys stay pinned so a
+  rule that loses notes is still caught, but they are no longer a page
+  measure and no rule may be justified on them alone.
+- **The quantizer instrument (`wjazz_quantize.py`)**: its page-hit already
+  folded the swung 2/3 and 3/4 into an eighth pair (the day-one lesson,
+  R27) but not the "e", and the memory note "instrument transfer limit"
+  had recorded that it judges collateral and not style. That is now its
+  stated role, in CLAUDE.md.
+- **R31, the ballad grids** (`slow_beat_s` 0.7, sixths, 32nds and 32nd
+  triplets under 86 bpm): the one shipped rule judged on nothing human.
+  It was justified by the SLOW band's page hit (35.8 -> 40.6 counting
+  drops) and three Flex-Q ballad pages (0.847 -> 0.870), because no hand
+  score or Omnibook side is under 86 bpm. At 37-79 bpm Flex-Q divides
+  beats in six, eight, ten and twelve because the timing resolves that
+  finely -- the literal reading a transcriber simplifies most at exactly
+  that tempo. **Switched off** (`slow_beat_s` 0.0; the mechanism and the
+  grids stay for a human ballad page to judge). Both baselines
+  re-pinned: the instrument back to 7,155 dropped (from 5,770), the
+  harness's three Flex-Q ballad rows back to 0.847; no hand-scored or
+  Omnibook page moves either way, which is the point.
+- **D11's tempo-scaled slack** took its tempo evidence (the written value
+  stepping 16th -> triplet eighth -> eighth with tempo) from Flex-Q's
+  divisions; its rationale, the 20 ms round-trip criterion, is
+  independent and stands. Noted, not changed.
+- **The GUI's ground-truth score for a WJazzD track** (`wjazz_score.py`,
+  the `wjazz-scores/*.musicxml` the 73 sidecars point at) is that layer
+  rendered; it is where the listener's bar came from. The guide now says
+  so: trust its notes and bar lines, not its note values.
+- **The survey's WJazzD column** is relabelled Flex-Q. **The "rhythm
+  prior"** (a per-figure frequency table to break grid ties) must never
+  be counted from this layer; from the 14,000 notes of the hand scores
+  and the Omnibook it is thin, and is not planned.
+
+Unaffected, because they use the human layers only: WJazzD note F1 and
+beat F1 (onsets in seconds), the swing validation, `grid_drift`, the
+placement and on-the-bar measures (beat level), the octave repair (bar
+and beat level), and every quantize/notate rule judged on the twelve
+hand scores or the Omnibook (R27, R28, R29, R30, the six-grid rejection,
+R32). The lesson, which this project has met before in another form
+(R8's mean over four, the wrong-take control): know what a reference IS
+before a number against it can move a rule.
+
 ## Resolved
 
 ### R32 - Four WJazzD grids were tracked at half the pulse, and the repair thinned the true beats away (the octave error, open since R21)
@@ -1443,7 +1520,9 @@ Soul Station's long beats at 100 bpm. It still reached Brother Hubbard's
 two takes, whose grid was tracked at half rate (R21) and whose median beat
 therefore looked like a ballad's: 0.276 -> 0.210 / 0.260 on a page already
 off its pulse; that was R21's, and R32 fixed the grid the same day.
-Baselines re-pinned.
+Baselines re-pinned. **Switched off 2026-09-23 (D36)**: every number
+above is agreement with Flex-Q's quantisation, and no human ballad page
+exists to judge the rule; `slow_beat_s` is 0.0 and the mechanism stays.
 
 ### R30 - A rest was allowed the syncopation a note is, and straddled the beat (was D35.3)
 

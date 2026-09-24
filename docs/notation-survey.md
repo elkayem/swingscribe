@@ -85,9 +85,13 @@ left blank; "-" means the corpus cannot show it.
 | other (fifths, sevenths...) | 0 | 0.6 | 0 | 1.0 | 0 | 2.7 | 4.6 |
 | onsets | 4747 | 4291 | 9469 | 21593 | 36718 | 35997 | 197017 |
 
-WJazzD's thirds are not all triplets: its tatum is literal, and it files a
-swung pair at 2/3 or 3/4 as often as at 1/2 (docs/wjazz-quantize.md). Read
-that column as "where the annotator heard it", not "what a page writes".
+WJazzD's thirds are not all triplets: its tatum layer is not a
+transcriber's but Flex-Q's, the Jazzomat project's flexible quantisation
+of the annotated onsets, per beat at whatever division fits (D36,
+2026-09-23), and it files a swung pair at 2/3 or 3/4 as often as at 1/2.
+Read those two columns as "where the notes sounded, quantised finely",
+never as "what a page writes"; only the hand scores and the Omnibook are
+pages.
 
 ### Gap to the next onset
 

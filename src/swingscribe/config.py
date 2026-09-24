@@ -479,19 +479,20 @@ class QuantizeConfig(BaseModel):
     # triplet is not three notes at sixths; what sixths fit is scatter.
     sixteenth_triplets: bool = False
     sixteenth_triplet_fit: float = 0.03
-    # A solo whose MEDIAN beat is at least this long, in seconds (86 bpm and
-    # under), is a BALLAD and every beat is offered `slow_beat_grids`
-    # outright: at 37-79 bpm the WJazzD annotator files 20% of notes at
-    # sixths, 18% at eighths of a beat and 11% at tenths, and beats hold
-    # four to eight onsets, while the candidate set stops at the sixteenth
-    # unless sixteenths cannot keep the onsets apart (D11's last half).
-    # Measured 2026-09-21 (docs/wjazz-quantize.md): the instrument's SLOW
-    # band 35.8 -> 40.6 counting drops, 3,545 -> 2,227 notes dropped; the
-    # three located WJazzD ballads 0.847 -> 0.870, 3 of 3 up, 20 more
-    # notes matched each. The median, not the beat: judged per beat, a
-    # 100 bpm track with a third of its beats past 0.6 s (Soul Station)
-    # and two half-rate grids read worse. 0 is off.
-    slow_beat_s: float = 0.7
+    # A solo whose MEDIAN beat is at least this long, in seconds, is a
+    # BALLAD and every beat is offered `slow_beat_grids` outright (R31,
+    # 2026-09-21; 0.7 is 86 bpm and under). OFF since 2026-09-23 (D36): the
+    # only evidence for it was WJazzD's tatum layer, which is Flex-Q's
+    # algorithmic quantisation of the onsets, not a transcriber's page --
+    # at 37-79 bpm it divides beats in six, eight, ten and twelve because
+    # the timing resolves that finely, which is exactly the literal reading
+    # a transcriber simplifies away, and no hand score or Omnibook side is
+    # under 86 bpm to say otherwise. Under it the instrument's SLOW band
+    # read 35.8 -> 40.6 counting drops and the three Flex-Q ballad pages
+    # 0.847 -> 0.870, which is agreement with a quantiser. The mechanism
+    # stays (the median beat, not each beat: per beat it reached Soul
+    # Station at 100 bpm) for a human ballad page to judge. 0 is off.
+    slow_beat_s: float = 0.0
     # The grids a ballad beat is offered, in divisions of the beat. 12 is
     # the annotator's triplet 32nd (11% of the notes our page LOST at slow
     # tempos, 60-100 ms from their neighbours; notate writes it as a 32nd

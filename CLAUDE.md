@@ -741,15 +741,21 @@ Results and limits: `docs/m5-quantize.md`.
   listener's complaint, charged whatever the annotator filed. The first
   version counted it as a hit, and a rule that wrote more of them read
   four points better on the instrument while notated rhythm fell on
-  eleven of twelve hand scores. `page_hit` is the number to move (70.7%
-  -> 75.3% the same day, R27); the classes say which choice is wrong;
-  run it after any quantize change, and then `run_eval`, because this
-  instrument sees a human's onsets and the page is built on ours.
+  eleven of twelve hand scores. `page_hit` folds the swung 2/3 and 3/4
+  into the eighth pair but NOT the "e" (the lag rule read +0.4 here and
+  +0.05 on the pages), and since D36 the whole layer is known to be
+  Flex-Q's quantisation rather than an annotator's choice: the
+  instrument judges COLLATERAL -- dropped and merged notes, a rule that
+  loses a beat -- in 16 seconds, and never style. Run it after any
+  quantize change for that, and then `run_eval`, where the listener's
+  twelve scores and the Omnibook judge the rule.
 - **And the page's VOCABULARY is surveyed against three human corpora**
   (2026-09-20, `scripts/notation_survey.py`, docs/notation-survey.md,
   D35): what we write INSTEAD when a position or value disagrees. Our
   pages beside the listener's twelve hand scores, LORIA's Omnibook and
-  WJazzD's positions, over the same tracks. The order of the differences
+  WJazzD's positions (Flex-Q's, D36: timing at a fine division, not a
+  page; read that column as where the notes sounded), over the same
+  tracks. The order of the differences
   is the order of the work: the laid-back downbeat written on the "e"
   (6.2% of our onsets against 1.8-2.5%; the line sits +0.033 beats behind
   the tracked grid at the median track, Birks Works +0.088) with the
@@ -811,17 +817,22 @@ Results and limits: `docs/m6-notate.md`.
   SECONDS, the round-trip criterion), converted per beat at that beat's own
   length — measured: rhythm up at both tempo extremes, tie rate down at
   speed, pitch untouched (D11 in docs/benchmark-deficiencies.md). **The
-  candidate SET follows the tempo too, since 2026-09-21 (R31)**: a solo
-  whose MEDIAN beat is 0.7 s or longer (`slow_beat_s`, 86 bpm and under)
-  has every beat offered sixths, 32nds and triplet 32nds
-  (`slow_beat_grids`), because at 37-79 bpm the annotator files half the
-  notes at divisions past four and our page dropped a fifth of them. SLOW
-  band page hit counting drops 35.8 -> 40.6%, the three located WJazzD
-  ballads 0.847 -> 0.870 and no hand-scored or Omnibook page moves. The
-  MEDIAN beat, not each beat: per beat it reached Soul Station's long
-  beats at 100 bpm and read worse there. A HALF-RATE grid (Brother
-  Hubbard) looked like a ballad to it and read worse; the grid was the
-  defect, not the rule, and R32 fixed the grid the same day.
+  candidate SET can follow the tempo too (R31, 2026-09-21), and that rule
+  is OFF since 2026-09-23 (D36)**: a solo whose MEDIAN beat is
+  `slow_beat_s` or longer has every beat offered sixths, 32nds and triplet
+  32nds (`slow_beat_grids`). It was shipped at 0.7 s (86 bpm and under)
+  because at 37-79 bpm WJazzD's tatum layer puts half the notes at
+  divisions past four and our page dropped a fifth of them -- SLOW band
+  page hit counting drops 35.8 -> 40.6%, the three located ballads 0.847
+  -> 0.870, no hand-scored or Omnibook page moved. But that layer is
+  Flex-Q's quantisation, not a transcriber, and NO human page under 86
+  bpm exists in the benchmark, so the rule had only a quantiser's word
+  that a ballad should be written in 32nd triplets: the literal reading a
+  transcriber simplifies most at exactly that tempo. `slow_beat_s` is 0.0
+  and the mechanism stays (the MEDIAN beat, not each beat: per beat it
+  reached Soul Station's long beats at 100 bpm) for a human ballad page
+  to judge. A HALF-RATE grid (Brother Hubbard) looked like a ballad to it
+  and read worse; R32 fixed the grid.
 - **The triplet deficit is mostly gone, and the 4x frame was wrong (D12).**
   Post-D11 we write 12.0% tuplet notes; only 59.8% of WJazzD's ternary notes
   are real 3+-onset triplet figures (the rest are swung pairs annotated at
@@ -1100,15 +1111,30 @@ made. Both are kept; neither subsumes the other.
   the ten hand scores hold 53 of them, 22 in the Peterson, so its reference
   bar 40 began a bar and a half after the music's. `mscz.parse` keeps the
   pitch in the melody at its main note's position with zero duration.
-- **WJazzD carries a human's NOTATION, not just their onsets.** Every note has
-  `bar`, `beat`, and `tatum` out of `division` subdivisions — a swung pair is
-  two eighths, which is the convention we target. `wjazz.notated_positions`
-  reads it and `benchmark.score_against_wjazz_notation` scores against it.
-  **Rhythm only**: WJazzD stores metrical position but not notated VALUE (its
-  `duration` column is performed seconds), so a `value` number there would be
-  invented. This is the control the MuseScore set cannot be — those are ten
-  bebop eighth-note lines, which reward a grid rule for writing everything as
-  eighths; `division` runs 1 through 10 across 456 WJazzD solos.
+- **WJazzD's tatum layer is NOT a human's notation. It is Flex-Q's** (D36,
+  2026-09-23). Every note has `bar`, `beat`, and `tatum` out of `division`,
+  and this file said for two weeks that it was "a human's notation" and
+  "the control the MuseScore set cannot be". The Jazzomat docs say the
+  converter's `flexq` block "is used by the metrical annotation algorithm
+  (Flex-Q)": the onsets, pitches and beats are a human's, the tatum is an
+  algorithm's flexible quantisation of them, per beat, at whatever
+  division fits -- so it files a swung offbeat at 2/3 or 3/4 (24% of
+  two-note beats), a lone late offbeat on the "a" (10% of one-note
+  beats), a laid-back downbeat on the "e", and divides ballad beats in
+  six, eight, ten and twelve. Miles's So What bar 47, three swung eighth
+  pairs a fifth of a beat behind, is filed as two "e"s, three "a"s, a
+  dotted eighth and two sixteenth rests. That is MORE literal than our
+  own quantizer, and the listener's exact complaint. What it is evidence
+  about: which notes, when, and where the beats are (note F1, beat F1,
+  swing, drift, placement, the octave repair). What it is not: how a page
+  should look. `benchmark.score_against_wjazz_notation` and the
+  `wjazz_notation` rhythm rows (0.667 over 77) are COLLATERAL instruments
+  now -- dropped notes, bar count, placement -- never a page measure, and
+  the harness prints them under "Flex-Q". A rule is judged on the
+  listener's twelve scores and the Omnibook, or it is not judged. The one
+  shipped rule that had only Flex-Q's word, R31's ballad grids, is OFF
+  (`slow_beat_s` 0.0) until a human ballad page exists. And a per-figure
+  frequency table ("rhythm prior") must never be counted from this layer.
 - **Notate only the LOCATED solo, never the whole track.** A WJazzD sidecar
   covers the whole file, so notating its region writes the head and every
   other soloist too — and `alignment.align` is GLOBAL, so it is then matching

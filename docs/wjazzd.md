@@ -182,6 +182,17 @@ human labels, and confirm a hypothesis the plan had only flagged.
 
 ## A score CAN be built from this database, and an earlier reading said it could not
 
+**Read this section with D36 (2026-09-23, docs/benchmark-deficiencies.md)
+in hand.** The bar/beat/tatum layer this section calls "a human's" is the
+Jazzomat project's Flex-Q metrical annotation algorithm applied to the
+human's onsets and beats -- a flexible quantisation at whatever division
+fits each beat -- so the score built here carries a human's pitches, onsets
+and bar lines and an ALGORITHM's rhythm, more literal than any transcriber
+(a swung offbeat at 3/4, a laid-back downbeat on the "e", Miles's So What
+bar 47 as sixteenth rests and a dotted eighth). It is a ground truth for
+notes and bar lines, and a collateral instrument for the quantizer; it is
+not a page and must not judge one.
+
 The claim was that WJazzD carries a human's onsets and metrical positions but
 not a notated score, "because `melody.duration` is performed seconds and there
 is no column holding a note VALUE". The first half is true. The second half is

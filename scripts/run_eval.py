@@ -855,8 +855,11 @@ def render(card: dict) -> None:
         print_placement(card["summary"], "mscz")
 
     if card.get("wjazz_notation"):
-        print("\n== Notation: our score against WJazzD's metrical annotation ==")
-        print("  (rhythm only — WJazzD stores metrical position, not notated value)")
+        print("\n== Flex-Q: our page against WJazzD's ALGORITHMIC quantisation of the onsets ==")
+        print(
+            "  (collateral only -- dropped notes, bar count, placement. Not a page measure:"
+            " the tatum layer is Flex-Q's, more literal than any transcriber, D36)"
+        )
         header = f"  {'solo':<34s} {'matched':>8s} {'cover':>7s} {'rhythm':>8s} {'on bar':>7s}"
         print(header)
         print("  " + "-" * (len(header) - 2))

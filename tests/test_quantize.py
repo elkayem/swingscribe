@@ -1012,10 +1012,14 @@ def test_a_ballad_beat_of_six_is_written_on_sixths():
     assert _ballad_beat(1.5) == [8.0, 8.125, 8.375, 8.5, 8.625, 8.875]
 
 
-def test_the_ballad_grids_ship_on_at_86_bpm_and_under():
+def test_the_ballad_grids_ship_off():
+    """R31 shipped on at 86 bpm and under, judged only against WJazzD's
+    tatum layer -- Flex-Q's quantisation of the onsets, not a transcriber's
+    page (D36, 2026-09-23). Off until a human ballad page says otherwise;
+    the mechanism and its grids stay for that measurement."""
     from swingscribe.config import QuantizeConfig
 
-    assert QuantizeConfig().slow_beat_s == 0.7
+    assert QuantizeConfig().slow_beat_s == 0.0
     assert QuantizeConfig().slow_beat_grids == (6, 8, 12)
 
 

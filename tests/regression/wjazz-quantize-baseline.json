@@ -24,25 +24,25 @@
     },
     "MEDIUM SLOW": {
       "classes": {
-        "annotation literal": 816,
-        "below the grid": 2451,
-        "binary as triplet": 264,
-        "early offbeat as 16th": 357,
-        "hit": 6896,
-        "laid-back beat after it": 105,
-        "late offbeat as dotted": 296,
-        "other": 758,
+        "annotation literal": 871,
+        "below the grid": 2459,
+        "binary as triplet": 241,
+        "early offbeat as 16th": 346,
+        "hit": 6900,
+        "laid-back beat after it": 84,
+        "late offbeat as dotted": 295,
+        "other": 672,
         "pushed beat before it": 7,
-        "swing convention": 314,
-        "triplet as binary": 221
+        "swing convention": 319,
+        "triplet as binary": 224
       },
-      "dropped": 432,
-      "hit": 0.5523,
-      "matched": 12485,
+      "dropped": 499,
+      "hit": 0.5556,
+      "matched": 12418,
       "n_notes": 12917,
       "n_solos": 31,
-      "page_hit": 0.6179,
-      "page_hit_all": 0.5958
+      "page_hit": 0.6252,
+      "page_hit_all": 0.5993
     },
     "MEDIUM UP": {
       "classes": {
@@ -68,25 +68,25 @@
     },
     "SLOW": {
       "classes": {
-        "annotation literal": 513,
-        "below the grid": 6164,
-        "binary as triplet": 238,
-        "early offbeat as 16th": 242,
-        "hit": 6884,
-        "laid-back beat after it": 270,
-        "late offbeat as dotted": 229,
-        "other": 794,
+        "annotation literal": 837,
+        "below the grid": 6227,
+        "binary as triplet": 53,
+        "early offbeat as 16th": 200,
+        "hit": 5928,
+        "laid-back beat after it": 82,
+        "late offbeat as dotted": 204,
+        "other": 464,
         "pushed beat before it": 0,
-        "swing convention": 135,
-        "triplet as binary": 101
+        "swing convention": 147,
+        "triplet as binary": 110
       },
-      "dropped": 2227,
-      "hit": 0.4421,
-      "matched": 15570,
+      "dropped": 3545,
+      "hit": 0.4159,
+      "matched": 14252,
       "n_notes": 17797,
       "n_solos": 38,
-      "page_hit": 0.4662,
-      "page_hit_all": 0.4061
+      "page_hit": 0.4529,
+      "page_hit_all": 0.3582
     },
     "UP": {
       "classes": {
@@ -113,24 +113,24 @@
   },
   "overall": {
     "classes": {
-      "annotation literal": 13064,
-      "below the grid": 19965,
-      "binary as triplet": 2845,
-      "early offbeat as 16th": 5036,
-      "hit": 119000,
-      "laid-back beat after it": 902,
-      "late offbeat as dotted": 2536,
-      "other": 9418,
+      "annotation literal": 13443,
+      "below the grid": 20036,
+      "binary as triplet": 2637,
+      "early offbeat as 16th": 4983,
+      "hit": 118048,
+      "laid-back beat after it": 693,
+      "late offbeat as dotted": 2510,
+      "other": 9002,
       "pushed beat before it": 644,
-      "swing convention": 15414,
-      "triplet as binary": 4389
+      "swing convention": 15431,
+      "triplet as binary": 4401
     },
-    "dropped": 5770,
-    "hit": 0.6159,
-    "matched": 193213,
+    "dropped": 7155,
+    "hit": 0.6154,
+    "matched": 191828,
     "n_notes": 198983,
     "n_solos": 452,
-    "page_hit": 0.7461,
-    "page_hit_all": 0.723
+    "page_hit": 0.7483,
+    "page_hit_all": 0.7194
   }
 }

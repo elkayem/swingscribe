@@ -293,6 +293,22 @@ page rhythm 0.67 and 0.59). Beat threshold 0.6 and 0.75 were measured too and re
 on the SLOW band; 0.7 sits between Soul Station's 0.60 and the slowest
 real ballad's 0.84.
 
+**Switched off 2026-09-23 (D36 in docs/benchmark-deficiencies.md).** The
+listener showed one bar of Flex-Q's layer rendered beside a published
+transcription of the same solo, and the Jazzomat documentation confirms
+what this document had called "the annotator's filing" is the Flex-Q
+metrical annotation algorithm: an algorithmic quantisation of a human's
+onsets on a human's grid, per beat, at whatever division fits. Everything
+in this section that says the annotator "files half the notes at
+divisions past four" at 37-79 bpm is Flex-Q resolving timing that a
+transcriber would simplify, and no hand score or Omnibook side is under 86
+bpm to say what a transcriber does. So the rule had only a quantiser's
+word, and `slow_beat_s` ships 0.0; the mechanism and the grids stay for a
+human ballad page to judge. Baseline re-pinned (7,155 dropped again).
+Everywhere in this document, read "the annotator" for a position at a
+tatum as "Flex-Q"; the instrument's remaining job is collateral --
+dropped and merged notes, a lost beat -- not style.
+
 ## Measured and not shipped
 
 ### The six-per-beat grid (D35.2), measured and off

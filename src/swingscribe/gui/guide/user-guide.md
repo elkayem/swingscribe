@@ -278,6 +278,14 @@ Each class has its own toggle chip so you can show or hide it, and its own
 count. Ground-truth notes can be inspected and sounded the same way your own
 notes can, with the Inspect tool.
 
+A MusicXML score built from the Weimar Jazz Database (the `wjazz_score`
+tool) is a different kind of ground truth. Its pitches, onsets and beats
+are a human's, but its rhythm is the database's own algorithmic
+quantisation of the played timing (Flex-Q), which is more literal than any
+transcriber: a swung offbeat can land on a dotted position and a laid-back
+downbeat on the "e". Trust its notes and its bar lines; do not read its
+note values as how the solo should be written.
+
 **Two different questions, easy to conflate:** the pitch F1 shown on the
 ground-truth bar is time-free and pitch-only — it asks *did we hear the
 right notes?* The **Score it** button asks a different, harder question:
