@@ -194,9 +194,7 @@ def main() -> None:
     print("phase of the three onsets, true against false candidates:")
     spread("true", true_rows)
     spread("false", [r for r in rows if not r["true"]])
-    print(
-        "what the annotator filed where lattice 0.10 adopts a false one (twelfths of a beat):"
-    )
+    print("what the annotator filed where lattice 0.10 adopts a false one (twelfths of a beat):")
     filed = Counter(r["rel"] for r in rows if not r["true"] and lattice(0.10)(r))
     for rel, n in filed.most_common(8):
         print(f"  {n:4d}  {tuple(round(x, 3) for x in rel)}")
