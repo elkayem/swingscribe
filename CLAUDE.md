@@ -851,10 +851,18 @@ Results and limits: `docs/m6-notate.md`.
   `QuantizeConfig.quarter_triplets` is OFF because the reading is not
   identifiable from onset timing: on the twelve hand scores the best rule
   adopts 9 pairs of which 3 are the human's, and the lattice version cost
-  hand-score rhythm 0.773 -> 0.704. The human writes ONE dotted-eighth +
-  sixteenth pair in 4,234 notes; we write 2.5 per hundred, and that IS the
-  unread quarter-note triplet. Do not turn the flag on for a number; build
-  the truth from WJazzD's tatum positions first. **And a ternary reading
+  hand-score rhythm 0.773 -> 0.704. **Settled at scale 2026-09-23
+  (`scripts/wjazz_quarter_triplets.py`)**: WJazzD's annotators file 116
+  of the figure in 197,000 notes, 8 of them the clean three-onset
+  even-beat shape among 12,737 such units, and on the annotator's OWN
+  onsets those sit at 0.15, 0.80, 1.43 of the unit, inside the spread of
+  the "one, and, and-of-two" figures around them; every lattice and
+  interval rule reads precision 0.00-0.02. The figure is read from
+  harmony and phrase, not timing; the flag stays off for good unless the
+  listener marks the half on the roll. The earlier claim that our
+  dotted-eighth pairs WERE unread quarter-note triplets is withdrawn: at
+  the human's figures we write eighths with an eighth rest, and the
+  dotted pairs (17 on the twelve pages) are elsewhere. **And a ternary reading
   needs every onset of the beat INSIDE it on thirds** (2026-09-20, R28,
   `tuplet_needs_onsets_inside`): an onset the thirds grid sends to 1.0 is
   the next beat's note, not the third of a triplet -- laid-back sixteenths

@@ -1025,6 +1025,34 @@ monkeypatch over `quarter_triplet_pairs` that records every candidate pair
 and its truth) lives with this session's scratch scripts; its method is
 above.
 
+**Truth at scale, 2026-09-23 (`scripts/wjazz_quarter_triplets.py`): on the
+annotator's own onsets the figure is not identifiable either, and (a) is
+closed.** Over the 4/4 solos of WJazzD, 197,000 notes, the annotators file
+116 quarter-note triplets in all (0.06% of notes): 61 start on beat two or
+four, where the page cannot write one; 37 have a fourth onset in the unit
+(the next note early); 8 are the clean three-onset, even-beat figure the
+reading looks for, among 12,737 candidate units of that shape. Those 8
+sit in the annotator's onsets at 0.15, 0.80 and 1.43 of the unit (medians;
+10th-90th 0.01-0.18, 0.64-0.84, 1.33-1.48): a sixth of a beat late, and
+inside the false candidates' spread (0.35, 0.93, 1.51). The lattice rule
+adopts 9 to 144 units at tolerances 0.06 to 0.12 and 0 to 1 of them are
+real; the shipped interval rule adopts 254 with 5 real (precision 0.02).
+What the lattice adopts, the annotator filed as (0, 1/2, 3/2) and (0,
+2/3, 3/2) -- "one, and, and-of-two" with the "and" swung or triplet --
+which is what our page writes there too. The held lengths do not separate
+them (0.47 against 0.44 beats), nor the next onset (1.87 against 2.02).
+The swung "and" of the solos holding a real figure sits at 0.71, on top of
+the figure's second note. So the figure is read from harmony and phrase,
+not from timing, by the annotator as by the listener; the flag stays off,
+and the earlier claim that our dotted eighths WERE unread quarter-note
+triplets is withdrawn: paired note by note (session instrument
+`qt_locate.py`), at the human's 12 figures on the hand scores and 9 in the
+Omnibook we write eighths with an eighth rest (the middle note lands on
+the "and" or the next beat), and our 17 dotted-eighth pairs on those
+pages are elsewhere. On WJazzD's 24 located figures we write four eighths
+at 14. What is left of (b) and (c): the listener marking the half on the
+roll, since the page can write it.
+
 ### D29 - Eighth-note triplets: we write a quarter of the human's, and the grid is the smaller reason
 
 Measured 2026-09-11/12 with `scripts/triplet_beats.py`, beat by beat over
