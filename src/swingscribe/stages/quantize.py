@@ -41,9 +41,14 @@ Pure arithmetic, no heavy imports — the whole stage runs in CI.
 """
 
 import bisect
+import functools
+import json
+import math
 import statistics
+from fractions import Fraction
+from pathlib import Path
 
-from swingscribe.config import Config
+from swingscribe.config import Config, QuantizeConfig
 from swingscribe.model import Document, MeterSection, QuantizedNote, SwingSpan
 
 # Bump when this stage's behavior changes without a config change (see
@@ -183,6 +188,41 @@ def _phase_of(span: SwingSpan) -> float:
     return span.bur / (1.0 + span.bur)
 
 
+# The figure prior: how often a human transcriber writes each set of onset
+# positions inside a beat, counted over 49,000 beats of 245 OMR-read
+# transcription pages (docs/figure-prior.md, scripts/figure_prior.py build).
+# An aggregate table, a few hundred rows, shipped inside the package.
+FIGURE_PRIOR_PATH = Path(__file__).resolve().parent.parent / "figure-prior.json"
+
+
+@functools.lru_cache(maxsize=1)
+def figure_prior(path: Path = FIGURE_PRIOR_PATH) -> tuple[dict[str, float], float]:
+    """({figure: surprisal in nats}, the surprisal of a figure the table never
+    saw). Surprisal is -ln of the figure's share of beats WITH an onset; the
+    unseen figure gets half a count. Read once per process."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    counts: dict[str, int] = data["counts"]
+    unseen = float(data.get("unseen", 0.5))
+    total = sum(counts.values()) + unseen
+    table = {key: -math.log(n / total) for key, n in counts.items()}
+    return table, -math.log(unseen / total)
+
+
+def figure_of(offsets: list[float], divisions: int) -> str:
+    """The figure a reading makes: the beat's onsets snapped to `divisions`,
+    as sorted exact fractions, in the table's spelling ("0 1/2"). An onset
+    the grid sends to 1.0 is the next beat's downbeat and is not part of this
+    beat's figure; a beat left with nothing is "-"."""
+    positions = sorted({Fraction(round(offset * divisions), divisions) for offset in offsets})
+    inside = [p for p in positions if p < 1]
+    return " ".join(str(p) for p in inside) if inside else "-"
+
+
+def figure_surprisal(key: str, prior: tuple[dict[str, float], float]) -> float:
+    table, unseen = prior
+    return table.get(key, unseen)
+
+
 def snap(position: float, divisions: int) -> tuple[float, float]:
     """Snap a position in beats to a subdivision grid.
 
@@ -205,10 +245,21 @@ def choose_reading(
     star: float | None = None,
     offbeat_pair_fit: float = 0.0,
     inside: bool = False,
+    prior_weight: float = 0.0,
+    prior: tuple[dict[str, float], float] | None = None,
 ) -> tuple[int, str]:
     """Pick the subdivision the notes in one beat actually fit, and under
     which timing reading: ("warped", the beat is swung) or ("raw", the beat
     is straight or ternary).
+
+    `prior_weight`, in beats per nat, adds to each (grid, reading)
+    candidate's snap error the surprisal of the figure it writes -- minus
+    the log of that figure's share on a human page (`figure_prior`,
+    docs/figure-prior.md) -- BEFORE the coarsest-within-slack comparison.
+    Everything else stands as it is: `_keeps_apart` is still a hard
+    constraint, the tuplet and sixteenth gates still trim the candidates,
+    and the prior only ever decides among what they leave. At 0.0 it is
+    not consulted.
 
     Post-warp, a swung eighth pair (0, 0.5) and a triplet figure (0, 1/3, 2/3)
     are close enough that assuming a binary grid silently rewrites the second
@@ -310,10 +361,13 @@ def choose_reading(
     errors: dict[int, float] = {}
     chosen: dict[int, str] = {}
     separating: list[int] = []
+    table = prior if prior is not None else (figure_prior() if prior_weight > 0 else None)
     for divisions in allowed:
         scored = []
         for name, values in readings(divisions):
             error = sum(abs(snap(offset, divisions)[1]) for offset in values) / len(values)
+            if table is not None and prior_weight > 0:
+                error += prior_weight * figure_surprisal(figure_of(values, divisions), table)
             scored.append((not _keeps_apart(values, divisions), error, name))
         merges, error, name = min(scored)
         errors[divisions], chosen[divisions] = error, name
@@ -467,6 +521,7 @@ def quantize_notes(
     sixteenth_triplet_fit: float = 0.03,
     slow_beat_s: float = 0.0,
     slow_beat_grids: tuple[int, ...] = (6, 8),
+    figure_prior_weight: float = 0.0,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -558,6 +613,7 @@ def quantize_notes(
         ballad = statistics.median(_beat_length(beats, i) for i in per_beat) >= slow_beat_s
     grids: dict[int, int] = {}
     readings: dict[int, str] = {}
+    prior = figure_prior() if figure_prior_weight > 0 else None
     for index, offsets in per_beat.items():
         # A beat the finest binary grid cannot keep apart holds a genuine
         # 32nd run — Bird on a ballad — and merging is silent note LOSS on
@@ -609,6 +665,8 @@ def quantize_notes(
             star=max(STRAIGHT_PHASE, by_beat.get(index, STRAIGHT_PHASE) - lags.get(index, 0.0)),
             offbeat_pair_fit=offbeat_pair_tuplet_fit,
             inside=tuplet_needs_onsets_inside,
+            prior_weight=figure_prior_weight,
+            prior=prior,
         )
     if allow_triplets and quarter_triplets:
         # A beat pair that reads as a quarter-note triplet is two ternary
@@ -822,6 +880,31 @@ def replay_onsets(
     return out
 
 
+def settings(qc: QuantizeConfig) -> dict:
+    """The `quantize_notes` keyword arguments a QuantizeConfig asks for --
+    one mapping, so a script that quantizes by hand (the WJazzD instrument,
+    the weight sweep) runs the shipped settings and not a copy of them."""
+    return {
+        "resolution": qc.resolution,
+        "straight_bur_ceiling": qc.straight_bur_ceiling,
+        "allow_triplets": qc.allow_triplets,
+        "min_onsets_for_tuplet": qc.min_onsets_for_tuplet,
+        "grid_slack_s": qc.grid_slack_s,
+        "min_onsets_for_sixteenth": qc.min_onsets_for_sixteenth,
+        "offbeat_pair_tuplet_fit": qc.offbeat_pair_tuplet_fit,
+        "tuplet_needs_onsets_inside": qc.tuplet_needs_onsets_inside,
+        "lag_window_beats": qc.lag_window_beats,
+        "lag_cap": qc.lag_cap,
+        "lag_floor": qc.lag_floor,
+        "sixteenth_triplets": qc.sixteenth_triplets,
+        "sixteenth_triplet_fit": qc.sixteenth_triplet_fit,
+        "slow_beat_s": qc.slow_beat_s,
+        "slow_beat_grids": qc.slow_beat_grids,
+        "quarter_triplets": qc.quarter_triplets,
+        "figure_prior_weight": qc.figure_prior_weight,
+    }
+
+
 def run(document: Document, config: Config) -> Document:
     grid = document.beat_grid
     if grid is None or len(grid.beats) < 2:
@@ -840,23 +923,8 @@ def run(document: Document, config: Config) -> Document:
         grid.beats,
         document.swing,
         document.meter,
-        resolution=qc.resolution,
-        straight_bur_ceiling=qc.straight_bur_ceiling,
-        allow_triplets=qc.allow_triplets,
-        min_onsets_for_tuplet=qc.min_onsets_for_tuplet,
-        grid_slack_s=qc.grid_slack_s,
-        min_onsets_for_sixteenth=qc.min_onsets_for_sixteenth,
-        offbeat_pair_tuplet_fit=qc.offbeat_pair_tuplet_fit,
-        tuplet_needs_onsets_inside=qc.tuplet_needs_onsets_inside,
-        lag_window_beats=qc.lag_window_beats,
-        lag_cap=qc.lag_cap,
-        lag_floor=qc.lag_floor,
-        sixteenth_triplets=qc.sixteenth_triplets,
-        sixteenth_triplet_fit=qc.sixteenth_triplet_fit,
-        slow_beat_s=qc.slow_beat_s,
-        slow_beat_grids=qc.slow_beat_grids,
         chords=[list(n.chord) for n in notes],
-        quarter_triplets=qc.quarter_triplets,
+        **settings(qc),
     )
 
     by_beat, track = pooled_phase(document.swing, qc.straight_bur_ceiling)

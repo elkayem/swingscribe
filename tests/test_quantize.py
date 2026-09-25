@@ -1049,3 +1049,61 @@ def test_a_ballad_is_a_tempo_not_a_long_beat():
     )
     read = sorted(round(q.beat, 3) for q, p in zip(quantized, positions, strict=True) if 8 <= p < 9)
     assert read == [8.0, 8.125, 8.375, 8.5, 8.625, 8.875]
+
+
+# ── the figure prior ────────────────────────────────────────────────────
+
+
+def _prior_figure_beat(weight: float) -> list[float]:
+    """Sixteen beats at 120 bpm, each holding onsets at 0, 0.5 and 0.8 of
+    the beat, straight (no swing span), lag off. On snap error alone the
+    sixteenth grid wins by a hair: 0.0167 beats of mean error against the
+    eighth grid's 0.0667, with 0.04 beats of slack (0.02 s at 0.5 s a beat).
+    The figure it writes, `0 1/2 3/4`, is 1.2% of a human's beats; the
+    eighth grid's `0 1/2` is 55%."""
+    from swingscribe.stages.quantize import figure_prior
+
+    figure_prior.cache_clear()
+    beats = [i * 0.5 for i in range(17)]
+    onsets = [b + frac * 0.5 for b in beats[:-1] for frac in (0.0, 0.5, 0.8)]
+    quantized, positions = quantize_notes(
+        onsets,
+        [0.05] * len(onsets),
+        [60] * len(onsets),
+        beats,
+        [],
+        [],
+        grid_slack_s=0.02,
+        figure_prior_weight=weight,
+    )
+    assert len(quantized) == len(onsets)
+    return [round(q.beat, 3) for q in quantized[24:27]]  # the three onsets of beat 8
+
+
+def test_the_figure_prior_writes_a_rare_figure_on_the_coarser_grid():
+    """A beat whose snap error prefers the sixteenth grid by a hair and whose
+    figure the table calls rare is written on the eighth grid with the
+    weight on, and unchanged with it at zero."""
+    # No meter section, so `beat` is the absolute position: beat 8 of the grid.
+    assert _prior_figure_beat(0.0) == [8.0, 8.5, 8.75]  # the dotted figure, on snap error
+    assert _prior_figure_beat(0.01) == [8.0, 8.5, 9.0]  # the pair; the late note is the next beat's
+
+
+def test_the_figure_prior_table_ships_and_reads():
+    from swingscribe.stages.quantize import figure_of, figure_prior, figure_surprisal
+
+    table, unseen = figure_prior()
+    assert table["0 1/2"] < table["0"] < table["0 1/3 2/3"] < table["0 3/4"] < unseen
+    assert all(s > 0 for s in table.values())
+    assert figure_of([0.0, 0.52], 2) == "0 1/2"
+    assert figure_of([0.1, 0.34, 0.65], 3) == "0 1/3 2/3"
+    assert figure_of([0.9], 2) == "-"  # pushed onto the next beat: nothing left here
+    assert figure_of([0.0, 0.0], 4) == "0"  # one figure, however many onsets share it
+    assert figure_surprisal("0 1/2", (table, unseen)) == table["0 1/2"]
+    assert figure_surprisal("0 1/8 1/3 5/7", (table, unseen)) == unseen
+
+
+def test_the_figure_prior_is_off_by_default_and_costs_nothing():
+    config = Config()
+    assert config.quantize.figure_prior_weight == 0.0
+    assert _prior_figure_beat(0.0) == _prior_figure_beat(-1.0)

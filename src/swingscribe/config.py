@@ -531,6 +531,20 @@ class QuantizeConfig(BaseModel):
     # identify it (docs/benchmark-deficiencies.md D28). The page CAN write
     # the figure; what is missing is a reading that deserves to be trusted.
     quarter_triplets: bool = False
+    # How much a candidate grid's FIGURE -- the set of positions it writes
+    # the beat's onsets on -- counts against it, in beats per nat of
+    # surprisal on a human page. The table (`swingscribe/figure-prior.json`,
+    # scripts/figure_prior.py build) is the share of each figure over 49,000
+    # beats of 245 OMR-read human transcriptions (docs/figure-prior.md): an
+    # eighth pair is 55% of beats with an onset, a note on the "e" alone
+    # 0.05%. Added to each candidate's mean snap error before the
+    # coarsest-within-slack rule, so a grid that fits the onsets a hair
+    # better but writes a figure no transcriber writes loses. Every rule it
+    # sits beside stands unchanged; it decides only among what the gates
+    # leave. Not tuned on the page score (which rewards "everything as
+    # eighth pairs"); set by the quantizer's own 20 ms round-trip criterion
+    # like `grid_slack_s`. 0 is off.
+    figure_prior_weight: float = 0.0
 
 
 class NotateConfig(BaseModel):
