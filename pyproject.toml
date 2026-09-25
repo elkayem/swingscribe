@@ -88,6 +88,26 @@ batch = [
 roformer = [
     "audio-separator[cpu]>=0.30",
 ]
+# pdf2musicxml (src/pdf2musicxml, docs/pdf2musicxml.md): PDF transcriptions
+# -> MusicXML ground truth. Its own group because nothing in the pipeline
+# imports it and homr brings opencv, rapidocr and onnxruntime (~200 MB).
+# pypdfium2 renders the pages (its pdfium.dll loads under Smart App Control,
+# checked 2026-09-24); homr is the default OMR engine and needs no Java.
+# Audiveris, the second engine, is NOT a Python package: `pdf2musicxml
+# setup` unpacks its release into %USERPROFILE%\.pdf2musicxml.
+# uv sync --group ml --group gui --group batch --group roformer --group omr
+omr = [
+    "pypdfium2>=4.30",
+    "pillow>=10",
+    "numpy>=1.26",
+    "homr>=0.7",
+    # homr wants opencv-python-headless (<5) and rapidocr wants opencv-python;
+    # both unpack into ONE cv2/ folder, and a 5.0 beside a 4.14 left cv2.gapi
+    # importing symbols the binary did not have. Pinning the two to the same
+    # major keeps the resolver on one version, so the files agree.
+    "opencv-python>=4.13,<5",
+    "opencv-python-headless>=4.13,<5",
+]
 
 [tool.uv]
 # No macOS until something deploys there (M8 at the earliest).

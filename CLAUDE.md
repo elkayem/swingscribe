@@ -949,6 +949,212 @@ Results and limits: `docs/m6-notate.md`.
   than what it buys the page — and IS that criterion: 0.02 s of mean snap
   error, converted per beat.
 
+## pdf2musicxml: PDF transcriptions -> MusicXML ground truth (2026-09-24)
+
+`src/pdf2musicxml/` is a STANDALONE tool (imports nothing from swingscribe)
+that turns the transcription PDFs the listener drops in
+`benchmark/Transcriptions_Other/` into one MusicXML per transcription --
+single solos and books of them. Launch with `.\pdf2musicxml convert <folder>`
+(a `.cmd` beside `swingscribe.cmd`, same three routes); `uv sync ... --group
+omr` installs its Python side; `.\pdf2musicxml setup` fetches Audiveris.
+docs/pdf2musicxml.md has the measurements. Things not to re-derive:
+
+- **Two OMR engines, on purpose, and homr is the primary.** Measured on a
+  scanned page in a handwritten jazz font, Audiveris lost the opening rest,
+  four of five triplets and every tie; homr kept them (ties come out as
+  slurs, which `musicxml.slurs_to_ties` mends, and a misread time
+  signature is replaced by what the bars fill). Over the 221 vector PDFs
+  with both readings homr is nearer the printed note count on 140 (Audiveris
+  on 9), reads 98.5% of the noteheads to Audiveris's 96.9%, and leaves half
+  as many bars short of the signature -- so it is the primary on clean
+  exports too, whatever an early single-page look at Audiveris's ties and
+  chord symbols suggested. Audiveris runs as the CROSS-CHECK: the bars the
+  two readings disagree on are the proofreader's list. Its reading lives
+  under `.work/<pdf>/tNN/`, never beside the primary file: the listener
+  uses the output folder for other projects and asked for one file per
+  transcription (2026-09-24). oemer was rejected: no tuplets, no
+  handwritten fonts.
+- **Audiveris is never installed; its MSI is unpacked with `msiexec /a`**
+  into `%USERPROFILE%\.pdf2musicxml` (outside AppData: the redirection
+  trap above) and run through its bundled Zulu `java.exe`, which Smart App
+  Control accepts -- the jpackage `Audiveris.exe` launcher it would not.
+  `audiveris.jar` must be FIRST on the classpath or it looks for `res/`
+  under the cwd. APPDATA is pointed at the tool folder for the run so the
+  Tesseract data lands where both shells see it.
+- **Audiveris gets staff pages only, rasterised by us.** It refuses to
+  export a book in which any sheet failed (a cover page has "no regularly
+  spaced lines") and refuses any page it renders above 20 megapixels (the
+  ebook embeds 150 dpi scans on a 15-inch page). `pdfpages.render_page`
+  sizes every page to a 3300 px long side and `write_gray_pdf` hands them
+  back as a hand-written Flate PDF; one Audiveris run per transcription.
+- **A notation-program PDF prints its own note count**: every notehead is
+  a music-font glyph about a staff space tall and a little wider than
+  tall (`vector.is_notehead_box`), whatever its code -- a Finale PDF puts
+  the half head at U+02D9 and Sibelius its quarter REST at U+0152, so
+  code lists were wrong twice. An accent has the same shape and sits
+  straight above or below its note (`drop_articulations`). The report
+  gives notes read per notehead printed -- 115 of 115 on Big Chief, 971
+  of 1014 on Minority -- so a page that lost or invented notes shows as a
+  number, without a human. Scans have no count; there the two engines'
+  bar agreement is the only instrument.
+- **And a notation-program PDF prints its PITCHES too** (`vector.py`):
+  staff lines are thin vector paths, noteheads and accidentals are
+  positioned glyphs, so a notehead's height above the bottom line is its
+  step and the glyph to its left its accidental. The engine's notes are
+  aligned to the printed ones on diatonic position and their pitches set
+  from the page; Audiveris's Big Chief reading needed 0 changes (the check
+  on the reader), homr's Minority reading 36 of 971. Durations stay the
+  engine's. A flat's bowl sits 30% up its glyph; a key signature must be
+  a circle-of-fifths prefix or it is a courtesy accidental.
+- **And it prints its TUPLET NUMBERS, its TIME SIGNATURE and its TEMPO**
+  (2026-09-24, the listener's second round: bar 19 of Arriving Soon had
+  nine plain eighths where the page brackets three under a "3", Whisper
+  Not carried a 2/2 under a printed 4/4, and no file had its tempo). A
+  tuplet number is a lone digit in the family's Text face (Finale: Times
+  Bold Italic) in the staff's band among its notes -- chord digits have a
+  neighbour on their baseline, bar numbers sit before the first note. The
+  page printed 3,971 of them where the engines wrote 2,438 tuplet groups.
+  `vector.apply_printed_tuplets` claims the `count` consecutive onsets
+  the digit is centred on -- noteheads AND RESTS, which are music glyphs
+  with one code per value across Opus, Inkpen2 and Maestro (U+2030 eighth,
+  U+0152 quarter, U+2248 16th, U+00D3 half, U+2211 whole; `rest_value`),
+  each paired with the reading's rest between the same two aligned notes
+  -- with no bar line between, and makes their read notes one value in a
+  3:2 (5:4, 6:4, 7:4), refining the divisions when the ratio needs it.
+  The BRACKET's extent, when one is drawn, says which onsets the number
+  holds (`_bracket_extent`; Whisper Not bar 20: quarter, quarter, two
+  beamed eighths under one "3" -- a quarter-note triplet with a split),
+  and each member's value is the page's (`_page_value`: a rest's glyph,
+  the beams over the note's stem within four spaces of the group's ends
+  -- the "LAY BACK" line over that bar spans every head five spaces off
+  -- else its flag glyphs j/J/k/K, else a quarter); when the values sum
+  to `count` of one unit the group is that tuplet with a `<normal-type>`.
+  Only the NEAREST bracket segment on each side of the number is its own
+  (three brackets in a row: a bracket taken too wide claimed five
+  sixteenths under a 3:2 and MuseScore refused seven files); a bracket
+  holding other than `count` onsets with no page value is left alone.
+  Without any beam or flag on the page the older rule stands: the beams
+  over the whole group (`_beams_over`), else the one `normal` of which make the group's
+  read total (an engine that split a triplet eighth into two sixteenths
+  kept the SOUNDING total), else `count` of which make it (plain notes,
+  the written total), else the majority. A bar-length guess ("the value
+  that brings the bar nearest its signature") was tried and withdrawn
+  the same day: it halved Whisper Not's bar 9 triplet because the
+  engine's extra rests had made the bar long. A grace note among the
+  read notes leaves the group alone (eight files crashed on its missing
+  duration before that guard), and so does a bar of several voices:
+  shortening one voice's notes sent a later `<backup>` past the bar's
+  start and MuseScore refused the file (Maynard & Waynard bar 97; the
+  one new refusal of the round, found by `render`). A notehead or rest
+  the engine dropped is reported per bar in the manifest's
+  `tuplet_notes`, not guessed. Over the 222 vector files: 1,371 groups
+  made tuplets from the page (1,021 valued member by member from the
+  page, 141 with a rest inside), 208 numbers left explained, bars not
+  filling the signature 1,872 -> 1,318 before the merge below. The engines'
+  own tuplets under no printed number are COUNTED, not stripped.
+- **The two readings are MERGED bar for bar** (`musicxml.merge_readings`,
+  2026-09-24): 53 transcriptions are scans with no text layer, where the
+  page readers are silent and homr alone read none of Don Byas's Star
+  Dust triplets that Audiveris read as printed; and the ebook measurement
+  that made homr the primary on scans was one handwritten-font page. Where
+  the two readings' bar counts agree, each bar goes to the reading that
+  holds the page's note count for it (vector files), else the one NEARER
+  to filling its signature; ties stay with homr, differing bar counts pair
+  nothing. A taken bar brings notes and chord symbols only (Audiveris's
+  OCR'd `<direction>` words, `<print>` and `<barline>` stay behind; the
+  primary's attributes and tempo stay), and EVERY `<beam>` in the file
+  goes afterwards: MuseScore beams by hand once a file holds any, and the
+  homr bars, which carry none, came out as single flagged sixteenths.
+  The page's note count per measure follows the notes' printed bars
+  (`vector.printed_count_per_measure`), never the index: a joined bar
+  shifted every count and let a bar that dropped two notes win.
+  Agreement is measured before the merge. Star Dust: 9 of 34 bars
+  from Audiveris, bars 2 and 3 with their triplets; the corpus took 474
+  bars on 92 files and bars off the signature fell 1,318 -> 942 (vector)
+  and 635 -> 590 (scans). A taken bar is nearer its signature, not
+  thereby right: still a proofreader's bar.
+- **And the page's bar lines fix the reading's BARS** (`vector.align_bars`,
+  2026-09-24): each aligned note knows its printed bar, so two read
+  measures on one printed bar are joined (homr took Whisper Not's double
+  bar line for two bars and a repeat) and a read measure on two printed
+  bars is divided where the second begins. Joins need the pair to make
+  under a bar and a half together, divisions a measure a bar and a half
+  or longer -- two real bars behind a bar line the finder missed must
+  not become one -- and multi-voice bars are left alone. `bar_notes` in
+  the manifest names each.
+  The time signature is two music-font digits stacked at the staff's start
+  or a common/cut glyph, and it outranks what the bars fill (2/2 and 4/4
+  fill the same bars); `--time` outranks both. The tempo is a beat glyph in
+  the Text face ("h" in Opus Text is a half note), "=", a number, and the
+  words before it; it is written as a metronome direction with
+  `<sound tempo>` in quarters (Arriving Soon: "Fast Swing half = 128").
+- **And its CHANGES of signature, its MULTI-BAR RESTS and its bar
+  numbers** (2026-09-25, the listener's sixth round: 40 of Artie Shaw's
+  50 off bars were two 2/4 sections read as 4/4, No Room For Squares'
+  14 were bars a multi-bar rest left empty, MuseScore flagged The First
+  Circle's opening whole rests in 12/8). A printed signature knows the
+  bar it begins (bar lines passed, the notehead's count) and the read
+  measure whose first aligned note sits there declares it; unbacked
+  engine changes go (`vector.apply_printed_times`). A multi-bar rest is
+  a filled path four spaces or wider, about 0.7 of a space thick,
+  centred on the MIDDLE line, with a music-font count over it and no
+  notehead in its bar (`vector.multi_rests`); the stretch between two
+  aligned notes becomes count-plus-plain-rest-bars whole-measure rests
+  in the signature printed at the rest (`expand_multirests`; No Room's
+  95- and 64-bar rests are real, its printed bar numbers 98/258/262
+  match). A bar of nothing or of one whole rest is a whole-measure rest
+  of ITS bar (`musicxml.fill_rest_bars`). A double bar line drawn as two
+  paths is one bar line. homr's repeat marks go unless the cross-check
+  read that direction (115 forward repeats against Audiveris's 6;
+  `strip_repeats`). A scan's declared 3/4 falls to the commonest length
+  when that has three times the bars (Alone Together 81 to 5;
+  `fix_time_signature`). Nothing rescales a note value to a signature:
+  the scans' halved values are the engines' reading of a handwritten
+  font. Off bars 1,532 -> 1,240 (vector 942 -> 746, scans 590 -> 494);
+  900 rest bars on 22 files. The page's bar number at each system's
+  start against the file's measure there is the check that verified
+  the rest expansions (every system on five files; La Prima Notte
+  drifts 24) -- not in the tool yet, the next instrument to add.
+- **pdfium's text layer drops the second of two identical characters whose
+  boxes touch**: a printed 4/4 arrives as one "4", a 2/2 as one "2", while
+  3/4 and 6/8 arrive whole. The page's text OBJECTS still hold both, so a
+  lone numerator with a text object right under it is N/N; a lone numerator
+  with nothing under it is not a signature.
+- **A stem is not a bar line.** `find_barlines` took every thin vertical
+  path spanning the staff for one (116 on Whisper Not's 33-bar page): the
+  pitch reader reset its accidentals at each stem and "corrected" pitches
+  wrongly (10 changes on that page, 1 once fixed; 22 -> 9 on Arriving
+  Soon), and a tuplet number's group "straddled a bar line". Measured on
+  Opus, Inkpen2 and Maestro pages: a bar line overshoots BOTH outer lines
+  by the same 0.05-0.7 of a space (0.15 Finale, 0.34 Sibelius), a stem ends
+  ON a notehead at one end. Sibelius also draws bar lines wider than
+  stems; Finale draws them alike, so width is only a floor. 187 of 222
+  vector files read about one bar line per bar; an older Finale export can
+  hide some, so `correct_pitches` also ends an accidental's hold where the
+  READING's measure ends (`sounding_alters`, union of both; 22 alters on
+  10 files), and `barlines_printed` against `measures` in the manifest
+  says which. The corpus's pitch corrections fell from ~3,900 to 2,431
+  with the stem fix -- the difference was wrong corrections.
+- **A book is split by title text or by the first staff's height**
+  (`layout.group_pages`): a title pushes the first staff down the page
+  (14% against 8.5% on the ebook). The guess is written to the manifest
+  beside the output; a wrong split is corrected there, not in code.
+- **MuseScore refuses a whole file, exit code 40 and no message, for two
+  engine slips**: a tuplet whose written values do not make its ratio
+  (3:2 over eighth-eighth-quarter; four bare "triplet quarters") and a
+  `<chord/>` tone on a rest or after a `<backup>`. `musicxml.repair_tuplets`
+  and `repair_chords` strip the mark and keep the durations; 48 of 285
+  corpus files were refused before them. `pdf2musicxml render` is the
+  test -- bisect a refused file by measure, then by note, to find the
+  next such construct.
+- The `omr` group brings opencv, rapidocr and onnxruntime (~200 MB) and
+  homr keeps its downloaded models INSIDE its package folder, so a sync
+  that reinstalls homr re-downloads them. `opencv-python` (rapidocr's) and
+  `opencv-python-headless` (homr's) are pinned to ONE major in pyproject:
+  both unpack into the same `cv2/` folder, and a 5.0 beside a 4.14 broke
+  `import cv2.typing` for every homr run. Outputs are derivatives of
+  commercial recordings and stay under the gitignored `benchmark/`.
+
 ## Measuring: two benchmarks, and they answer different questions
 
 Confusing them cost months. `docs/benchmark-deficiencies.md` is the running

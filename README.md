@@ -95,6 +95,12 @@ score. It asks two questions separately, because they have different
 answers: did we hear the right notes, and did we *write* them the way a
 transcriber would?
 
+A hand transcription can also start life as a PDF from the web: the
+standalone `pdf2musicxml` tool (see [docs/pdf2musicxml.md](docs/pdf2musicxml.md))
+reads single solos and whole books with two OMR engines, writes one
+MusicXML per transcription for MuseScore, and lists the bars the engines
+disagree on for proofreading.
+
 ## How well does it work
 
 Measured against the Weimar Jazz Database's human-annotated solos, where
