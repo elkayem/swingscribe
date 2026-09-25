@@ -248,6 +248,41 @@ def add_score_onsets(tally: Tally, path: Path) -> None:
     tally.add_onsets([n.position for n in score.melody])
 
 
+def add_corpus(tally: Tally, folder: Path) -> None:
+    """The 275 OMR-read human pages (docs/figure-prior.md), under the
+    figure prior's own filter: a bar that does not fill its signature, a
+    bar the converter doubts, and a compound-metre bar are left out, and
+    positions are counted over runs of counted bars so no gap spans one.
+    Written symbols come from the same reader; the pages are read with
+    `figure_prior.read_transcription`, not `mscz`, so the exclusions are the
+    figure table's exactly."""
+    import figure_prior
+
+    for transcription in figure_prior.load_corpus(folder, log=lambda *_: None):
+        origin = 0.0
+        run: list[float] = []
+        for bar in transcription.bars:
+            if (
+                not figure_prior.bar_included(transcription, bar, strict=False)
+                or bar.signature[1] != 4
+            ):
+                if run:
+                    tally.add_onsets(run)
+                    run = []
+                origin += float(bar.length)
+                continue
+            for kind in bar.note_kinds:
+                tally.add_written(kind, False, False, "[" in kind)
+            for kind in bar.rest_kinds:
+                tally.add_written(kind, True, False, False)
+            tally.tied += bar.tie_starts
+            run.extend(origin + float(o) for o in bar.onsets)
+            origin += float(bar.length)
+        if run:
+            tally.add_onsets(run)
+        tally.tracks += 1
+
+
 def add_wjazz_onsets(tally: Tally, db: sqlite3.Connection, melid: int) -> bool:
     row = db.execute("SELECT signature FROM solo_info WHERE melid=?", (melid,)).fetchone()
     signature = row[0] if row else None
@@ -272,7 +307,13 @@ def sidecar_of(key: str) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
 
-def survey(db_path: Path | None, step_cost: float, dip_db: float, grids_path: Path) -> dict:
+def survey(
+    db_path: Path | None,
+    step_cost: float,
+    dip_db: float,
+    grids_path: Path,
+    corpus: Path | None = None,
+) -> dict:
     quiet = lambda *_: None  # noqa: E731
     cache = run_eval.notes_cache(step_cost, dip_db)
     runs = run_eval.transcribe_all(cache, step_cost, dip_db, log=quiet)
@@ -281,6 +322,12 @@ def survey(db_path: Path | None, step_cost: float, dip_db: float, grids_path: Pa
 
     def tally(name: str) -> Tally:
         return tallies.setdefault(name, Tally(name))
+
+    # The fourth human column: the OMR-read transcription pages, a corpus
+    # with no audio on hand, so it stands beside every set rather than
+    # against one of them.
+    if corpus is not None and corpus.is_dir():
+        add_corpus(tally("human pages (OMR corpus)"), corpus)
 
     # The hand-scored tracks and the Omnibook: our page over the sidecar's
     # span, the reference from the sidecar's score. Default take only.
@@ -370,12 +417,18 @@ def main() -> None:
     parser.add_argument("--dip-db", type=float, default=0.0)
     parser.add_argument("--grids", type=Path, default=run_eval.GRIDS_CACHE)
     parser.add_argument("--json", type=Path, default=None, help="write the tallies here")
+    parser.add_argument(
+        "--corpus",
+        type=Path,
+        default=Path("benchmark/Transcriptions_Other/musicxml"),
+        help="the OMR-read human pages (scripts/figure_prior.py); skipped if absent",
+    )
     args = parser.parse_args()
     # The stages narrate every page they build (swing spans, notes placed);
     # a survey over a hundred pages wants only the tallies.
     logging.disable(logging.CRITICAL)
     with contextlib.redirect_stdout(io.StringIO()):
-        result = survey(args.db, args.step_cost, args.dip_db, args.grids)
+        result = survey(args.db, args.step_cost, args.dip_db, args.grids, args.corpus)
     render(result)
     if args.json:
         args.json.write_text(json.dumps(result, indent=2), encoding="utf-8")
