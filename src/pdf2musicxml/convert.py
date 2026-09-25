@@ -556,6 +556,8 @@ def convert_group(
                 part,
                 other_part,
                 vector.printed_count_per_measure(part, printed) if printed else None,
+                vector.printed_bar_per_measure(part, printed) if printed else None,
+                vector.printed_bar_per_measure(other_part, printed) if printed else None,
             )
             filled += musicxml.fill_rest_bars(part)
         else:

@@ -1723,6 +1723,19 @@ def align_bars(part: ET.Element, printed: PrintedPages) -> BarFix:
     return result
 
 
+def printed_bar_per_measure(
+    part: ET.Element, printed: PrintedPages
+) -> list[tuple[int, int, int] | None]:
+    """The printed bar (page, staff, bar) each read measure's aligned notes sit in.
+
+    None where a measure holds notes of two printed bars, or none.
+    """
+    keys = _printed_bar_of_notes(part, printed)
+    if keys is None:
+        return [None] * len(part.findall("measure"))
+    return [ks[0] if len(ks) == 1 else None for ks in _measure_keys(part, keys)]
+
+
 def printed_count_per_measure(part: ET.Element, printed: PrintedPages) -> list[int | None]:
     """How many noteheads the page prints in each of the reading's measures, by the notes' bars.
 

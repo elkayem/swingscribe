@@ -1975,3 +1975,58 @@ def test_a_repeated_signature_is_dropped():
     musicxml.set_measure_time(part.findall("measure")[2], 2, 4)
     assert musicxml.drop_redundant_times(part) == 1
     assert musicxml.time_changes(part) == ["bar 3: 2/4"]
+
+
+# ---------------------------------------------------------------- pairing the two readings
+
+
+def _with_systems(bars_, breaks, divisions=4):
+    """A part whose measures at the given indices start a new system."""
+    marked = [
+        ('<print new-system="yes"/>' if k in breaks else "") + bar for k, bar in enumerate(bars_)
+    ]
+    return musicxml.first_part(score(marked, divisions=divisions).getroot())
+
+
+def test_readings_of_equal_bar_count_pair_by_index():
+    part = musicxml.first_part(score([note("C", 4, 4) * 4] * 3).getroot())
+    other = musicxml.first_part(score([note("D", 4, 4) * 4] * 3).getroot())
+    assert musicxml.pair_measures(part, other) == [(0, 0), (1, 1), (2, 2)]
+
+
+def test_readings_of_unequal_bar_count_pair_by_system():
+    # This reading: systems of 4 and 4 bars. The other took a double bar line for
+    # two bars in its first system: 5 and 4. The second systems pair; the first do not.
+    part = _with_systems([note("C", 4, 4) * 4] * 8, {4})
+    other = _with_systems([note("D", 4, 4) * 4] * 9, {5})
+    assert musicxml.pair_measures(part, other) == [(4, 5), (5, 6), (6, 7), (7, 8)]
+
+
+def test_readings_pair_by_the_printed_bar_when_both_were_aligned_to_the_page():
+    part = musicxml.first_part(score([note("C", 4, 4) * 4] * 3).getroot())
+    other = musicxml.first_part(score([note("D", 4, 4) * 4] * 4).getroot())
+    keys = [(0, 0, 0), (0, 0, 1), (0, 0, 2)]
+    other_keys = [(0, 0, 0), None, (0, 0, 1), (0, 0, 2)]  # its bar 2 was split in two
+    assert musicxml.pair_measures(part, other, keys, other_keys) == [(0, 0), (1, 2), (2, 3)]
+
+
+def test_a_merge_takes_a_paired_bar_the_other_reading_fills_across_a_split():
+    # Four bars here, the second short; five there with the first split but bar 2 full.
+    mine = _with_systems(
+        [note("C", 4, 4) * 4, note("C", 4, 4) * 3] + [note("C", 4, 4) * 4] * 2, {2}
+    )
+    theirs = _with_systems(
+        [note("D", 4, 4) * 2] * 2 + [note("D", 4, 4) * 4] + [note("D", 4, 4) * 4] * 2, {3}
+    )
+    result = musicxml.merge_readings(mine, theirs)
+    assert (result.compared, result.taken, result.bars) == (2, 0, [])
+    # Nothing pairs in the first system (2 bars against 3); the second system's
+    # bars pair and are equal, so nothing is taken. Now make one of ours short.
+    mine = _with_systems(
+        [note("C", 4, 4) * 4] * 2 + [note("C", 4, 4) * 3, note("C", 4, 4) * 4], {2}
+    )
+    result = musicxml.merge_readings(mine, theirs)
+    assert (result.taken, result.bars) == (1, ["3"])
+    assert [n.findtext("pitch/step") for n in mine.findall("measure")[2].findall("note")] == [
+        "D"
+    ] * 4

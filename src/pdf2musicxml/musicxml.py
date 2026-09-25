@@ -1210,8 +1210,89 @@ class Merge:
     bars: list[str] = field(default_factory=list)  # their numbers
 
 
+def systems_of(part: ET.Element) -> list[list[ET.Element]]:
+    """The measures grouped by system, at each `<print new-system>` or `<print new-page>`."""
+    out: list[list[ET.Element]] = [[]]
+    for measure in part.findall("measure"):
+        mark = measure.find("print")
+        breaks = mark is not None and (
+            mark.get("new-system") == "yes" or mark.get("new-page") == "yes"
+        )
+        if breaks and out[-1]:
+            out.append([])
+        out[-1].append(measure)
+    return out
+
+
+def pair_measures(
+    part: ET.Element,
+    other: ET.Element,
+    keys: list | None = None,
+    other_keys: list | None = None,
+) -> list[tuple[int, int]]:
+    """Which measure of the other reading stands for each of this one, as index pairs.
+
+    Three ways, the first that applies: by the page's printed bar, when
+    both readings' notes were aligned to the page (the keys, one per
+    measure, None where a measure holds notes of two printed bars or
+    none); by index when the bar counts agree; else by SYSTEM -- both
+    engines mark system breaks, so two systems of equal bar count that
+    begin within two bars of each other pair, and their bars by index.
+    Two readings that differ by a bar (a scan whose double bar line one
+    engine took for two) used to pair nothing at all: 100 of the
+    corpus's 275 transcriptions.
+    """
+    measures = part.findall("measure")
+    others = other.findall("measure")
+    if keys is not None and other_keys is not None and any(keys) and any(other_keys):
+        position = {}
+        for j, key in enumerate(other_keys):
+            if key is not None and key not in position:
+                position[key] = j
+        pairs = []
+        last = -1
+        for i, key in enumerate(keys):
+            j = position.get(key) if key is not None else None
+            if j is not None and j > last:
+                pairs.append((i, j))
+                last = j
+        return pairs
+    if len(measures) == len(others):
+        return [(k, k) for k in range(len(measures))]
+    mine, theirs = systems_of(part), systems_of(other)
+    if len(mine) < 2 or len(theirs) < 2:
+        return []
+    index_mine = {id(m): i for i, m in enumerate(measures)}
+    index_theirs = {id(m): j for j, m in enumerate(others)}
+    # Two systems pair when they hold the same number of bars and begin
+    # within two bars of each other in their readings; otherwise the
+    # reading that lags (the earlier start) moves on, or both do.
+    starts_mine = [index_mine[id(s[0])] for s in mine]
+    starts_theirs = [index_theirs[id(s[0])] for s in theirs]
+    pairs = []
+    i = j = 0
+    while i < len(mine) and j < len(theirs):
+        if len(mine[i]) == len(theirs[j]) and abs(starts_mine[i] - starts_theirs[j]) <= 2:
+            for m, o in zip(mine[i], theirs[j], strict=True):
+                pairs.append((index_mine[id(m)], index_theirs[id(o)]))
+            i += 1
+            j += 1
+        elif starts_mine[i] < starts_theirs[j]:
+            i += 1
+        elif starts_theirs[j] < starts_mine[i]:
+            j += 1
+        else:
+            i += 1
+            j += 1
+    return pairs
+
+
 def merge_readings(
-    part: ET.Element, other: ET.Element, printed_counts: list[int | None] | None = None
+    part: ET.Element,
+    other: ET.Element,
+    printed_counts: list[int | None] | None = None,
+    keys: list | None = None,
+    other_keys: list | None = None,
 ) -> Merge:
     """Take from the other reading each bar it reads better, bar for bar.
 
@@ -1228,7 +1309,8 @@ def merge_readings(
     result = Merge()
     measures = part.findall("measure")
     others = other.findall("measure")
-    if not measures or len(measures) != len(others):
+    pairs = pair_measures(part, other, keys, other_keys) if measures and others else []
+    if not pairs:
         return result
     this_divisions, other_divisions = _first_divisions(part), _first_divisions(other)
     common = math.lcm(this_divisions, other_divisions)
@@ -1236,8 +1318,9 @@ def merge_readings(
     scale_divisions(other, common // other_divisions)
     counts = printed_counts if printed_counts and len(printed_counts) == len(measures) else None
     this_bars, other_bars = bars(part), bars(other)
-    result.compared = len(measures)
-    for k, (mine, theirs) in enumerate(zip(measures, others, strict=True)):
+    result.compared = len(pairs)
+    for k, j in pairs:
+        mine, theirs = measures[k], others[j]
         expected = this_bars[k].expected
         # The page's note count first, then how far the bar is from its
         # signature (nearer wins: a reading a third of a beat short beats
@@ -1246,10 +1329,10 @@ def merge_readings(
         score_theirs: tuple = (0, 0)
         if counts is not None and counts[k] is not None:
             score_mine = (this_bars[k].notes == counts[k], 0)
-            score_theirs = (other_bars[k].notes == counts[k], 0)
+            score_theirs = (other_bars[j].notes == counts[k], 0)
         if expected is not None:
             score_mine = (score_mine[0], -abs(this_bars[k].length - expected))
-            score_theirs = (score_theirs[0], -abs(other_bars[k].length - expected))
+            score_theirs = (score_theirs[0], -abs(other_bars[j].length - expected))
         if score_theirs <= score_mine:
             continue
         replacement = copy.deepcopy(theirs)

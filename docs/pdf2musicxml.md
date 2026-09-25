@@ -461,6 +461,30 @@ The Bird after these rules, while La Prima Notte di Quiete, a nine-page
 feature with 176 bars of rest, drifts by up to 24 bars in two stretches
 -- the manifest's `rest_notes` name each stretch for the proofreader.
 
+### Pairing the readings when their bar counts differ
+
+The listener saw 32nd notes in Alone Together where the page has
+sixteenths, and 64ths in both Body and Souls: homr reads one beam too
+many on that heavy handwritten font (213 32nds against Audiveris's 8 on
+Alone Together, where Audiveris reads 850 sixteenths). Audiveris had
+those bars right, and the merge could not use them, because it paired
+bars only when the two readings' bar counts agreed -- 100 of the 275
+transcriptions (34 of the 53 scans) differed by a bar or more, and on
+those the cross-check merged nothing. `musicxml.pair_measures` now
+pairs three ways, the first that applies: by the page's printed bar
+when both readings' notes were aligned to the page (`vector.
+printed_bar_per_measure`, exact on vector files); by index when the
+counts agree; else by system, since both engines mark system breaks --
+two systems of equal bar count that begin within two bars of each
+other pair, and their bars by index (a SequenceMatcher on the bar
+counts paired the wrong systems: with counts 4,4 against 5,4 it matched
+the first 4 to the second). Bars from the cross-check 486 to 817 on
+171 files; bars off the signature 1,240 to 1,015 (vector 746 to 613,
+scans 494 to 402); Alone Together 59 to 36. The Body and Souls stay at
+about 50 of 70: with 0% agreement between the readings, a system pairs
+only where both engines counted its bars alike, and the taken bars are
+nearer the signature rather than right.
+
 ## What is left to a human
 
 An OMR reading is a draft. Per page expect a handful of wrong durations,

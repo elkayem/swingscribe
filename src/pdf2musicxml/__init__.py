@@ -14,4 +14,4 @@ naming the instrument and its transposition, turning an engine's slurs into
 the ties they were, and reporting bars that do not add up -- is here.
 """
 
-__version__ = "0.3.20"
+__version__ = "0.3.22"

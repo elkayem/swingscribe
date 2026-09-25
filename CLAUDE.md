@@ -1115,6 +1115,18 @@ docs/pdf2musicxml.md has the measurements. Things not to re-derive:
   start against the file's measure there is the check that verified
   the rest expansions (every system on five files; La Prima Notte
   drifts 24) -- not in the tool yet, the next instrument to add.
+- **The merge pairs bars three ways** (`musicxml.pair_measures`,
+  2026-09-25): by the page's printed bar when both readings were aligned
+  to it (`vector.printed_bar_per_measure`), by index when the counts
+  agree, else by SYSTEM (both engines write `<print new-system>`; two
+  systems of equal bar count beginning within two bars of each other
+  pair). It used to pair nothing when the counts differed, which was
+  100 of 275 transcriptions and every scan the listener complained of
+  (homr reads one beam too many on the handwritten font: 32nds for
+  16ths; Audiveris has those bars). Bars from the cross-check 486 ->
+  817 on 171 files; off bars 1,240 -> 1,015 (vector 613, scans 402).
+  Do not align systems with SequenceMatcher on bar counts: it matches
+  equal counts out of position.
 - **pdfium's text layer drops the second of two identical characters whose
   boxes touch**: a printed 4/4 arrives as one "4", a 2/2 as one "2", while
   3/4 and 6/8 arrive whole. The page's text OBJECTS still hold both, so a
