@@ -32,48 +32,62 @@ On 2026-09-24 `src/pdf2musicxml/` (docs/pdf2musicxml.md) converted 267
 PDF transcriptions by human transcribers into MusicXML under
 `benchmark/Transcriptions_Other/musicxml/`. That is the corpus.
 
-## The corpus, counted (2026-09-24, one pass over the folder)
+## The corpus, counted (2026-09-25, one pass over the folder after the converter's second round)
 
-| | n |
+The converter was corrected on 2026-09-25 (printed tuplet numbers, time
+signatures and tempo marks are now read off the page text; docs/pdf2musicxml.md)
+and the listener is still spot-checking, so these numbers will move
+again. Re-run the count when the folder changes; it takes seconds.
+
+| | n (2026-09-24 in brackets) |
 |---|---|
 | transcriptions (`*.musicxml`) | 275 |
-| notes (chord tones collapsed, grace notes dropped) | 125,352 |
-| rests | 14,887 |
-| tuplet notes | 8,438 (6.7%) |
-| tied-into notes (not onsets) | 4,260 (3.4%) |
-| bars | 20,271 |
-| bars whose notes fill the signature | 17,694 (87.3%) |
-| beats in those full bars (quarter-note beats) | 65,951 |
-| files with a tempo mark | 0 |
-| time signatures (bars) | 4/4 16,950; 2/2 2,854; 3/4 302; 2/4 97; 3/2 68 |
-| sources | Wesley Chin 53 files / 35.8k notes (hard bop, Sibelius); maxgrynchuk.com 50 / 25.0k (lead-trumpet charts: Ferguson, Bergeron, Sandoval; cut time, dense sixteenths); peterandwillanderson.com 161 / 65.3k (swing era and New Orleans clarinet and tenor, Finale, 36 scanned) |
+| notes (chord tones collapsed, grace notes dropped) | 124,615 |
+| rests | 15,702 |
+| tuplet notes | 12,747, 10.2% (was 8,438, 6.7%) |
+| tied-into notes (not onsets) | 4,198 (3.4%) |
+| bars | 21,018 |
+| bars whose notes fill the signature | 19,944, 94.9% (was 87.3%) |
+| beats in those full bars (quarter-note beats) | 76,896 (was 65,951) |
+| bars the two OMR engines read differently | 5,613, 26.7% (median file agreement 0.76) |
+| files with a tempo mark (`<sound tempo>`, quarter-note bpm, half-note marks already doubled) | 118 of 275 (was 0); Wesley Chin 49 of 53, maxgrynchuk 39 of 42, peterandwillanderson 30 of 180 |
+| tempo bands over those 118 | under 100: 8; 100-160: 21; 160-220: 29; 220-300: 52; 300 and over: 8. Three marks under 40 bpm are misread digits ("quarter = 20"); drop anything under 40 |
+| time signatures (bars) | 4/4 19,481; 2/2 1,293 (was 2,854, the printed signature is read now); 6/8 92; 12/8 55; 2/4 47; 10/8 34; 8/8 14 |
+| printed tuplet numbers | 3,976 printed; 1,343 applied from the page over the engine's reading; 165 could not be applied (78 files); 78 read by an engine with no number printed |
+| sources | Wesley Chin 53 files (hard bop, Sibelius); maxgrynchuk.com 42 (lead-trumpet charts: Ferguson, Bergeron, Sandoval; dense sixteenths); peterandwillanderson.com 180 (swing era and New Orleans clarinet and tenor, Finale, 36 scanned) |
 
 Preview of the per-beat figure tally, full bars only, onset positions as
 fractions of the beat (a tied-into note is not an onset; a chord is one
 onset):
 
-| figure | share of 65,951 beats |
+| figure | share of 76,896 beats (2026-09-24 in brackets) |
 |---|---|
-| 0 1/2 (eighth pair) | 40.7% |
-| no onset | 23.4% |
-| 0 (one note on the beat) | 12.9% |
-| 1/2 (one note on the and) | 7.9% |
-| 0 1/4 1/2 3/4 (four sixteenths) | 4.9% |
-| 0 1/3 2/3 (triplet) | 2.5% |
-| 0 1/2 3/4 | 1.2% |
+| 0 1/2 (eighth pair) | 38.1% (40.7) |
+| no onset | 27.1% (23.4) |
+| 0 (one note on the beat) | 12.5% (12.9) |
+| 1/2 (one note on the and) | 7.8% (7.9) |
+| 0 1/4 1/2 3/4 (four sixteenths) | 4.1% (4.9) |
+| 0 1/3 2/3 (triplet) | 3.1% (2.5) |
+| 0 1/2 3/4 | 1.0% |
 | 1/2 3/4 | 0.8% |
-| 0 1/4 (sixteenth then dotted eighth) | 0.5% |
-| 1/4 1/2 3/4 | 0.5% |
 | 0 1/4 1/2 | 0.4% |
-| 3/4 alone (the lone "a") | 0.4% |
-| 0 3/4 (dotted eighth plus sixteenth) | 0.4% |
+| 0 1/4 (sixteenth then dotted eighth) | 0.4% |
+| 1/4 1/2 3/4 | 0.4% |
+| 1/3 2/3 | 0.4% (0.2) |
+| 1/3 alone | 0.3% |
+| 0 3/4 (dotted eighth plus sixteenth) | 0.3% |
+| 0 2/3 | 0.3% |
+| 3/4 alone (the lone "a") | 0.2% (0.4) |
 | 1/4 alone (the lone "e") | 0.1% |
-| 261 distinct figures; those seen under 20 times | 1.0% of beats |
+| 0 0 (an engine duplicate, not a figure) | 0.1% |
 
-The six commonest figures are 92% of beats. The rules already shipped
+The six commonest figures are 93% of beats. The rules already shipped
 (R27, R29) encode the rarity of the lone "e", the lone "a" and the dotted
 eighth; the table says how rare, and it says the same for the two
-hundred figures nobody has written a rule for.
+hundred figures nobody has written a rule for. Between the two rounds the
+triplet rows rose and the sixteenth and lone-"a" rows fell: that is the
+page's printed tuplet numbers replacing engine readings, and the
+direction to expect from further cleanup.
 
 ## What the corpus is and is not evidence about
 
@@ -87,43 +101,58 @@ hundred figures nobody has written a rule for.
   Omnibook sides through `scripts/run_eval.py`, which is a clean
   hold-out by construction. Verify that no corpus title is a recording in
   `benchmark/` (list both; a match is dropped from the count).
-- It carries no tempo. Nothing in the files says how fast; a
-  tempo-conditioned table is not available from this corpus. See task 3.
-- It is an OMR reading, not a proofread page. 12.7% of bars do not fill
-  their signature (an engine slip somewhere in the bar), and the
-  figures in those bars are the long tail (591 distinct figures with
-  them, 261 without). Count from full bars only. Beats with two onsets
-  at one position ("0 0", 73 beats) are engine duplicates; drop them.
-  The manifests (`*.pdf2musicxml.json`) carry per-file quality:
-  `printed_noteheads` against `notes`, `check_agreement`, `off_bars`,
-  `time_note`. Report the table with and without the low-quality files
-  so its stability is on the record.
-- **The OMR's commonest slip is a triplet read without its mark**, and
-  it biases the table in a known direction. The listener has seen this
-  on the pages (2026-09-24). A triplet read as three binary notes
-  leaves its bar short, so the bar is excluded, so bars WITH triplets
-  are over-represented among the excluded 12.7%: the 2.5% triplet
-  figure above is a floor, not an estimate. Where the engine read the
-  mark but got the values wrong, `musicxml.repair_tuplets` stripped the
-  mark and kept the durations, and that bar is short too. A misread
-  triplet that still fills its bar looks like a legitimate binary
-  figure and cannot be told from one. So: report the tuplet figures per
-  file beside the manifest's engine-agreement bars; treat the triplet
-  rows as lower bounds; and if the listener has marked the missed
-  triplets in any files, re-run the table on them (a re-tally takes
-  seconds) and say what moved. The cleanup that matters most for the
-  prior is the triplets in Wesley Chin's 53 hard-bop files, the stratum
-  nearest the judge set.
-- 18 files are marked "bars too irregular to decide" on the time
-  signature; they are mostly ballads (Body and Soul, Star Dust, Round
-  Midnight, Yesterdays) written in 32nds and sextuplets. They are 7% of
-  files and their full bars are few; a wrong signature that still fills
-  (4/4 read as 2/2) does not change a per-quarter count. The listener
-  has also seen time-signature mistakes on the pages; those files are a
-  cleanup for a later purpose (a human ballad page is what R31 waits
-  for, docs/benchmark-deficiencies.md D36), not a blocker here.
-- Style is skewed. 161 of 275 files are swing-era and New Orleans
-  players, 50 are big-band lead-trumpet charts, 53 are the hard bop the
+- It carries a tempo on 118 of 275 files, read from the page's own
+  metronome text and written as `<sound tempo>` in quarter-note bpm
+  (the converter doubles a half-note mark: Advance Notice's "Swing half
+  = 108" is 216). The bands are thin at the ends (8 files under 100
+  bpm, 8 at 300 and over) and full in the middle. Three marks under 40
+  bpm are misread digits; drop them. The other 157 files have no
+  tempo. See task 3.
+- It is an OMR reading, not a proofread page, and **a bar whose notes
+  do not fill its signature is excluded, without exception** (the
+  listener's rule, 2026-09-25: a short or long bar is a certain sign of
+  a mistake somewhere in it, and there is no way to say where). That is
+  5.1% of bars now (12.7% before the converter's second round). Two
+  more exclusions beside it: a beat with two onsets at one position
+  ("0 0", 75 beats) is an engine duplicate; and a bar the manifest
+  names under its tuplet bookkeeping as one where a printed tuplet
+  number could not be applied (`tuplets_unapplied`, 165 over 78 files)
+  or where an engine read a tuplet the page does not print
+  (`tuplets_unprinted`, 78) is a bar the tool itself doubts. The
+  manifests (`*.pdf2musicxml.json`) carry the rest of the per-file
+  quality: `printed_noteheads` against `notes`, `check_agreement`,
+  `check_disagreeing` (the bars the two engines read differently, 26.7%
+  of all bars), `off_bars`, `time_note`, `tempo`. Report the table
+  under the plain filter and under a strict one that also drops every
+  bar the two engines disagree on (about 70% of bars survive it); if
+  the top thirty figures agree within their counts, the plain filter is
+  the one to build from, and the comparison is the evidence that the
+  OMR noise does not shape the table.
+- **The OMR's commonest slip was a triplet read without its mark.** The
+  listener saw it on the pages (2026-09-24) and the converter now reads
+  the printed tuplet numbers off the page text and applies them over
+  the engine's reading (1,343 of 3,976 printed numbers changed a
+  reading; tuplet notes went from 6.7% to 10.2% of the corpus, beside
+  the listener's own 11.2% and the Omnibook's 14.4%). What remains: a
+  misread triplet that still fills its bar looks like a legitimate
+  binary figure and cannot be told from one, and the 165 numbers the
+  tool could not apply are in bars excluded above. So the triplet rows
+  are close now but still read slightly low; say so beside them, report
+  them per stratum, and re-tally when the listener's spot checks land
+  (a re-tally takes seconds). Cleanup pays most in Wesley Chin's 53
+  hard-bop files, the stratum nearest the judge set.
+- Time signatures are read from the page now ("printed 4/4" on 182
+  files); 7 files remain "too irregular to decide" (18 before), mostly
+  ballads (Body and Soul, Star Dust, Round Midnight) written in 32nds
+  and sextuplets. A wrong signature that still fills (4/4 read as 2/2)
+  does not change a per-quarter count. Compound meters (6/8, 12/8, 10/8,
+  8/8: 195 bars, under 1%) have no quarter-note beat and are left out of
+  the count entirely. The listener has seen time-signature mistakes on
+  the pages; those files are a cleanup for a later purpose (a human
+  ballad page is what R31 waits for, docs/benchmark-deficiencies.md
+  D36), not a blocker here.
+- Style is skewed. 180 of 275 files are swing-era and New Orleans
+  players, 42 are big-band lead-trumpet charts, 53 are the hard bop the
   judge set is made of. Count per source stratum and report whether the
   strata agree on the top thirty figures before pooling. If Bechet and
   Parker disagree on what is rare, the prior conditions on something, or
@@ -141,12 +170,15 @@ Read every `*.musicxml` in the folder and tally, per beat of each bar that
 fills its signature: the sorted tuple of onset positions in the beat
 (fractions, exact, from `duration`/`divisions` with `backup`/`forward`
 honoured; a tied-into note and a grace note are not onsets; a chord is
-one onset). Count 4/4 and 3/4 per quarter note. Count 2/2 separately, per
-quarter note as well, and say what its figures look like; it is 14% of
-bars and a cut-time chart's "eighth pair" is a pair of quarters. Do not
-fold it into the pooled table until you have looked. The script belongs
-in `scripts/` with a test on a synthetic MusicXML file (a tie, a tuplet,
-a backup, a bar that does not fill), standard library only.
+one onset), applying the exclusions above (a bar that does not fill, a
+duplicate onset, a bar the manifest's tuplet bookkeeping doubts, a
+compound meter). Count 4/4, 3/4 and 2/4 per quarter note. Count 2/2
+separately, per quarter note as well, and say what its figures look
+like; it is 6% of bars and a cut-time chart's "eighth pair" is a pair of
+quarters. Do not fold it into the pooled table until you have looked.
+The script belongs in `scripts/` with a test on a synthetic MusicXML
+file (a tie, a tuplet, a backup, a duplicate onset, a bar that does not
+fill), standard library only.
 
 Write `docs/figure-prior.md`: the table per source stratum and pooled,
 with n on every row; the same with the low-quality files excluded; the
@@ -180,19 +212,27 @@ names what we over-write and under-write with a number on each.
 ### 3. What to condition on
 
 The prior must condition only on what the quantizer knows when it runs:
-the onsets, the beat grid in seconds, the swing reading. Test three
+the onsets, the beat grid in seconds, the swing reading. Test four
 conditionings on the human corpus, cheapest first, and take the simplest
 that carries information:
 
 - nothing (one table);
+- tempo band, on the 118 files with a mark (drop marks under 40 bpm):
+  the quantizer knows each beat's length in seconds, and D11 found the
+  running note value steps with tempo (sixteenth under 120 bpm, triplet
+  eighth to 160, eighth above). The bands under 100 and at 300 and over
+  hold 8 files each, so a table per band is thin at the ends; report the
+  counts behind every cell, and whether the middle bands differ from
+  each other at all;
 - local onset density: onsets per beat over the surrounding eight beats,
-  bucketed (this is computable on a human page and at quantize time
-  alike, and it is the tempo proxy D11 found: the running note value
-  steps with tempo, so a dense page is a slow or a sixteenth-note one);
+  bucketed. It is computable on every page, marked or not, and at
+  quantize time alike, and it is the same tempo proxy from the other
+  side. If it carries what the tempo band carries, it is the one to use,
+  because it covers all 275 files;
 - the previous beat's figure (a bigram). Report the conditional entropy
   against the unigram's; under about 0.1 bit of gain, skip it.
 
-Meter (3/4, 2/2) is a fourth, and the beat grid already knows it. Report
+Meter (3/4, 2/2) is a fifth, and the beat grid already knows it. Report
 each conditioning's entropy and the counts behind the sparsest cell.
 
 ### 4. The prior in the quantizer
