@@ -248,6 +248,7 @@ def choose_reading(
     prior_weight: float = 0.0,
     prior: tuple[dict[str, float], float] | None = None,
     next_occupied: bool = False,
+    previous_pushed: bool = False,
 ) -> tuple[int, str]:
     """Pick the subdivision the notes in one beat actually fit, and under
     which timing reading: ("warped", the beat is swung) or ("raw", the beat
@@ -270,11 +271,16 @@ def choose_reading(
     once -- a pushed note leaves the beat's figure, the figure left behind
     is the common one, and the WJazzD instrument's dropped notes went 7,155
     to 22,934. Such a reading is marked as merging, exactly as one that
-    merges inside the beat is. The push is refused at its source only: a
-    first version also flagged the beat AFTER a push, which put every
-    reading of that beat in the fallback, where the prior took the coarsest
+    merges inside the beat is. The other side is guarded too: where the beat
+    before DID push a note onto this beat's line (every grid sent it there,
+    the fallback), a reading of this beat that puts its own note on that
+    line loses one of the two (`previous_pushed`; Mobley's All The Things
+    bar 61), and is marked the same way. Only such a reading: a first
+    version flagged every reading of the beat after a push, which put the
+    whole beat in the fallback, where the prior then took the coarsest
     grid, which pushed in turn -- a cascade down every ballad (26,973
-    dropped).
+    dropped). Losses are counted before error in the fallback now, so a
+    reading that keeps its note off the line always wins there.
 
     Post-warp, a swung eighth pair (0, 0.5) and a triplet figure (0, 1/3, 2/3)
     are close enough that assuming a binary grid silently rewrites the second
@@ -389,6 +395,8 @@ def choose_reading(
             if with_prior:
                 error += prior_weight * figure_surprisal(figure_of(values, divisions), table)
                 if next_occupied and any(s >= 1.0 - 1e-9 for s in snapped):
+                    merges, merged = True, merged + 1
+                if previous_pushed and any(s <= 1e-9 for s in snapped):
                     merges, merged = True, merged + 1
             # With the prior on, a grid that merges is ranked by how many
             # notes it loses before its error: in the fallback below (no grid
@@ -651,6 +659,10 @@ def quantize_notes(
     grids: dict[int, int] = {}
     readings: dict[int, str] = {}
     prior = figure_prior() if figure_prior_weight > 0 else None
+    pushed: set[int] = set()  # beats whose chosen reading sent a note to the next beat line
+    # Ascending, so the beat before is decided when the prior asks whether it
+    # pushed; each beat's choice is its own, so the order changes nothing
+    # with the prior off.
     for index in sorted(per_beat):
         offsets = per_beat[index]
         # A beat the finest binary grid cannot keep apart holds a genuine
@@ -708,7 +720,13 @@ def quantize_notes(
             next_occupied=any(
                 o < 0.25 for o in per_beat.get(index + 1, []) + per_beat_raw.get(index + 1, [])
             ),
+            previous_pushed=(index - 1) in pushed,
         )
+        if prior is not None:
+            grid = grids[index]
+            values = per_beat_raw[index] if grid % 3 == 0 or readings[index] == "raw" else offsets
+            if any(snap(o, grid)[0] >= 1.0 - 1e-9 for o in values):
+                pushed.add(index)
     if allow_triplets and quarter_triplets:
         # A beat pair that reads as a quarter-note triplet is two ternary
         # beats: the figure's raw thirds snap per beat to 0 and 2/3 on the
