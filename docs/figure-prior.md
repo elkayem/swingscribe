@@ -634,6 +634,40 @@ a choice this brief settles. Three ways forward, all the listener's:
    behaviour): the earlier table, a level note count, and the shipped
    quantizer's beat-line losses left as they are.
 
+### Shipped (2026-09-26)
+
+The listener read the four Mobley excerpts (the Before and After page)
+and chose the note-keeping version: bars 19-20 and 54-55 "closer to the
+mark" (and their own bar 19 was wrong on a second listen, and corrected);
+bars 22-23 "I would still have written it the way I wrote it" (the B is a
+late eighth, not a sixteenth figure) but the note was heard; bars 52-53
+"SwingScribe caught a note that I missed", the score corrected. "On the
+whole the After were more accurate. If this is representative of
+everything, then I would enable that switch."
+
+Enabled: `figure_prior_weight` 0.015 by default (R33), both baselines
+re-pinned against the corrected Mobley score. The listener's own
+corrections, measured first at the old default, moved Mobley's pitch F1
+0.8975 -> 0.9025 and note F1 0.5563 -> 0.5628 and nothing else. Then the
+prior at its default against that baseline:
+
+| | old default (corrected score) | shipped |
+|---|---|---|
+| hand scores, rhythm (n=12) | 0.8453 | 0.8455 (4 up, 5 down) |
+| hand scores, value (n=12) | 0.7768 | 0.7786 |
+| pianists, rhythm, oracle line (n=7) | 0.8664 | 0.8711 |
+| Omnibook, rhythm (n=22, coverage 0.766 -> 0.773) | 0.7874 | 0.7796 (1 up, 16 down) |
+| Omnibook, value (n=22) | 0.7139 | 0.7114 |
+| Omnibook, readability (n=22) | 0.9975 | 0.9979 |
+| WJazzD placement / coverage (n=73) | 0.855 / 0.8675 | 0.8554 / 0.8726 |
+| instrument: dropped of 198,983 | 7,155 | 4,203 |
+| rows re-pinned in real-audio-baselines.json | | 954 of 2,749 |
+
+The Omnibook's fall is D37's (the recovered notes), not the prior's; the
+decomposition is the section above. `wjazz-quantize-baseline.json` is
+re-pinned too (page hit 74.8 -> 74.9%, a collateral number). WJazzD note
+F1 and beat F1 did not move: nothing above quantize did.
+
 ### The figures on our pages, re-tallied at 0.015
 
 `compare` again with the weight on. Share of beats with an onset; the

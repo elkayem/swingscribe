@@ -929,6 +929,31 @@ Results and limits: `docs/m6-notate.md`.
   figure most -- on our onsets a sixteenth triplet is not three notes at
   sixths, and a grid finer than a sixteenth is where our onsets stop being
   a human's. The first grid-choice rule that did not transfer.
+- **A per-beat FIGURE PRIOR from 245 human transcription pages sits on
+  the grid choice** (2026-09-26, R33, `figure_prior_weight` 0.015 beats
+  per nat, `swingscribe/figure-prior.json`, docs/figure-prior.md): each
+  candidate grid's snap error gains the surprisal of the figure it
+  writes -- the eighth pair is 55% of a human's onset beats, the lone "e"
+  0.05% -- before the coarsest-within-slack rule; every gate stands and
+  the prior decides only among what they leave. Counted by
+  `scripts/figure_prior.py` over the OMR corpus under
+  `benchmark/Transcriptions_Other/` with a bar that does not fill its
+  signature out WITHOUT EXCEPTION; re-run the count and `build` when the
+  listener's corrections land, then both pins. One table: given the
+  onset count no conditioning carries 0.03 bit. The weight is the
+  slack's equivalence, never the page score. **With the prior on, two
+  guards keep every heard note**: a reading may not push a note onto an
+  occupied beat line, nor onto a line the beat before pushed onto, and
+  the all-grids-merge fallback ranks by notes lost -- the prior found
+  both loopholes within a minute (drops 7,155 -> 22,934). The shipped
+  quantizer had been dropping one heard note in 120 that way, silently
+  (D37), and the pages score BETTER without those notes because the
+  transcribers do not write most of them: Omnibook rhythm 0.787 -> 0.780
+  is that, not the prior (guards alone 0.779; at a level note count the
+  prior read +0.007 on the hand scores and +0.002 on the Omnibook, 7 of
+  12 and 12 of 22 pages up). Never "fix" the score by letting the
+  quantizer drop notes again; the erase tool is where a heard note
+  leaves the page.
 - **A grid that merges two onsets is too coarse, whatever its snap error.**
   Two notes on one grid position are one note in a single-line score. Without
   this, coarsening bought notated rhythm by silently deleting 4.8% of the

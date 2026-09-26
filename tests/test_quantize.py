@@ -1122,7 +1122,7 @@ def test_the_figure_prior_table_ships_and_reads():
     assert figure_surprisal("0 1/8 1/3 5/7", (table, unseen)) == unseen
 
 
-def test_the_figure_prior_is_off_by_default_and_costs_nothing():
+def test_the_figure_prior_ships_on_and_off_costs_nothing():
     config = Config()
-    assert config.quantize.figure_prior_weight == 0.0
+    assert config.quantize.figure_prior_weight == 0.015  # R33
     assert _prior_figure_beat(0.0) == _prior_figure_beat(-1.0)

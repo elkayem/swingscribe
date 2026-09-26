@@ -1431,7 +1431,107 @@ R32). The lesson, which this project has met before in another form
 (R8's mean over four, the wrong-take control): know what a reference IS
 before a number against it can move a rule.
 
+### D37 - The quantizer was dropping one heard note in 120 at beat lines, and the pages score better without them
+
+Found 2026-09-25 while rendering Mobley's All The Things You Are bar by
+bar for the listener (docs/figure-prior.md). A late note that the eighth
+grid pushes onto the next beat line lands on the note already there, and
+notate keeps one per grid position: nothing in the log, nothing on the
+page. Counted with the figure prior's guards (R33) switched on, which
+refuse such a reading: 388 of 46,802 notes on the 79 judge and located
+pages (0.8%), none lost on any page; on the annotator's own onsets the
+instrument's drops 7,155 -> 4,203 of 198,983.
+
+The pages score BETTER without those notes. At the smallest prior weight,
+where the prior itself barely decides, the guards alone read hand-score
+rhythm 0.8452 -> 0.8422 (3 up, 5 down) and Omnibook 0.7874 -> 0.7787 (1
+up, 18 down) with coverage up on every set (18 of 22, 55 of 73): the
+transcribers do not write most of the recovered notes, and notated
+rhythm is gap-based, so an extra note between two matched ones breaks
+the gap either side of it. Mobley's bar 22 is the shape of it: the
+recovered B is written as a sixteenth figure where the listener writes
+two eighths, and the listener, hearing it again, kept the eighths ("he is
+just playing the B a little late"). Bar 52 is the other shape: the
+recovered Bb on beat 2 was a note the listener had missed, and the
+listener corrected the score.
+
+What would move: notated rhythm and value on both sets, by exactly the
+share of recovered notes that are notes a transcriber would leave out.
+Whether a heard note belongs on the page is a hearing question and the
+listener's erase tool exists for it; a quantizer that decides it silently
+is the defect, and that half is closed with R33. The open half is the
+notes themselves: which of the 388 are ghosted notes a page omits by
+convention (bar 22), which are real notes the transcriber missed (bar
+52), and which are the transcriber's extra notes (D22's class). A
+per-note table over the twelve hand scores, the way D22 was measured,
+would say.
+
 ## Resolved
+
+### R33 - A per-beat figure prior from 245 human transcription pages, shipped at 0.015 beats per nat
+
+2026-09-26, the listener's decision on reading Mobley's All The Things
+You Are bar by bar, before and after (docs/figure-prior.md has every
+number; docs/figure-prior-brief.md is the brief). What ships:
+
+- `swingscribe/figure-prior.json`: how often a human transcriber writes
+  each set of onset positions inside a quarter-note beat, counted by
+  `scripts/figure_prior.py` over 49,373 beats with an onset on 245 of the
+  OMR-read pages under `benchmark/Transcriptions_Other/` (seven dropped
+  as recordings under `benchmark/`; bars that do not fill their signature
+  out without exception; 2/2 and compound metres out). The eighth pair
+  is 55.0%, the single downbeat 18.0%, the lone "and" 11.5%, four
+  sixteenths 4.9%, the triplet 3.7%, and the lone "e" 0.05%. The three
+  sources and the three human sets (the corpus, the listener's twelve,
+  the Omnibook) agree on the order and within a few points on the
+  shares. Given the onset count, no conditioning (tempo, density, the
+  beat before, metre, source) carries over 0.03 bit held out, so it is
+  one table.
+- `QuantizeConfig.figure_prior_weight = 0.015`: each candidate grid's
+  mean snap error gains the surprisal of the figure it writes, times the
+  weight, before the coarsest-within-slack rule. Every existing rule
+  stands; the prior decides among what the gates leave. The weight is
+  set by the slack's own equivalence (3.8 nats of the commonest decision
+  may cost what 0.02 s costs at 150 bpm) and checked on the round trip:
+  452 WJazzD solos, pooled mean 21.71 -> 22.19 ms, every band that meets
+  20 ms at 0 still meets it, 3.5% of notes move.
+- Two guards, on with the prior: a reading may not push a note onto an
+  occupied beat line, nor put one on a line the beat before pushed onto,
+  and where every grid merges, the fallback ranks by notes lost before
+  error. The prior found both loopholes within a minute of going on
+  (drops 7,155 -> 22,934, then a cascade to 26,973); with the guards it
+  keeps every heard note (D37).
+
+Against the corrected Mobley score (the listener fixed bars 19 and 52 on
+reading the comparison; that alone moved Mobley's pitch F1 0.8975 ->
+0.9025 and nothing else): hand-score rhythm 0.8453 -> 0.8455 over 12 (4
+up, 5 down), value 0.7768 -> 0.7786, readability 0.9990; pianists' rhythm
+0.8664 -> 0.8711 over 7; Omnibook rhythm 0.7874 -> 0.7796 over 22 (1 up,
+16 down) at coverage 0.766 -> 0.773 (18 up, 0 down), value 0.7139 ->
+0.7114, readability 0.9975 -> 0.9979, ties 0.0421 -> 0.0403; WJazzD
+placement 0.855 -> 0.8554 and coverage 0.8675 -> 0.8726 (55 up, 0 down);
+WJazzD note F1 and beat F1 untouched (nothing above quantize moved). The
+Omnibook's fall is D37's, not the prior's: the guards alone read 0.7787
+and the prior on top of them 0.7796; at a level note count the prior
+read hand-score rhythm 0.8452 -> 0.8524 (7 up, 1 down) and Omnibook
+0.7874 -> 0.7894 (12 up, 8 down). On the figures: the lone-"e" figures we
+over-wrote three to twenty times against every human set come down to a
+half or a third of their excess, and no beat loses its onset.
+
+The brief's own ship criteria (rhythm up on both sets with more pages up
+than down) hold for the level-count version and not for this one; the
+listener chose this one on the pages themselves: on four excerpts, two
+"closer to the mark", one where the page now shows a note that was
+missing and the listener's own score was wrong, and one where the
+listener prefers the old reading. Re-pinned: 954 of 2,749 rows of
+`real-audio-baselines.json` (128 `notation/`, 194 `omnibook-notation/`,
+618 `wjazz-notation/`, 10 `summary/`, and Mobley's 4 `mscz/` rows from the
+corrected score) and `wjazz-quantize-baseline.json` (drops 7,155 ->
+4,203, page hit 74.8 -> 74.9%). The quantize cache key moved with the
+field (arithmetic, no CREPE). The corpus is still being corrected; the
+count and `scripts/figure_prior.py build` are seconds, and both pins
+follow.
+
 
 ### R32 - Four WJazzD grids were tracked at half the pulse, and the repair thinned the true beats away (the octave error, open since R21)
 

@@ -542,9 +542,18 @@ class QuantizeConfig(BaseModel):
     # better but writes a figure no transcriber writes loses. Every rule it
     # sits beside stands unchanged; it decides only among what the gates
     # leave. Not tuned on the page score (which rewards "everything as
-    # eighth pairs"); set by the quantizer's own 20 ms round-trip criterion
-    # like `grid_slack_s`. 0 is off.
-    figure_prior_weight: float = 0.0
+    # eighth pairs"); set by the slack's own equivalence: at 150 bpm, 0.015
+    # lets the commonest decision (the eighth pair against the dotted
+    # figure, 3.8 nats) spend what `grid_slack_s` spends, and the tempo
+    # bands that meet the 20 ms round trip at 0 still meet it. ON since
+    # 2026-09-26 (R33) on the listener's reading of Mobley's All The Things
+    # bar by bar. With it on, two guards keep every heard note on the page
+    # (a reading may not push a note onto an occupied beat line, nor put
+    # one on a line the beat before pushed onto), which the shipped
+    # quantizer did not: 388 more notes on the 79 benchmark pages, and the
+    # page score reads a little lower for them because the transcribers do
+    # not write most of them (D37). 0 is off, and the old behaviour.
+    figure_prior_weight: float = 0.015
 
 
 class NotateConfig(BaseModel):
