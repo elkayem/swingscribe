@@ -386,10 +386,283 @@ running value steps from the sixteenth (17% four-sixteenth beats at
 100-160) to the eighth pair (62% at 220-300, 75% at 300 and over). That is
 the onset count again, and `grid_slack_s` in seconds already carries it.
 
-## The prior in the quantizer, and the judge
+## The prior in the quantizer
 
-(Tasks 4-6. Filled in below as they land.)
+`QuantizeConfig.figure_prior_weight`, beats per nat, default 0.0 (off).
+`choose_reading` adds to each (grid, reading) candidate's mean snap error
+the surprisal of the figure that candidate writes -- minus the log of its
+share over the 49,373 onset beats above (`quantize.figure_prior`, read
+once from `swingscribe/figure-prior.json`, 131 rows; an unseen figure gets
+half a count, 11.5 nats) -- times the weight, before the
+coarsest-within-slack comparison. An onset a grid sends to 1.0 is the
+next beat's downbeat and leaves this beat's figure. Every rule the prior
+sits beside stands: `_keeps_apart` is hard, the tuplet and sixteenth gates
+trim the candidates first, the lag rule runs first, and the prior decides
+only among what they leave. Adding the field moved the quantize cache
+key, which is arithmetic below transcribe and no CREPE. At 0.0 the term is
+not computed and every pinned number reproduces (the harness: "all 2749
+numbers unchanged"; the instrument: "unchanged").
+
+**Two loopholes, found by the quantizer instrument the moment the weight
+went on, and closed with the prior on only.** `scripts/wjazz_quantize.py`
+at 0.015 read dropped notes 7,155 -> 22,934 of 198,983 (3.6% -> 11.5%;
+the slow band 20% -> 66%). Traced on Parker's Don't Blame Me:
+
+- a reading that pushed an onset onto the next beat's line, where that
+  beat's own note sat, kept a common figure for itself and lost the note
+  in notate (one note per grid position). With the prior on such a
+  reading is marked as merging, exactly as one that merges inside the
+  beat is (`next_occupied`: the next beat has an onset under 0.25). A
+  first version also flagged the beat AFTER a push, which put every
+  reading of that beat into the fallback, where the prior took the
+  coarsest grid, which pushed in turn: a cascade down every ballad
+  (26,973 dropped). Withdrawn; the push is refused at its source only;
+- where no grid keeps every onset apart (a ballad's ornament under the
+  32nd grid), the coarsest-within-slack loop ran over every candidate,
+  and with the unseen figure's 11.5 nats on the 32nd grid the eighth grid
+  was "within slack" while it merged four notes to the 32nd's one. With
+  the prior on, that fallback set is the grids that lose the fewest
+  notes.
+
+With both, the prior drops FEWER notes on the instrument than the shipped
+quantizer, at every weight: the pushes it refuses were losing notes
+already.
+
+## Setting the weight by the round trip
+
+`scripts/figure_prior.py sweep --db wjazz/wjazzd.db`: `replay_onsets` with
+the residual discarded (the notation replayed with its feel, plan section
+5's acceptance question) on WJazzD's annotated onsets on the annotator's
+grid, 452 solos, 198,983 notes, under the shipped settings, 33 seconds. The
+first row is the least-snap-error notation (no slack, no prior), so the
+table reads what coarsening costs in total. Mean absolute error in ms of
+every note; per tempo band the mean of the solos' means.
+
+| weight (beats per nat) | mean ms | rms ms | notes moved % | median solo mean ms | worst solo mean ms | solos over 20 ms | under 100 | 100-160 | 160-220 | 220-300 | 300 and over |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| no slack, no prior (reference) | 20.80 | 29.46 | 0.00 | 18.90 | 57.9 | 205 | 36.7 | 23.8 | 18.0 | 15.3 | 13.9 |
+| 0.0 (shipped) | 21.71 | 30.68 | 0.00 | 19.75 | 58.9 | 222 | 37.9 | 24.7 | 18.7 | 16.0 | 14.8 |
+| 0.0025 | 21.70 | 30.75 | 2.05 | 19.92 | 58.1 | 223 | 37.7 | 24.8 | 18.8 | 16.0 | 14.8 |
+| 0.005 | 21.97 | 31.26 | 2.58 | 20.20 | 58.3 | 233 | 38.2 | 25.2 | 19.0 | 16.1 | 14.9 |
+| 0.0075 | 22.23 | 31.82 | 2.99 | 20.40 | 59.2 | 236 | 38.9 | 25.6 | 19.1 | 16.2 | 15.0 |
+| 0.01 | 22.46 | 32.31 | 3.32 | 20.57 | 59.8 | 247 | 39.4 | 26.0 | 19.3 | 16.3 | 15.0 |
+| **0.015** | 22.80 | 33.16 | 3.75 | 20.79 | 60.3 | 251 | 40.5 | 26.5 | 19.4 | 16.3 | 15.1 |
+| 0.02 | 23.02 | 33.66 | 4.01 | 20.89 | 64.7 | 257 | 41.2 | 26.8 | 19.5 | 16.4 | 15.1 |
+| 0.03 | 23.23 | 34.14 | 4.25 | 20.98 | 68.0 | 258 | 42.0 | 27.1 | 19.6 | 16.5 | 15.1 |
+| 0.05 | 23.29 | 34.25 | 4.33 | 21.05 | 68.0 | 259 | 42.2 | 27.2 | 19.6 | 16.5 | 15.1 |
+| 0.1 | 23.32 | 34.31 | 4.38 | 21.07 | 68.0 | 259 | 42.2 | 27.2 | 19.6 | 16.5 | 15.1 |
+
+The sweep saturates at about 0.03: past it the prior has already taken
+the likeliest figure wherever the gates and the slack let it, and nothing
+moves. Three readings of "the mean round-trip error stays within the
+shipped criterion", stated before the pages were read:
+
+- **the pooled mean**: already 21.7 ms at the shipped settings, over the
+  criterion, because the slow bands read 25-38 ms even with no slack (a
+  ballad's beat is a second long and the sixteenth is the finest grid
+  offered). Under this reading no weight passes, and neither does 0.0;
+- **the median solo**: 19.75 ms at the shipped settings, 0.25 ms inside
+  the line, and over it at 0.005. A criterion met by a quarter of a
+  millisecond at the default is not one to set anything by;
+- **the bands that meet the criterion today** (160 bpm and up, where the
+  judge set lives): every one stays within 20 ms at every weight to
+  saturation (160-220: 18.7 -> 19.6; 220-300: 16.0 -> 16.5; 300 and over:
+  14.8 -> 15.1). The criterion does not bind.
+
+So the criterion bounds the weight only at saturation, and the weight
+judged is set by the slack's own equivalence instead: `grid_slack_s` is
+0.02 s of snap error a coarser grid may cost, 0.05 beats at the
+benchmark's centre of 150 bpm. The prior's commonest decision -- the
+eighth pair against the dotted figure `0 1/2 3/4`, 0.60 against 4.40
+nats -- is 3.8 nats, and **0.015 beats per nat lets it spend 0.057 beats
+there, the slack's own allowance.** At 0.015 the prior costs the round
+trip 1.1 ms of pooled mean (the slack itself costs 0.9), moves 3.75% of
+the notes, and the bands that meet the criterion still meet it. The
+pages were then read at 0.0025 and 0.03 as well, for the trend and not
+for the choice.
+
+**A caveat on the unit.** A weight in beats per nat is worth more
+milliseconds on a long beat: the sweep's under-100 band moves 37.9 ->
+40.5 ms at 0.015 while 220-300 moves 16.0 -> 16.3, and the prior pushes
+hardest, in time, exactly where humans write finest (the tempo table
+above: 17% four-sixteenth beats at 100-160 bpm). A weight in SECONDS per
+nat converted per beat like the slack is the D11-consistent alternative;
+no human ballad page exists to judge it (D36), and the judge set is all
+160 bpm and up, so this stays a finding.
+
+## The judge
+
+`scripts/run_eval.py --db wjazz/wjazzd.db --cache-dir
+benchmark/.swingscribe-cache --jobs 4`, the weight set through
+`SWINGSCRIBE_QUANTIZE__FIGURE_PRIOR_WEIGHT` (the environment ranks above
+the yaml), four minutes a run, the baseline run first reproducing every
+pinned number. Means over the default takes; "up / down" counts pages
+that moved by more than the harness's own 0.002 tolerance. Hand-score
+rhythm is the number R29 moved 0.794 -> 0.845; its value is 0.777, its
+readability 0.9990. Coverage is on every Omnibook row (0.766 at the
+default; every page trusted).
+
+| | shipped | 0.0025 | **0.015** | 0.03 |
+|---|---|---|---|---|
+| hand scores, rhythm (n=12) | 0.8452 | 0.8455 (3 up, 2 down) | **0.8524 (7 up, 1 down)** | 0.8525 (8 up, 2 down) |
+| hand scores, value (n=12) | 0.7769 | 0.7774 (3 / 3) | 0.7816 (6 / 2) | 0.7828 (7 / 3) |
+| hand scores, readability (n=12) | 0.9990 | 0.9990 | 0.9991 (1 / 0) | 0.9994 (2 / 0) |
+| hand scores, tie rate (n=12) | 0.0329 | 0.0331 | 0.0324 | 0.0321 |
+| hand scores, placement (n=12) | 0.9027 | 0.9022 | 0.9021 (4 / 5) | 0.9025 |
+| pianists, rhythm, oracle line (n=7) | 0.8664 | 0.8675 | 0.8730 | 0.8712 |
+| pianists, rhythm, CREPE line (n=7) | 0.8623 | 0.8583 | 0.8576 | 0.8569 |
+| Omnibook, rhythm (n=22, coverage 0.766 -> 0.769 / 0.768 / 0.767) | 0.7874 | 0.7861 (6 up, 12 down) | **0.7894 (12 up, 8 down)** | 0.7902 (14 up, 6 down) |
+| Omnibook, value (n=22) | 0.7139 | 0.7130 (5 / 11) | 0.7158 (11 / 7) | 0.7162 (14 / 5) |
+| Omnibook, readability (n=22) | 0.9975 | 0.9976 | 0.9980 (3 / 0) | 0.9982 (5 / 0) |
+| Omnibook, tie rate (n=22) | 0.0421 | 0.0420 | 0.0400 (2 / 12) | 0.0395 |
+| Omnibook, placement (n=22) | 0.8591 | 0.8594 | 0.8577 (6 / 9) | 0.8574 |
+| readability, all notations (n=85) | 0.9957 | 0.9959 | 0.9962 | 0.9963 |
+| WJazzD Flex-Q rhythm, collateral (n=73) | 0.6669 | 0.6676 (18 / 21) | 0.6635 (19 / 36) | 0.6629 (19 / 39) |
+| WJazzD placement (n=73) | 0.855 | 0.8556 | 0.853 | 0.8514 |
+| WJazzD Flex-Q coverage (n=73) | 0.8675 | 0.8693 (26 / 5) | 0.8663 (14 / 25) | 0.8652 (12 / 32) |
+| instrument: dropped of 198,983 annotated notes | 7,155 (3.6%) | 5,186 (2.6%) | 5,989 (3.0%) | 6,276 (3.2%) |
+| instrument: page hit (not evidence, D36) | 74.8% | 74.4% | 74.7% | 74.7% |
+| instrument: early offbeat as 16th / late as dotted / laid-back after | 4,983 / 2,510 / 693 | 4,917 / 2,731 / 673 | 4,636 / 2,442 / 398 | 4,579 / 2,377 / 285 |
+| instrument: pushed beat before / triplet as binary / binary as triplet | 644 / 4,401 / 2,637 | 863 / 4,340 / 2,812 | 800 / 4,259 / 2,998 | 781 / 4,285 / 2,960 |
+| notes on our 79 judge and located pages, ties merged (of 46,802) | 46,802 | +145 (63 pages up, 10 down) | -8 (37 up, 42 down) | -64 (30 up, 52 down) |
+
+Per page at 0.015, hand scores: All The Things 0.796 -> 0.819, Soul
+Station 0.820 -> 0.838, Lover 0.846 -> 0.864, Someday My Prince 0.829 ->
+0.846, Giant Steps 0.873 -> 0.880, There Will Never Be Another You 0.947
+-> 0.954, Billy Boy 0.857 -> 0.863; Carl Perkins 0.825 -> 0.815 is the one
+down; Birks Works, For Minors Only, Confirmation and Melody for C within
+0.002. Omnibook: Ornithology 0.750 -> 0.785, Laird Baird 0.797 -> 0.816,
+Shawnuff 0.816 -> 0.831, Donna Lee 0.854 -> 0.865 lead the twelve up;
+Now's The Time (both takes) 0.808 -> 0.788 and 0.802 -> 0.788, KC Blues
+0.658 -> 0.643 and Red Cross 0.721 -> 0.708 lead the eight down.
+
+What the three columns say together: at 0.0025 the prior barely decides
+and the collision rule does the moving -- more notes on every set, the
+Omnibook a little worse (12 down); at 0.015 both hand-score and Omnibook
+rhythm are up with more pages up than down, readability up on both,
+ties down on both, coverage up on the Omnibook, the instrument's drops
+down and its complaint classes down (the laid-back beat written after
+the line 693 -> 398, the early offbeat as a sixteenth 4,983 -> 4,636,
+the late offbeat as a dotted figure 2,510 -> 2,442) except two that rise
+(below), and our pages hold the same notes to within eight of
+46,802; at 0.03 the pages read the same or a hair better and the WJazzD
+collateral (placement, coverage, Flex-Q rhythm) reads a hair worse, which
+is where a page-tuned weight would have been pulled and why the weight
+was not set there. Two classes rise. "Pushed beat before it" (644 -> 800 of
+191,000): a beat's late note that used to be written on the "a" now
+goes to the next beat line where that line is free, which a human
+writes more often still. And "binary as triplet" (2,637 -> 2,998): the triplet figure is 3.7% of a
+human's beats and the three-onset sixteenth figures 0.3-1.2% each, so
+where the tuplet gate admits both, the prior leans ternary; the
+Omnibook's triplet row on our pages rose 4.74 -> 4.95% against its 6.02%,
+so on the pages this is the right direction, and the WJazzD instrument
+is D36's literal layer.
+
+**The brief's ship criteria at 0.015: hand-score rhythm up (7 of 12 up, 1
+down), Omnibook rhythm up (12 of 22 up, 8 down), readability not worse
+(0.9990 -> 0.9991 and 0.9975 -> 0.9980), the dropped-note count not worse
+(the instrument 7,155 -> 5,989; our own pages level), and the round-trip
+criterion holds on every band that meets it today. All five hold.** The
+default is still 0.0 in this commit; flipping it and re-pinning both
+baselines is the listener's call (the brief: stop and ask first).
+
+### The figures on our pages, re-tallied at 0.015
+
+`compare` again with the weight on. Share of beats with an onset; the
+counts of our beats with an onset are unchanged on the hand-score set
+(2,578) and up on the other two (4,956 -> 4,967; 19,151 -> 19,182), which
+is the collision rule keeping notes on their own beat.
+
+| figure | hand scores % | ours before | ratio | ours at 0.015 | ratio | Omnibook % | ours before | ratio | ours at 0.015 | ratio | corpus % | ours (WJazzD) before | ratio | at 0.015 | ratio |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 1/2 | 55.03 | 50.35 | 0.91 | 51.20 | 0.93 | 57.29 | 50.50 | 0.88 | 51.64 | 0.90 | 55.05 | 42.34 | 0.77 | 43.56 | 0.79 |
+| 0 1/3 2/3 | 5.20 | 5.08 | 0.98 | 5.35 | 1.03 | 6.02 | 4.74 | 0.79 | 4.95 | 0.82 | 3.67 | 3.05 | 0.83 | 3.30 | 0.90 |
+| 0 1/4 1/2 3/4 | 2.22 | 0.66 | 0.30 | 0.66 | 0.30 | 3.57 | 1.59 | 0.45 | 1.49 | 0.42 | 4.93 | 2.23 | 0.45 | 2.21 | 0.45 |
+| 0 1/2 3/4 | 1.45 | 0.62 | 0.43 | 1.09 | 0.75 | 1.52 | 0.75 | 0.49 | 1.03 | 0.67 | 1.23 | 0.69 | 0.56 | 0.94 | 0.77 |
+| 1/2 3/4 | 0.98 | 0.50 | 0.51 | 0.50 | 0.51 | 1.94 | 0.63 | 0.32 | 0.83 | 0.42 | 1.00 | 0.84 | 0.84 | 0.91 | 0.92 |
+| 0 1/4 | 0.30 | 1.75 | **5.85** | 0.66 | **2.21** | 0.10 | 1.51 | **14.5** | 0.87 | **8.3** | 0.44 | 1.39 | **3.20** | 0.64 | **1.47** |
+| 0 1/4 1/2 | 0.38 | 1.36 | **3.54** | 0.74 | **1.92** | 0.54 | 1.51 | **2.79** | 0.99 | **1.82** | 0.42 | 2.15 | **5.12** | 1.61 | **3.83** |
+| 0 1/4 3/4 | 0.00 | 0.47 | - | 0.27 | - | 0.00 | 0.93 | - | 0.74 | - | 0.14 | 1.07 | 7.89 | 0.93 | 6.84 |
+| 1/4 1/2 | 0.04 | 0.39 | 9.1 | 0.31 | 7.3 | 0.04 | 0.81 | 19.3 | 0.58 | 14.0 | 0.04 | 1.00 | 23.5 | 0.77 | 18.1 |
+| 1/4 | 0.09 | 0.12 | 1.4 | 0.12 | 1.4 | 0.00 | 0.32 | - | 0.14 | - | 0.05 | 0.26 | 5.3 | 0.14 | 2.8 |
+| 0 3/4 | 0.04 | 0.31 | 7.3 | 0.43 | 10.0 | 0.27 | 0.46 | 1.7 | 0.74 | 2.7 | 0.26 | 0.49 | 1.9 | 0.56 | 2.2 |
+| 3/4 | 0.04 | 0.12 | 2.7 | 0.12 | 2.7 | 0.04 | 0.18 | 4.4 | 0.32 | 7.7 | 0.19 | 0.32 | 1.7 | 0.37 | 1.9 |
+
+The over-written lone-"e" figures come down on every set -- `0 1/4` to a
+third of its excess, `0 1/4 1/2` to a half, `1/4 1/2` and `0 1/4 3/4` by a
+fifth to a quarter -- and the under-written three-onset sixteenth figures
+(`0 1/2 3/4`, `1/2 3/4`) come up toward the human rate, which is the
+laid-back beat being written on its beat and the late "a" staying an "a".
+Nothing rare went up except the dotted figures `0 3/4` and `3/4`, by a
+few beats each (5 -> 8 and 9 -> 16 on the Omnibook): the prior prefers a
+lone `3/4` (0.19%) to a lone `1/4` (0.05%) where a beat's one late note
+must go somewhere, and a human would more often push it to the next
+line. The four-sixteenth deficit and the ternary two-onset figures do not
+move, as the diagnostic said they would not: the first is missing onsets,
+the second is the tuplet gate.
 
 ## Findings to report, not to implement
 
-(Task 7. Filled in below.)
+1. **Tuplet share.** The corpus reads 10.3% tuplet notes whole, 7.9% in
+   the bars the plain filter keeps and 5.8% under strict; Wesley Chin's
+   hard-bop stratum, the one nearest the judge set, 6.2% (3.7% strict);
+   the listener's own pages 11.2%, the Omnibook 14.4%; ours 8.5% on the
+   hand-score set and 7.6% on the Omnibook set today, 8.9% and 8.0% at
+   0.015 (the survey's tally, the triplet row of the table above). The
+   OMR filter's bias against tuplet bars is the largest error in the
+   corpus table and the one the listener's cleanup will move; the tuplet
+   row's true share is nearer the judge pages' 5-6% of beats than the
+   3.7% counted. Our deficit against the listener is not in the
+   three-onset triplet (5.35% against 5.20%) but in the figures below.
+2. **Figures the humans write that our candidate grids cannot produce.**
+   The two-onset ternary figures `1/3`, `0 2/3`, `1/3 2/3`, `2/3` are
+   1.0% of the corpus's onset beats, 1.6% of the listener's, 0.4% of the
+   Omnibook's, and 0.00% of ours: `min_onsets_for_tuplet` is 3 and
+   `offbeat_pair_tuplet_fit` is off, both measured (D28, docs/wjazz-quantize.md).
+   The sixteenth-triplet figures `0 1/6 1/3 1/2`, `1/2 2/3 5/6`, `0 1/2
+   2/3 5/6`, `0 1/6 1/3 1/2 2/3 5/6` are 0.57% of the corpus's, 0.47% of
+   the listener's and 3.1% of the Omnibook's, and 0.00% of ours:
+   `sixteenth_triplets` is off, measured. The Omnibook's quintuplet `0
+   1/5 2/5 3/5 4/5` (0.13%) has no grid at all. A prior cannot write a
+   candidate the set does not hold; these are the gates' decision, and
+   the table now says what each gate costs on a human page.
+3. **Rests.** A human starts 95% of rests on the beat and 5% on the
+   "and", and 0.4% anywhere else; writes eighth 36%, quarter 34%, half
+   15%, whole 11%, sixteenth 2.5%. The sixteenth rest is 2.5% here
+   against the listener's 0.1% because the lead-trumpet charts are
+   sixteenth material: a rule "a sixteenth rest only inside a beat that
+   holds sixteenths" would follow the corpus and keep `MIN_REST` at an
+   eighth for the judge set. The dotted quarter rest is 0.1% in the
+   corpus and 0% in the Omnibook, which is R30's finding from a third
+   corpus.
+4. **Where a beat depends on the one before.** On the raw figure the
+   previous beat carries 0.33 bits held out (its class alone 0.32 with
+   seven cells); given the onset count, 0.03. So the dependence is on
+   how many notes the next beat holds, not on how they are written: after
+   a four-sixteenth beat the next onset beat holds four sixteenths 50.5%
+   of the time (the density table above, 1,779 beats), and a three-onset
+   sixteenth figure 1.4-3.5%. Our pages write `0 1/4 1/2` at three to five
+   times the human rate and `0 1/4 1/2 3/4` at a third to a half of it,
+   on every set, and the prior does not move the second: those are
+   four-sixteenth beats with a note missing, faithfully written. That is a
+   transcribe finding (a sixteenth run's notes dropped or merged
+   upstream), and the context that would flag it is the beat before.
+5. **The weight's unit** (above): beats per nat presses hardest in time
+   on the slowest beats, where humans write finest. Seconds per nat,
+   converted per beat like `grid_slack_s`, is the alternative; a human
+   ballad page would judge it.
+6. **2/2.** A cut-time chart's per-quarter figures are a different
+   distribution (pair 44% against 55%, dotted figures two to four times
+   as common) and the quantizer has no notion of cut time; the 21 files
+   are out of the table.
+7. **The tempo staircase from the human side.** Four-sixteenth beats are
+   17% of onset beats at 100-160 bpm, 6% at 160-220, 1% at 220-300, 0.3%
+   at 300 and over; the eighth pair 30%, 48%, 62%, 75%. D11's rule that
+   the running value is set by tempo is what a human page does, and the
+   slack in seconds already carries it; given the count no band writes a
+   figure differently.
+8. **The re-tally.** The count takes four seconds and the corpus is being
+   corrected. When it changes: `python scripts/figure_prior.py` for the
+   tables, `python scripts/figure_prior.py build` for the shipped JSON
+   (and then the quantize tests and, if the default is on, both
+   baselines), `compare --db` for the diagnostic.
