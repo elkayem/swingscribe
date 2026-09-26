@@ -566,6 +566,74 @@ criterion holds on every band that meets it today. All five hold.** The
 default is still 0.0 in this commit; flipping it and re-pinning both
 baselines is the listener's call (the brief: stop and ask first).
 
+### The judge, re-run once the prior kept every heard note (2026-09-25, later the same day)
+
+The table above was measured with the push refused at its source only.
+Rendering Mobley's All The Things You Are bar by bar for the listener
+showed a note still lost in bar 61: beat 3's late note went to beat 4's
+line through the fallback, and beat 4's eighth reading put its own first
+note on that line. The narrow guard for it (`previous_pushed`, a reading
+with a note ON the line the beat before pushed onto) closed the last way
+the prior could lose a note, and it also stopped the SHIPPED quantizer's
+own losses at those lines wherever the prior is on: the instrument's
+drops 7,155 -> 4,203, and on the 79 judge and located pages no page loses
+a note at any weight and 94 gain 388 (0.8% of 46,802). The round trip at
+0.015 costs 0.5 ms of pooled mean (22.19 against 21.71).
+
+Then the pages read differently, and the smallest weight says why: at
+0.0025 the prior barely decides, so that column is the guard alone.
+
+| | shipped | 0.0025 (the guard alone) | 0.015 | 0.03 |
+|---|---|---|---|---|
+| hand scores, rhythm (n=12) | 0.8452 | 0.8422 (3 up, 5 down) | 0.8451 (4 up, 5 down) | 0.8436 (4 up, 5 down) |
+| hand scores, value (n=12) | 0.7769 | 0.7764 | 0.7785 (4 / 4) | 0.7784 |
+| hand scores, readability (n=12) | 0.9990 | 0.9990 | 0.9990 | 0.9992 |
+| pianists, rhythm, oracle line (n=7) | 0.8664 | 0.8683 | 0.8711 | 0.8693 |
+| Omnibook, rhythm (n=22) | 0.7874 | 0.7787 (1 up, 18 down) | 0.7796 (1 up, 16 down) | 0.7800 (3 up, 14 down) |
+| Omnibook, value (n=22) | 0.7139 | 0.7098 | 0.7114 | 0.7117 |
+| Omnibook, readability (n=22) | 0.9975 | 0.9976 | 0.9979 | 0.9980 |
+| Omnibook, coverage (n=22) | 0.7662 | 0.7729 (18 up, 0 down) | 0.7729 | 0.7729 |
+| WJazzD Flex-Q coverage, collateral (n=73) | 0.8675 | 0.8725 (55 up, 0 down) | 0.8726 | 0.8726 |
+| WJazzD placement (n=73) | 0.855 | 0.8567 | 0.8554 | 0.8547 |
+| instrument: dropped of 198,983 | 7,155 | | 4,203 | |
+| notes on our 79 pages (of 46,802) | 46,802 | +388, none lost | +388, none lost | +388, none lost |
+
+Two effects, pulled apart:
+
+- **Keeping the notes the shipped quantizer loses at beat lines** costs the
+  page score: hand-score rhythm -0.003, Omnibook -0.009 with 18 of 22
+  sides down, while coverage rises on every set and no page loses a
+  note. The 388 notes are ones the transcribers mostly do not write --
+  the recovered note in Mobley's bar 22 is written as a sixteenth figure
+  where the page has two eighths -- and notated rhythm is gap-based, so an
+  extra note between two matched ones breaks the gap either side of it.
+  That the shipped quantizer drops about one heard note in 120 at beat
+  lines, and that the pages read better for it, is a finding in its own
+  right (D37 below): a note SwingScribe heard vanishes with nothing in
+  the log, and the erase tool exists for the listener to judge such
+  notes, not the quantizer.
+- **The prior on top of that** reads hand-score rhythm +0.003 (0.8422 ->
+  0.8451), Omnibook +0.001 (0.7787 -> 0.7796), pianists +0.003, ties down
+  on both sets; measured at a level note count (the earlier table, before
+  this guard) it read +0.007 and +0.002 with 7 of 12 and 12 of 22 pages up.
+  Small, positive, and not what moved the earlier table most.
+
+**The brief's ship criteria, taken as written, do not hold for the code as
+it stands**: hand-score rhythm is flat with 5 pages down to 4 up, and
+Omnibook rhythm is down. They held for the version measured first, at a
+level note count. The two versions differ only in whether the prior is
+allowed to lose notes the shipped quantizer loses too, and that is not
+a choice this brief settles. Three ways forward, all the listener's:
+
+1. leave the default at 0.0 (the state of this commit): the flag, the
+   table and the guards stay for the next corpus;
+2. ship the prior with the guard, at 0.015, accepting the page score for
+   the notes: re-pin both baselines, and treat the 388 recovered notes as
+   the transcriber's erasures to make, not the quantizer's;
+3. ship the prior without the previous-beat guard (commit dabf7da's
+   behaviour): the earlier table, a level note count, and the shipped
+   quantizer's beat-line losses left as they are.
+
 ### The figures on our pages, re-tallied at 0.015
 
 `compare` again with the weight on. Share of beats with an onset; the
@@ -661,7 +729,16 @@ the second is the tuplet gate.
    the running value is set by tempo is what a human page does, and the
    slack in seconds already carries it; given the count no band writes a
    figure differently.
-8. **The re-tally.** The count takes four seconds and the corpus is being
+8. **The shipped quantizer loses about one heard note in 120 at beat
+   lines** (D37 candidate). A late note pushed onto the next beat line by
+   the eighth grid meets the note already there, and notate keeps one:
+   388 of 46,802 notes on the 79 judge and located pages, 7,155 of
+   198,983 on the annotator's own onsets. With the prior's guards on,
+   none is lost. The pages score BETTER without those notes, because the
+   transcribers do not write most of them; whether they should be on the
+   page is a hearing question for the listener's erase tool, not a
+   quantizer's silent decision.
+9. **The re-tally.** The count takes four seconds and the corpus is being
    corrected. When it changes: `python scripts/figure_prior.py` for the
    tables, `python scripts/figure_prior.py build` for the shipped JSON
    (and then the quantize tests and, if the default is on, both
