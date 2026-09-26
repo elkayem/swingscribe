@@ -1054,19 +1054,30 @@ def test_a_ballad_is_a_tempo_not_a_long_beat():
 # ── the figure prior ────────────────────────────────────────────────────
 
 
-def _prior_figure_beat(weight: float) -> list[float]:
-    """Sixteen beats at 120 bpm, each holding onsets at 0, 0.5 and 0.8 of
-    the beat, straight (no swing span), lag off. On snap error alone the
+def _prior_figure_beat(weight: float, next_beat_downbeat: bool = False) -> list[float]:
+    """Sixteen beats at 120 bpm of straight eighth pairs (no swing span, lag
+    off), except beat 8, which holds onsets at 0, 0.5 and 0.8 of the beat,
+    and beat 9, which holds a lone note on its "and" -- or, with
+    `next_beat_downbeat`, on its beat line. On snap error alone beat 8's
     sixteenth grid wins by a hair: 0.0167 beats of mean error against the
     eighth grid's 0.0667, with 0.04 beats of slack (0.02 s at 0.5 s a beat).
     The figure it writes, `0 1/2 3/4`, is 1.2% of a human's beats; the
-    eighth grid's `0 1/2` is 55%."""
+    eighth grid's `0 1/2` is 55%, with the late note pushed to beat 9's line."""
     from swingscribe.stages.quantize import figure_prior
 
     figure_prior.cache_clear()
     beats = [i * 0.5 for i in range(17)]
-    onsets = [b + frac * 0.5 for b in beats[:-1] for frac in (0.0, 0.5, 0.8)]
-    quantized, positions = quantize_notes(
+    onsets: list[float] = []
+    for index, b in enumerate(beats[:-1]):
+        if index == 8:
+            fractions = (0.0, 0.5, 0.8)
+        elif index == 9:
+            fractions = (0.0,) if next_beat_downbeat else (0.5,)
+        else:
+            fractions = (0.0, 0.5)
+        onsets.extend(b + f * 0.5 for f in fractions)
+    first = 8 * 2  # beats 0-7 hold two onsets each
+    quantized, _positions = quantize_notes(
         onsets,
         [0.05] * len(onsets),
         [60] * len(onsets),
@@ -1077,16 +1088,24 @@ def _prior_figure_beat(weight: float) -> list[float]:
         figure_prior_weight=weight,
     )
     assert len(quantized) == len(onsets)
-    return [round(q.beat, 3) for q in quantized[24:27]]  # the three onsets of beat 8
+    return [round(q.beat, 3) for q in quantized[first : first + 3]]
 
 
 def test_the_figure_prior_writes_a_rare_figure_on_the_coarser_grid():
     """A beat whose snap error prefers the sixteenth grid by a hair and whose
     figure the table calls rare is written on the eighth grid with the
-    weight on, and unchanged with it at zero."""
-    # No meter section, so `beat` is the absolute position: beat 8 of the grid.
+    weight on, and unchanged with it at zero. No meter section, so `beat`
+    is the absolute position: beat 8 of the grid."""
     assert _prior_figure_beat(0.0) == [8.0, 8.5, 8.75]  # the dotted figure, on snap error
-    assert _prior_figure_beat(0.01) == [8.0, 8.5, 9.0]  # the pair; the late note is the next beat's
+    assert _prior_figure_beat(0.01) == [8.0, 8.5, 9.0]  # the pair; the late note is beat 9's
+
+
+def test_the_figure_prior_never_pushes_a_note_onto_an_occupied_beat_line():
+    """The same beat when beat 9 has its own note on the line: the eighth
+    reading would write two notes on one position across the bar line, so
+    it is refused as a merging grid is, and the sixteenth stays."""
+    assert _prior_figure_beat(0.0, next_beat_downbeat=True) == [8.0, 8.5, 8.75]
+    assert _prior_figure_beat(0.01, next_beat_downbeat=True) == [8.0, 8.5, 8.75]
 
 
 def test_the_figure_prior_table_ships_and_reads():

@@ -247,6 +247,7 @@ def choose_reading(
     inside: bool = False,
     prior_weight: float = 0.0,
     prior: tuple[dict[str, float], float] | None = None,
+    next_occupied: bool = False,
 ) -> tuple[int, str]:
     """Pick the subdivision the notes in one beat actually fit, and under
     which timing reading: ("warped", the beat is swung) or ("raw", the beat
@@ -260,6 +261,20 @@ def choose_reading(
     constraint, the tuplet and sixteenth gates still trim the candidates,
     and the prior only ever decides among what they leave. At 0.0 it is
     not consulted.
+
+    With the prior on, `_keeps_apart` is applied one beat wider as well: a
+    reading that sends an onset to 1.0 while the next beat has its own note
+    at the beat line (`next_occupied`) writes two notes on one grid position
+    across the bar line and notate keeps one. Measured without it
+    (2026-09-25, docs/figure-prior.md): the prior found the loophole at
+    once -- a pushed note leaves the beat's figure, the figure left behind
+    is the common one, and the WJazzD instrument's dropped notes went 7,155
+    to 22,934. Such a reading is marked as merging, exactly as one that
+    merges inside the beat is. The push is refused at its source only: a
+    first version also flagged the beat AFTER a push, which put every
+    reading of that beat in the fallback, where the prior took the coarsest
+    grid, which pushed in turn -- a cascade down every ballad (26,973
+    dropped).
 
     Post-warp, a swung eighth pair (0, 0.5) and a triplet figure (0, 1/3, 2/3)
     are close enough that assuming a binary grid silently rewrites the second
@@ -360,17 +375,32 @@ def choose_reading(
     # best error and marked as merging.
     errors: dict[int, float] = {}
     chosen: dict[int, str] = {}
+    lost: dict[int, int] = {}
     separating: list[int] = []
     table = prior if prior is not None else (figure_prior() if prior_weight > 0 else None)
+    with_prior = table is not None and prior_weight > 0
     for divisions in allowed:
         scored = []
         for name, values in readings(divisions):
             error = sum(abs(snap(offset, divisions)[1]) for offset in values) / len(values)
-            if table is not None and prior_weight > 0:
+            snapped = [snap(offset, divisions)[0] for offset in values]
+            merged = len(values) - len({round(s, 9) for s in snapped})
+            merges = merged > 0
+            if with_prior:
                 error += prior_weight * figure_surprisal(figure_of(values, divisions), table)
-            scored.append((not _keeps_apart(values, divisions), error, name))
-        merges, error, name = min(scored)
+                if next_occupied and any(s >= 1.0 - 1e-9 for s in snapped):
+                    merges, merged = True, merged + 1
+            # With the prior on, a grid that merges is ranked by how many
+            # notes it loses before its error: in the fallback below (no grid
+            # keeps every onset apart -- a ballad's ornament under the 32nd
+            # grid) the prior's term made the coarsest grid win, and it
+            # merged three notes where the finest merged one. Off, the
+            # ordering is the one every pinned number stands on.
+            scored.append((merges, merged, error, name) if with_prior else (merges, error, name))
+        merges, *rest = min(scored)
+        error, name = rest[-2], rest[-1]
         errors[divisions], chosen[divisions] = error, name
+        lost[divisions] = rest[0] if with_prior else 0
         if not merges:
             separating.append(divisions)
     best_error = min(errors.values())
@@ -380,12 +410,19 @@ def choose_reading(
     # hard constraint and not a preference. Without it, buying notated rhythm
     # by coarsening the grid quietly costs notes: 4.8% of All The Things
     # disappeared before this rule existed.
-    separating = separating or allowed
+    # No grid keeps every onset apart (a ballad's ornament under the 32nd
+    # grid): the choice is among the grids that lose the FEWEST notes. With
+    # the prior off every grid counts as losing none here and the set is
+    # the whole candidate list, as it always was; with it on, the coarsest
+    # grid's cheap figure was winning this loop and merging four notes
+    # where the finest merged one (2026-09-25, docs/figure-prior.md).
+    fewest = min(lost.values())
+    separating = separating or [d for d in allowed if lost[d] == fewest]
     # Coarsest first: a smaller number of divisions is a coarser grid.
     for divisions in sorted(separating):
         if errors[divisions] <= best_error + slack + 1e-12:
             return divisions, chosen[divisions]
-    divisions = min(separating, key=lambda d: errors[d])
+    divisions = min(separating, key=lambda d: (lost[d], errors[d]))
     return divisions, chosen[divisions]
 
 
@@ -614,7 +651,8 @@ def quantize_notes(
     grids: dict[int, int] = {}
     readings: dict[int, str] = {}
     prior = figure_prior() if figure_prior_weight > 0 else None
-    for index, offsets in per_beat.items():
+    for index in sorted(per_beat):
+        offsets = per_beat[index]
         # A beat the finest binary grid cannot keep apart holds a genuine
         # 32nd run — Bird on a ballad — and merging is silent note LOSS on
         # the page: Don't Blame Me was writing 327 of 513 heard notes. The
@@ -667,6 +705,9 @@ def quantize_notes(
             inside=tuplet_needs_onsets_inside,
             prior_weight=figure_prior_weight,
             prior=prior,
+            next_occupied=any(
+                o < 0.25 for o in per_beat.get(index + 1, []) + per_beat_raw.get(index + 1, [])
+            ),
         )
     if allow_triplets and quarter_triplets:
         # A beat pair that reads as a quarter-note triplet is two ternary

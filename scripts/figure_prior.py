@@ -880,6 +880,120 @@ def ratio_table(report: dict) -> dict:
     return out
 
 
+# ── the weight, by the round trip (task 5) ───────────────────────────────────
+
+# -1 is the reference row: no slack, no prior (the least-snap-error notation).
+SWEEP_WEIGHTS = (-1.0, 0.0, 0.0025, 0.005, 0.0075, 0.01, 0.015, 0.02, 0.03, 0.05, 0.075, 0.1)
+
+
+def sweep_report(db_path: Path, weights: tuple[float, ...] = SWEEP_WEIGHTS, limit=None) -> dict:
+    """Mean round-trip error of the NOTATION -- `replay_onsets` with the
+    residual discarded, the acceptance question of plan section 5 -- on
+    WJazzD's annotated onsets on the annotator's own grid, at each weight,
+    under the shipped settings. No audio; the same input the quantizer
+    instrument (scripts/wjazz_quantize.py) feeds. The weight is set here,
+    never on a page score: the largest value whose mean stays within the
+    criterion `grid_slack_s` was set by, 20 ms."""
+    import contextlib
+    import io
+    import sqlite3
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+    import wjazz_quantize
+
+    from swingscribe.config import Config
+    from swingscribe.stages.quantize import beat_position, quantize_notes, replay_onsets, settings
+    from swingscribe.stages.swing import swing_spans
+
+    base = settings(Config().quantize)
+    db = sqlite3.connect(db_path)
+    solos = list(db.execute("select melid, avgtempo from solo_info order by melid"))
+    if limit:
+        solos = solos[:limit]
+    per_weight: dict[float, dict] = {
+        w: {"sum_ms": 0.0, "sum_sq": 0.0, "n": 0, "moved": 0, "per_solo": []} for w in weights
+    }
+    n_solos = 0
+    for melid, tempo in solos:
+        solo = wjazz_quantize.load_solo(db, melid)
+        if solo is None or len(solo["grid"]) < 16:
+            continue
+        grid = solo["grid"]
+        notes = solo["notes"]
+        onsets = [n["onset"] for n in notes]
+        kept = [o for o in onsets if beat_position(o, grid) is not None]
+        if len(kept) < 20:
+            continue
+        n_solos += 1
+        with contextlib.redirect_stdout(io.StringIO()):
+            spans = swing_spans(onsets, grid)
+        reference: list[float] | None = None
+        for w in weights:
+            # The reference row: no slack and no prior, the least-snap-error
+            # notation, so the sweep reads what coarsening costs in total.
+            overrides = {"grid_slack_s": 0.0} if w < 0 else {"figure_prior_weight": w}
+            quantized, positions = quantize_notes(
+                onsets,
+                [n["duration"] for n in notes],
+                [n["pitch"] for n in notes],
+                grid,
+                spans,
+                [],
+                **{**base, **overrides},
+            )
+            replayed = replay_onsets(
+                quantized, positions, grid, spans, base["straight_bur_ceiling"]
+            )
+            errors = [abs(a - b) * 1000.0 for a, b in zip(kept, replayed, strict=True)]
+            snapped = [round(q.beat, 6) for q in quantized]
+            if w == 0.0:
+                reference = snapped
+            if reference is None:
+                reference = snapped  # the reference row itself: nothing moved yet
+            bucket = per_weight[w]
+            bucket["sum_ms"] += sum(errors)
+            bucket["sum_sq"] += sum(e * e for e in errors)
+            bucket["n"] += len(errors)
+            bucket["moved"] += sum(1 for a, b in zip(snapped, reference, strict=True) if a != b)
+            bucket["per_solo"].append((sum(errors) / len(errors), tempo_band(tempo)))
+    out = {"solos": n_solos, "weights": {}}
+    for w, b in per_weight.items():
+        means = [m for m, _band in b["per_solo"]]
+        by_band: dict = defaultdict(list)
+        for m, band in b["per_solo"]:
+            by_band[band or "no tempo"].append(m)
+        out["weights"][str(w)] = {
+            "mean_ms": round(b["sum_ms"] / max(1, b["n"]), 3),
+            "rms_ms": round(math.sqrt(b["sum_sq"] / max(1, b["n"])), 3),
+            "notes": b["n"],
+            "notes_moved_share": round(b["moved"] / max(1, b["n"]), 4),
+            "solo_mean_median_ms": round(sorted(means)[len(means) // 2], 3) if means else None,
+            "solo_mean_max_ms": round(max(means), 3) if means else None,
+            "solos_over_20ms": sum(1 for m in means if m > 20.0),
+            "by_band_mean_ms": {
+                band: round(sum(v) / len(v), 3) for band, v in sorted(by_band.items())
+            },
+        }
+    return out
+
+
+def render_sweep(report: dict) -> None:
+    print(f"\n== Round trip of the notation on WJazzD's onsets, {report['solos']} solos ==")
+    print(
+        f"  {'weight':>7} {'mean ms':>8} {'rms ms':>7} {'moved %':>8} {'solo median':>12} "
+        f"{'solo max':>9} {'solos>20':>9}  per band"
+    )
+    for w, row in report["weights"].items():
+        bands = ", ".join(f"{b} {m:.1f}" for b, m in row["by_band_mean_ms"].items())
+        label = "slack 0" if float(w) < 0 else f"{float(w):7.4f}"
+        print(
+            f"  {label:>7} {row['mean_ms']:8.3f} {row['rms_ms']:7.3f} "
+            f"{100 * row['notes_moved_share']:8.2f} {row['solo_mean_median_ms']:12.3f} "
+            f"{row['solo_mean_max_ms']:9.3f} {row['solos_over_20ms']:9d}  {bands}"
+        )
+
+
 # ── rendering ────────────────────────────────────────────────────────────────
 
 
@@ -988,8 +1102,12 @@ def count(folder: Path, log=print) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
-        "mode", nargs="?", default="count", choices=("count", "condition", "compare", "build")
+        "mode",
+        nargs="?",
+        default="count",
+        choices=("count", "condition", "compare", "build", "sweep"),
     )
+    parser.add_argument("--limit", type=int, default=None, help="sweep: first N solos only")
     parser.add_argument("--corpus", type=Path, default=CORPUS)
     parser.add_argument("--json", type=Path, default=None, help="write every count here")
     parser.add_argument(
@@ -1008,6 +1126,9 @@ def main() -> None:
     elif args.mode == "compare":
         result = compare_report(args.db, args.grids)
         render_compare(result)
+    elif args.mode == "sweep":
+        result = sweep_report(args.db or REPO_ROOT / "wjazz/wjazzd.db", limit=args.limit)
+        render_sweep(result)
     else:
         corpus = load_corpus(args.corpus)
         result = prior_table([r for t in corpus for r in beat_records(t)])
