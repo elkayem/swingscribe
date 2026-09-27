@@ -219,6 +219,27 @@ def roformer_stem_name(output_path: str | Path) -> str | None:
     return _ROFORMER_STEM_NAMES.get(match.group(1).strip().lower())
 
 
+def ensure_roformer_model_dir() -> Path | None:
+    """Create the folder AUDIO_SEPARATOR_MODEL_DIR names, if it names one.
+
+    audio-separator takes its download folder from that variable and raises
+    FileNotFoundError when the folder does not exist yet, instead of making
+    it. The portable launcher sets it to a per-user folder that a fresh
+    install does not have, so the default separator failed on the first
+    Separate of every new install (v0.1.0, found 2026-09-27; the release had
+    been tested on htdemucs only). Unset, audio-separator uses its own
+    default folder and makes that itself.
+    """
+    import os
+
+    configured = os.environ.get("AUDIO_SEPARATOR_MODEL_DIR")
+    if not configured:
+        return None
+    folder = Path(configured)
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
 def _roformer_separate(audio_path: Path, checkpoint: str, out_dir: Path) -> dict[str, str]:
     """Write `checkpoint`'s stems for `audio_path` into `out_dir` as
     `<stem>.wav`, through python-audio-separator. Heavy import inside: the
@@ -229,6 +250,7 @@ def _roformer_separate(audio_path: Path, checkpoint: str, out_dir: Path) -> dict
 
     work = out_dir / "_separating"
     work.mkdir(parents=True, exist_ok=True)
+    ensure_roformer_model_dir()
     separator = Separator(output_dir=str(work), output_format="WAV", log_level=30)
     # load_model fetches the checkpoint on first use (hundreds of MB) with
     # nothing on the job's bar to say so; announce it where the GUI looks.

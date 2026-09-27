@@ -13,6 +13,8 @@ set "ROOT=%~dp0"
 set "DATA=%LOCALAPPDATA%\SwingScribe"
 if not exist "%DATA%\models" mkdir "%DATA%\models"
 if not exist "%DATA%\cache" mkdir "%DATA%\cache"
+rem audio-separator refuses a model folder that does not exist yet.
+if not exist "%DATA%\models\audio-separator" mkdir "%DATA%\models\audio-separator"
 
 rem Model weights download on first use into one per-user folder: demucs and
 rem beat_this through torch hub, the Roformer through audio-separator, the

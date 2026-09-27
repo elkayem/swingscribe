@@ -474,9 +474,20 @@ Smart App Control test, which needs a machine with the feature on.
    & "$env:LOCALAPPDATA\SwingScribe-build\SwingScribe\SwingScribe.cmd" --no-browser --port 8798
    ```
 
-   then open a track, run Beats, Separate with htdemucs, Transcribe, Export,
-   Quit. This is the per-file reputation test: a refused DLL is a visible
-   failure in that console. Do it for every release, because verdicts flap.
+   then open a track, run Beats, Separate with the DEFAULT separator
+   (`bsroformer_sw`), Transcribe, Export, Quit -- once for a horn and once
+   for a pianist, so the piano model runs too. This is the per-file
+   reputation test: a refused DLL is a visible failure in that console. Do
+   it for every release, because verdicts flap. **Start from an empty data
+   folder** (rename `%LOCALAPPDATA%\SwingScribe` aside), so every weight
+   downloads the way it does on a new install: v0.1.0 was tested on
+   htdemucs with the folder already populated, and shipped a default
+   separator that failed on the first Separate of every fresh install,
+   because audio-separator refuses a model folder that does not exist yet
+   (found 2026-09-27). On this machine the downloads also need the CA
+   bundle (`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`) in the launching
+   console, and a shell run from the Claude app sees a redirected
+   `%LOCALAPPDATA%` (CLAUDE.md).
 4. **Test on the second laptop** as a stranger's machine (Smart App Control
    is off there): download the zip in a browser, extract, `setup.cmd`, the
    icon, the same run, `uninstall.cmd`; then confirm its own Python still

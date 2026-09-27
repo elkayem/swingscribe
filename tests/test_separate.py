@@ -8,7 +8,7 @@ import pytest
 
 from conftest import requires_heavy
 from swingscribe.device import resolve_device
-from swingscribe.stages.separate import existing_stems, stems_dir
+from swingscribe.stages.separate import ensure_roformer_model_dir, existing_stems, stems_dir
 
 
 def test_resolve_device_auto():
@@ -318,3 +318,19 @@ def test_reusing_an_older_set_backfills_its_marker(tmp_path, monkeypatch):
     assert not (out / SOURCE_MARKER).exists()
     separate.run(document, config)
     assert (out / SOURCE_MARKER).is_file()
+
+
+def test_the_roformer_model_dir_is_made_on_a_fresh_install(tmp_path, monkeypatch):
+    """audio-separator raises on a missing AUDIO_SEPARATOR_MODEL_DIR rather
+    than creating it, and a fresh portable install has none: the default
+    separator failed on the first Separate of every new install."""
+    folder = tmp_path / "SwingScribe" / "models" / "audio-separator"
+    monkeypatch.setenv("AUDIO_SEPARATOR_MODEL_DIR", str(folder))
+    assert ensure_roformer_model_dir() == folder
+    assert folder.is_dir()
+    assert ensure_roformer_model_dir() == folder  # a second call is harmless
+
+
+def test_no_model_dir_variable_leaves_audio_separator_its_default(monkeypatch):
+    monkeypatch.delenv("AUDIO_SEPARATOR_MODEL_DIR", raising=False)
+    assert ensure_roformer_model_dir() is None
