@@ -241,15 +241,18 @@ class PagePrint:
 
 # ---------------------------------------------------------------- geometry
 
+# pdfium's FPDF_PAGEOBJ_PATH (fpdf_edit.h), the one thing the geometry below
+# wanted from pypdfium2. A literal keeps these functions on any object with
+# pdfium's page interface, so the tier-1 tests (no `omr` group) run them.
+FPDF_PAGEOBJ_PATH = 2
+
 
 def find_staves(page) -> list[Staff]:
     """Staves from the thin, wide paths: five equally spaced lines, top of the page first."""
-    import pypdfium2.raw as raw
-
     width, _height = page.get_size()
     lines = []
     for obj in page.get_objects(max_depth=4):
-        if obj.type != raw.FPDF_PAGEOBJ_PATH:
+        if obj.type != FPDF_PAGEOBJ_PATH:
             continue
         left, bottom, right, top = obj.get_bounds()
         if top - bottom < 2.0 and right - left > 0.3 * width:
@@ -290,12 +293,10 @@ def find_barlines(page, staves: list[Staff]) -> list[list[float]]:
     2.0 points in Inkpen2); Finale draws them alike, so width is only a
     floor here, never the test.
     """
-    import pypdfium2.raw as raw
-
     candidates: list[tuple[float, float, float, float]] = []
     widths: list[float] = []
     for obj in page.get_objects(max_depth=4):
-        if obj.type != raw.FPDF_PAGEOBJ_PATH:
+        if obj.type != FPDF_PAGEOBJ_PATH:
             continue
         left, bottom, right, top = obj.get_bounds()
         # Up to 8 points wide: a double bar line is one path in some exports.
@@ -406,11 +407,9 @@ def find_beams(page, staves: list[Staff]) -> list[tuple[int, float, float, float
     lines pass this sieve too; `_beams_over` tells them apart by where
     they end and how far from the heads they sit.
     """
-    import pypdfium2.raw as raw
-
     out: list[tuple[int, float, float, float, float]] = []
     for obj in page.get_objects(max_depth=4):
-        if obj.type != raw.FPDF_PAGEOBJ_PATH:
+        if obj.type != FPDF_PAGEOBJ_PATH:
             continue
         left, bottom, right, top = obj.get_bounds()
         width, height = right - left, top - bottom
@@ -501,7 +500,7 @@ def read_page(pdf: Path, index: int) -> PagePrint | None:
     paths = [
         tuple(float(v) for v in obj.get_bounds())
         for obj in page.get_objects(max_depth=4)
-        if obj.type == raw.FPDF_PAGEOBJ_PATH
+        if obj.type == FPDF_PAGEOBJ_PATH
     ]
 
     heads.sort(key=lambda h: (h.staff, round(h.x, 1), -h.y))

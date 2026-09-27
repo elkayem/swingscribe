@@ -925,6 +925,7 @@ def test_accent_stacked_on_a_head_is_not_a_note():
 
 
 def test_audiveris_book_is_rebuilt_when_the_pages_change(tmp_path, monkeypatch):
+    pytest.importorskip("PIL")  # _read_with opens the pages and writes the book with it
     from PIL import Image
 
     from pdf2musicxml import convert
