@@ -1,6 +1,6 @@
 [project]
 name = "swingscribe"
-version = "0.1.0"
+version = "0.2.0"
 description = "Jazz audio in → instrument-separated, swing-aware notation out"
 readme = "README.md"
 license = { text = "MIT" }
