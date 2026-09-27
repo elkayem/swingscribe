@@ -1,441 +1,613 @@
-# SwingScribe — User guide
+# SwingScribe user guide
 
-## Overview
+SwingScribe turns a jazz recording into a solo transcription. You work one
+solo at a time, in three steps down one page:
 
-SwingScribe turns a jazz recording into swing-aware MusicXML. The GUI is where
-you do that by hand, one solo at a time: select the span you care about,
-isolate it from the rest of the band, transcribe it, review and clean up the
-result, and export.
+1. **Select the span.** Mark where the solo starts and ends, and check the
+   bar grid.
+2. **Isolate and audition.** Separate the soloist from the band, and listen
+   to make sure the separation worked.
+3. **Transcribe and review.** Get the notes, clean up anything that is not
+   the solo, and export MusicXML.
 
-Launch it from the repo with:
+This guide covers every control. To install SwingScribe, see the
+[installation guide](https://github.com/elkayem/swingscribe/blob/master/INSTALL.md).
+A few terms (stem, span, downbeat, F1) are defined at the end.
+
+## Starting and stopping
+
+**The Windows app:** double-click the SwingScribe icon. A console window
+opens minimized, and the app opens in your browser.
+
+**From source:** run this command from the repository:
 
 ```
 uv run python -m swingscribe gui
 ```
 
-Name a file to open it straight away, with its folder listed in the picker:
+On Windows, `.\swingscribe gui` does the same thing through the `.cmd` shim
+beside `pyproject.toml`. Do not use `uv run swingscribe`: Windows Smart App
+Control refuses the `swingscribe.exe` stub it runs (see Troubleshooting).
+
+You can name a file to open it straight away:
 
 ```
 uv run python -m swingscribe gui path/to/track.m4a
 ```
 
-On Windows, `.\swingscribe gui` (the `.cmd` shim beside `pyproject.toml`) does
-the same thing. Prefer either to `uv run swingscribe`: that runs a
-console-script `.exe` generated fresh at install time, which Windows Smart
-App Control refuses as an unsigned binary it has never seen (`os error
-4551`). The `README.md` has the details.
+`gui` also takes these options:
 
-The app serves itself on `127.0.0.1:8420` and opens a browser tab there. It
-listens on localhost only; the audio never leaves your machine.
+- `--port <n>` serves on a different port. The default is 8420.
+- `--no-browser` starts the server without opening a browser tab.
+- `--library <folder>` sets the folder the track picker starts in.
 
-**Quit**, at the right of the header and again at the top of the Open a
-track window, stops the server: the page replaces
-itself with a notice and the console window it was launched from closes.
-If a separation or transcription is still running the button turns red and
-names it; a second click within four seconds abandons the job and quits
-anyway. Nothing you judged is lost either way — your span, downbeat, edits
-and score link are written beside the audio as you change them; an abandoned
-job only loses cache work it can redo. Closing the browser tab on its own
-does **not** stop the server.
+The app lives at `http://127.0.0.1:8420/`. It listens only on your own
+machine, so your audio never leaves it. **Help**, in the header, opens this
+guide in a new tab.
+
+### Quitting
+
+**Quit** is at the right of the header, and at the top of the Open a track
+window. It stops the server. The page replaces itself with a notice, and if
+you started from the icon, the console window closes too.
+
+If a separation or transcription is still running, the button turns red and
+names it. Click again within four seconds to abandon the job and quit
+anyway. Nothing you decided is lost, because your settings are saved beside
+the audio as you make them.
+
+Closing the browser tab does **not** stop the server. To get back, open
+`http://127.0.0.1:8420/` again.
 
 ## Opening a track
 
-Click **Open track…** in the top bar to bring up the picker:
+Click **Open track…** in the header to open the track picker.
 
-- **Recent** — tracks you've opened before.
-- **Cache** — click **Show** to see what's cached per track (separated stems
-  and the ingested wav) and reclaim disk space. This only deletes stems
-  directories and ingest wavs — it never touches your saved span, downbeat,
-  or edits.
-- **Browse** — a folder browser starting from your drives.
-- The text field at the bottom takes a pasted path to an audio file directly.
+- **Recent** lists tracks you have opened before, with the stem and span
+  you last used.
+- **Cache** shows, once you click **Show**, how much disk each track's
+  cached data uses. See "Freeing disk space" below.
+- **Browse** is a folder browser. It starts in the library folder: your
+  Music folder in the Windows app, or wherever you launched from. Use
+  **↑ Up**, the drive menu, or type a folder into the path box and press
+  <kbd>Enter</kbd>.
+- The field at the bottom takes a full path to an audio file. Paste one and
+  click **Open**.
 
-Whatever you set up for a track — the span, downbeat, ensemble, stem choice,
-erasures, and so on — is saved beside the audio file itself, in
-`<track>.swingscribe.json`. It travels with the file, not with the app's
-cache.
+SwingScribe opens `.wav`, `.flac`, `.mp3`, `.m4a`, `.aac`, `.ogg`, `.opus`,
+`.wma`, `.aiff` and `.aif` files. The files it writes itself, such as
+isolated stems and A/B mixes, are hidden from the list.
 
-## Zooming and panning
+### Your settings travel with the audio
 
-The same gestures work everywhere you'd want to zoom in: the Detail waveform
-in panel 1, the isolated-stem waveform in panel 2, and the piano roll in
-panel 3.
+Everything you decide about a track, from the span and downbeat to your
+edits and the transposition, is saved in a small file beside the audio. For
+`solo.m4a` it is `solo.m4a.swingscribe.json`. Keep it with the audio, and
+the track opens the way you left it.
 
-- **Scroll** to zoom, centered on the pointer.
-- **Shift-scroll** to pan.
-- **Drag** to pan.
-- A trackpad's horizontal swipe pans too.
-- The **+** / **−** chips zoom by a fixed step, and **Fit** resets to show
-  the whole span.
+### Freeing disk space
 
-The piano roll is the one exception while the **Edit** tool is selected:
-there, a plain drag draws the rubber-band selection instead, so panning
-becomes **shift-drag**.
+Separated stems are big. The **Cache** panel lists each track's sets of
+stems and its decoded wav. **Delete all** frees a whole track, and **✕**
+frees one set of stems. Each delete asks first: the button changes to
+"free N MB?", and a second click within four seconds confirms it. **No
+track known** gathers cached data whose track can no longer be found.
 
-The **Overview** waveform in panel 1 never zooms — it always shows the whole
-track. Dragging on it draws a fresh A/B selection, and the box drawn on it
-marks where the Detail view is; drag that box to slide the Detail view
-without changing the selection.
+Deleting cache data never touches your settings file. The worst it costs is
+re-running a separation.
+
+## Getting around
+
+The page has three sections, and each has its own transport. Section 1 plays
+the original recording, section 2 the isolated stem, and section 3 the
+transcription. Pressing play in one section stops the others. <kbd>Space</kbd>
+and <kbd>Enter</kbd> act on whichever section you last played or clicked in.
+
+### Zooming and panning
+
+The same gestures work on the Detail waveform in section 1, the stem
+waveform in section 2, and the piano roll in section 3.
+
+- **Scroll** to zoom around the pointer.
+- **Shift-scroll** or **drag** to pan. A trackpad's sideways swipe pans too.
+- The **+** and **−** chips zoom in steps.
+- **Fit** shows the whole span. On the Detail view it is **Fit selection**,
+  which leaves a little room either side. **Edge A** and **Edge B** zoom in
+  tight around one edge of the selection, so you can place it by eye.
+
+The one exception is the piano roll with the **Edit** tool selected. There a
+plain drag draws a selection box, and **shift-drag** pans.
+
+The **Overview** waveform at the top of section 1 never zooms: it always
+shows the whole track. What a drag on it does depends on where it starts:
+
+- Inside the box that marks the Detail view, it slides the Detail view.
+- On an edge of the selection, it moves that edge.
+- Inside the selection, it moves the whole selection.
+- Anywhere else, it draws a new selection.
+
+### Playback speed
+
+Every transport has the same speed control, so you can slow a fast line
+down to hear it. The pitch never changes.
+
+- The chips are **1×**, **¾×**, **½×** and **¼×**, and the slider runs
+  from 20% to 200%.
+- **−** and **+** step by one percent, or five with a shift-click.
+  Scrolling over the slider does the same.
+- Click the readout to type a speed, such as `43`, `43%` or `0.43`, and
+  press <kbd>Enter</kbd>. <kbd>Esc</kbd> puts it back.
+- <kbd>,</kbd> and <kbd>.</kbd> change the active section's speed by five
+  percent, or one with <kbd>Shift</kbd>.
+
+In section 1 a new speed takes effect at once. Sections 2 and 3 stretch the
+audio on the server, so the change applies when you let go of the slider
+and takes a moment to arrive. Press play meanwhile and playback starts as
+soon as it lands.
 
 ## Step 1: Select the span
 
-Opening a track for the first time — one with no remembered span — starts
-you with the whole track selected, and the Detail view showing the whole
-track too. Narrow it down to the solo from there.
+The first time you open a track, the whole track is selected. Narrow the
+selection down to the solo. Use the Overview to find your way around a long
+file, and the Detail view to place the edges exactly.
 
-**Overview vs. Detail:** the Overview is for finding your way around a
-multi-minute file; the Detail view is where you actually place the
-boundaries. Dragging on Overview draws a new selection; dragging elsewhere on
-Detail pans.
+### Placing A and B
 
-**The A/B selection**, on the Detail waveform:
+On the Detail waveform, only the orange **A** and **B** handles change the
+selection.
 
-- Only the orange A and B handles change the selection. Drag a handle to
-  move that edge.
-- Or use **Set A** / **Set B** (keys <kbd>A</kbd> / <kbd>B</kbd>) to place an
-  edge at the current playhead while the track plays, then the `−.1` / `+.1`
-  nudge buttons to fine-tune it.
-- Clicking anywhere else on Detail just moves the playhead; it does not move
-  a handle.
-- **Snap** (chip, or key <kbd>S</kbd>) snaps A/B to the nearest beat or bar
-  while dragging or tapping — but never on a nudge, since the small nudges
-  are exactly how you correct the grid's own small errors.
+- Drag a handle to move that edge.
+- Or, while the track plays, press **Set A** or **Set B** (keys <kbd>A</kbd>
+  and <kbd>B</kbd>) to put an edge at the playhead. Then fine-tune it with
+  the **−.1** and **+.1** nudge buttons, which move it a tenth of a second.
+- Clicking anywhere else on the Detail view moves the playhead. It never
+  moves a handle.
+- **Snap** (key <kbd>S</kbd>) cycles through **off**, **bar** and **beat**.
+  With snap on, a dragged or tapped edge lands on the nearest bar line or
+  beat. The nudges never snap, so you can still correct a small error in
+  the beat grid.
 
-**Transport:** the play button, <kbd>Space</kbd> to play/pause, and the
-**speed control** for checking a fast line by ear (see below). **Loop
-A/B** (<kbd>L</kbd>) confines playback to the selection and loops it; switch
-it off to listen around the span — before it, after it — without moving A or
-B. **⇤ Start** (<kbd>Enter</kbd>) plays from the start: of the selection
-while Loop A/B is on, of the track when it is off.
+The readout at the right shows the span's length and how many bars it
+covers.
 
-Each section has its own play button and its own **⇤ Start**, and pressing
-one silences the others: play in section 1 is always the original recording,
-in section 2 the isolated stem, in section 3 the transcription's rendering.
-<kbd>Space</kbd> and <kbd>Enter</kbd> act on whichever section you last
-played or clicked in.
+### Transport
 
-**Beats:** click **Beats** to show the bar grid — bar lines, bar numbers, and
-chorus markers — over the waveform, computed from the whole track (this may
-run a short background job the first time). It's what transcription will
-quantize against, so it's worth checking before you spend time downstream.
+The play button or <kbd>Space</kbd> plays and pauses. **Loop A/B**
+(<kbd>L</kbd>) keeps playback inside the selection and loops it. Switch it
+off to listen before and after the span without moving A or B. **⇤ Start**
+(<kbd>Enter</kbd>) plays from the start of the selection, or from the start
+of the track when Loop A/B is off.
 
-- <kbd>D</kbd>, or clicking a beat dot, sets the downbeat at the nearest
-  beat — useful while the music is playing.
-- Until you set one, the downbeat is a guess taken from the music **around
-  your selection**, so the bar lines can shift by a beat when you select a
-  different part of a long track. That is deliberate: a beat the tracker
-  lost elsewhere in the tune should not put your solo's bar lines off. Once
-  you set the downbeat yourself, it stays where you put it.
-- <kbd>F</kbd>, or shift-clicking a beat, sets the **form start**: that beat
-  becomes bar 1, chorus counting starts there, and everything before it is
-  drawn faint and unnumbered. Handy for skipping an intro.
-- The time-signature menu and the **2× time** toggle (for notating a ballad
-  at twice the pulse) apply to the whole tune.
-- **Chorus length** (8/12/16/24/32 bars, or none) draws a heavier line every
-  N bars, for a solo that's a whole number of choruses. Pick **custom…** for a
-  form the menu doesn't list — a 20-bar tune, a 16-bar blues — and type the
-  number beside it; Enter applies it, Esc puts the menu back. It joins the menu
-  and is remembered with the track.
+### The bar grid
 
-## Step 2: Isolate & audition
+The bar grid is what the transcription will be written against, so check it
+before you go further. Click **Beats** to compute it. The first time takes
+a few seconds, and the chip shows the progress. After that the grid is
+cached and appears whenever you open the track, and **Beats** just shows or
+hides it.
 
-This is the gate: if the soloist isn't clearly dominant in the isolated
-stem, no amount of tuning downstream will rescue the transcription. Listen
-here before spending time on transcription.
+The grid is drawn over the waveforms: a tick for each beat, a numbered dot
+for each bar, and a gold dot at the start of each chorus. The readout above
+the Detail view gives the tempo, the time signature, how many seconds of
+the track have no steady beat (shaded on the waveform), and the bar and
+chorus count.
 
-**Separation model:** the chips let you pick which model separates the
-track. Hover over a chip for what it is and whether its stems are already on
-disk for this span; a lit dot means they are.
+- **Downbeat:** press <kbd>D</kbd> to put the downbeat on the beat nearest
+  the playhead, or click a beat dot. Until you do, SwingScribe guesses it
+  from the music **around your selection**, so the bar lines can shift when
+  you select a different part of a long track. That is deliberate: a beat
+  lost elsewhere in the tune should not throw off your solo. A downbeat you
+  set yourself stays put.
+- **Form start:** press <kbd>F</kbd>, or shift-click a beat dot, to make the
+  nearest bar line bar 1. Chorus counting starts there, and everything
+  before it is drawn faint and unnumbered, which is handy for skipping an
+  intro. The **bar 1 @ m:ss** chip shows where it is. Its **✕** clears it.
+- **Time signature:** the menu offers 2/4, 3/4, 4/4, 5/4, 6/4, 7/4, 3/8,
+  6/8, 9/8 and 12/8.
+- **2× time** notates the solo at twice the tracked pulse. Use it for a
+  ballad played in double time, so a run of 32nd notes becomes ordinary
+  sixteenths.
+- **Chorus length** (8, 12, 16, 24 or 32 bars, or none) draws a heavier line
+  every N bars. Choose **custom…** for a form the menu does not list, such
+  as a 20-bar tune. Type the number and press <kbd>Enter</kbd>, or
+  <kbd>Esc</kbd> to cancel. The custom length joins the menu and is saved
+  with the track.
 
-- **BS-RoFormer** — the default. Much slower than Demucs, but far better at
-  keeping a horn in one stem. Because it separates only the selected span,
-  a solo takes minutes rather than tens of minutes.
-- **Demucs** — Hybrid Transformer Demucs, four stems (vocals, drums, bass
-  and *other*). The fast choice: about three minutes for a ten-minute track
-  on a CPU.
-- **Demucs 6-stem** — Demucs with guitar and piano stems added. Worth trying
-  on a piano solo; it sometimes files a horn under guitar or vocals.
-- **Demucs fine-tuned** — four Demucs models averaged. Four times slower
-  than Demucs and, measured on our benchmark, no more accurate. Kept for
-  comparison.
+Snap, the time signature, 2× time and chorus length stay disabled until the
+track has a beat grid.
 
-The command-line names for these are `bsroformer_sw`, `htdemucs`,
-`htdemucs_6s` and `htdemucs_ft`; the command box at the bottom of the panel
-uses them.
+## Step 2: Isolate and audition
 
-Separation is scoped to your selected span, and the **Separate** button
-shows a time estimate before you click it (a span-scoped Roformer separation
-of a chorus or two is a matter of minutes, not the whole-track run).
+This step is the gate. If the soloist is not clearly on top in the isolated
+stem, nothing later on can rescue the transcription. Listen here before you
+transcribe.
 
-While a separation job runs, a progress bar and message show; **Cancel**
-stops the job and returns the panel to a plain **Separate** button, ready to
-run again.
+### Choosing a separation model
 
-**Lead stem:** the menu lists what got separated for this model (`other`,
-`vocals`, `guitar`, `piano`, `bass`, …) plus any sum of stems that can be
-formed from what's on disk — for example `other+vocals` shows up when both
-of those stems exist and might together hold a soloist Demucs split between
-them mid-phrase.
+The chips choose which AI model separates the track. Hover over a chip to
+see what it is. A lit dot means its stems for this span are already on
+disk.
 
-**Audition:** the isolated-stem waveform plays looped over the span. The
-A/B toggle switches between **Isolated**, **Original**, and **Both**, and
-switching mid-phrase is sample-locked — you're comparing the exact same
-instant either way. **Click** (<kbd>C</kbd>) mixes a metronome on the bar
-grid into the audition, which is a fast way to hear whether the downbeat is
-right. The speed control slows playback without changing pitch; here and
-in section 3 the audio is stretched on the server and reloaded, so a new
-speed takes a moment to arrive. Press play in the meantime and it starts
-as soon as the audio lands, at the new speed and from where you were.
+- **BS-RoFormer** is the default. It is a Band-Split RoPE Transformer, the
+  architecture that won the music separation track of the 2023 Sound
+  Demixing Challenge. It is much slower than Demucs, but far better at
+  keeping a horn in one stem.
+- **Demucs** (Hybrid Transformer Demucs) is the fast choice. It gives four
+  stems (vocals, drums, bass and *other*) and takes about three minutes
+  for a ten-minute track on a CPU.
+- **Demucs 6-stem** adds guitar and piano stems. It is worth trying on a
+  piano solo, but it sometimes files a horn under guitar or vocals.
+- **Demucs fine-tuned** averages four Demucs models. It is four times
+  slower than Demucs and, on SwingScribe's benchmarks, no more accurate.
+  It is kept for comparison.
 
-**Speed:** every transport has the same control — preset chips (1×, ¾×,
-½×, ¼×), a slider from 20% to 200%, **−** / **+** for one percent at a
-time (shift-click for five), and a readout you can click and type into:
-`43` or `43%`, then <kbd>Enter</kbd>. Scrolling over the slider or the
-readout moves it one percent, and <kbd>,</kbd> / <kbd>.</kbd> step the
-speed of whichever section is playing by five percent (with
-<kbd>Shift</kbd>, one). The pitch never moves. In section 1 the change is
-instant; in sections 2 and 3 the slider takes effect when you let go.
+The configuration file calls these `bsroformer_sw`, `htdemucs`,
+`htdemucs_6s` and `htdemucs_ft`.
 
-The **mixer** below lets you solo/mute and adjust the level of every stem
-from this separation. **Download isolated span** saves the isolated stem as
-a wav, and the command box shows the equivalent CLI invocation.
+### Separating
 
-## Step 3: Transcribe & review
+Separation covers only your selected span. That is what makes BS-RoFormer
+practical: a solo takes minutes, not the tens of minutes a whole track
+would. The button says what it will do and how long it should take, for
+example **Separate selection with BS-RoFormer (~4 min)**. It disappears
+once this span's stems exist. While the job runs, a progress bar shows the
+time left, and **Cancel** stops it.
 
-Click **Transcribe span** to run transcription over the selected span.
+### Lead stem
 
-**Ensemble** tells the transcriber who's playing: `Horn-led`, `Trio (piano)`,
-or `Solo piano`. A trio or solo-piano ensemble gets a second opinion from the
-polyphonic piano model; a horn never does, because a piano model asked about
-a saxophone vouches for nothing useful. The hint text next to the menu says
-whether the piano model will be consulted for the current choice.
+The **Lead stem** menu picks the stem that holds the soloist. It lists
+every stem the model produced (`other`, `vocals`, `guitar`, `piano`,
+`bass` and so on), plus two sums:
 
-**Line** (pianists only) picks which detector supplies the melody:
-"Piano model, melody picked" (the default: a sequence chosen from
-everything the polyphonic model heard) or "CREPE, checked by piano model"
-(monophonic pitch tracking corroborated by the piano model). They're two
-takes of the same span — compare them by ear. Against the hand
-transcriptions the picked line has more of the right notes on six
-pianists of seven, which is why it is the default; the CREPE take is
-still there for the passage where it hears better.
+- `other+vocals`
+- `other+vocals+guitar+piano`
 
-**The piano roll** draws notes over the bar grid, with opacity tracking
-confidence, and carries the same beat strip along its bottom edge as the
-waveforms: a tick per beat, a dot and number per bar, a gold dot at a
-chorus start. Two lanes beneath it show the raw evidence continuously: f0 (raw
-CREPE pitch, dim, against the smoothed kept pitch, bright — a gap between
-them is a frame that got gated out) and gate (periodicity against its
-threshold, with energy-gate failures shaded).
+A sum helps when a model has switched the soloist between stems mid-phrase
+(see Troubleshooting). The menu starts on `piano` for a piano ensemble and
+on `other` for everything else.
 
-**Tools**, in the tool group above the roll:
+### Audition
 
-- **Inspect** (the default) — clicking a note moves the playhead, sounds a
-  plain tone at that note's pitch, and shows the frames that produced it in
-  the inspector panel below (with a **♪ Play** button to hear it again).
-  This works on ground-truth notes too, once a hand transcription is loaded
-  — click any matched, wrong, or missed note to inspect and hear it — and
-  on the piano model's candidates while they are shown: the inspector says
-  how loud the model heard the note and whether it is on the page.
-  Dragging on the roll pans.
-- **Edit** (<kbd>E</kbd> toggles between the two tools) — clicking a note
-  silences it; clicking a faint magenta piano-model candidate switches it
-  on and sounds it. Dragging a box silences every note it covers; alt-drag
-  restores a run instead. With Edit selected, shift-drag pans (a plain drag
-  draws the rubber band).
+The isolated stem is drawn in teal over the original mix, and plays looped
+over the span.
 
-Toggle the piano-model candidates with the **piano model** chip
-(<kbd>V</kbd>) — everything the piano model heard that the current line
-left out is drawn faint on the roll. Switching one on with the Edit tool
-adds it to the transcription: if it lands at the same time as a line note,
-the two are written together as a **chord**, taking the line note's
-duration.
+- The **Isolated**, **Original** and **Both** toggle switches what you hear.
+  Switching is sample-locked, so you compare exactly the same instant.
+- **Click** (<kbd>C</kbd>) adds a metronome on the bar grid. It is the
+  quickest way to hear whether the downbeat is right, and it needs a beat
+  grid.
+- The **mixer** has a row for the original mix, each stem, and the click.
+  Each row has a mute toggle (◉ / ○) and a level slider.
+- **Download isolated span** saves the isolated stem over the span as a wav,
+  at the current playback speed.
+- The command box shows the equivalent `ab` command line, with a **Copy**
+  button. See "The command line" below.
 
-Silenced notes stay visible, struck through — you can see what you cut.
-**Undo** / **Redo** (<kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd>) and
-**Restore all** work over the whole edit history, and Restore all is itself
-undoable.
+## Step 3: Transcribe and review
 
-Erasures are remembered **by content** — onset and exact pitch — not by
-note number, so a later re-transcription that renumbers every note still
-finds the right one to keep silenced. If a stored erasure no longer matches
-anything (the transcriber changed and no longer emits that note), the edit
-bar reports it rather than silently dropping it; **Discard** forgets those
-permanently, and even that is undoable.
+Click **Transcribe span** to transcribe the lead stem over the selected
+span. Once a transcription exists, the button reads **Re-transcribe**. A
+transcription that is already cached loads by itself when you open the
+track.
 
-## Ground truth and scoring
+### Who is playing
 
-**Ground truth…** loads a MuseScore hand transcription (`.mscz` / `.mscx`)
-and draws its notes over yours, colour-coded by how each one aligned:
+**Ensemble** tells SwingScribe who is playing: **Horn-led**, **Trio
+(piano)** or **Solo piano**. A pianist is transcribed with the help of a
+polyphonic piano model, which hears every note played. A horn never is,
+because a piano model asked about a saxophone vouches for nothing. The note
+beside the menu says whether the piano model will be consulted. Changing
+the ensemble clears the review, so transcribe again afterwards.
 
-- **matched** — agrees with a note you transcribed.
-- **wrong** — a note is there, but at the wrong pitch.
-- **invented** — a note you transcribed with nothing in the hand
-  transcription to match it.
-- **missed** — a note in the hand transcription with nothing of yours to
-  match it.
+**Line** (pianists only) chooses where the melody comes from:
 
-Each class has its own toggle chip so you can show or hide it, and its own
-count. Ground-truth notes can be inspected and sounded the same way your own
-notes can, with the Inspect tool.
+- **Piano model, melody picked** is the default. The melody is chosen, as a
+  line, from everything the piano model heard.
+- **CREPE, checked by piano model** tracks the melody with CREPE, a neural
+  network pitch tracker that follows one line at a time. The piano model
+  then corrects its octaves, drops notes it cannot vouch for, and fills its
+  gaps.
 
-A MusicXML score built from the Weimar Jazz Database (the `wjazz_score`
-tool) is a different kind of ground truth. Its pitches, onsets and beats
-are a human's, but its rhythm is the database's own algorithmic
-quantisation of the played timing (Flex-Q), which is more literal than any
-transcriber: a swung offbeat can land on a dotted position and a laid-back
-downbeat on the "e". Trust its notes and its bar lines; do not read its
-note values as how the solo should be written.
+They are two takes of the same span, so compare them by ear. Against hand
+transcriptions, the picked melody gets more of the right notes for six
+pianists out of seven. The CREPE take is there for the passage where it
+hears better, and its export gets `.crepe` in the file name.
 
-**Two different questions, easy to conflate:** the pitch F1 shown on the
-ground-truth bar is time-free and pitch-only — it asks *did we hear the
-right notes?* The **Score it** button asks a different, harder question:
-*are the notes we got written the way a human would write them?* — matching
-rhythm and value, not just pitch. It always reads lower than the F1 above
-it, because it charges the gap between performed timing and notated rhythm
-to the transcriber. Neither number replaces the other.
+### The piano roll
 
-The same line ends with **on the bar**: the share of matched notes written
-on the beat your score writes them on. Rhythm cannot see a page whose every
-bar line is a beat off — the gaps between notes are all still right — so
-this is the number that does. A page on its bar lines reads about 0.8 to
-0.95. If most notes sit the same distance from where your score has them,
-the line turns into a warning — **BAR LINES OFF** — and says how far, and
-which way to move the downbeat. Move it, export again, and score again.
+The notes are drawn over the bar grid, with the same beat strip along the
+bottom as the waveforms. A note's opacity shows how confident the
+transcriber was. The line above the roll counts the notes and shows how much
+of the span had a clear pitch.
 
-## Export
+Two lanes under the roll show the raw evidence:
 
-**Export MusicXML** writes the score beside the audio file, with the span
-folded into the filename — export the same track's second chorus later and
-you get a second file, not an overwrite.
+- **f0** is the pitch trace. The dim line is the raw pitch estimate, and
+  the bright line is the pitch that was kept. A gap between them is a frame
+  that was gated out.
+- **Gate** is periodicity, meaning how clearly pitched each moment is,
+  against the threshold a note must pass. Shading marks frames rejected for
+  being too quiet.
 
-**Written for** picks the transposition the part should be notated in
-(concert C, B♭ for trumpet/soprano, B♭ tenor, or E♭ for alto/baritone).
-Nothing in the audio says which horn is playing, so this can only come from
-you, and the key signature moves with your choice.
+The section's transport plays **Original** (the default), **Transcription**
+(the notes as plain tones, with silenced notes left out) or **Both**.
 
-Bars in the export are numbered from 1 within the span you selected — the
-way a solo transcription is normally numbered — not from the start of the
-track. Silenced notes are left out of the export; candidates you switched on
-are written in, as chords where they land on a line note.
+### Inspect and Edit
 
-If the file on disk is older than what's on screen (because you kept
-editing after exporting), the export bar says so.
+The two tools sit above the edit bar. <kbd>E</kbd> switches between them.
+
+- **Inspect** is the default. Click a note to move the playhead there, hear
+  the note's pitch, and see the evidence behind it in the inspector below:
+  the frames, their periodicity, the pitch spread, and a plain-language
+  verdict. **♪ Play** sounds it again. Dragging pans.
+- **Edit** changes the transcription. Click a note to silence it, or click
+  it again to bring it back. Drag a box to silence every note inside it.
+  Alt-drag a box to restore them. Shift-drag pans.
+
+Silenced notes stay visible, struck through, so you can see what you cut.
+**↶** and **↷** undo and redo (<kbd>Ctrl+Z</kbd> and
+<kbd>Ctrl+Shift+Z</kbd>) across the whole edit history. **Restore all**
+brings back every silenced note, and it can be undone too. The edit bar
+counts what you have silenced and added.
+
+### Notes the piano model heard
+
+For a pianist, everything the piano model heard that the melody left out
+is drawn faint on the roll. The **piano model · N** chip (<kbd>V</kbd>)
+shows or hides these candidates. With **Edit** selected, click a candidate
+to switch it on. It joins the transcription, and if it sounds together with
+a melody note, the two are written as a chord with the melody note's
+length. With **Inspect**, clicking a candidate shows how loudly the model
+heard it and whether it is on the page.
+
+### Edits survive re-transcription
+
+Edits are remembered by the note's onset and exact pitch, not by its number
+in the list, so a later transcription that renumbers every note still finds
+the right one. If a silenced note has vanished from the new transcription,
+the app says it is "already gone": good news, since the transcriber now
+agrees with you. If one now sounds at a different pitch, the app says it is
+"worth a look". **Discard** forgets unmatched silenced notes for good, and
+even that can be undone.
+
+## Comparing with a hand transcription
+
+Once a transcription exists, **Ground truth…** loads a hand transcription
+and lays it over yours. It lists the scores beside the track first, and
+accepts MuseScore files (`.mscz`, `.mscx`) and MusicXML (`.musicxml`,
+`.xml`). The link is saved with the track, and **✕** removes it.
+
+Every note is marked by how the two aligned. Each class has a chip that
+shows or hides it, with a count:
+
+- **matched**: you and the hand transcription agree.
+- **wrong note**: a note is there in both, at different pitches.
+- **invented**: a note you have that the hand transcription does not.
+- **missed**: a note in the hand transcription that you do not have.
+
+The line beside the chips names the score and gives its F1. The score is
+placed against your notes by matching the notes themselves, not by clock
+time, and a note that cannot be placed is pinned to the span rather than
+dropped. Hand-transcription notes can be inspected and played with the
+Inspect tool, just like your own.
+
+### Two questions, two numbers
+
+The **F1** on the ground-truth line asks: *did we hear the right notes?* It
+compares pitches only and ignores rhythm.
+
+**Score it**, in the export bar, asks a harder question: *are the notes
+written the way a human wrote them?* It compares the written rhythm and note
+values, so it always reads lower than F1. It charges every difference
+between the played timing and the written rhythm to the transcriber. The
+result looks like this:
+
+```
+vs solo.mscz: rhythm 0.82 · value 0.78 · 88% lined up (171/194) · on the bar 0.89
+```
+
+- **rhythm** is the share of matched notes whose written position agrees
+  with the hand transcription.
+- **value** is the share whose written note length agrees.
+- **lined up** is how much of the hand transcription could be matched at
+  all. Below half, the two are probably not the same solo, and SwingScribe
+  withholds the rhythm score rather than show a meaningless number.
+- **on the bar** is the share of matched notes written on the same beat of
+  the bar as the hand transcription. A page whose every bar line is a beat
+  off still scores well on rhythm, because the gaps between notes are all
+  right. This is the number that catches it. A page on its bar lines reads
+  about 0.8 to 0.95. If most notes sit the same distance off, the line
+  turns into a **BAR LINES OFF** warning that says how far off they are and
+  which way to move the downbeat. Move it, export again and score again.
+
+### Scores built from the Weimar Jazz Database
+
+A score built from the
+[Weimar Jazz Database](https://jazzomat.hfm-weimar.de/dbformat/dboverview.html)
+with the `wjazz_score` tool has a human's pitches, onsets and beats. Its
+rhythm, though, is the database's automatic quantisation of the played
+timing, which is more literal than any transcriber: a swung offbeat can land
+on a dotted position. Trust its notes and bar lines, not its note values.
+
+## Exporting MusicXML
+
+**Export MusicXML** (<kbd>X</kbd>) writes the score beside the audio file,
+with the span in the file name, for example `solo.42-118s.musicxml`. Export
+the second chorus later and you get a second file, not an overwrite. The
+export bar then shows a **Download** link and a summary: bars, notes, time
+signature, swing, and where the file went. Export needs a beat grid, so
+press **Beats** first.
+
+**Written for** sets the transposition of the part:
+
+- **C — concert**
+- **E♭ — alto, baritone**
+- **B♭ — trumpet, soprano**
+- **B♭ tenor — written +9th**
+
+Nothing in the audio says which horn is playing, so this has to come from
+you. The key signature moves with it.
+
+Bars are numbered from 1 within your span, the way a solo transcription is
+usually numbered, not from the start of the track. Notes before the first
+full bar become a pickup. Silenced notes are left out, and candidates you
+switched on are written in.
+
+If you keep editing after an export, the export bar says the file on disk
+is older than what you see.
 
 ## Keyboard shortcuts
 
-Shortcuts are ignored while you're typing into a text field, and most need a
-track loaded.
+Shortcuts need a track open. They are ignored while the focus is in a text
+field, a menu or a slider.
 
-- <kbd>Space</kbd> — play / pause
-- <kbd>Enter</kbd> — play from the start of the active section: A (or the
-  top of the track with Loop A/B off) in section 1, the span in sections 2
-  and 3
-- <kbd>A</kbd> / <kbd>B</kbd> — set edge A / B at the playhead
-- <kbd>L</kbd> — toggle Loop A/B
-- <kbd>S</kbd> — toggle snap to beat/bar
-- <kbd>C</kbd> — toggle the click track in audition
-- <kbd>D</kbd> — set the downbeat at the nearest beat
-- <kbd>F</kbd> — set the form start (bar 1) at the nearest bar
-- <kbd>E</kbd> — toggle the Inspect / Edit tool
-- <kbd>V</kbd> — toggle the piano-model candidate overlay
-- <kbd>X</kbd> — export MusicXML (once a review is up)
-- <kbd>[</kbd> / <kbd>]</kbd> — nudge the focused A/B edge by −0.1s / +0.1s
-  (add <kbd>Shift</kbd> for 0.01s)
-- <kbd>←</kbd> / <kbd>→</kbd> — seek −2s / +2s (add <kbd>Shift</kbd> for
-  0.1s)
-- <kbd>,</kbd> / <kbd>.</kbd> — playback speed −5% / +5% in the active
-  section (add <kbd>Shift</kbd> for 1%)
-- <kbd>Ctrl+Z</kbd> — undo an edit
-- <kbd>Ctrl+Shift+Z</kbd> (or <kbd>Ctrl+Y</kbd>) — redo
+- <kbd>Space</kbd>: play or pause the active section.
+- <kbd>Enter</kbd>: play from the start of the active section.
+- <kbd>A</kbd> / <kbd>B</kbd>: set edge A or B at the playhead.
+- <kbd>[</kbd> / <kbd>]</kbd>: nudge the focused edge by −0.1 s or
+  +0.1 s. Add <kbd>Shift</kbd> for 0.01 s.
+- <kbd>←</kbd> / <kbd>→</kbd>: seek the original recording by −2 s or
+  +2 s. Add <kbd>Shift</kbd> for 0.1 s.
+- <kbd>,</kbd> / <kbd>.</kbd>: playback speed −5% or +5% in the active
+  section. Add <kbd>Shift</kbd> for 1%.
+- <kbd>L</kbd>: turn Loop A/B on or off.
+- <kbd>S</kbd>: cycle snap through off, bar and beat.
+- <kbd>D</kbd>: set the downbeat at the nearest beat (needs the beat grid).
+- <kbd>F</kbd>: set the form start at the nearest bar line (needs the beat
+  grid).
+- <kbd>C</kbd>: turn the click track on or off.
+- <kbd>E</kbd>: switch between the Inspect and Edit tools.
+- <kbd>V</kbd>: show or hide the piano model's candidates.
+- <kbd>X</kbd>: export MusicXML.
+- <kbd>Ctrl+Z</kbd>: undo an edit.
+- <kbd>Ctrl+Shift+Z</kbd> or <kbd>Ctrl+Y</kbd>: redo.
 
 ## The command line
 
-Everything the GUI does has a command. The pipeline caches every stage, so
-a command re-run with the same inputs is instant, and the GUI and the
-commands share one cache.
+Everything the app does is also a command. Run the commands from a source
+checkout as `uv run python -m swingscribe <command>`, or as
+`.\swingscribe <command>` on Windows. Every stage is cached, so a command
+re-run with the same inputs finishes at once, and the app and the commands
+share one cache.
 
-- `swingscribe run <file>` — the whole pipeline: separate, track beats,
-  transcribe, notate, and write MusicXML. Add `--start` / `--end` (seconds)
-  to limit it to one solo, `--stem` to name the stem carrying the soloist,
-  and `--tempo-hint <bpm>` if the beat tracker picks the wrong octave.
-- `swingscribe audition <file> --stem other --start 90 --end 210` — write
-  just the isolated stem over a span, so you can hear whether the soloist is
-  cleanly separated before spending minutes on analysis.
-- `swingscribe ab <file> ...` — the ear test: a stereo wav with the original
-  on the left and the rendered transcription on the right, plus the
-  transcribed MIDI. The GUI's command box shows the exact `ab` command for
-  the span and stem you settled on.
-- `swingscribe click <file>` — the music with a click on every detected
-  beat, for checking the grid by ear.
-- `swingscribe cache ls` / `swingscribe cache rm` — what the cache holds,
-  and a way to reclaim disk, the same as the picker's Cache panel.
+- `run <file>` runs the whole pipeline: separate, track beats, transcribe,
+  notate, and write MusicXML to the cache's `exports` folder.
+- `audition <file>` writes just the isolated stem over a span. Use it to
+  hear whether the soloist separates cleanly before you spend minutes on
+  analysis.
+- `ab <file>` is the ear test. It writes a stereo wav with the original on
+  the left and the transcription, rendered as tones, on the right. It also
+  writes the transcription as MIDI, and `--midi` sets where. The app's
+  command box shows the exact `ab` command for your span and stem.
+- `click <file>` writes the music with a click on every detected beat, so
+  you can check the grid by ear.
+- `cache ls` lists what the cache holds per track. `cache rm` deletes it,
+  just like the Cache panel.
+- `gui [file]` starts the app.
 
-Options that mirror the GUI's settings: `--time-signature`, `--downbeat`
-and `--bars-per-chorus` for the bar grid, and `separate.model` in the config
-file for the separation model. Audio can be wav or flac natively, plus
-anything ffmpeg decodes (mp3, m4a/aac, ogg, opus, wma, aiff, ...).
+The common options are:
 
-Separation and transcription need the ML dependency group
-(`uv sync --group ml --group gui --group roformer`) and download model
-weights (about 300 MB) on first use. Without a CUDA GPU they run on the
-CPU: expect minutes, not seconds, for a whole track — which is why the GUI
+- `--start` and `--end` limit a command to one solo, in seconds (`run`,
+  `audition` and `ab`).
+- `--stem` names the stem that carries the soloist.
+- `--time-signature`, `--downbeat` and `--bars-per-chorus` set up the bar
+  grid.
+- `--tempo-hint <bpm>` helps when the beat tracker picks half or double the
+  tempo (`run`, `ab` and `click`).
+- `-o` sets the output file.
+- `--config <file>` uses a different configuration file.
+
+Settings without a flag, such as the separation model, the ensemble and the
+transposition, live in the configuration file. `swingscribe --version`
+prints the version. Audio can be wav or flac, plus anything ffmpeg decodes
+(mp3, m4a, aac, ogg, opus, wma, aiff and more).
+
+Separation and transcription need the AI dependency groups (`uv sync
+--group ml --group gui --group roformer`), and they download about half a
+gigabyte of models on first use. Without a CUDA GPU they run on the CPU.
+Expect minutes, not seconds, for a whole track, which is why the app
 separates only the span you selected.
 
-## Third-party models and their licences
+## The AI models and their licences
 
-SwingScribe is MIT licensed. The models it runs are not SwingScribe's, and
-each is downloaded on first use under its own terms.
+SwingScribe is MIT licensed. The models it runs belong to their authors,
+and each one downloads on first use under its own terms.
 
-- **Hybrid Transformer Demucs** (`htdemucs` and variants), separation: MIT.
-- **beat_this** `final0`, beat tracking: MIT.
-- **Piano transcription CRNN** (Kong et al.), the pianist's second opinion
-  and oracle line: CC BY 4.0.
-- **BS-Roformer-SW**, separation, the default separator: **none. The
-  weights are of unknown authorship.** The person who rehosted them says
+- **BS-RoFormer** ([paper](https://arxiv.org/abs/2309.02612)) is the
+  default separator. The weights SwingScribe uses, BS-Roformer-SW, have
+  **no licence and no known author**. The person who re-hosted them says
   they did not train them and know nothing of their origin, and every copy
-  since declares the licence unknown. SwingScribe does not ship them; your
-  machine downloads them from the UVR community model repository the first
-  time you separate with this model, the same way every UVR user gets
-  them. For anything you sell, pick `htdemucs` (MIT) in the separator menu.
+  since declares the licence unknown. SwingScribe does not ship them. Your
+  machine downloads them the first time you separate with this model, from
+  the model repository of the Ultimate Vocal Remover (UVR) community, the
+  same way every UVR user gets them. For anything you sell, choose Demucs
+  in the separator menu.
+- **Hybrid Transformer Demucs** ([paper](https://arxiv.org/abs/2211.08553))
+  and its variants, for separation, are MIT licensed.
+- **Beat This!** ([paper](https://arxiv.org/abs/2407.21658)), for beat
+  tracking, is MIT licensed.
+- **CREPE** ([paper](https://arxiv.org/abs/1802.06182)), for pitch
+  tracking, is MIT licensed.
+- The **high-resolution piano transcription** model by Kong et al.
+  ([paper](https://arxiv.org/abs/2010.01815)), used for pianists, is CC BY
+  4.0.
 
-The full list, with the libraries, is in `NOTICES.md` beside the launcher
-in the portable folder and under `packaging/` in the repository.
+`NOTICES.md` lists every model and library. It sits beside the launcher in
+the Windows app, and under `packaging/` in the repository.
 
 ## Troubleshooting
 
-**A chunk of the solo is missing entirely.** Demucs assigns every moment to
-exactly one stem, so a soloist it can't place consistently isn't attenuated
-— it's switched to a different stem, leaving digital silence in the one
-you're listening to. If the Lead stem menu offers a summed option like
-`other+vocals`, try it: the soloist may be split between the two.
+**A chunk of the solo is missing.** A separation model assigns each moment
+to exactly one stem. So a soloist it cannot place consistently is not
+turned down: it is switched to another stem, leaving digital silence in the
+one you are listening to. Try a summed lead stem such as `other+vocals`,
+or try another separation model.
 
-**The bars don't line up with what you hear.** Turn on **Click** in the
-audition step, or **Beats** in the span step, and listen against the
-metronome — a wrong downbeat is obvious against the click track, and a
-click or shift-click on the right beat fixes it.
+**The bars do not line up with what you hear.** Turn on **Click** in
+section 2 and listen against the metronome. A wrong downbeat is obvious
+against the click. Click the right beat dot, or press <kbd>D</kbd> on it, to
+fix it. If the grid itself runs at half or double the right speed, pass
+`--tempo-hint` on the command line.
 
-**A piano solo doesn't seem to be getting a second opinion.** Check the
-**Ensemble** menu — leaving it unset behaves like `Horn-led`, which never
-consults the piano model. Pick `Trio (piano)` or `Solo piano` explicitly.
+**A piano solo is not getting the piano model.** Check **Ensemble**. Unless
+it is set to **Trio (piano)** or **Solo piano**, the piano model is never
+consulted.
 
-**A separation is stuck or you picked the wrong model.** Click **Cancel**
-to stop it and return to the Separate button; pick a different model or
-span and run it again.
+**A separation is stuck, or you picked the wrong model.** Click **Cancel**,
+pick a different model or span, and separate again.
 
-**The browser tab is closed but the console window is still there.** The
-server is still running — closing the tab does not stop it. Open
-`http://127.0.0.1:8420/` again and click **Quit**, or close the console
-window.
+**The browser tab is closed but the server is still running.** Closing the
+tab does not stop it. Open `http://127.0.0.1:8420/` again and click
+**Quit**, or close the console window.
 
 **Windows refuses to run `swingscribe.exe`.** If `uv run swingscribe ...`
 fails with `An Application Control policy has blocked this file (os error
-4551)`, Smart App Control is refusing the console-script stub that pip
-generates at install time, not SwingScribe itself. Run the module instead —
-`uv run python -m swingscribe gui`, or the `.\swingscribe` shim beside
-`pyproject.toml` — which goes through an interpreter Windows already trusts.
-A first launch can also fail once on the reputation lookup and pass on the
-retry.
+4551)`, Smart App Control is refusing the small `.exe` stub that the
+installer generates, not SwingScribe itself. Run
+`uv run python -m swingscribe ...` or the `.\swingscribe` shim instead.
+A first launch can also fail once while Windows checks the file's
+reputation, and then pass on a retry.
 
-**Model weights will not download.** On a network that intercepts TLS, set
-`SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` to a bundle that includes your
-organisation's root certificate; `uv` needs `UV_SYSTEM_CERTS=true`.
+**Model downloads fail.** On a network that intercepts TLS, set
+`SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` to a certificate bundle that
+includes your organisation's root certificate. uv needs
+`UV_SYSTEM_CERTS=true`.
+
+## Terms used in this guide
+
+- **Span:** the stretch of the track you selected, usually one solo.
+- **Stem:** one instrument group separated out of the mix, such as drums,
+  bass, piano or *other*. A horn usually lands in *other*.
+- **Downbeat:** the first beat of a bar. SwingScribe counts bar lines from
+  it.
+- **Form start:** the bar that becomes bar 1, so an intro is not counted.
+- **Chorus:** one time through the tune's form, often 12 or 32 bars.
+- **f0:** the fundamental frequency, which is the pitch you hear.
+- **Periodicity:** how regular, and so how clearly pitched, the sound is at
+  a moment. Noise and drums score low, and a held note scores high.
+- **F1:** the standard accuracy score for transcription. It balances notes
+  found against notes invented, and 1.0 is perfect.
+- **MusicXML:** the standard file format for sheet music. MuseScore,
+  Finale, Sibelius and Dorico all open it.
+- **Swing:** playing pairs of eighth notes long-short. Jazz writes them as
+  plain eighths under a *Swing* marking, and SwingScribe does the same.

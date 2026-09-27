@@ -245,10 +245,11 @@ broken a tool at least once:
 - **No audio in git, ever** (plan §12) — not committed-then-deleted, not in a
   private repo. Same for MIDI/MusicXML/note lists derived from commercial
   recordings; only aggregate metrics may be committed. A rendered IMAGE of
-  a few bars for illustration (the README's twelve bars of Birks Works,
-  `docs/images/birks-works.png`) is allowed: the listener's decision,
-  2026-09-20, on the record as not a copyright problem. A full solo, or
-  the file behind the picture, still is not.
+  a few bars for illustration (the README's eight bars of Birks Works,
+  written literally and by SwingScribe, `docs/images/swing-comparison.png`;
+  twelve bars in `birks-works.png` before 2026-09-27) is allowed: the
+  listener's decision, 2026-09-20, on the record as not a copyright
+  problem. A full solo, or the file behind the picture, still is not.
 
 ## Testing (plan §6, §12)
 

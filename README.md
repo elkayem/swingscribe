@@ -1,235 +1,192 @@
-<h1 align="center">SwingScribe</h1>
-
-<p align="center"><strong>A jazz recording in. A solo transcription out — with the swing written the way a player reads it.</strong></p>
-
 <p align="center">
-  <a href="src/swingscribe/gui/guide/user-guide.md">User guide</a> ·
-  <a href="#install-windows-nothing-else-needed">Install</a> ·
-  <a href="#get-started-from-source">From source</a> ·
-  <a href="#how-well-does-it-work">How well it works</a> ·
-  <a href="docs/development.md">Developing</a>
+  <img src="docs/images/banner.png" alt="SwingScribe: jazz solos from the record to the page, with the swing written the way players read it" width="100%">
 </p>
 
-![SwingScribe with a solo selected: the whole track above, the selected span below, and the bar grid drawn over both](docs/images/hero.png)
+<p align="center">
+  <a href="https://github.com/elkayem/swingscribe/releases/latest"><img alt="Download for Windows" src="https://img.shields.io/github/v/release/elkayem/swingscribe?style=for-the-badge&label=Download%20for%20Windows&color=f0a848&labelColor=1b1305"></a>
+  <a href="INSTALL.md"><img alt="Installation" src="https://img.shields.io/badge/Installation-guide-5ad2c2?style=for-the-badge&labelColor=16171c"></a>
+  <a href="src/swingscribe/gui/guide/user-guide.md"><img alt="User guide" src="https://img.shields.io/badge/User-guide-5ad2c2?style=for-the-badge&labelColor=16171c"></a>
+</p>
 
-SwingScribe listens to a record, pulls the soloist out of the band, works
-out where the beats and bars fall, and writes the solo down as MusicXML you
-can open in MuseScore. It knows that a swung eighth-note pair is written as
-two eighths under a *Swing* marking, not as a triplet figure, and it keeps
-the player's actual timing as data instead of throwing it away. Everything
-runs on your own machine. Nothing is uploaded anywhere.
+<p align="center">
+  <img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-4a5163?style=flat-square">
+  <img alt="Runs locally" src="https://img.shields.io/badge/runs-100%25%20locally-4a5163?style=flat-square">
+  <img alt="Python 3.11" src="https://img.shields.io/badge/python-3.11-4a5163?style=flat-square">
+</p>
 
-## What a transcription looks like
+**SwingScribe turns a jazz record into a solo transcription you would
+actually play from.** Mark the solo, and SwingScribe pulls the soloist out of
+the band, finds every beat and bar, and hears every note. Then it writes a
+clean lead sheet, with swung eighths written as eighths under a *Swing*
+marking, the way jazz musicians read them. It runs on your own computer, and
+it is free.
 
-![The first twelve bars of Art Pepper's solo on Birks Works, as SwingScribe wrote them: swung eighth-note lines under a Swing marking, a triplet where he played one, a laid-back beat written on the beat](docs/images/birks-works.png)
+## Why SwingScribe
 
-This is the first chorus of Art Pepper's solo on *Birks Works*, exactly as
-SwingScribe wrote it and MuseScore drew it. The listener selected the solo
-and clicked its first downbeat; the notes, the key, the *Swing* marking,
-the triplet in bar 2, and the rhythm of every bar are the program's.
-Compare it with a transcription made by ear and the two agree on the
-rhythm of 84% of the notes they share; bar 4, where Pepper plays a third of
-a beat behind the band, is written note for note the way a transcriber
-writes it — on the beat, not on the sixteenth he actually landed on. This is
-what the tool is for: a page you would read from, not a piano-roll dump
-with the timing spelled out in tied thirty-second notes.
+<p align="center">
+  <img src="docs/images/swing-comparison.png" alt="The same eight bars of Art Pepper's solo on Birk's Works, written two ways. Snapped literally to the nearest sixteenth, the page has 9 ties and 16 sixteenth notes. Written by SwingScribe, it has 1 tie, 2 sixteenths, a Swing marking and the triplet Pepper played." width="100%">
+</p>
 
-## Find the solo
+Most automatic transcription writes down exactly what it measures, and in
+jazz that is the wrong answer. Swung eighths come out as triplets or dotted
+rhythms, a laid-back soloist lands a sixteenth late, and the page fills with
+ties. SwingScribe measures the swing and the lay-back first, then writes
+what a transcriber would.
 
-Open a track and the whole recording is in front of you. Drag out the solo
-on the overview, then place the edges precisely on the detail view: tap
-<kbd>A</kbd> and <kbd>B</kbd> while it plays, nudge by a tenth of a second,
-or snap to the nearest beat or bar. Loop it, slow it to any speed down to
-a fifth without changing the pitch, and listen until the boundaries are
-right.
+<table>
+<tr>
+<td width="50%" valign="top">
 
-The bar grid is drawn over the waveform before you transcribe anything —
-a tick per beat, a numbered dot per bar, a gold mark at every chorus — so a
-grid that does not match the tune is caught by eye, and by ear with the
-built-in click track. Move the downbeat with one keypress. Tell it where
-the form starts so an intro is not counted. Your choices are saved beside
-the audio and are there when you come back.
+### Writes swing, not arithmetic
+It measures how hard each passage swings and how far the soloist sits
+behind the beat. Then it writes eighths as eighths and keeps the triplets
+that were really played, guided by statistics from **245 human jazz
+transcriptions**.
 
-## Isolate the soloist
+</td>
+<td width="50%" valign="top">
 
-![The isolate panel: the isolated stem drawn in teal over the original mix, with every stem on its own fader](docs/images/isolate.png)
+### Hears the soloist, not the band
+A state-of-the-art AI model lifts the horn or piano out of the full mix,
+over just the passage you picked. You can compare it with the original
+before a note is written.
 
-State-of-the-art source separation splits the recording into stems, and
-you hear the result before spending a minute on anything else. Switch
-between the isolated instrument and the original mid-phrase — playback is
-sample-locked, so you are comparing the same instant — and mix every stem
-on its own fader to check what the model took and what it left behind.
+</td>
+</tr>
+<tr>
+<td valign="top">
 
-Separation is scoped to the span you selected, so the best model,
-BS-RoFormer, takes minutes rather than tens of minutes on an ordinary CPU.
-Demucs is a click away when speed matters more. Every result is cached:
-the same span never costs twice.
+### Shows you the bars first
+The bar grid is drawn over the waveform before you transcribe, with a click
+track to check it by ear. If the downbeat is wrong, one keypress moves it.
 
-## Transcribe, review, export
+</td>
+<td valign="top">
 
-![The review panel: the transcription on a piano roll over the bar grid, coloured against a hand transcription, with the pitch-tracking evidence in lanes below](docs/images/review.png)
+### Handles pianists too
+A dedicated piano model hears every key a pianist strikes, and SwingScribe
+picks the melody out of the chords. Switch on any other note it heard to
+write a chord.
 
-The transcription lands on a piano roll over the same bar grid, with the
-evidence that produced every note in the lanes beneath it. Click a note to
-hear its pitch, see the frames behind it, and read why the transcriber made
-the call it did. Play the original, the transcription rendered as tones, or
-both together, at any speed.
+</td>
+</tr>
+<tr>
+<td valign="top">
 
-Then fix what needs fixing. Silence a note that was heard right but belongs
-to another instrument, drag a box to silence a run, and undo any of it.
-Your edits are remembered by content, not by position, so they survive a
-re-transcription. For a piano solo the polyphonic piano model gives a
-second opinion: it corrects octaves, drops notes it cannot vouch for, fills
-gaps in the line, and offers every note it heard that the line left out —
-switch one on and it is written as a chord.
+### Keeps you in charge
+Every note sits on a piano roll with the evidence behind it. Silence
+whatever belongs to another instrument. Your edits survive a
+re-transcription.
 
-Export writes MusicXML beside the audio, transposed for the instrument you
-choose, with the key signature moved to match, bars numbered from the start
-of the solo the way a transcription is.
+</td>
+<td valign="top">
 
-## Measure it against a human
+### Private, free and open
+There are no accounts, uploads or subscriptions. It exports MusicXML for
+MuseScore, Finale, Sibelius or Dorico, transposed for B♭ and E♭ horns.
 
-Load a hand transcription and SwingScribe aligns it to its own, colours
-every note — matched, wrong pitch, missed, invented — and reports the
-score. It asks two questions separately, because they have different
-answers: did we hear the right notes, and did we *write* them the way a
-transcriber would?
+</td>
+</tr>
+</table>
 
-A hand transcription can also start life as a PDF from the web: the
-standalone `pdf2musicxml` tool (see [docs/pdf2musicxml.md](docs/pdf2musicxml.md))
-reads single solos and whole books with two OMR engines, writes one
-MusicXML per transcription for MuseScore, and lists the bars the engines
-disagree on for proofreading.
+## How it works
 
-## How well does it work
+<p align="center">
+  <img src="docs/images/pipeline.png" alt="Five steps: isolate the soloist with Band-Split RoFormer, find beats and bars with Beat This!, track pitch with a neural network, write the swing with SwingScribe's own rhythm engine, and export MusicXML" width="100%">
+</p>
 
-Measured against the Weimar Jazz Database's human-annotated solos, where
-every note has a time and a pitch, and against pages written by people:
-twelve hand transcriptions made by ear in MuseScore and twenty-two solos
-from the Charlie Parker Omnibook.
+SwingScribe uses four research-grade neural networks and one engine of its
+own.
 
-| measure | result |
-|---|---|
-| Note F1 (did we hear what was played) | 0.858, mean over 73 solos |
-| Beat F1 (is the grid right) | 0.942, over the same 73 |
-| Notated rhythm against the hand transcriptions (did we write it the way a transcriber did) | 0.845, mean over 12 |
-| Notated rhythm against the Omnibook | 0.787, mean over 22 |
+- **[Band-Split RoFormer](https://arxiv.org/abs/2309.02612)** isolates the
+  soloist. This transformer took first place in the music separation track
+  of the 2023 Sound Demixing Challenge. It keeps a saxophone in one piece
+  where older separators tear it between stems.
+  [Demucs](https://arxiv.org/abs/2211.08553) is one click away when speed
+  matters more.
+- **[Beat This!](https://arxiv.org/abs/2407.21658)** tracks the beat. It is a
+  transformer beat tracker from JKU Linz (ISMIR 2024). SwingScribe repairs
+  its dropped and doubled beats into a bar grid you can steer.
+- **Neural pitch tracking** hears the notes. A deep convolutional network,
+  [CREPE](https://arxiv.org/abs/1802.06182), reads the soloist's pitch a
+  hundred times a second. SwingScribe keeps the soloist and rejects what
+  leaked in from the band.
+- **[High-resolution piano transcription](https://arxiv.org/abs/2010.01815)**
+  hears every note of a piano solo, and SwingScribe picks the melody out of
+  the comping.
+- **SwingScribe's rhythm engine** writes the page. This is the part you will
+  not find anywhere else. It measures the swing section by section and
+  removes the soloist's lag behind the band. Then it reads each beat at the
+  simplest rhythm the notes support.
 
-Notated rhythm is the share of matched notes whose written position agrees
-with the human's, on the human's grid. It reads lower than note F1 and
-always will: it charges the transcriber for every place a player's timing
-and a page's rhythm differ, which is the question this project exists to
-answer.
+## See it in action
 
-Those numbers come from a single command that scores every solo on disk,
-and the project keeps a running list of what is still wrong in
-[docs/benchmark-deficiencies.md](docs/benchmark-deficiencies.md). This is
-research-grade software that is used daily; it is not finished, and it says
-so.
+**Find the solo.** Mark it on the overview and place its edges on the
+detail view. Check the bar grid by eye and by ear, and slow the music down
+without changing its pitch.
 
-## Install (Windows, nothing else needed)
+![Selecting a Charlie Parker solo: the whole track above, the selected span below, with beats and bar numbers drawn along the bottom](docs/images/hero.png)
 
-Each [release](https://github.com/elkayem/swingscribe/releases) carries
-`SwingScribe-<version>-windows-x64.zip`, about 450 MB: a folder holding its
-own Python, every library, ffmpeg and the app. Nothing is installed in the
-usual sense, and a Python already on your computer is neither used nor
-touched.
+**Hear the soloist alone.** Switch between the isolated instrument and the
+original mid-phrase. Playback is sample-locked, and every stem has its own
+fader.
 
-1. **Download the zip and extract it somewhere with a short path**, such as
-   `C:\SwingScribe` or directly under Documents. A very deep path can hit
-   Windows' path-length limit part-way through extraction.
-2. **Double-click `setup.cmd`** in the folder, once. It puts a SwingScribe
-   icon on the desktop and in the Start Menu, and adds SwingScribe to
-   Settings > Apps.
-3. **Double-click the icon.** A console window opens minimized and the app
-   opens in your browser at `127.0.0.1:8420`. To stop, click **Quit** at the
-   top right of the page (the Open a track window has one too); closing the
-   tab does not stop it.
+![The isolate panel: the separated saxophone in teal over the original mix, with a fader for every stem](docs/images/isolate.png)
 
-The first time Windows runs a script that came from the internet it may say
-"Windows protected your PC". Click *More info*, then *Run anyway*; it asks
-once per script. The first run of each step (beats, separation,
-transcription) downloads that step's model weights, about half a gigabyte
-all told and only once, into `%LOCALAPPDATA%\SwingScribe`; the progress bar
-says so while it happens.
+**Review every note.** Click any note to hear it and see why it was
+written. Load a hand transcription and every note is marked as matched,
+wrong, missed or invented.
 
-**What it writes:** downloaded weights and the cache under
-`%LOCALAPPDATA%\SwingScribe`, and a small `<track>.swingscribe.json` beside
-each audio file you open, holding your span, downbeat and edits. That file
-is yours to keep; it is what makes a track open the way you left it.
+![The review panel: the transcription on a piano roll, coloured against a hand transcription, with a note selected in the inspector and the export bar below](docs/images/review.png)
 
-**Updating:** extract the new version to a new folder, run its `setup.cmd`,
-delete the old folder. Weights and cache are shared, so nothing downloads
-again. **Uninstalling:** `uninstall.cmd` in the folder, or Settings > Apps.
-It removes the icons, the Apps entry and the folder, asks before removing
-the data folder, and never touches the sidecars beside your music.
+## Measured against human transcribers
 
-**If a new laptop refuses to run it:** Windows' Smart App Control judges
-every program file by reputation, and its verdicts change over time. Every
-file in the folder was checked against it before release. If it still
-refuses one, Windows Security > App & browser control > Smart App Control
-settings lets an administrator turn the feature off, and since the April
-2026 Windows update it can be turned back on afterwards. `README.txt` in
-the folder repeats all of this.
+| Question | Reference | Result |
+|---|---|---|
+| Did it hear the notes that were played? | 73 solos from the [Weimar Jazz Database](https://jazzomat.hfm-weimar.de/dbformat/dboverview.html), every note annotated by hand | note F1 **0.86** |
+| Are the beats in the right place? | the same 73 solos | beat F1 **0.94** |
+| Is the rhythm written the way a transcriber wrote it? | 12 transcriptions made by ear | **85%** of matched notes agree |
+| And the way the Omnibook wrote it? | 22 solos from the *Charlie Parker Omnibook* | **78%** of matched notes agree |
 
-Model and library licences are listed in `NOTICES.md` in the folder and
-under [packaging/](packaging/NOTICES.md) here. One deserves a sentence: the
-default separator's weights, BS-Roformer-SW, have no licence and no known
-author. SwingScribe does not ship them; your machine downloads them from
-the UVR community model repository the first time you separate. Use
-`htdemucs` (MIT) for anything you sell.
+F1 is the standard transcription score. At 1.0, every note is found and
+nothing is invented. The project keeps an open
+[list of what is still wrong](docs/benchmark-deficiencies.md).
 
-## Get started from source
+## Get started
 
-You need [uv](https://docs.astral.sh/uv/), Python 3.11, git, and ffmpeg for
-anything other than wav or flac.
+**Windows:** download `SwingScribe-<version>-windows-x64.zip` (about 450 MB)
+from the [latest release](https://github.com/elkayem/swingscribe/releases/latest).
+It holds everything the app needs, including its own Python. Extract it,
+double-click `setup.cmd` once, and then use the SwingScribe icon.
 
-```
+**From source** on Windows or Linux, with [uv](https://docs.astral.sh/uv/):
+
+```bash
 git clone https://github.com/elkayem/swingscribe.git
 cd swingscribe
 uv sync --group ml --group gui --group roformer
 uv run python -m swingscribe gui
 ```
 
-The app opens in your browser at `127.0.0.1:8420`. Name a file to open it
-straight away:
+The app opens in your browser, and you do not need a GPU. See the
+**[installation guide](INSTALL.md)** for both routes in detail, and the
+**[user guide](src/swingscribe/gui/guide/user-guide.md)** for every control.
+The user guide is also behind the app's **Help** button.
 
-```
-uv run python -m swingscribe gui path/to/track.m4a
-```
+## Also in the box
 
-Model weights (about 300 MB) download on first use. A GPU is not required;
-everything here was built and measured on a laptop without one.
+- **A command line** for every step, so you can script a batch of solos.
+  See the [user guide](src/swingscribe/gui/guide/user-guide.md#the-command-line).
+- **pdf2musicxml** turns PDF transcriptions, from single solos to whole
+  books, into MusicXML. It lists the bars that need proofreading.
+  See [docs/pdf2musicxml.md](docs/pdf2musicxml.md).
+- **For developers,** [docs/development.md](docs/development.md) covers the
+  tests and the benchmarks.
 
-**Quit**, in the app's header, stops the server; closing the tab does not.
-On Windows, `scripts/make_shortcut.ps1` puts a SwingScribe icon on the
-desktop that launches the app through the `swingscribe.cmd` shim, which is
-the route Smart App Control never refuses (see the user guide's
-troubleshooting section).
+## Licence
 
-The **[user guide](src/swingscribe/gui/guide/user-guide.md)** — also behind
-the Help button in the app — covers every control, the keyboard shortcuts,
-the command line, and troubleshooting. [docs/development.md](docs/development.md)
-is for running the tests and the benchmarks.
-
-## Under the hood
-
-- **Separation:** BS-RoFormer, with Hybrid Transformer Demucs as the fast
-  alternative.
-- **Beats:** beat_this, tracked on the full mix and repaired into a bar grid
-  you can steer.
-- **Pitch:** CREPE, with hand-rolled onset detection and a line-selection
-  pass that keeps the soloist and drops the bleed.
-- **Piano:** a polyphonic piano transcription model as a second opinion,
-  merged into the line where it has holes.
-- **Swing:** a per-section swing model that measures the beat-upbeat ratio
-  and writes swung pairs as eighths, with the residual timing preserved.
-- **Notation:** grid selection one beat at a time, tuplets only where three
-  onsets demand them, and MusicXML with 24 divisions per quarter.
-
-A linear pipeline of pure stages, every one cached on disk under
-content-hashed keys, so changing a setting re-runs only what it touches.
-
-## License
-
-MIT — see `LICENSE`.
+SwingScribe is MIT licensed. The AI models download on first use under their
+own licences, listed in [NOTICES.md](packaging/NOTICES.md). The default
+separator's weights (BS-Roformer-SW) were published by the community with no
+stated licence or author, and SwingScribe does not ship them. For commercial
+work, choose Demucs (MIT) in the separator menu.
