@@ -411,7 +411,10 @@ a folder with a Python and a launcher script, no app bundle — with one
 difference worth recording now: python.org's macOS build is signed and
 notarized by the Python Software Foundation, so a folder built on it
 carries a trusted interpreter the way this one does. Untested; pyproject
-still excludes macOS.
+still excludes macOS. What running from source there would take is in
+INSTALL.md, "macOS (untested)" (2026-09-27): the lock resolves for Apple
+Silicon on macOS 14+ once allowed, and the torch cap, which exists for
+Smart App Control, holds audio-separator back to 0.45 on a Mac.
 
 ### Signing
 

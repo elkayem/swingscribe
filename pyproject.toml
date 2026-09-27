@@ -110,8 +110,10 @@ omr = [
 ]
 
 [tool.uv]
-# No macOS until something deploys there (M8 at the earliest).
-environments = ["sys_platform == 'win32'", "sys_platform == 'linux'"]
+# No macOS until something deploys there (M8 at the earliest). It is
+# untested, not incompatible: INSTALL.md, "macOS (untested)", has what an
+# Apple Silicon lock needs (checked 2026-09-27).
+environments =["sys_platform == 'win32'", "sys_platform == 'linux'"]
 
 [[tool.uv.index]]
 # The original dev machine has no NVIDIA GPU, so torch comes from the CPU

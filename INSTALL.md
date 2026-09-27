@@ -6,7 +6,8 @@ There are two ways to run SwingScribe.
   installed, and it is the right choice if you just want to transcribe
   solos.
 - **From source** runs on Windows or Linux. Choose it if you are on Linux,
-  or if you want to work on the code. macOS is not supported yet.
+  or if you want to work on the code. macOS is untested, and
+  [macOS (untested)](#macos-untested) says what trying it would take.
 
 Either way, everything runs on your own computer. No account is needed, and
 no audio leaves your machine. A GPU is not required.
@@ -185,6 +186,80 @@ Some networks intercept TLS, and then the model downloads fail with
 `CERTIFICATE_VERIFY_FAILED`. Point Python at a certificate bundle that
 includes your organisation's root certificate by setting `SSL_CERT_FILE`
 and `REQUESTS_CA_BUNDLE`. For uv itself, set `UV_SYSTEM_CERTS=true`.
+
+## macOS (untested)
+
+Nobody has run SwingScribe on a Mac yet. It is untested rather than
+incompatible, and these notes are for a developer who wants to try.
+They record what was checked from a Windows machine on 2026-09-27.
+
+**What was checked:**
+
+- **The dependencies resolve for Apple Silicon.** A copy of the project
+  with macOS allowed locked cleanly, with native wheels for every compiled
+  library: torch, torchaudio, onnxruntime, numba, llvmlite and soundfile.
+- **The code has no Windows-only paths** in the pipeline or the web app.
+  ffmpeg is found on the `PATH`, the folder browser handles a Unix root,
+  and the tier-1 tests already pass on Linux in CI.
+
+**What is needed:**
+
+- **An Apple Silicon Mac (M1 or later) on macOS 14 Sonoma or later.**
+  torch 2.12 and onnxruntime 1.29 publish Mac wheels only for Apple
+  Silicon, built for macOS 14. There are no Intel Mac wheels.
+- **Allow macOS in the lock.** `pyproject.toml` limits the lock to
+  Windows and Linux, so `uv sync` on a Mac refuses to install anything.
+  Add Apple Silicon to `environments` under `[tool.uv]`, then run
+  `uv lock`:
+
+  ```toml
+  environments = [
+      "sys_platform == 'win32'",
+      "sys_platform == 'linux'",
+      "sys_platform == 'darwin' and platform_machine == 'arm64'",
+  ]
+  ```
+
+- **Decide about the torch cap.** torch and torchaudio are capped below
+  2.13 because Smart App Control blocks a file in torch 2.13 on Windows.
+  That reason does not apply to a Mac. With the cap in place, the lock
+  falls back to audio-separator 0.45 on a Mac, because 0.47 needs torch
+  2.13 or later there. That combination is untested with the default
+  separator. To give the Mac current versions, make the cap apply
+  everywhere except macOS, for example
+  `"torch>=2.4,<2.13; sys_platform != 'darwin'"` beside
+  `"torch>=2.4; sys_platform == 'darwin'"`, and the same for torchaudio.
+- **ffmpeg:** `brew install ffmpeg`.
+
+Then install and run as in [From source](#from-source). `uv run swingscribe
+gui` also works on a Mac, because the Windows warning about the generated
+stub does not apply.
+
+**What to expect, and what to look at first:**
+
+- **Everything runs on the CPU except the default separator.**
+  SwingScribe's device setting chooses between CUDA and the CPU, so demucs,
+  CREPE, the beat tracker and the piano model run on the CPU. audio-separator
+  switches to Apple's GPU (MPS) by itself on Apple Silicon, so the
+  BS-RoFormer may run faster than on a CPU, or may fail on an operation MPS
+  lacks. Setting `separate.device` to `cpu` does not reach it. Teaching
+  `src/swingscribe/device.py` about `mps` would let the other models try
+  the GPU too, but each one needs checking.
+- **Keep the separator's weights out of `/tmp`.** audio-separator stores
+  its models in `/tmp/audio-separator-models/` unless told otherwise, and
+  macOS empties `/tmp` on reboot. The download is about 700 MB. Set
+  `AUDIO_SEPARATOR_MODEL_DIR` to a permanent folder, and create the folder
+  first, because audio-separator refuses one that does not exist.
+- **Run the tests first:** `uv run pytest`. Adding `macos-latest` to the
+  matrix in `.github/workflows/ci.yml` would keep them passing.
+
+**The ready-to-run app is Windows-only.** Its launcher, setup and uninstall
+scripts are `.cmd` files, and its build fetches a Windows Python and a
+Windows ffmpeg. A Mac version could take the same shape: a folder with a
+standalone Python, the locked libraries and a launcher script. It would
+also have to get past Gatekeeper, which quarantines unsigned downloads, and
+notarizing an app needs a paid Apple developer account.
+`docs/packaging-plan.md` has the Windows design and a note on the Mac.
 
 ## Next steps
 
