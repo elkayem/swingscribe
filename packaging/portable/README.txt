@@ -68,6 +68,28 @@ If something goes wrong
   since the April 2026 Windows update it can be turned back on afterwards.
 - Model weights will not download: check the network, then try again;
   a partial download is re-fetched.
+- A download fails with "CERTIFICATE_VERIFY_FAILED" (most often on the
+  first Separate): your network inspects encrypted traffic, as many
+  workplaces and some antivirus products do, and signs it with its own
+  certificate. Windows trusts that certificate; SwingScribe's downloader
+  does not until you tell it to:
+    1. Get the network's root certificate as a "Base-64 encoded" .cer
+       file. Your IT department can supply it. Or find it yourself: open
+       https://github.com in your browser, click the padlock, view the
+       certificate, and the top of the chain is the root. If it is not a
+       public authority (it names your company or your antivirus), export
+       it as Base-64.
+    2. Copy python\Lib\site-packages\certifi\cacert.pem from this folder
+       to a folder of its own, for example C:\SwingScribe-certs\, so an
+       update does not delete it. Open the copy in Notepad, paste the
+       whole text of the .cer file at the end, and save.
+    3. Start > "Edit environment variables for your account" > New, twice:
+       SSL_CERT_FILE and REQUESTS_CA_BUNDLE, both set to that file, for
+       example C:\SwingScribe-certs\cacert.pem.
+    4. Quit SwingScribe and start it again from the icon.
+- "The separation process crashed" and a mention of memory: separation
+  needs a few GB of free memory. Close other programs and try again, or
+  choose htdemucs in the separator menu, a much smaller model.
 
 The user guide (the Help button in the app) covers every control.
 Licences of the models and libraries: NOTICES.md beside this file.

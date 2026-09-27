@@ -588,10 +588,29 @@ installer generates, not SwingScribe itself. Run
 A first launch can also fail once while Windows checks the file's
 reputation, and then pass on a retry.
 
-**Model downloads fail.** On a network that intercepts TLS, set
-`SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` to a certificate bundle that
-includes your organisation's root certificate. uv needs
-`UV_SYSTEM_CERTS=true`.
+**A separation fails with "the separation process crashed".** It needs a
+few GB of free memory. Close other programs and try again, or choose
+**htdemucs**, a much smaller model.
+
+**A download fails with `CERTIFICATE_VERIFY_FAILED`.** Your network
+inspects encrypted traffic and signs it with its own certificate, as many
+workplaces and some antivirus products do. Windows trusts that certificate,
+but the downloader for the default separation model does not. Make a
+certificate bundle and point SwingScribe at it:
+
+1. Get the network's root certificate as a Base-64 `.cer` file, from your
+   IT department or by exporting the top of the certificate chain your
+   browser shows for https://github.com.
+2. Copy `python\Lib\site-packages\certifi\cacert.pem` out of the
+   SwingScribe folder to a folder of its own, open the copy in Notepad,
+   paste the whole text of the `.cer` file at the end, and save. From
+   source, copy the same file out of `.venv\Lib\site-packages\certifi\`.
+3. In **Start > Edit environment variables for your account**, set both
+   `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` to the copy. From source, uv
+   also needs `UV_SYSTEM_CERTS=true`.
+4. Quit SwingScribe and start it again.
+
+The installation guide has the same steps with more detail.
 
 ## Terms used in this guide
 

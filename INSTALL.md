@@ -88,6 +88,37 @@ the feature off at **Windows Security > App & browser control > Smart App
 Control settings**. Since the April 2026 Windows update it can be turned
 back on afterwards.
 
+### If a download fails with a certificate error
+
+Some networks inspect encrypted traffic and sign it with their own
+certificate. Many workplaces do this, and so do some antivirus products.
+Windows trusts that certificate, but the downloader for the default
+separation model does not, so the first **Separate** fails with an error
+that mentions `CERTIFICATE_VERIFY_FAILED`. To fix it:
+
+1. **Get the network's root certificate** as a Base-64 `.cer` file. Your
+   IT department can supply it. Or open https://github.com in your
+   browser, click the padlock and view the certificate: the top of the
+   chain is the root. If it names your company or your antivirus rather
+   than a public authority, export it as "Base-64 encoded".
+2. **Make a certificate bundle.** Copy
+   `python\Lib\site-packages\certifi\cacert.pem` from the SwingScribe
+   folder to a folder of its own, such as `C:\SwingScribe-certs\`, so an
+   update does not delete it. Open the copy in Notepad, paste the whole
+   text of the `.cer` file at the end, and save.
+3. **Point SwingScribe at it.** Open **Start > Edit environment variables
+   for your account** and add two variables, `SSL_CERT_FILE` and
+   `REQUESTS_CA_BUNDLE`, both set to the bundle, for example
+   `C:\SwingScribe-certs\cacert.pem`.
+4. **Quit SwingScribe and start it again** from the icon.
+
+### If a separation crashes
+
+A separation needs a few GB of free memory. When it runs out, the job
+fails with "the separation process crashed" and a mention of memory.
+Close other programs and try again, or choose **htdemucs** in the
+separator menu, a much smaller model.
+
 ## From source
 
 **You need:**
