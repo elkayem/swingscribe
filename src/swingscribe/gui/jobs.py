@@ -141,6 +141,60 @@ def _idle_worker(path: str, config_json: str, model: str, queue) -> None:
     queue.put(("done",))
 
 
+def _crashing_worker(path: str, config_json: str, model: str, queue) -> None:
+    """A worker that dies the way torch did under memory pressure (an access
+    violation on Windows, the kernel's SIGKILL elsewhere) — what the crash
+    message test watches."""
+    import os
+    import signal
+
+    queue.put(("progress", "separate", 0.05, "about to crash", False))
+    time.sleep(0.5)  # let the queue's feeder thread deliver the message
+    if os.name == "nt":
+        os._exit(-1073741819)  # 0xC0000005, STATUS_ACCESS_VIOLATION
+    os.kill(os.getpid(), signal.SIGKILL)
+
+
+# Windows exit codes of a process that crashed rather than exited: an access
+# violation is what torch's allocator does when memory runs out mid-separation
+# (2026-09-27, c10.dll with ~1 GB free), and the others are the same family.
+_WINDOWS_CRASHES = {
+    0xC0000005: "an access violation",
+    0xC0000017: "out of memory",
+    0xC00000FD: "a stack overflow",
+    0xC0000409: "a fatal runtime error",
+}
+_MEMORY_HINT = (
+    " That is usually a shortage of memory: a separation needs a few GB free."
+    " Close other programs and try again, or choose htdemucs, a much smaller"
+    " model."
+)
+
+
+def worker_exit_message(exitcode: int | None, windows: bool | None = None) -> str:
+    """What to tell the listener when the separation process dies without
+    reporting. It used to say only that, which does not say whether a retry
+    makes sense; the exit code does."""
+    import os
+
+    if windows is None:
+        windows = os.name == "nt"
+    if exitcode is None:
+        return "the separation worker exited without reporting"
+    if windows:
+        code = exitcode & 0xFFFFFFFF  # the same status, signed or unsigned
+        if code in _WINDOWS_CRASHES:
+            return (
+                f"the separation process crashed (exit code 0x{code:08X},"
+                f" {_WINDOWS_CRASHES[code]})." + _MEMORY_HINT
+            )
+    elif exitcode < 0:
+        signal_number = -exitcode
+        verb = "was killed" if signal_number == 9 else "crashed"
+        return f"the separation process {verb} (signal {signal_number})." + _MEMORY_HINT
+    return f"the separation process stopped unexpectedly (exit code {exitcode})."
+
+
 # Job kinds that must not queue behind a separation. Beat tracking is ~8
 # seconds and needs no stems at all; on a single worker it sat behind an
 # eleven-minute demucs run, which is indistinguishable from beat tracking
@@ -316,9 +370,8 @@ class JobRunner:
                     message = queue.get(timeout=0.5)
                 except Empty:
                     if not process.is_alive():
-                        raise RuntimeError(
-                            "the separation worker exited without reporting"
-                        ) from None
+                        process.join(5)  # so exitcode is set
+                        raise RuntimeError(worker_exit_message(process.exitcode)) from None
                     continue
                 if message[0] == "progress":
                     _kind, stage, fraction, text, cached = message

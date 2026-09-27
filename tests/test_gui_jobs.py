@@ -176,3 +176,37 @@ def test_a_beats_job_does_not_queue_behind_a_separation():
     assert runner._pool_for("beats") is not runner._pool_for("separate")
     assert runner._pool_for("transcribe") is runner._pool_for("beats")
     assert runner._pool_for("some-future-kind") is runner._pool_for("separate")
+
+
+def test_a_crashed_separation_says_why_and_what_to_try():
+    """The worker used to report only that it 'exited without reporting',
+    which does not say whether a retry makes sense. Torch dies with an access
+    violation when memory runs out mid-separation (2026-09-27)."""
+    for code in (0xC0000005, -1073741819):  # unsigned and signed, one status
+        message = jobs.worker_exit_message(code, windows=True)
+        assert "0xC0000005" in message and "access violation" in message
+        assert "memory" in message and "htdemucs" in message
+    killed = jobs.worker_exit_message(-9, windows=False)
+    assert "killed (signal 9)" in killed and "memory" in killed
+    assert "crashed (signal 11)" in jobs.worker_exit_message(-11, windows=False)
+
+
+def test_an_ordinary_exit_code_gets_no_memory_hint():
+    message = jobs.worker_exit_message(1, windows=True)
+    assert "exit code 1" in message and "memory" not in message
+    assert jobs.worker_exit_message(None) == "the separation worker exited without reporting"
+
+
+def test_a_worker_process_that_crashes_fails_the_job_with_the_reason(tmp_path):
+    """End to end through a real child process that dies mid-separation."""
+    import time
+
+    runner = jobs.JobRunner()
+    runner._worker = jobs._crashing_worker
+    job = runner.submit("x.wav", Config(cache_dir=tmp_path), "htdemucs", "separate")
+    deadline = time.time() + 60
+    while job.state in ("queued", "running") and time.time() < deadline:
+        time.sleep(0.1)
+    assert job.state == "error"
+    assert "crashed" in job.error or "killed" in job.error
+    assert "memory" in job.error
