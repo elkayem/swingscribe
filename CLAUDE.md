@@ -368,7 +368,11 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   and the signing budget is zero; a folder of files that already carry
   reputation (python-build-standalone's `python.exe` at the PINNED RELEASE
   uv runs here, the wheels' own DLLs, BtbN's LGPL ffmpeg) runs nothing
-  new. `packaging/build_portable.ps1` is the build, pins at the top;
+  new. **Pin ffmpeg to a MONTH-END BtbN autobuild**: daily ones are
+  deleted after about two weeks (the 2026-09-13 pin was, and the v0.2.0
+  release build failed on the runner while this machine's cached download
+  hid it), month-end ones are kept. Only a build with an empty
+  `downloads\` tests the pins. `packaging/build_portable.ps1` is the build, pins at the top;
   `packaging/portable/` holds the launcher, `setup.cmd` (icons + a per-user
   Settings > Apps entry) and `uninstall.cmd`; the release workflow rebuilds
   on a tag. Output goes to `%LOCALAPPDATA%\SwingScribe-build`, NOT under

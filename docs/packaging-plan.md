@@ -515,7 +515,15 @@ with the old `python.exe` hash still in place so it fails and prints the new
 one, launch the new interpreter on a Smart App Control machine (it is a
 different file with its own reputation clock), and only then record the new
 hash. To change ffmpeg: pick a BtbN `autobuild-*` tag and its `win64-lgpl`
-asset; the checksum is read from the release's own `checksums.sha256`. A
+asset; the checksum is read from the release's own `checksums.sha256`.
+**Pick a month-end tag** (`autobuild-YYYY-MM-last day`): BtbN deletes its
+daily builds after about two weeks and keeps each month's last build
+indefinitely. The first pin was a daily build (2026-09-13); two weeks later
+it was gone, and the v0.2.0 release build failed on the runner while this
+machine's cached copy hid the problem. A clean build is therefore the only
+test of the pins -- `-OutDir` a fresh folder, or empty `downloads\`, before
+calling a release ready. A new ffmpeg is a new `ffmpeg.exe`, so it goes
+through step 3 like any other binary. A
 library moves by moving the lock file (`uv lock`) — the build reads the lock,
 so a version bump in pyproject followed by `uv lock` is the whole change,
 and step 3 is what says whether the new files pass.

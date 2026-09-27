@@ -55,8 +55,15 @@ $PythonExeSha256 = "624b66d8178129ac5611f3cf32adf440ea0b7dc6b1bde60c5677d7ebc62e
 # ffmpeg: BtbN's builds, the LGPL variant (the gyan.dev builds winget installs
 # are GPL, which would bind the whole folder). The release's checksums.sha256
 # is fetched and the zip verified against it.
-$FfmpegTag   = "autobuild-2026-09-13-14-50"
-$FfmpegAsset = "ffmpeg-n8.1.2-52-g5a03dfa0f6-win64-lgpl-8.1.zip"
+# PIN A MONTH-END BUILD. BtbN deletes its daily autobuilds after about two
+# weeks and keeps the last build of each month indefinitely (every month
+# back to 2024-10 was still there on 2026-09-27). The first pin was a daily
+# build, autobuild-2026-09-13; it was gone two weeks later, and the v0.2.0
+# release build failed on the runner while this machine's cached copy hid it.
+# This one passed Smart App Control on the dev machine 2026-09-27
+# (ffmpeg.exe sha256 9c60da6c0b08...).
+$FfmpegTag   = "autobuild-2026-08-31-13-27"
+$FfmpegAsset = "ffmpeg-n8.1.2-50-g1a748fe2cd-win64-lgpl-8.1.zip"
 
 # torch's CPU wheels are not on PyPI; uv export emits no index lines.
 $TorchIndex  = "https://download.pytorch.org/whl/cpu"
