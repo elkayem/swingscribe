@@ -246,6 +246,13 @@ def _roformer_separate(audio_path: Path, checkpoint: str, out_dir: Path) -> dict
     `roformer` group is optional and CI never installs it."""
     import shutil
 
+    from swingscribe import numba_guard
+
+    # audio-separator loads librosa to prepare the mix, librosa imports
+    # numba, and Smart App Control refuses numba's DLL on some days
+    # (numba_guard.py). The stand-in keeps the default separator working
+    # then; the real numba wins whenever it loads.
+    numba_guard.ensure_numba()
     from audio_separator.separator import Separator
 
     work = out_dir / "_separating"

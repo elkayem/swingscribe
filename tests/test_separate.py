@@ -334,3 +334,92 @@ def test_the_roformer_model_dir_is_made_on_a_fresh_install(tmp_path, monkeypatch
 def test_no_model_dir_variable_leaves_audio_separator_its_default(monkeypatch):
     monkeypatch.delenv("AUDIO_SEPARATOR_MODEL_DIR", raising=False)
     assert ensure_roformer_model_dir() is None
+
+
+class _RefusesImport:
+    """A meta-path finder that fails the way Application Control does: the
+    DLL is refused with OSError 4551, not ImportError."""
+
+    def __init__(self, names):
+        self.names = names
+
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in self.names:
+            raise OSError(4551, "An Application Control policy has blocked this file")
+        return None
+
+
+def _block_numba(monkeypatch):
+    import sys
+
+    for name in list(sys.modules):
+        if name.split(".")[0] in ("numba", "llvmlite"):
+            monkeypatch.delitem(sys.modules, name)
+    # Registers the undo that removes whatever the code under test puts there.
+    monkeypatch.setitem(sys.modules, "numba", None)
+    monkeypatch.delitem(sys.modules, "numba")
+    monkeypatch.setattr(sys, "meta_path", [_RefusesImport(("numba", "llvmlite"))] + sys.meta_path)
+
+
+def test_a_refused_numba_gets_a_passthrough_stand_in(monkeypatch):
+    import sys
+
+    from swingscribe import numba_guard
+
+    _block_numba(monkeypatch)
+    assert numba_guard.ensure_numba() is False
+    stub = sys.modules["numba"]
+
+    def f(x):
+        return x
+
+    assert stub.jit(f) is f and stub.njit(cache=True)(f) is f
+    assert stub.prange is range
+    assert numba_guard.ensure_numba() is False  # the stand-in is kept, not re-tried
+
+
+def test_a_numba_that_loads_is_left_alone():
+    import sys
+
+    from swingscribe import numba_guard
+
+    try:
+        import numba
+    except (ImportError, OSError):
+        pytest.skip("numba does not load here")
+    assert numba_guard.ensure_numba() is True
+    assert sys.modules["numba"] is numba
+
+
+def test_the_default_separator_survives_a_refused_numba(tmp_path, monkeypatch):
+    """audio-separator loads librosa, librosa imports numba, and Smart App
+    Control refuses numba's DLL on some days: the Roformer must get the
+    stand-in before its library is imported, as the piano model does."""
+    import sys
+    import types
+
+    from swingscribe.stages import separate
+
+    _block_numba(monkeypatch)
+    monkeypatch.delenv("AUDIO_SEPARATOR_MODEL_DIR", raising=False)
+    seen = {}
+
+    class Loaded(Exception):
+        pass
+
+    class FakeSeparator:
+        def __init__(self, **kwargs):
+            seen["numba"] = getattr(sys.modules.get("numba"), "__version__", None)
+
+        def load_model(self, model_filename):
+            raise Loaded
+
+    package = types.ModuleType("audio_separator")
+    module = types.ModuleType("audio_separator.separator")
+    module.Separator = FakeSeparator
+    monkeypatch.setitem(sys.modules, "audio_separator", package)
+    monkeypatch.setitem(sys.modules, "audio_separator.separator", module)
+
+    with pytest.raises(Loaded):
+        separate._roformer_separate(tmp_path / "a.wav", "BS-Roformer-SW.ckpt", tmp_path / "out")
+    assert seen["numba"] == "0.0.0-swingscribe-passthrough"

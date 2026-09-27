@@ -101,35 +101,13 @@ def _numba_free() -> None:
     touches, so the un-jitted functions are the same functions, slower.
     Real modules win whenever they import.
     """
-    import sys
-    import types
-
-    # A blocked DLL raises OSError, not ImportError: transcribe.BLOCKED_IMPORT.
-    from swingscribe.stages.transcribe import BLOCKED_IMPORT, _ensure_resampy
+    # The numba stand-in is swingscribe/numba_guard.py, shared with the
+    # default separator, which loads librosa too (2026-09-27).
+    from swingscribe import numba_guard
+    from swingscribe.stages.transcribe import _ensure_resampy
 
     _ensure_resampy()
-    try:
-        import numba  # noqa: F401
-    except BLOCKED_IMPORT:
-
-        def _passthrough(*args, **kwargs):
-            if len(args) == 1 and callable(args[0]) and not kwargs:
-                return args[0]
-
-            def wrap(function):
-                return function
-
-            return wrap
-
-        stub = types.ModuleType("numba")
-        stub.jit = _passthrough
-        stub.njit = _passthrough
-        stub.vectorize = _passthrough
-        stub.guvectorize = _passthrough
-        stub.stencil = _passthrough
-        stub.prange = range
-        stub.__version__ = "0.0.0-swingscribe-passthrough"
-        sys.modules["numba"] = stub
+    numba_guard.ensure_numba()
 
 
 def transcribe(
