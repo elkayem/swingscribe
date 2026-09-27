@@ -139,19 +139,6 @@ wrong, missed or invented.
 
 ![The review panel: the transcription on a piano roll, coloured against a hand transcription, with a note selected in the inspector and the export bar below](docs/images/review.png)
 
-## Measured against human transcribers
-
-| Question | Reference | Result |
-|---|---|---|
-| Did it hear the notes that were played? | 73 solos from the [Weimar Jazz Database](https://jazzomat.hfm-weimar.de/dbformat/dboverview.html), every note annotated by hand | note F1 **0.86** |
-| Are the beats in the right place? | the same 73 solos | beat F1 **0.94** |
-| Is the rhythm written the way a transcriber wrote it? | 12 transcriptions made by ear | **85%** of matched notes agree |
-| And the way the Omnibook wrote it? | 22 solos from the *Charlie Parker Omnibook* | **78%** of matched notes agree |
-
-F1 is the standard transcription score. At 1.0, every note is found and
-nothing is invented. The project keeps an open
-[list of what is still wrong](docs/benchmark-deficiencies.md).
-
 ## Get started
 
 **Windows:** download `SwingScribe-<version>-windows-x64.zip` (about 450 MB)
