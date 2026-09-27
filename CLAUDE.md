@@ -153,7 +153,10 @@ broken a tool at least once:
   silently cost every fresh piano transcription its oracle ("keeping CREPE"
   in a log nobody reads). `piano._numba_free()` now stubs numba with
   pass-through decorators when the real one will not load — librosa only
-  ever uses it to OPTIMIZE functions that run fine un-jitted.
+  ever uses it to OPTIMIZE functions that run fine un-jitted. The stand-in
+  is `swingscribe/numba_guard.py` since 2026-09-27, and the DEFAULT
+  SEPARATOR uses it too: audio-separator loads librosa, and before that
+  the Roformer path had no fallback at all.
 - **A blocked DLL HANGS a windowless process instead of raising**
   (2026-09-08). From a console, Application Control's refusal of
   `llvmlite.dll` arrives as `OSError: [WinError 4551]` and the shims above
