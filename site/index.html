@@ -193,15 +193,6 @@
   .step .num { color: var(--lead); font-weight: 700; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 8px; }
   .step .figure { border: 1px solid var(--line); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45); }
 
-  /* Stats */
-  .stats { display: grid; gap: 18px; grid-template-columns: repeat(3, 1fr); margin-bottom: 24px; }
-  @media (max-width: 760px) { .stats { grid-template-columns: 1fr; } }
-  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
-  .stat .big { font-size: 44px; font-weight: 750; letter-spacing: -0.02em; color: var(--accent); line-height: 1.1; }
-  .stat .label { font-weight: 650; margin: 6px 0 6px; }
-  .stat p { margin: 0; color: var(--muted); font-size: 15px; }
-  .small { color: var(--muted); font-size: 15px; max-width: 48em; }
-
   /* Get started */
   .start { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
   @media (max-width: 860px) { .start { grid-template-columns: minmax(0, 1fr); } }
@@ -246,7 +237,6 @@
     <nav class="nav-links" aria-label="Sections">
       <a href="#features">Features</a>
       <a href="#how">How it works</a>
-      <a href="#accuracy">Accuracy</a>
       <a href="guide/">User guide</a>
       <a href="https://github.com/elkayem/swingscribe">GitHub</a>
     </nav>
@@ -422,36 +412,7 @@
   </div>
 </section>
 
-<section class="alt" id="accuracy">
-  <div class="wrap">
-    <h2>Measured against human transcriptions</h2>
-    <p class="intro">SwingScribe is scored against real jazz recordings and the notes
-      people wrote down for them.</p>
-    <div class="stats">
-      <div class="stat">
-        <div class="big">86%</div>
-        <div class="label">Note accuracy</div>
-        <p>Note F1 against note-by-note human annotations of 73 solos in the
-          <a href="https://jazzomat.hfm-weimar.de/">Weimar Jazz Database</a>.</p>
-      </div>
-      <div class="stat">
-        <div class="big">94%</div>
-        <div class="label">Beat accuracy</div>
-        <p>Beat F1 on the same 73 solos, tracked from the full band recording.</p>
-      </div>
-      <div class="stat">
-        <div class="big">34</div>
-        <div class="label">Hand-written pages</div>
-        <p>The finished page is scored as notation against 12 hand transcriptions and
-          22 solos from the Charlie Parker Omnibook.</p>
-      </div>
-    </div>
-    <p class="small">How it is measured is written up in the
-      <a href="https://github.com/elkayem/swingscribe/blob/master/docs/development.md">developer docs</a>.</p>
-  </div>
-</section>
-
-<section id="start">
+<section class="alt" id="start">
   <div class="wrap">
     <h2>Get started</h2>
     <p class="intro">Everything runs on your own computer. No account is needed, no
@@ -492,7 +453,7 @@ uv run python -m swingscribe gui</code></pre>
   </div>
 </section>
 
-<section class="alt" id="faq">
+<section id="faq">
   <div class="wrap faq">
     <h2>Questions</h2>
     <details>
