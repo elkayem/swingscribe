@@ -1,0 +1,48 @@
+# Publishes the website, https://elkayem.github.io/swingscribe/, from site/
+# plus the user guide and the README's images (site/assemble.sh copies them,
+# so each keeps one source). Repository Settings > Pages must have its source
+# set to "GitHub Actions".
+name: Pages
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - site/**
+      - src/swingscribe/gui/guide/**
+      - docs/images/**
+      - assets/swingscribe.ico
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one half-way through.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site
+        run: bash site/assemble.sh _site
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5

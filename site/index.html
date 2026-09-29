@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SwingScribe: jazz solo transcription, audio to sheet music</title>
+<meta name="description" content="Free jazz solo transcription software. SwingScribe turns a record into a lead sheet in MusicXML, with swung eighths written as eighths, not triplets.">
+<link rel="canonical" href="https://elkayem.github.io/swingscribe/">
+<link rel="icon" href="favicon.ico">
+<meta name="theme-color" content="#0d0e12">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="SwingScribe">
+<meta property="og:title" content="SwingScribe: jazz solos from the record to the page">
+<meta property="og:description" content="Free software that turns a jazz record into a solo transcription you would actually play from, with the swing written the way players read it.">
+<meta property="og:url" content="https://elkayem.github.io/swingscribe/">
+<meta property="og:image" content="https://elkayem.github.io/swingscribe/images/social-card.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="SwingScribe: a waveform with the soloist isolated, and the same solo written as a lead sheet under a Swing marking">
+<meta name="twitter:card" content="summary_large_image">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "SwingScribe",
+  "url": "https://elkayem.github.io/swingscribe/",
+  "description": "Jazz solo transcription software. It isolates the soloist, finds the beats and bars, hears every note, and writes a MusicXML lead sheet with swung eighths written as eighths under a Swing marking.",
+  "applicationCategory": "MultimediaApplication",
+  "applicationSubCategory": "Music transcription",
+  "operatingSystem": "Windows 10, Windows 11, Linux",
+  "downloadUrl": "https://github.com/elkayem/swingscribe/releases/latest",
+  "installUrl": "https://github.com/elkayem/swingscribe/blob/master/INSTALL.md",
+  "image": "https://elkayem.github.io/swingscribe/images/social-card.png",
+  "screenshot": "https://elkayem.github.io/swingscribe/images/review.png",
+  "license": "https://opensource.org/licenses/MIT",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": { "@type": "Person", "name": "Larry McGovern" },
+  "sameAs": ["https://github.com/elkayem/swingscribe"]
+}
+</script>
+
+<style>
+  :root {
+    --bg: #0d0e12;
+    --bg-2: #111218;
+    --panel: #161821;
+    --panel-2: #1c1f2b;
+    --line: #272b3a;
+    --text: #e6e8ef;
+    --muted: #8f95aa;
+    --accent: #f0a848;
+    --accent-ink: #1b1305;
+    --lead: #5ad2c2;
+    --radius: 12px;
+    --page: 1120px;
+    --gutter: 24px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  img { max-width: 100%; height: auto; display: block; }
+  a { color: var(--accent); }
+  .wrap { max-width: var(--page); margin: 0 auto; padding: 0 var(--gutter); }
+
+  /* Navigation */
+  .nav {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(13, 14, 18, 0.86);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav .wrap { display: flex; align-items: center; gap: 22px; height: 60px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--text); text-decoration: none; font-weight: 700; font-size: 18px;
+  }
+  .logo {
+    width: 30px; height: 30px; border-radius: 8px;
+    display: grid; place-items: center;
+    background: linear-gradient(160deg, #ffc570, #e0922e);
+    color: var(--accent-ink); font-size: 18px; line-height: 1;
+    box-shadow: 0 0 18px rgba(240, 168, 72, 0.35);
+  }
+  .nav-links { display: flex; gap: 20px; margin-left: auto; }
+  .nav-links a { color: var(--muted); text-decoration: none; font-size: 15px; }
+  .nav-links a:hover { color: var(--text); }
+  .nav .btn { padding: 8px 14px; font-size: 14px; }
+  @media (max-width: 760px) { .nav-links { display: none; } .nav .btn { margin-left: auto; } }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 13px 22px; border-radius: 10px;
+    font-weight: 650; font-size: 16px; text-decoration: none;
+    border: 1px solid transparent;
+  }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .btn-primary:hover { background: #ffb95c; }
+  .btn-ghost { color: var(--text); border-color: var(--line); background: var(--panel); }
+  .btn-ghost:hover { border-color: #3a4054; }
+  .btn svg { width: 18px; height: 18px; flex: none; }
+
+  /* Hero */
+  .hero {
+    padding: 72px 0 40px;
+    background:
+      radial-gradient(900px 420px at 15% -10%, rgba(240, 168, 72, 0.13), transparent 70%),
+      radial-gradient(700px 420px at 95% 10%, rgba(90, 210, 194, 0.08), transparent 70%);
+  }
+  .eyebrow {
+    color: var(--lead); font-weight: 650; font-size: 14px;
+    letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(34px, 5.4vw, 58px); line-height: 1.08;
+    letter-spacing: -0.02em; margin: 0 0 20px; max-width: 16em;
+  }
+  h1 em { font-style: normal; color: var(--accent); }
+  .lead { font-size: clamp(18px, 2vw, 21px); color: #c9cdd9; max-width: 38em; margin: 0 0 30px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .cta-note { color: var(--muted); font-size: 14px; margin: 14px 0 0; }
+  .cta-note a { color: var(--muted); }
+  .shot {
+    margin: 48px 0 0; border-radius: var(--radius); overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+  }
+  .why { color: #c1c6d3; max-width: 46em; margin: 24px auto 0; text-align: center; font-size: 18px; }
+
+  /* Sections */
+  section { padding: 76px 0; }
+  section.alt { background: var(--bg-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  h2 {
+    font-size: clamp(28px, 3.6vw, 40px); line-height: 1.15;
+    letter-spacing: -0.015em; margin: 0 0 16px;
+  }
+  h3 { font-size: 19px; margin: 0 0 8px; line-height: 1.3; }
+  .intro { color: #c9cdd9; max-width: 42em; margin: 0 0 36px; font-size: 18px; }
+  .figure { border-radius: var(--radius); overflow: hidden; }
+  figcaption { color: var(--muted); font-size: 15px; margin-top: 12px; }
+
+  /* Feature cards */
+  .grid { display: grid; gap: 18px; grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 24px;
+  }
+  .card p { margin: 0; color: #b8bdcb; font-size: 16px; }
+  .card .mark {
+    width: 34px; height: 34px; border-radius: 9px; margin-bottom: 14px;
+    display: grid; place-items: center;
+    background: rgba(240, 168, 72, 0.12); color: var(--accent);
+  }
+  .card .mark svg { width: 19px; height: 19px; }
+
+  /* Pipeline list */
+  .models { list-style: none; padding: 0; margin: 36px 0 0; display: grid; gap: 14px; }
+  .models li {
+    display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 16px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 18px 20px;
+  }
+  .models .n {
+    width: 44px; height: 44px; border-radius: 50%;
+    display: grid; place-items: center;
+    border: 1px solid var(--line); color: var(--lead); font-weight: 700;
+  }
+  .models p { margin: 0; color: #b8bdcb; font-size: 16px; }
+  .models li.own { border-color: rgba(240, 168, 72, 0.45); }
+  .models li.own .n { color: var(--accent); border-color: rgba(240, 168, 72, 0.45); }
+
+  /* Tour */
+  .tour { display: grid; gap: 56px; }
+  .step { display: grid; grid-template-columns: 5fr 7fr; gap: 36px; align-items: center; }
+  .step.flip { grid-template-columns: 7fr 5fr; }
+  .step.flip .text { order: 2; }
+  @media (max-width: 860px) {
+    .step, .step.flip { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+    .step.flip .text { order: 0; }
+  }
+  .step .text p { color: #c1c6d3; margin: 0; }
+  .step .num { color: var(--lead); font-weight: 700; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 8px; }
+  .step .figure { border: 1px solid var(--line); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45); }
+
+  /* Stats */
+  .stats { display: grid; gap: 18px; grid-template-columns: repeat(3, 1fr); margin-bottom: 24px; }
+  @media (max-width: 760px) { .stats { grid-template-columns: 1fr; } }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
+  .stat .big { font-size: 44px; font-weight: 750; letter-spacing: -0.02em; color: var(--accent); line-height: 1.1; }
+  .stat .label { font-weight: 650; margin: 6px 0 6px; }
+  .stat p { margin: 0; color: var(--muted); font-size: 15px; }
+  .small { color: var(--muted); font-size: 15px; max-width: 48em; }
+
+  /* Get started */
+  .start { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+  @media (max-width: 860px) { .start { grid-template-columns: minmax(0, 1fr); } }
+  .start .card p + p { margin-top: 12px; }
+  .start ol { margin: 12px 0 18px; padding-left: 22px; color: #b8bdcb; font-size: 16px; }
+  .start li { margin: 4px 0; }
+  pre {
+    background: #0a0b0e; border: 1px solid var(--line); border-radius: 9px;
+    padding: 14px 16px; overflow-x: auto; margin: 12px 0 0;
+    font: 14px/1.55 ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace; color: #d7dae4;
+  }
+  code { font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace; font-size: 0.9em; }
+
+  /* FAQ */
+  .faq { max-width: 820px; }
+  details { border-bottom: 1px solid var(--line); padding: 18px 0; }
+  details:first-of-type { border-top: 1px solid var(--line); }
+  summary { cursor: pointer; font-weight: 650; font-size: 18px; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; color: var(--accent); font-weight: 400; font-size: 22px; line-height: 1; }
+  details[open] summary::after { content: "\2212"; }
+  details p { color: #b8bdcb; margin: 12px 0 0; }
+
+  /* Footer */
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; color: var(--muted); font-size: 15px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; }
+  footer a { color: var(--muted); }
+  footer .spacer { flex: 1; }
+
+  @media (max-width: 600px) {
+    :root { --gutter: 16px; }
+    section { padding: 56px 0; }
+    .hero { padding-top: 48px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="./"><span class="logo" aria-hidden="true">&#9835;</span>SwingScribe</a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#accuracy">Accuracy</a>
+      <a href="guide/">User guide</a>
+      <a href="https://github.com/elkayem/swingscribe">GitHub</a>
+    </nav>
+    <a class="btn btn-primary" href="#start">Download</a>
+  </div>
+</header>
+
+<main>
+
+<section class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Free jazz solo transcription</p>
+    <h1>From the record to the page, <em>with the swing written the way players read it.</em></h1>
+    <p class="lead">SwingScribe turns a jazz record into a solo transcription you would
+      actually play from. Mark the solo, and it pulls the soloist out of the band,
+      finds every beat and bar, and hears every note. Then it writes a clean lead
+      sheet, with swung eighths written as eighths under a <em>Swing</em> marking.
+      It runs on your own computer, and it is free.</p>
+    <div class="cta">
+      <a class="btn btn-primary" data-download href="https://github.com/elkayem/swingscribe/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+        Download for Windows
+      </a>
+      <a class="btn btn-ghost" href="guide/">Read the user guide</a>
+      <a class="btn btn-ghost" href="https://github.com/elkayem/swingscribe">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        Source on GitHub
+      </a>
+    </div>
+    <p class="cta-note"><span data-release>About 450 MB</span> &middot; Windows 10 and 11 &middot; No GPU needed &middot;
+      Linux <a href="#start">from source</a> &middot; MIT licence</p>
+    <figure class="shot">
+      <img src="images/swing-comparison.png" width="2560" height="1736"
+        alt="The same eight bars of Art Pepper's solo on Birk's Works, written two ways. Snapped literally to the nearest sixteenth, the page has 9 ties and 16 sixteenth notes. Written by SwingScribe, it has 1 tie, 2 sixteenths, a Swing marking and the triplet Pepper played.">
+    </figure>
+    <p class="why">Most automatic transcription writes down exactly what it measures, and
+      in jazz that is the wrong answer. Swung eighths come out as triplets or dotted
+      rhythms, a laid-back soloist lands a sixteenth late, and the page fills with ties.
+      SwingScribe measures the swing and the lay-back first, then writes what a
+      transcriber would.</p>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <h2>What it does</h2>
+    <p class="intro">Everything between the record and a page you can open in your
+      notation program, with you in charge at every step.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
+        <h3>Writes swing, not arithmetic</h3>
+        <p>It measures how hard each passage swings and how far the soloist sits behind
+          the beat. Then it writes eighths as eighths and keeps the triplets that were
+          really played, guided by statistics from 245 human jazz transcriptions.</p>
+      </div>
+      <div class="card">
+        <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h2M6 8v8M10 4v16M14 8v8M18 10v4M22 12h0"/></svg></div>
+        <h3>Hears the soloist, not the band</h3>
+        <p>A state-of-the-art AI model lifts the horn or piano out of the full mix, over
+          just the passage you picked. You can compare it with the original before a
+          note is written.</p>
+      </div>
+      <div class="card">
+        <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18M8 3v18M16 3v18"/></svg></div>
+        <h3>Shows you the bars first</h3>
+        <p>The bar grid is drawn over the waveform before you transcribe, with a click
+          track to check it by ear. If the downbeat is wrong, one keypress moves it.</p>
+      </div>
+      <div class="card">
+        <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M7 5v9M12 5v9M17 5v9"/></svg></div>
+        <h3>Handles pianists too</h3>
+        <p>A dedicated piano model hears every key a pianist strikes, and SwingScribe
+          picks the melody out of the chords. Switch on any other note it heard to write
+          a chord.</p>
+      </div>
+      <div class="card">
+        <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></div>
+        <h3>Keeps you in charge</h3>
+        <p>Every note sits on a piano roll with the evidence behind it. Silence whatever
+          belongs to another instrument. Your edits survive a re-transcription.</p>
+      </div>
+      <div class="card">
+        <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+        <h3>Private, free and open</h3>
+        <p>There are no accounts, uploads or subscriptions. It exports MusicXML for
+          MuseScore, Finale, Sibelius or Dorico, transposed for B&#9837; and E&#9837; horns.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="how">
+  <div class="wrap">
+    <h2>How it works</h2>
+    <p class="intro">Four research-grade neural networks and one engine of its own.</p>
+    <figure class="figure" style="margin:0">
+      <img src="images/pipeline.png" width="2560" height="798" loading="lazy"
+        alt="Five steps: isolate the soloist with Band-Split RoFormer, find beats and bars with Beat This!, track pitch with a neural network, write the swing with SwingScribe's own rhythm engine, and export MusicXML">
+    </figure>
+    <ol class="models">
+      <li><span class="n">1</span><div><h3>Isolate the soloist</h3>
+        <p><a href="https://arxiv.org/abs/2309.02612">Band-Split RoFormer</a> took first
+          place in the music separation track of the 2023 Sound Demixing Challenge. It
+          keeps a saxophone in one piece where older separators tear it between stems.
+          <a href="https://arxiv.org/abs/2211.08553">Demucs</a> is one click away when
+          speed matters more.</p></div></li>
+      <li><span class="n">2</span><div><h3>Find the beats and bars</h3>
+        <p><a href="https://arxiv.org/abs/2407.21658">Beat This!</a> is a transformer beat
+          tracker from JKU Linz (ISMIR 2024). SwingScribe repairs its dropped and doubled
+          beats into a bar grid you can steer.</p></div></li>
+      <li><span class="n">3</span><div><h3>Hear the notes</h3>
+        <p>A deep convolutional network, <a href="https://arxiv.org/abs/1802.06182">CREPE</a>,
+          reads the soloist's pitch a hundred times a second. SwingScribe keeps the
+          soloist and rejects what leaked in from the band. For a piano solo,
+          <a href="https://arxiv.org/abs/2010.01815">high-resolution piano transcription</a>
+          hears every note, and SwingScribe picks the melody out of the comping.</p></div></li>
+      <li class="own"><span class="n">4</span><div><h3>Write the swing</h3>
+        <p>SwingScribe's rhythm engine is the part you will not find anywhere else. It
+          measures the swing section by section and removes the soloist's lag behind the
+          band. Then it reads each beat at the simplest rhythm the notes support.</p></div></li>
+      <li><span class="n">5</span><div><h3>Export MusicXML</h3>
+        <p>Open the result in MuseScore, Finale, Sibelius or Dorico, in concert pitch or
+          transposed for B&#9837; and E&#9837; instruments.</p></div></li>
+    </ol>
+  </div>
+</section>
+
+<section id="tour">
+  <div class="wrap">
+    <h2>See it in action</h2>
+    <p class="intro">Three panels take you from a whole record to a finished page.</p>
+    <div class="tour">
+      <div class="step">
+        <div class="text">
+          <p class="num">Step 1</p>
+          <h3>Find the solo</h3>
+          <p>Mark it on the overview and place its edges on the detail view. Check the
+            bar grid by eye and by ear, and slow the music down without changing its
+            pitch.</p>
+        </div>
+        <figure class="figure" style="margin:0">
+          <img src="images/hero.png" width="2880" height="1148" loading="lazy"
+            alt="Selecting a Charlie Parker solo: the whole track above, the selected span below, with beats and bar numbers drawn along the bottom">
+        </figure>
+      </div>
+      <div class="step flip">
+        <div class="text">
+          <p class="num">Step 2</p>
+          <h3>Hear the soloist alone</h3>
+          <p>Switch between the isolated instrument and the original mid-phrase. Playback
+            is sample-locked, and every stem has its own fader.</p>
+        </div>
+        <figure class="figure" style="margin:0">
+          <img src="images/isolate.png" width="2880" height="1072" loading="lazy"
+            alt="The isolate panel: the separated saxophone in teal over the original mix, with a fader for every stem">
+        </figure>
+      </div>
+      <div class="step">
+        <div class="text">
+          <p class="num">Step 3</p>
+          <h3>Review every note</h3>
+          <p>Click any note to hear it and see why it was written. Load a hand
+            transcription and every note is marked as matched, wrong, missed or
+            invented.</p>
+        </div>
+        <figure class="figure" style="margin:0">
+          <img src="images/review.png" width="2880" height="2060" loading="lazy"
+            alt="The review panel: the transcription on a piano roll, coloured against a hand transcription, with a note selected in the inspector and the export bar below">
+        </figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="accuracy">
+  <div class="wrap">
+    <h2>Measured against human transcriptions</h2>
+    <p class="intro">SwingScribe is scored against real jazz recordings and the notes
+      people wrote down for them.</p>
+    <div class="stats">
+      <div class="stat">
+        <div class="big">86%</div>
+        <div class="label">Note accuracy</div>
+        <p>Note F1 against note-by-note human annotations of 73 solos in the
+          <a href="https://jazzomat.hfm-weimar.de/">Weimar Jazz Database</a>.</p>
+      </div>
+      <div class="stat">
+        <div class="big">94%</div>
+        <div class="label">Beat accuracy</div>
+        <p>Beat F1 on the same 73 solos, tracked from the full band recording.</p>
+      </div>
+      <div class="stat">
+        <div class="big">34</div>
+        <div class="label">Hand-written pages</div>
+        <p>The finished page is scored as notation against 12 hand transcriptions and
+          22 solos from the Charlie Parker Omnibook.</p>
+      </div>
+    </div>
+    <p class="small">How it is measured is written up in the
+      <a href="https://github.com/elkayem/swingscribe/blob/master/docs/development.md">developer docs</a>.</p>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <h2>Get started</h2>
+    <p class="intro">Everything runs on your own computer. No account is needed, no
+      audio leaves your machine, and a GPU is not required.</p>
+    <div class="start">
+      <div class="card">
+        <h3>Windows app</h3>
+        <p>A ready-to-run folder that holds everything the app needs, including its own
+          Python. You need Windows 10 or 11 (64-bit) and about 2.5 GB of free disk.</p>
+        <ol>
+          <li>Download the zip (<span data-release>about 450 MB</span>).</li>
+          <li>Extract it somewhere with a short path, such as <code>C:\SwingScribe</code>.</li>
+          <li>Double-click <code>setup.cmd</code> once.</li>
+          <li>Use the SwingScribe icon. The app opens in your browser.</li>
+        </ol>
+        <div class="cta">
+          <a class="btn btn-primary" data-download href="https://github.com/elkayem/swingscribe/releases/latest">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
+            Download for Windows
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/elkayem/swingscribe/releases/latest">Release notes</a>
+        </div>
+      </div>
+      <div class="card">
+        <h3>From source</h3>
+        <p>On Windows or Linux, with <a href="https://docs.astral.sh/uv/">uv</a>. macOS is
+          untested.</p>
+        <pre><code>git clone https://github.com/elkayem/swingscribe.git
+cd swingscribe
+uv sync --group ml --group gui --group roformer
+uv run python -m swingscribe gui</code></pre>
+        <p>The <a href="https://github.com/elkayem/swingscribe/blob/master/INSTALL.md">installation
+          guide</a> covers both routes in detail, and the <a href="guide/">user guide</a>
+          covers every control. There is also a command line for every step, so you can
+          script a batch of solos.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="faq">
+  <div class="wrap faq">
+    <h2>Questions</h2>
+    <details>
+      <summary>Is SwingScribe really free?</summary>
+      <p>Yes. It is open source under the MIT licence, with no accounts or
+        subscriptions. The AI models download on first use under their own licences,
+        listed in <a href="https://github.com/elkayem/swingscribe/blob/master/packaging/NOTICES.md">NOTICES.md</a>.
+        The default separator's weights were published by the community with no stated
+        licence, so for commercial work choose Demucs (MIT) in the separator menu.</p>
+    </details>
+    <details>
+      <summary>Does my audio get uploaded anywhere?</summary>
+      <p>No. SwingScribe runs entirely on your computer. It opens in your browser, but
+        the page is served by the app itself, and your recordings never leave your
+        machine.</p>
+    </details>
+    <details>
+      <summary>Which instruments does it transcribe?</summary>
+      <p>Single-line horn solos, such as saxophone, trumpet and trombone, and piano
+        solos, which get a dedicated piano model. You tell it who is playing, and it
+        writes the soloist's line.</p>
+    </details>
+    <details>
+      <summary>What do I get at the end?</summary>
+      <p>A MusicXML file of the solo, with bar lines, a key signature and the swing
+        written the way players read it. MuseScore, Finale, Sibelius and Dorico all
+        open it, and it can be transposed for B&#9837; and E&#9837; instruments.</p>
+    </details>
+    <details>
+      <summary>How long does a solo take?</summary>
+      <p>Minutes. Most of the time goes into isolating the soloist, and SwingScribe does
+        that over just the passage you selected, not the whole track. Demucs is a
+        faster separator when speed matters more than quality.</p>
+    </details>
+    <details>
+      <summary>Is it accurate enough to trust?</summary>
+      <p>Treat it as a first draft that you check. Every note sits on a piano roll with
+        the evidence behind it, so you can hear any note, and erase what does not
+        belong, before you export.</p>
+    </details>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>SwingScribe &middot; MIT licence</span>
+    <a href="guide/">User guide</a>
+    <a href="https://github.com/elkayem/swingscribe/blob/master/INSTALL.md">Installation</a>
+    <a href="https://github.com/elkayem/swingscribe">GitHub</a>
+    <a href="https://github.com/elkayem/swingscribe/issues">Report a problem</a>
+    <span class="spacer"></span>
+  </div>
+</footer>
+
+<script>
+  // Point the download buttons straight at the latest release's zip and show its
+  // version and size. Without the API (offline, rate-limited), the links stay on
+  // the release page and the text stays "about 450 MB".
+  fetch('https://api.github.com/repos/elkayem/swingscribe/releases/latest')
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then((release) => {
+      const zip = (release.assets || []).find((a) => /windows-x64\.zip$/.test(a.name));
+      if (!zip) return;
+      const size = `${Math.round(zip.size / 1e6)} MB`;
+      document.querySelectorAll('[data-download]').forEach((a) => { a.href = zip.browser_download_url; });
+      document.querySelectorAll('[data-release]').forEach((el) => {
+        el.textContent = el.closest('.cta-note') ? `${release.tag_name}, ${size}` : size;
+      });
+    })
+    .catch(() => {});
+</script>
+</body>
+</html>

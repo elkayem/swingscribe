@@ -4,6 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/elkayem/swingscribe/releases/latest"><img alt="Download for Windows" src="https://img.shields.io/github/v/release/elkayem/swingscribe?style=for-the-badge&label=Download%20for%20Windows&color=f0a848&labelColor=1b1305"></a>
+  <a href="https://elkayem.github.io/swingscribe/"><img alt="Website" src="https://img.shields.io/badge/Website-elkayem.github.io-5ad2c2?style=for-the-badge&labelColor=16171c"></a>
   <a href="INSTALL.md"><img alt="Installation" src="https://img.shields.io/badge/Installation-guide-5ad2c2?style=for-the-badge&labelColor=16171c"></a>
   <a href="src/swingscribe/gui/guide/user-guide.md"><img alt="User guide" src="https://img.shields.io/badge/User-guide-5ad2c2?style=for-the-badge&labelColor=16171c"></a>
 </p>
