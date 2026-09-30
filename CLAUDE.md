@@ -1020,7 +1020,10 @@ Results and limits: `docs/m6-notate.md`.
   `scripts/figure_prior.py` over the OMR corpus under
   `benchmark/Transcriptions_Other/` with a bar that does not fill its
   signature out WITHOUT EXCEPTION; re-run the count and `build` when the
-  listener's corrections land, then both pins. One table: given the
+  listener's corrections land, then both pins. `build` leaves out every
+  page of the locked TEST split (2026-09-29: 177 pages counted, not 245;
+  9 of 2,749 pins moved, none past 0.004) so the prior never counts a
+  page a release run scores. One table: given the
   onset count no conditioning carries 0.03 bit. The weight is the
   slack's equivalence, never the page score. **With the prior on, two
   guards keep every heard note**: a reading may not push a note onto an
@@ -1288,6 +1291,49 @@ list of what is actually wrong; run everything with one command:
   page file and scipy's HiGHS DLL refused to load in them ("paging file
   is too small"), with 23 GB of 32 already held by the browser, MuseScore
   and the app.
+
+- **A moved pin is printed with its SET's paired interval** (2026-09-29,
+  `swingscribe/evaluation.py`, docs/roadmap.md E1): per set and headline
+  measure, the mean change over the same tracks, a 95% bootstrap interval
+  resampled by RECORDING (three So What solos are one draw, not three),
+  and up/down/level with an exact sign test by recording. A mean the
+  interval does not separate from zero is not evidence for a rule: R33
+  read +0.007 on the hand scores with 7 of 12 up, sign-test p 0.77.
+  `--against card.json` compares two runs saved with `--json` the same
+  way (an A/B under an environment override) and never fails.
+- **A locked TEST split** (2026-09-29, `tests/regression/split.json`,
+  E2). Every track in `benchmark/` that day, by every name the harness
+  knows it by, is dev; a track added since is test when a salted hash of
+  its TUNE TITLE falls under 0.3, so every version of a tune and every
+  soloist on one recording land together (a WJazzD track's title comes
+  from `--db`). An ordinary run holds test tracks out and says how many;
+  `run_eval --test` scores them alone against `test-baselines.json`, at a
+  release, never while tuning. Never regenerate split.json or move a
+  title into dev after seeing its test numbers. The audio wishlists in
+  `benchmark/audio-wishlist-*.csv` carry each row's split.
+- **The PDF pages are a FOURTH set, in two tiers** (2026-09-29, E3,
+  sections `pages`/`pages-notation`, means `pages_silver_*` and
+  `pages_bronze_*`). A recording beside its `.musicxml` in
+  `benchmark/Transcriptions_Other/musicxml/`, same base name, located by
+  `locate_scores.py --folder Transcriptions_Other/musicxml --stem ...
+  --ensemble ...`, is scored like the Omnibook and never folded into the
+  listener's twelve or the book. SILVER is a vector page whose printed
+  noteheads were counted -- at most 5% unread, at most 5% of the read
+  notes unprinted -- with 90% of its bars filling their signature
+  (`evaluation.page_tier`; 170 of 222 vector pages); bronze is the rest,
+  every scan included. The gates were set from reading quality before
+  any page was scored: never move them to lift a score. Kept out of the
+  WJazzD identification like the Omnibook, because a page's recording is
+  often a copy of a WJazzD track (a "triple": onsets + page + audio).
+  The first three (Embraceable You, Cheese Cake, Shorter's Gingerbread
+  Boy) are WJazzD copies; Moose The Mooche, Scrapple From The Apple and
+  Joy Spring were REFUSED against the audio on disk (32%, 26%, 47%
+  coverage): other takes, whatever `figure_prior.OVERLAP` assumed. A
+  bar-line STEP on a page is the page's or the grid's: Cheese Cake's page
+  and WJazzD's annotation of the same solo both step a beat at bar 84
+  (our grid), Gingerbread Boy's page steps on its own bar 102, which the
+  OMR filled with six beats (the page). Check the page's unfilled bars
+  before charging a step to the grid.
 
 - **WJazzD (`score_wjazz.py`) is audio against audio** — a human's per-note
   onsets in seconds for the same recording. Asks "did we hear what was

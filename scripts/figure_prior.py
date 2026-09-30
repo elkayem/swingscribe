@@ -33,7 +33,11 @@ What counts, and what is left out (the brief's rules, the listener's first):
   left out; 4/4, 3/4, 2/4 and 5/4 are counted per quarter, and 2/2 per
   quarter TOO but in a table of its own until it has been looked at;
 - a corpus title that is a recording under `benchmark/` is dropped
-  (`OVERLAP`), so the judge set stays a hold-out.
+  (`OVERLAP`), so the judge set stays a hold-out;
+- and `build` drops every page of the locked TEST split
+  (`tests/regression/split.json`, docs/roadmap.md E2): the prior that ships
+  is never counted from a page a release run scores. The tables and the
+  other modes still describe the whole corpus.
 
 Two filters are reported side by side: PLAIN (the rules above) and STRICT
 (plain, plus every bar the two OMR engines read differently, the manifest's
@@ -44,7 +48,9 @@ Only aggregates leave this script. The pages are transcriptions of
 commercial recordings and `benchmark/` is gitignored (CLAUDE.md, plan
 section 12): no note list, no bar-by-bar content, ever.
 
-Standard library only, so it runs anywhere the corpus does.
+Standard library only, so it runs anywhere the corpus does; `build` also
+reads the split through `swingscribe.evaluation`, which is standard library
+at import too.
 """
 
 from __future__ import annotations
@@ -63,6 +69,7 @@ from xml.etree import ElementTree
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CORPUS = REPO_ROOT / "benchmark" / "Transcriptions_Other" / "musicxml"
 PRIOR_PATH = REPO_ROOT / "src" / "swingscribe" / "figure-prior.json"
+SPLIT_PATH = REPO_ROOT / "tests" / "regression" / "split.json"
 
 # Corpus files whose recording is under benchmark/ (the WJazzD folder, the
 # Omnibook, or the listener's twelve): the judge set is a hold-out only if
@@ -309,6 +316,21 @@ def load_corpus(folder: Path = CORPUS, log=print) -> list[Transcription]:
             continue
         out.append(read_transcription(path, manifests.get(path.name)))
     return out
+
+
+def without_test_pages(corpus: list[Transcription], split_path: Path = SPLIT_PATH, log=print):
+    """The corpus less every page the locked split holds out as TEST. A
+    missing split file holds nothing out, and says so."""
+    if not split_path.is_file():
+        log(f"  no {split_path}: counting every page")
+        return corpus
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+    from swingscribe.evaluation import load_split, page_group
+
+    split = load_split(split_path)
+    kept = [t for t in corpus if not split.is_test(page_group(t.manifest, t.name))]
+    log(f"  held out {len(corpus) - len(kept)} test-split page(s) of {len(corpus)}")
+    return kept
 
 
 # ── the figures ──────────────────────────────────────────────────────────────
@@ -1130,7 +1152,7 @@ def main() -> None:
         result = sweep_report(args.db or REPO_ROOT / "wjazz/wjazzd.db", limit=args.limit)
         render_sweep(result)
     else:
-        corpus = load_corpus(args.corpus)
+        corpus = without_test_pages(load_corpus(args.corpus))
         result = prior_table([r for t in corpus for r in beat_records(t)])
         PRIOR_PATH.write_text(json.dumps(result, indent=1), encoding="utf-8")
         print(

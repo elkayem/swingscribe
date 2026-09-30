@@ -703,6 +703,35 @@ line. The four-sixteenth deficit and the ternary two-onset figures do not
 move, as the diagnostic said they would not: the first is missing onsets,
 the second is the tuplet gate.
 
+### Rebuilt without the test split (2026-09-29)
+
+The PDF pages are about to become a benchmark (docs/roadmap.md): the
+listener is pairing recordings with them. A prior counted from a page and
+then judged on that same page is judged on its own training data, so
+`build` now drops every page of the locked TEST split
+(`tests/regression/split.json`, `swingscribe.evaluation.Split`) as it
+always dropped `OVERLAP`. Test is 30% of the tune titles not already in
+the benchmark, by a salted hash; 79 of the 268 pages the reader loads.
+
+| | before | after |
+|---|---|---|
+| files | 245 | 177 |
+| beats with an onset | 49,373 | 36,556 |
+| figures seen | 131 | 110 |
+| `0 1/2` share | 0.5505 | 0.5613 |
+| `0 1/3 2/3` share | 0.0367 | 0.0376 |
+| beat-weighted change in surprisal | | 0.028 nats (0.0004 beats at 0.015) |
+
+What it did to the pages, pinned the same day: 9 of 2,749 numbers past the
+0.002 tolerance, every one by 0.002-0.004 (Peterson value +0.0025, the
+Omnibook's Confirmation rhythm +0.0024 and Donna Lee's -0.0024/-0.0040);
+the paired change of every set sits inside +-0.0006 with no set decided,
+and the summary means move by 0.0001 (Omnibook value 0.7114 -> 0.7113,
+WJazzD placement 0.8554 -> 0.8555). The quantizer instrument drops no more
+notes (4,203) and its page hit reads 74.9% -> 74.8%, re-pinned. The dev
+pages that get recordings are still in the count; do not tune the prior's
+WEIGHT on them -- that is what the test split is for.
+
 ## Findings to report, not to implement
 
 1. **Tuplet share.** The corpus reads 10.3% tuplet notes whole, 7.9% in

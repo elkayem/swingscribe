@@ -38,6 +38,26 @@ choruses, editorially (plan section 6, layer 3: ghost notes dropped,
 enharmonics normalised), of a 78-era side. Its rhythm is never read without
 its coverage, because a located span could be the wrong take.
 
+## A fourth set: the PDF pages, in two tiers
+
+`benchmark/Transcriptions_Other/musicxml/` holds what `pdf2musicxml` read off
+the PDF transcriptions the listener collected. A page with its recording
+beside it (same base name) and a sidecar from `locate_scores.py` is scored
+exactly like the Omnibook -- and, like the Omnibook, in sections and means of
+its own (`pages`, `pages_notation`), split again by how far its OMR reading
+can be trusted: silver or bronze (`swingscribe.evaluation.page_tier`,
+docs/roadmap.md E3). A page is never folded into the listener's twelve or the
+book.
+
+## The locked test set
+
+Every track in `benchmark/` on 2026-09-29 is dev; a track added since is dev
+or test by a salted hash of its tune title (`swingscribe.evaluation.Split`,
+`tests/regression/split.json`). An ordinary run scores dev only and says how
+many tracks it held out; `--test` scores the test tracks alone, against pins
+of their own (`tests/regression/test-baselines.json`), and is for a release.
+Looking at a test number and then tuning is how a test set stops being one.
+
 ## What "pinned" means here
 
 Real-audio baselines cannot run in CI -- they need the audio, which is never
@@ -45,6 +65,13 @@ committed (plan section 12). So this is a pre-merge command, not a test. The
 baselines live in `tests/regression/real-audio-baselines.json`, separately
 from the synthetic ones in `baselines.json`, which stay sacred and untouched
 (CLAUDE.md).
+
+A moved number is printed with the paired change of its whole set: the same
+tracks before and after, a 95% interval resampled by recording, and a sign
+test (`swingscribe.evaluation.paired_change`). The pins say WHAT moved; the
+interval says whether the set moved more than its own spread. `--against
+card.json` prints the same comparison against a scorecard saved with
+`--json`, for an A/B run under an environment override.
 
 Nothing this reads or writes may be committed except the aggregate numbers.
 """
@@ -59,6 +86,9 @@ from pathlib import Path
 
 BENCH = Path("benchmark")
 BASELINES = Path("tests/regression/real-audio-baselines.json")
+# The test split's own pins, written only by `--test --pin` (module docstring).
+TEST_BASELINES = Path("tests/regression/test-baselines.json")
+SPLIT_FILE = Path("tests/regression/split.json")
 # Which stage cache the stems and ingests are read from. The default is the
 # repo-root cache the GUI shares when launched from here; `--cache-dir
 # benchmark/.swingscribe-cache` reads the batch's, where a span-scoped
@@ -121,6 +151,77 @@ OMNIBOOK_FOLDER = "Omnibook"
 def is_omnibook(key: str) -> bool:
     """Whether a run key names a track of the Omnibook set."""
     return track_of(key).startswith(OMNIBOOK_FOLDER + "/")
+
+
+# The PDF pages live under this subfolder (module docstring), their MusicXML
+# and manifests in its `musicxml/` folder beside the recordings.
+PAGES_FOLDER = "Transcriptions_Other"
+TIERS = ("silver", "bronze")
+
+
+def is_page(key: str) -> bool:
+    """Whether a run key names a recording paired with a PDF page."""
+    return track_of(key).startswith(PAGES_FOLDER + "/")
+
+
+def is_located(key: str) -> bool:
+    """A span placed by content rather than drawn by ear: its rhythm is
+    never read without its coverage, because it could be the wrong take."""
+    return is_omnibook(key) or is_page(key)
+
+
+def page_score(sidecar: dict) -> Path | None:
+    """The MusicXML a page's sidecar names, if it is a file."""
+    score = sidecar.get("score")
+    if not score:
+        return None
+    path = Path(score)
+    return path if path.is_file() else None
+
+
+def page_quality(score_path: Path) -> tuple[str, str]:
+    """(tier, split group) for a PDF page: its manifest entry and the share
+    of its bars that fill their signature, read by figure_prior's reader --
+    the same reader that decides which bars the prior counts."""
+    sys.path.insert(0, str(Path(__file__).parent))
+    import figure_prior
+
+    from swingscribe.evaluation import page_group, page_tier
+
+    entry = figure_prior.load_manifests(score_path.parent).get(score_path.name)
+    page = figure_prior.read_transcription(score_path, entry)
+    bars = [bar for bar in page.bars if bar.length > 0]
+    filled = sum(1 for bar in bars if bar.filled == bar.length) / len(bars) if bars else None
+    return page_tier(entry, filled), page_group(entry, page.name)
+
+
+def split_group(track: str, sidecar: dict, db=None) -> list[str]:
+    """The names a track goes by for the split -- its tune title where one is
+    known, else its file's stem. More than one when two spellings of the
+    track exist (a WJazzD file's stem and the database's title), so the
+    frozen dev list can hold both and a run with or without `--db` agrees."""
+    names = [Path(track).stem]
+    if is_page(track):
+        score = page_score(sidecar)
+        if score is not None:
+            names.insert(0, page_quality(score)[1])
+    melids = sidecar.get("melids") or ([sidecar["melid"]] if sidecar.get("melid") else [])
+    if db is not None and melids:
+        row = db.execute("select title from solo_info where melid=?", (int(melids[0]),)).fetchone()
+        if row:
+            names.insert(0, row[0])
+    return names
+
+
+def held_out(track: str, sidecar: dict, split, db=None) -> bool:
+    """Whether the locked split holds this track out of an ordinary run. A
+    track any of whose names is dev stays dev."""
+    from swingscribe.evaluation import normalize_title
+
+    names = split_group(track, sidecar, db)
+    if any(normalize_title(name) in split.dev for name in names):
+        return False
+    return split.is_test(names[0])
 
 
 def track_of(key: str) -> str:
@@ -451,12 +552,14 @@ def wjazz_scores(db_path: Path, runs: dict, grids: dict, jobs: int = 1) -> dict:
     """Note and beat scores against WJazzD, for every take we can identify."""
     tasks = []
     for name, run in sorted(runs.items()):
-        if is_omnibook(name):
+        if is_located(name):
             # The sets stay disjoint. WJazzD annotated six of these very
             # sides, and benchmark/wjazzd/ already holds them under their own
             # names: identifying them here again would score the same
             # recording twice and move the WJazzD mean's population without
-            # the pipeline having changed.
+            # the pipeline having changed. A PDF page's recording is often a
+            # copy of a WJazzD track (the "triples", docs/roadmap.md A1), so
+            # the same holds for the pages.
             continue
         tasks.append((name, run, grids.get(track_of(name)), str(db_path), str(CACHE_DIR)))
     results = {
@@ -625,7 +728,7 @@ def _notation_one(task: tuple) -> dict | None:
         **{k: round(v, 4) for k, v in bar_line_agreement(notation, reference).items()},
         **traced(bar_line_trace(notation, reference), reference.beats_per_bar),
     }
-    if is_omnibook(name):
+    if is_located(name):
         # A located span can be the wrong take, so its rhythm is never
         # read without its coverage (CLAUDE.md). The listener's rows
         # carry none: their spans were drawn by ear around one solo.
@@ -807,6 +910,85 @@ def print_placement(summary: dict, prefix: str) -> None:
         )
 
 
+def tier_of(entry: dict) -> str:
+    """A page row's reference tier, carried as a pinned 1/0 so a page that
+    changes tier shows in the diff."""
+    return "silver" if entry.get("silver") else "bronze"
+
+
+def render_located(rows: dict, notation: dict) -> None:
+    """The Omnibook's table, used for any set whose spans were placed by
+    content: pitch and note beside the page's rhythm, value, readability
+    and bar line, never a rhythm without its coverage."""
+    header = (
+        f"  {'tune':<26s} {'pitch':>6s} {'note':>6s} {'bars':>5s} {'cover':>6s} "
+        f"{'rhythm':>7s} {'value':>6s} {'read':>7s} {'bar line':>9s}"
+    )
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    for name, e in sorted(rows.items()):
+        n = notation.get(name, {})
+
+        def cell(field: str, width: int, digits: int, n=n) -> str:
+            return f"{n[field]:{width}.{digits}f}" if field in n else f"{'-':>{width}s}"
+
+        flag = "" if n.get("trusted", 1.0) else "   (untrusted — too little lined up)"
+        # Beats our bar lines sit from the book's, and the share of
+        # matched notes that say so: "+0.0 91%" is a page on its bars.
+        bar_line = f"{n['beat_offset']:+5.1f} {n['beat_share']:3.0%}" if n.get("beat_n") else "-"
+        print(
+            f"  {Path(name).stem[:26]:<26s} {e['pitch_f1']:6.3f} {e['note_f1']:6.3f} "
+            f"{cell('bars', 5, 0)} {cell('coverage', 6, 3)} {cell('rhythm', 7, 3)} "
+            f"{cell('value', 6, 3)} {cell('readability', 7, 4)} {bar_line:>9s}{flag}"
+            f"{trace_line(n)}"
+        )
+
+
+def print_located_summary(s: dict, prefix: str, unit: str) -> None:
+    if f"{prefix}_pitch_f1" in s:
+        print(
+            f"\n  mean pitch F1 {s[f'{prefix}_pitch_f1']:.3f}   note F1 "
+            f"{s[f'{prefix}_note_f1']:.3f}   over {int(s[f'{prefix}_n'])} {unit}"
+        )
+    if f"{prefix}_rhythm" in s:
+        print(
+            f"  mean rhythm {s[f'{prefix}_rhythm']:.3f}   value {s[f'{prefix}_value']:.3f}"
+            f"   over {int(s[f'{prefix}_rhythm_n'])} trusted"
+        )
+    print_placement(s, prefix)
+    if f"{prefix}_readability" in s:
+        print(
+            f"  mean readability {s[f'{prefix}_readability']:.4f} over "
+            f"{int(s[f'{prefix}_readability_n'])} notation(s)"
+        )
+
+
+def located_summary(rows: dict, notation: dict, prefix: str) -> dict:
+    """The means of a set whose spans were located by content, over the
+    DEFAULT take: pitch and note over every row, rhythm and value over the
+    trusted pairings only, placement, readability."""
+    out: dict[str, float] = {}
+    scored = [e for k, e in rows.items() if take_of(k) is None]
+    if scored:
+        out[f"{prefix}_pitch_f1"] = round(statistics.fmean(e["pitch_f1"] for e in scored), 4)
+        out[f"{prefix}_note_f1"] = round(statistics.fmean(e["note_f1"] for e in scored), 4)
+        out[f"{prefix}_n"] = float(len(scored))
+    pages = {k: e for k, e in notation.items() if take_of(k) is None}
+    trusted = [e for e in pages.values() if e.get("trusted")]
+    if trusted:
+        out[f"{prefix}_rhythm"] = round(statistics.fmean(e["rhythm"] for e in trusted), 4)
+        out[f"{prefix}_value"] = round(statistics.fmean(e["value"] for e in trusted), 4)
+        out[f"{prefix}_rhythm_n"] = float(len(trusted))
+    out.update(placement_summary(notation, prefix))
+    readable = [e for e in pages.values() if "readability" in e]
+    if readable:
+        out[f"{prefix}_readability"] = round(
+            statistics.fmean(e["readability"] for e in readable), 4
+        )
+        out[f"{prefix}_readability_n"] = float(len(readable))
+    return out
+
+
 def render(card: dict) -> None:
     wjazz = {k: v for k, v in card["wjazz"].items() if "skipped" not in v}
     skipped = {k: v for k, v in card["wjazz"].items() if "skipped" in v}
@@ -920,47 +1102,22 @@ def render(card: dict) -> None:
     if card.get("omnibook"):
         print("\n== Omnibook: Parker's recordings against LORIA's MusicXML of the book ==")
         print("  (pitch and note as the MuseScore set; rhythm and value never without coverage)")
-        header = (
-            f"  {'tune':<26s} {'pitch':>6s} {'note':>6s} {'bars':>5s} {'cover':>6s} "
-            f"{'rhythm':>7s} {'value':>6s} {'read':>7s} {'bar line':>9s}"
+        render_located(card["omnibook"], card.get("omnibook_notation", {}))
+        print_located_summary(card["summary"], "omnibook", "sides")
+
+    if card.get("pages"):
+        print("\n== PDF pages: recordings against the OMR reading of a human's transcription ==")
+        print(
+            "  (silver: a vector page whose printed notes were counted and read, bars filled;"
+            " bronze: the rest, scans included. Never folded into the sets above)"
         )
-        print(header)
-        print("  " + "-" * (len(header) - 2))
-        for name, e in sorted(card["omnibook"].items()):
-            n = card.get("omnibook_notation", {}).get(name, {})
-
-            def cell(field: str, width: int, digits: int, n=n) -> str:
-                return f"{n[field]:{width}.{digits}f}" if field in n else f"{'-':>{width}s}"
-
-            flag = "" if n.get("trusted", 1.0) else "   (untrusted — too little lined up)"
-            # Beats our bar lines sit from the book's, and the share of
-            # matched notes that say so: "+0.0 91%" is a page on its bars.
-            bar_line = (
-                f"{n['beat_offset']:+5.1f} {n['beat_share']:3.0%}" if n.get("beat_n") else "-"
-            )
-            print(
-                f"  {Path(name).stem[:26]:<26s} {e['pitch_f1']:6.3f} {e['note_f1']:6.3f} "
-                f"{cell('bars', 5, 0)} {cell('coverage', 6, 3)} {cell('rhythm', 7, 3)} "
-                f"{cell('value', 6, 3)} {cell('readability', 7, 4)} {bar_line:>9s}{flag}"
-                f"{trace_line(n)}"
-            )
-        s = card["summary"]
-        if "omnibook_pitch_f1" in s:
-            print(
-                f"\n  mean pitch F1 {s['omnibook_pitch_f1']:.3f}   note F1 "
-                f"{s['omnibook_note_f1']:.3f}   over {int(s['omnibook_n'])} sides"
-            )
-        if "omnibook_rhythm" in s:
-            print(
-                f"  mean rhythm {s['omnibook_rhythm']:.3f}   value {s['omnibook_value']:.3f}"
-                f"   over {int(s['omnibook_rhythm_n'])} trusted"
-            )
-        print_placement(s, "omnibook")
-        if "omnibook_readability" in s:
-            print(
-                f"  mean readability {s['omnibook_readability']:.4f} over "
-                f"{int(s['omnibook_readability_n'])} notation(s)"
-            )
+        for tier in TIERS:
+            rows = {k: e for k, e in card["pages"].items() if tier_of(e) == tier}
+            if not rows:
+                continue
+            print(f"\n  -- {tier} --")
+            render_located(rows, card.get("pages_notation", {}))
+            print_located_summary(card["summary"], f"pages_{tier}", "pages")
 
     takes = sorted(k for k in card["mscz"] if take_of(k) is None and second_key(k) in card["mscz"])
     if takes:
@@ -1034,7 +1191,12 @@ def flatten(card: dict) -> dict[str, float]:
         for field, value in entry.items():
             if isinstance(value, (int, float)):
                 flat[f"wjazz-notation/{pin_name(name)}/{field}"] = float(value)
-    for section, prefix in (("omnibook", "omnibook"), ("omnibook_notation", "omnibook-notation")):
+    for section, prefix in (
+        ("omnibook", "omnibook"),
+        ("omnibook_notation", "omnibook-notation"),
+        ("pages", "pages"),
+        ("pages_notation", "pages-notation"),
+    ):
         for name, entry in card.get(section, {}).items():
             for field, value in entry.items():
                 if isinstance(value, (int, float)):
@@ -1044,12 +1206,87 @@ def flatten(card: dict) -> dict[str, float]:
     return flat
 
 
-def compare(card: dict) -> int:
-    """Diff against the pinned baselines. Returns a process exit code."""
-    if not BASELINES.is_file():
-        print(f"\nNo baselines pinned yet. Run with --pin to create {BASELINES}.")
-        return 0
-    pinned = json.loads(BASELINES.read_text(encoding="utf-8"))
+# The per-track measures a set's headline means are made of, and so the ones
+# whose change is summarised paired (`paired_changes`).
+HEADLINE_FIELDS = ("note_f1", "pitch_f1", "beat_f1", "rhythm", "value", "readability", "on_the_bar")
+# Measures a pairing must be trusted for on BOTH sides: a located page below
+# the coverage floor has no rhythm worth comparing (CLAUDE.md).
+TRUSTED_FIELDS = ("rhythm", "value", "on_the_bar")
+
+
+def recording_of(pinned_track: str) -> str:
+    """The recording a pinned row belongs to: a WJazzD file holding several
+    annotated solos pins one row per soloist ("file [performer]"), and those
+    rows are not independent draws."""
+    return pinned_track.split(" [")[0]
+
+
+def paired_changes(before: dict[str, float], after: dict[str, float]) -> list[tuple]:
+    """(set, measure, PairedChange) for every headline measure of every set in
+    which at least one track moved past TOLERANCE, over the tracks both sides
+    hold. Default takes only -- the means describe what ships -- and trusted
+    pairings only where trust is defined."""
+    from swingscribe.evaluation import paired_change
+
+    grouped: dict[tuple[str, str], list[tuple[str, float, float]]] = {}
+    for key, now in after.items():
+        section, _, rest = key.partition("/")
+        if section == "summary" or key not in before:
+            continue
+        track, _, field = rest.rpartition("/")
+        if field not in HEADLINE_FIELDS or take_of(track) is not None:
+            continue
+        if field in TRUSTED_FIELDS:
+            trust = f"{section}/{track}/trusted"
+            if before.get(trust, 1.0) < 1.0 or after.get(trust, 1.0) < 1.0:
+                continue
+        grouped.setdefault((section, field), []).append((track, before[key], now))
+    out = []
+    for (section, field), rows in sorted(grouped.items()):
+        if not any(abs(now - was) > TOLERANCE for _t, was, now in rows):
+            continue
+        change = paired_change(
+            [was for _t, was, _n in rows],
+            [now for _t, _w, now in rows],
+            [recording_of(track) for track, _w, _n in rows],
+            tolerance=TOLERANCE,
+        )
+        out.append((section, field, change))
+    return out
+
+
+def print_paired(changes: list[tuple]) -> None:
+    if not changes:
+        return
+    print(
+        "\n== Paired changes: the same tracks before and after "
+        "(95% interval resampled by recording; up/down/level and the sign test by recording) =="
+    )
+    header = (
+        f"  {'set / measure':<30s} {'n':>4s} {'rec':>4s} {'mean change':>12s} "
+        f"{'95% interval':>21s} {'up':>4s} {'down':>5s} {'level':>6s} {'sign p':>7s}"
+    )
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    for section, field, c in changes:
+        mark = "  *" if c.decided else ""
+        print(
+            f"  {section + ' / ' + field:<30s} {c.n:4d} {c.recordings:4d} {c.mean:+12.4f} "
+            f"   [{c.low:+.4f}, {c.high:+.4f}] {c.up:4d} {c.down:5d} {c.level:6d} {c.p:7.3f}{mark}"
+        )
+    print("  * the interval excludes zero")
+
+
+def compare(card: dict, baselines: Path = BASELINES, pinned: dict | None = None) -> int:
+    """Diff against the pinned baselines, or against `pinned` (a flattened
+    scorecard, `--against`). Returns a process exit code: a moved pin is a
+    failure, a difference from another run is information."""
+    against = pinned is not None
+    if pinned is None:
+        if not baselines.is_file():
+            print(f"\nNo baselines pinned yet. Run with --pin to create {baselines}.")
+            return 0
+        pinned = json.loads(baselines.read_text(encoding="utf-8"))
     current = flatten(card)
     moved, appeared, vanished = [], [], []
     for key, value in sorted(current.items()):
@@ -1059,16 +1296,20 @@ def compare(card: dict) -> int:
             moved.append((key, pinned[key], value))
     vanished = sorted(set(pinned) - set(current))
 
+    label = "Against the other card" if against else "Baselines"
     if not (moved or appeared or vanished):
-        print(f"\n== Baselines: all {len(current)} numbers unchanged ==")
+        print(f"\n== {label}: all {len(current)} numbers unchanged ==")
         return 0
-    print("\n== Baselines: CHANGED ==")
+    print(f"\n== {label}: CHANGED ==")
     for key, was, now in moved:
         print(f"  {key:<48s} {was:7.4f} -> {now:7.4f}  ({now - was:+.4f})")
     for key in appeared:
         print(f"  {key:<48s}      new -> {current[key]:7.4f}")
     for key in vanished:
         print(f"  {key:<48s} {pinned[key]:7.4f} -> gone")
+    print_paired(paired_changes(pinned, current))
+    if against:
+        return 0
     print("\nIf this is intended, say so explicitly and re-pin with --pin (CLAUDE.md).")
     return 1
 
@@ -1110,29 +1351,58 @@ def main() -> None:
         default=default_jobs(),
         help="processes for the per-track scoring (default: half the cores); 1 is in-process",
     )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="score the locked TEST split alone, against its own pins (a release, not tuning)",
+    )
+    parser.add_argument(
+        "--against",
+        type=Path,
+        default=None,
+        help="compare with a scorecard saved by --json instead of the pins (an A/B run)",
+    )
     args = parser.parse_args()
     if args.cache_dir is not None:
         CACHE_DIR = args.cache_dir.resolve()
+    if args.pin and args.against:
+        raise SystemExit("--pin rewrites the pins; --against compares with a card. Pick one.")
 
     cache = notes_cache(args.step_cost, args.dip_db)
     print(f"== Transcribing (step cost {args.step_cost}, dip {args.dip_db} dB), cache {cache} ==")
     runs = transcribe_all(cache, args.step_cost, args.dip_db)
+    runs = split_runs(runs, args.db, test=args.test)
+    if args.test and not runs:
+        print("\nNo test-split track is in benchmark/ yet; nothing to score.")
+        return
     print(f"== Beat grids, cache {args.grids} ==")
     grids = beat_grids(args.grids)
 
     print(f"== Scoring in {args.jobs} process(es) ==")
     wjazz = wjazz_scores(args.db, runs, grids, args.jobs) if args.db else {}
-    # The Omnibook set is scored by the same two functions and then kept
-    # apart (OMNIBOOK_FOLDER), so the MuseScore sections stay the listener's.
+    # The Omnibook set and the PDF pages are scored by the same two functions
+    # and then kept apart (OMNIBOOK_FOLDER, PAGES_FOLDER), so the MuseScore
+    # sections stay the listener's.
     scored = mscz_scores(runs, args.jobs)
     notated = notation_scores(runs, grids, args.jobs) if grids else {}
+    tiers = page_tiers(runs)
+    for section in (scored, notated):
+        for key, entry in section.items():
+            if is_page(key):
+                entry["silver"] = float(tiers.get(track_of(key)) == "silver")
+
+    def own(section: dict) -> dict:
+        return {k: v for k, v in section.items() if not is_located(k)}
+
     card = {
         "settings": {"step_cost": args.step_cost, "dip_db": args.dip_db},
         "wjazz": wjazz,
-        "mscz": {k: v for k, v in scored.items() if not is_omnibook(k)},
-        "notation": {k: v for k, v in notated.items() if not is_omnibook(k)},
+        "mscz": own(scored),
+        "notation": own(notated),
         "omnibook": {k: v for k, v in scored.items() if is_omnibook(k)},
         "omnibook_notation": {k: v for k, v in notated.items() if is_omnibook(k)},
+        "pages": {k: v for k, v in scored.items() if is_page(k)},
+        "pages_notation": {k: v for k, v in notated.items() if is_page(k)},
         # WJazzD carries a human's NOTATION as well as their onsets, so the
         # same solos answer both questions.
         "wjazz_notation": (
@@ -1171,31 +1441,19 @@ def main() -> None:
         card["summary"]["mscz_note_n"] = float(len(default_mscz))
     # The Omnibook set, in means of its own, so every mean above stays over
     # the music it was pinned on. All horns, so no oracle take to keep out.
-    omnibook = list(card["omnibook"].values())
-    if omnibook:
-        card["summary"]["omnibook_pitch_f1"] = round(
-            statistics.fmean(e["pitch_f1"] for e in omnibook), 4
+    card["summary"].update(located_summary(card["omnibook"], card["omnibook_notation"], "omnibook"))
+    # The PDF pages, per tier: a silver page and a scan are different kinds
+    # of reference, and neither is a hand score (docs/roadmap.md, E3).
+    for tier in TIERS:
+        card["summary"].update(
+            located_summary(
+                {k: e for k, e in card["pages"].items() if tier_of(e) == tier},
+                {k: e for k, e in card["pages_notation"].items() if tier_of(e) == tier},
+                f"pages_{tier}",
+            )
         )
-        card["summary"]["omnibook_note_f1"] = round(
-            statistics.fmean(e["note_f1"] for e in omnibook), 4
-        )
-        card["summary"]["omnibook_n"] = float(len(omnibook))
-    trusted = [e for e in card["omnibook_notation"].values() if e.get("trusted")]
-    if trusted:
-        card["summary"]["omnibook_rhythm"] = round(
-            statistics.fmean(e["rhythm"] for e in trusted), 4
-        )
-        card["summary"]["omnibook_value"] = round(statistics.fmean(e["value"] for e in trusted), 4)
-        card["summary"]["omnibook_rhythm_n"] = float(len(trusted))
-    card["summary"].update(placement_summary(card["omnibook_notation"], "omnibook"))
     card["summary"].update(placement_summary(card["notation"], "mscz"))
     card["summary"].update(placement_summary(card["wjazz_notation"], "wjazz"))
-    omnibook_pages = [e for e in card["omnibook_notation"].values() if "readability" in e]
-    if omnibook_pages:
-        card["summary"]["omnibook_readability"] = round(
-            statistics.fmean(e["readability"] for e in omnibook_pages), 4
-        )
-        card["summary"]["omnibook_readability_n"] = float(len(omnibook_pages))
     # The pianists on both lines, PAIRED: the same tracks under each mean, so
     # the difference is the take's and not the population's.
     for section, field, label in (
@@ -1214,12 +1472,60 @@ def main() -> None:
     if args.json:
         args.json.write_text(json.dumps(card, indent=2), encoding="utf-8")
 
+    baselines = TEST_BASELINES if args.test else BASELINES
     if args.pin:
-        BASELINES.parent.mkdir(parents=True, exist_ok=True)
-        BASELINES.write_text(json.dumps(flatten(card), indent=2, sort_keys=True), encoding="utf-8")
-        print(f"\nPinned {len(flatten(card))} numbers to {BASELINES}.")
+        baselines.parent.mkdir(parents=True, exist_ok=True)
+        baselines.write_text(json.dumps(flatten(card), indent=2, sort_keys=True), encoding="utf-8")
+        print(f"\nPinned {len(flatten(card))} numbers to {baselines}.")
         return
-    raise SystemExit(compare(card))
+    if args.against:
+        other = flatten(json.loads(args.against.read_text(encoding="utf-8")))
+        raise SystemExit(compare(card, pinned=other))
+    raise SystemExit(compare(card, baselines))
+
+
+def split_runs(runs: dict, db_path: Path | None, test: bool, log=print) -> dict:
+    """The runs this invocation may score: the dev split, or with `test` the
+    test split alone. Says how many it held back, never silently."""
+    from swingscribe.evaluation import load_split
+
+    if not SPLIT_FILE.is_file():
+        log(f"  no {SPLIT_FILE}: every track is scored, none is held out")
+        return runs if not test else {}
+    split = load_split(SPLIT_FILE)
+    db = None
+    if db_path is not None:
+        import sqlite3
+
+        db = sqlite3.connect(db_path)
+    held: set[str] = set()
+    sidecars: dict[str, dict] = {}
+    for key in runs:
+        track = track_of(key)
+        if track not in sidecars:
+            path = BENCH / f"{track}.swingscribe.json"
+            sidecars[track] = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        if held_out(track, sidecars[track], split, db):
+            held.add(key)
+    if test:
+        log(f"  scoring the TEST split: {len(held)} run(s)")
+        return {k: v for k, v in runs.items() if k in held}
+    if held:
+        log(f"  held out: {len(held)} test-split run(s), scored only by --test at a release")
+    return {k: v for k, v in runs.items() if k not in held}
+
+
+def page_tiers(runs: dict) -> dict[str, str]:
+    """The reference tier of every PDF page among the runs, by track."""
+    tiers = {}
+    for key in runs:
+        track = track_of(key)
+        if not is_page(track) or track in tiers:
+            continue
+        path = BENCH / f"{track}.swingscribe.json"
+        score = page_score(json.loads(path.read_text(encoding="utf-8"))) if path.is_file() else None
+        tiers[track] = page_quality(score)[0] if score is not None else "bronze"
+    return tiers
 
 
 if __name__ == "__main__":

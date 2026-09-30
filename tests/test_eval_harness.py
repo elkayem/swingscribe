@@ -559,3 +559,173 @@ def test_parallel_map_is_a_map_in_order_at_any_job_count():
     assert run_eval.parallel_map(run_eval.pin_name, keys, 2) == expected
     assert run_eval.parallel_map(run_eval.pin_name, [], 4) == []
     assert 1 <= run_eval.default_jobs() <= 4
+
+
+# -- the PDF pages, the locked split, the paired table (docs/roadmap.md E1-E3) --
+
+
+def test_the_pages_are_their_own_located_set():
+    assert run_eval.is_page("Transcriptions_Other/musicxml/Cheese Cake.m4a")
+    assert run_eval.is_page("Transcriptions_Other/musicxml/Celia.m4a [line=crepe]")
+    assert not run_eval.is_page("Omnibook/Confirmation.m4a")
+    assert run_eval.is_located("Omnibook/Confirmation.m4a")
+    assert run_eval.is_located("Transcriptions_Other/musicxml/Cheese Cake.m4a")
+    assert not run_eval.is_located("wjazzd/Dexter_Gordon_Cheese_Cake_solo_121.m4a")
+    assert not run_eval.is_located("Art_Pepper_Birks_Works.m4a")
+
+
+def test_the_page_numbers_are_pinned_in_sections_of_their_own():
+    card = {
+        "wjazz": {},
+        "mscz": {},
+        "notation": {},
+        "pages": {"Transcriptions_Other/musicxml/Celia.m4a": {"pitch_f1": 0.7, "silver": 1.0}},
+        "pages_notation": {
+            "Transcriptions_Other/musicxml/Celia.m4a": {"rhythm": 0.6, "trusted": 1.0}
+        },
+        "summary": {},
+    }
+    flat = run_eval.flatten(card)
+    assert flat["pages/Celia/pitch_f1"] == 0.7
+    assert flat["pages/Celia/silver"] == 1.0
+    assert flat["pages-notation/Celia/rhythm"] == 0.6
+
+
+def test_located_summary_keeps_the_omnibook_keys_and_splits_the_tiers():
+    rows = {
+        "Omnibook/A.m4a": {"pitch_f1": 0.8, "note_f1": 0.5},
+        "Omnibook/B.m4a": {"pitch_f1": 0.6, "note_f1": 0.3},
+    }
+    notation = {
+        "Omnibook/A.m4a": {"rhythm": 0.7, "value": 0.6, "trusted": 1.0, "readability": 0.99},
+        "Omnibook/B.m4a": {"rhythm": 0.1, "value": 0.1, "trusted": 0.0, "readability": 0.97},
+    }
+    s = run_eval.located_summary(rows, notation, "omnibook")
+    assert s["omnibook_pitch_f1"] == 0.7 and s["omnibook_n"] == 2.0
+    # Rhythm and value over the trusted pairing only; readability over both.
+    assert (s["omnibook_rhythm"], s["omnibook_value"], s["omnibook_rhythm_n"]) == (0.7, 0.6, 1.0)
+    assert s["omnibook_readability"] == 0.98 and s["omnibook_readability_n"] == 2.0
+    # A pianist's second take never enters a mean.
+    rows["Omnibook/A.m4a [line=crepe]"] = {"pitch_f1": 0.0, "note_f1": 0.0}
+    assert run_eval.located_summary(rows, notation, "x")["x_pitch_f1"] == 0.7
+    assert run_eval.tier_of({"silver": 1.0}) == "silver"
+    assert run_eval.tier_of({"silver": 0.0}) == run_eval.tier_of({}) == "bronze"
+
+
+def _split_file(tmp_path, dev):
+    path = tmp_path / "split.json"
+    path.write_text(json.dumps({"salt": "test-salt", "test_share": 0.5, "dev": dev}))
+    return path
+
+
+def test_an_ordinary_run_holds_the_test_split_out_and_says_so(tmp_path, monkeypatch):
+    from swingscribe.evaluation import load_split
+
+    monkeypatch.setattr(run_eval, "BENCH", tmp_path)
+    split_path = _split_file(tmp_path, ["Old Tune"])
+    monkeypatch.setattr(run_eval, "SPLIT_FILE", split_path)
+    split = load_split(split_path)
+    # Find one new title on each side of this salt's hash.
+    titles = [f"New Tune {i}" for i in range(40)]
+    test_title = next(t for t in titles if split.is_test(t))
+    dev_title = next(t for t in titles if not split.is_test(t))
+    runs = {}
+    for title in ("Old Tune", test_title, dev_title):
+        audio = title.replace(" ", "_") + ".m4a"
+        write_sidecar(tmp_path, audio)
+        runs[audio] = {"notes": []}
+    runs["Old_Tune.m4a [line=crepe]"] = {"notes": []}
+    said = []
+    dev = run_eval.split_runs(runs, None, test=False, log=said.append)
+    held = test_title.replace(" ", "_") + ".m4a"
+    assert held not in dev
+    assert {"Old_Tune.m4a", "Old_Tune.m4a [line=crepe]"} <= set(dev)
+    assert any("held out: 1" in line for line in said)
+    assert set(run_eval.split_runs(runs, None, test=True, log=said.append)) == {held}
+
+
+def test_a_missing_split_file_holds_nothing_out(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_eval, "SPLIT_FILE", tmp_path / "absent.json")
+    runs = {"A.m4a": {"notes": []}}
+    assert run_eval.split_runs(runs, None, test=False, log=lambda _m: None) == runs
+    assert run_eval.split_runs(runs, None, test=True, log=lambda _m: None) == {}
+
+
+def test_a_track_with_any_dev_name_stays_dev(tmp_path):
+    from swingscribe.evaluation import Split
+
+    # A WJazzD file known by its stem when the run has no database and by its
+    # title when it has one: either name on the dev list keeps it dev.
+    split = Split("s", 1.0, frozenset({"dextergordoncheesecakesolo121"}))
+    sidecar = {"melid": 121}
+    assert not run_eval.held_out("wjazzd/Dexter_Gordon_Cheese_Cake_solo_121.m4a", sidecar, split)
+    assert run_eval.held_out("wjazzd/Someone_Else_solo_9.m4a", {}, split)
+
+
+def test_the_paired_table_pairs_tracks_by_recording_and_skips_what_it_must():
+    before = {
+        "wjazz/So_What [Miles Davis]/note_f1": 0.80,
+        "wjazz/So_What [John Coltrane]/note_f1": 0.70,
+        "wjazz/Walkin/note_f1": 0.90,
+        "wjazz/Walkin [line=crepe]/note_f1": 0.10,
+        "omnibook-notation/A/rhythm": 0.70,
+        "omnibook-notation/A/trusted": 1.0,
+        "omnibook-notation/B/rhythm": 0.20,
+        "omnibook-notation/B/trusted": 0.0,
+        "wjazz/Walkin/tempo": 128.0,
+        "summary/wjazz_note_f1": 0.8,
+    }
+    after = dict(before)
+    after.update(
+        {
+            "wjazz/So_What [Miles Davis]/note_f1": 0.85,
+            "wjazz/So_What [John Coltrane]/note_f1": 0.75,
+            "wjazz/Walkin [line=crepe]/note_f1": 0.99,
+            "omnibook-notation/B/rhythm": 0.90,
+            "summary/wjazz_note_f1": 0.9,
+        }
+    )
+    changes = {(s, f): c for s, f, c in run_eval.paired_changes(before, after)}
+    # The second take and the untrusted page are not in any row; a set where
+    # nothing trusted moved has no row at all; a non-headline field neither.
+    assert set(changes) == {("wjazz", "note_f1")}
+    c = changes[("wjazz", "note_f1")]
+    assert (c.n, c.recordings) == (3, 2)
+    assert (c.up, c.level, c.down) == (1, 1, 0)
+    assert c.mean == pytest.approx(0.1 / 3)
+
+
+def test_a_comparison_against_another_card_informs_and_does_not_fail(capsys):
+    card = {
+        "wjazz": {"A.m4a": {"note_f1": 0.9}, "B.m4a": {"note_f1": 0.8}},
+        "mscz": {},
+        "summary": {},
+    }
+    other = {"wjazz/A/note_f1": 0.8, "wjazz/B/note_f1": 0.8}
+    assert run_eval.compare(card, pinned=other) == 0
+    out = capsys.readouterr().out
+    assert "Against the other card: CHANGED" in out
+    assert "Paired changes" in out and "wjazz / note_f1" in out
+
+
+def test_the_figure_prior_build_leaves_the_test_pages_out(tmp_path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("figure_prior", SCRIPTS / "figure_prior.py")
+    fp = sys.modules.get("figure_prior")
+    if fp is None:
+        fp = importlib.util.module_from_spec(spec)
+        sys.modules["figure_prior"] = fp
+        spec.loader.exec_module(fp)
+    from swingscribe.evaluation import load_split
+
+    split_path = _split_file(tmp_path, [])
+    split = load_split(split_path)
+    titles = [f"Page {i}" for i in range(40)]
+    corpus = [
+        fp.Transcription(Path(f"{t}.musicxml"), t, "?", None, [], {"title": t}) for t in titles
+    ]
+    kept = fp.without_test_pages(corpus, split_path, log=lambda _m: None)
+    assert [t.name for t in kept] == [t for t in titles if not split.is_test(t)]
+    assert 0 < len(kept) < len(corpus)
+    assert fp.without_test_pages(corpus, tmp_path / "absent.json", log=lambda _m: None) == corpus
