@@ -100,6 +100,69 @@ _TINY = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+# ── chord symbols in the view (roadmap O4) ──────────────────────────────────
+
+
+def _chord_page(text: str, bars: int = 3) -> str:
+    """Export's MusicXML for a page of whole notes under these changes."""
+    from swingscribe.chords import parse_chart, place
+    from swingscribe.model import NotatedBar, NotatedNote, Notation
+    from swingscribe.stages.export import to_musicxml
+
+    notation = Notation(
+        bars=[
+            NotatedBar(
+                number=number,
+                time_signature=(4, 4),
+                notes=[NotatedNote(beat=0.0, duration=4.0, pitch=72, step="C", octave=5)],
+            )
+            for number in range(1, bars + 1)
+        ]
+    )
+    return to_musicxml(place(parse_chart(text, 4), notation, form_bar=1))
+
+
+def test_the_view_hands_verovio_only_what_the_file_says_to_print():
+    """Verovio 6.3 prints every <degree>, even one marked print-object="no",
+    so "E7b9" read "E7b9(♭9)"; and it prints a no-chord's hidden root, so
+    "N.C." read "C". The view removes the one and respells the other; the
+    file keeps both, as MusicXML and MuseScore want them."""
+    xml = _chord_page("| E7b9 | N.C. | C |")
+    assert '<degree print-object="no">' in xml and 'root-step text=""' in xml
+    shown = gui_page.for_verovio(xml)
+    assert "<degree" not in shown
+    assert '<numeral-root text="N.C.">' in shown
+    assert 'root-step text=""' not in shown
+    assert gui_page.for_verovio(_TINY) == _TINY  # a page without chords is untouched
+
+
+def _harm_texts(svg: str) -> list[str]:
+    """The text Verovio drew for each chord symbol, glyphs and all."""
+    import re
+
+    texts = []
+    for match in re.finditer(r'<g [^>]*class="harm[^"]*"[^>]*>', svg):
+        depth, index = 1, match.end()
+        while depth:
+            opening, closing = svg.find("<g", index), svg.find("</g>", index)
+            if opening != -1 and opening < closing:
+                depth, index = depth + 1, opening + 2
+            else:
+                depth, index = depth - 1, closing + 4
+        drawn = re.findall(r">([^<>]+)<", svg[match.end() : index])
+        texts.append("".join(part.strip() for part in drawn))
+    return texts
+
+
+def test_verovio_prints_each_chord_as_the_listener_spelled_it():
+    pytest.importorskip("verovio", reason="gui dependency group not installed")
+    gui_page.clear_memo()
+    xml = _chord_page("| Cmaj7 . E7b9 . | Am7 D7sus4 | N.C. | G7alt/D |", bars=4)
+    _, _, pages = gui_page.render(xml, 1200)
+    assert _harm_texts("".join(pages)) == ["Cmaj7", "E7b9", "Am7", "D7sus4", "N.C.", "G7alt/D"]
+    gui_page.clear_memo()
+
+
 def test_a_worker_thread_can_engrave():
     """Verovio's default resource path is set per THREAD by its own import;
     a route runs in a worker thread, where the default is the path of the
@@ -371,3 +434,35 @@ def test_a_machine_without_verovio_is_told_so_in_json(world, monkeypatch):
     response = _page(world)
     assert response.status_code == 501
     assert "Verovio" in response.json()["detail"]
+
+
+def test_the_changes_reach_the_page_and_say_where_they_landed(world, monkeypatch):
+    """The Changes field is a sidecar setting like the key: it moves the
+    page's digest, the view engraves the symbols, and the page reports the
+    chart's bars as Export does -- one string, one report."""
+    _needs_verovio()
+    seen = {}
+    real = gui_page.render
+
+    def spy(xml, width=None):
+        seen["xml"] = xml
+        return real(xml, width)
+
+    monkeypatch.setattr(gui_page, "render", spy)
+    plain = _page(world).json()
+    assert plain["changes"] is None
+    _state(world, changes="| Dm7 . G7 . | Cmaj7 |")
+    shown = _page(world).json()
+    assert shown["digest"] != plain["digest"]
+    assert shown["changes"]["bars"] == 2 and shown["changes"]["error"] is None
+    assert shown["changes"]["placed"] >= 2
+    assert _harm_texts("".join(shown["pages"]))[:2] == ["Dm7", "G7"]
+    written = world["client"].post(f"/api/tracks/{world['track']['id']}/export", params=SPAN).json()
+    assert pathlib.Path(written["path"]).read_text(encoding="utf-8") == seen["xml"]
+    assert written["changes"] == shown["changes"]
+
+    _state(world, changes="| Dm7 | Gxx |")
+    broken = _page(world)
+    assert broken.status_code == 200, broken.text  # the page is still drawn
+    assert broken.json()["changes"]["token"] == "Gxx"
+    assert "<harmony" not in seen["xml"]

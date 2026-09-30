@@ -1696,3 +1696,157 @@ def test_config_offers_every_key_signature(world):
     keys = world["client"].get("/api/config").json()["keys"]
     assert [fifths for fifths, _name in keys] == list(KEY_SIGNATURES)
     assert dict(map(tuple, keys))[-1] == "F major / D minor"
+
+
+# ── chord symbols from the listener's changes (roadmap O4) ──────────────────
+
+
+def _harmonies(path) -> list[tuple[int, str, str | None, str]]:
+    """(bar, root step, root alter, kind text) for every <harmony> in a file."""
+    from xml.etree import ElementTree
+
+    root = ElementTree.parse(path).getroot()
+    return [
+        (
+            int(measure.get("number")),
+            harmony.findtext("root/root-step"),
+            harmony.findtext("root/root-alter"),
+            harmony.find("kind").get("text"),
+        )
+        for measure in root.iter("measure")
+        for harmony in measure.findall("harmony")
+    ]
+
+
+def _state(world, track, **state):
+    response = world["client"].post(f"/api/tracks/{track['id']}/state", json={"state": state})
+    assert response.status_code == 200, response.text
+
+
+def test_the_changes_are_written_over_the_page(world, monkeypatch):
+    track = _seed_review(world, monkeypatch, pitches=(60, 62, 64, 65))
+    _seed_beats(monkeypatch, world)
+    _state(world, track, changes="| Cmaj7 . A7b9 . | Dm7 G7 |")
+    written = world["client"].post(f"/api/tracks/{track['id']}/export", params=SPAN).json()
+    found = _harmonies(written["path"])
+    assert found[:2] == [(1, "C", None, "maj7"), (1, "A", None, "7b9")]
+    report = written["changes"]
+    assert (report["bars"], report["chords"], report["error"]) == (2, 4, None)
+    # No form start or chorus length: the chart starts on the page's bar 1.
+    assert (report["chart_bar"], report["chorus"], report["from"]) == (1, 1, "span start")
+    assert report["placed"] == len(found)
+
+
+def test_a_page_without_changes_reports_none(world, monkeypatch):
+    track = _seed_review(world, monkeypatch)
+    _seed_beats(monkeypatch, world)
+    written = world["client"].post(f"/api/tracks/{track['id']}/export", params=SPAN).json()
+    assert written["changes"] is None
+    assert "<harmony" not in pathlib.Path(written["path"]).read_text(encoding="utf-8")
+
+
+def test_a_span_that_starts_mid_chorus_gets_its_bar_of_the_chart(world, monkeypatch):
+    """Bar lines at 0.5, 2.5 and 4.5 s; the form starts at 0.5 s, so a span
+    from 2.4 s opens on the form's second bar -- and the page's bar 1 gets
+    the chart's second bar, counted on the roll's own grid."""
+    track = _seed_review(world, monkeypatch, start=2.4, end=4.4, pitches=(60, 62, 64, 65))
+    _seed_beats(monkeypatch, world)
+    _state(
+        world,
+        track,
+        anchor=0.5,
+        form_start=0.5,
+        bars_per_chorus=3,
+        changes="| C7 | F7 | Bb7 |",
+    )
+    params = {**SPAN, "start": 2.4, "end": 4.4}
+    # The roll is asked the way the client asks it, with the meter it holds.
+    meter = {"anchor": 0.5, "form_start": 0.5, "bars_per_chorus": 3}
+    roll = (
+        world["client"].get(f"/api/tracks/{track['id']}/beats", params={**params, **meter}).json()
+    )
+    assert [bar for bar in roll["bars"] if bar[1] == 2] == [[2.5, 2]]
+    written = world["client"].post(f"/api/tracks/{track['id']}/export", params=params).json()
+    assert written["changes"]["chart_bar"] == 2
+    assert written["changes"]["from"] == "form start"
+    assert _harmonies(written["path"])[0] == (1, "F", None, "7")
+
+
+def test_a_chart_that_is_not_one_chorus_is_reported_and_left_off(world, monkeypatch):
+    """A 3-bar chart over a 4-bar chorus: one of the two is wrong, and
+    repeating it would put every symbol after bar 3 in the wrong place. The
+    page is still written -- the notes are the page."""
+    track = _seed_review(world, monkeypatch)
+    _seed_beats(monkeypatch, world)
+    _state(world, track, bars_per_chorus=4, changes="| C7 | F7 | Bb7 |")
+    response = world["client"].post(f"/api/tracks/{track['id']}/export", params=SPAN)
+    assert response.status_code == 200, response.text
+    written = response.json()
+    assert "3 bars" in written["changes"]["error"] and "4" in written["changes"]["error"]
+    assert _harmonies(written["path"]) == []
+
+
+def test_a_typo_in_the_changes_does_not_cost_the_export(world, monkeypatch):
+    track = _seed_review(world, monkeypatch)
+    _seed_beats(monkeypatch, world)
+    _state(world, track, changes="| C7 | Fxx7 |")
+    written = world["client"].post(f"/api/tracks/{track['id']}/export", params=SPAN).json()
+    assert written["changes"]["bar"] == 2 and written["changes"]["token"] == "Fxx7"
+    assert written["notes"] >= 1
+    assert _harmonies(written["path"]) == []
+
+
+def test_the_changes_move_with_a_b_flat_tenor_part(world, monkeypatch):
+    track = _seed_review(world, monkeypatch, pitches=(58, 60))
+    _seed_beats(monkeypatch, world)
+    _state(world, track, transposition="Bb-tenor", changes="| Bb7 Eb7 |")
+    written = world["client"].post(f"/api/tracks/{track['id']}/export", params=SPAN).json()
+    assert [(step, alter) for _bar, step, alter, _text in _harmonies(written["path"])][:2] == [
+        ("C", None),
+        ("F", None),
+    ]
+
+
+def test_the_changes_field_is_checked_as_it_is_typed(world):
+    client = world["client"]
+    good = client.post(
+        "/api/changes/check", json={"text": "| Dm7 G7 | C6/9 | % |", "time_signature": "4/4"}
+    ).json()
+    assert (good["bars"], good["chords"], good["error"]) == (3, 4, None)
+    bad = client.post("/api/changes/check", json={"text": "| Dm7 | G7 | Cmaj7# |"}).json()
+    assert (bad["bar"], bad["token"]) == (3, "Cmaj7#")
+    assert "bar 3" in bad["error"]
+    uneven = client.post(
+        "/api/changes/check", json={"text": "| C F G |", "time_signature": "4/4"}
+    ).json()
+    assert uneven["bar"] == 1 and uneven["error"]
+    assert (
+        client.post(
+            "/api/changes/check", json={"text": "| C F G |", "time_signature": "3/4"}
+        ).json()["error"]
+        is None
+    )
+    chorus = client.post(
+        "/api/changes/check", json={"text": "| C7 | F7 |", "bars_per_chorus": 12}
+    ).json()
+    assert "12" in chorus["error"]
+    assert client.post("/api/changes/check", json={"text": ""}).json()["bars"] == 0
+
+
+def test_the_changes_check_refuses_another_origin(world):
+    response = world["client"].post(
+        "/api/changes/check", json={"text": "C7"}, headers={"Origin": "http://evil.example"}
+    )
+    assert response.status_code == 403
+
+
+def test_the_score_button_never_sees_the_changes(world, monkeypatch, tmp_path):
+    """A chord symbol is not a note, and the hand scores are compared note
+    for note: the Score button reads the same with changes typed or not."""
+    track = _seed_review(world, monkeypatch, pitches=(64, 67, 71))
+    _seed_beats(monkeypatch, world)
+    params = {**SPAN, "score": str(_hand_transcription(tmp_path))}
+    before = world["client"].get(f"/api/tracks/{track['id']}/notation-score", params=params).json()
+    _state(world, track, changes="| Em7 | A7 |")
+    after = world["client"].get(f"/api/tracks/{track['id']}/notation-score", params=params).json()
+    assert after == before

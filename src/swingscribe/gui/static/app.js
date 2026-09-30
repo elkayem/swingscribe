@@ -13,6 +13,8 @@ import { initStorage } from './storage.js';
 import { PageView } from './page.js';
 import { playPitch } from './tone.js';
 import { RateControl } from './rate.js';
+import { ChangesField } from './changes.js';
+import { SOLO_LEVEL_LABELS, SoloBands, soloLabel } from './solos.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -75,6 +77,7 @@ const state = {
   timing: null,             // swing | literal-16 | literal-32; null = server default
   key: null,                // concert key signature in fifths; null = detect it
   transposition: null,      // the exported part's key; null = server default
+  changes: '',              // one chorus of chord symbols, typed (chords.py)
   exported: null,           // {path, bars, notes, ...} from the last export
   exportedAt: null,         // what the tree looked like when it was written
   notationScore: null,      // {rhythm, value, matched} against the hand transcription
@@ -219,6 +222,29 @@ const page = {
   width: 0,         // the width it was laid out for, as the server rounded it
 };
 const PAGE_OWED = 'The page appears here once the span is transcribed.';
+
+/* Find the solos (roadmap O3): proposed spans, as bands under the Overview.
+   Suggestions only -- a click on a band makes the selection through the
+   same flow as a drag, and the lead label on it is text that never reaches
+   the Stem menu or the ensemble (gui/solos.py says why). See the section
+   "Find the solos" below for the flow. */
+const soloBands = new SoloBands($('solo-bands'), {
+  onChoose: (span) => chooseSolo(span),
+  describe: (span) => describeSolo(span),
+});
+const solos = {
+  data: null,        // the /solos answer when ready: spans, model, level
+  probe: null,       // the last not-ready answer: what is missing, and the estimate
+  level: 'default',  // fewer | default | more -- the penalty, server-side
+  shown: false,      // the bands are on screen (remembered per track)
+  origin: null,      // the span the listener clicked to make the selection
+  jobId: null,       // a Find the solos job in flight
+  token: 0,          // bumped per request: only the latest answer is drawn
+  signature: null,   // what the last answer was asked for
+  choiceTimer: null,
+};
+let soloLevels = Object.keys(SOLO_LEVEL_LABELS);
+let soloSeparationModel = 'htdemucs_6s';
 
 // ── screen 1: the track picker ──────────────────────────────────────────────
 
@@ -445,6 +471,8 @@ async function loadTrack(track) {
   state.timing = remembered.timing ?? null;
   state.key = Number.isInteger(remembered.key) ? remembered.key : null;
   state.transposition = remembered.transposition ?? null;
+  state.changes = typeof remembered.changes === 'string' ? remembered.changes : '';
+  changesField.load(state.changes);
   state.exported = null;
   state.exportedAt = null;
   state.notationScore = null;
@@ -459,6 +487,18 @@ async function loadTrack(track) {
   suggestion.token += 1;
   suggestion.signature = null;
   suggestion.data = null;
+  // So do its proposed solo spans. A job still running for it keeps running
+  // on the server; its watcher checks the track before drawing anything.
+  solos.token += 1;
+  solos.signature = null;
+  solos.data = null;
+  solos.probe = null;
+  solos.origin = null;
+  solos.jobId = null;
+  clearTimeout(solos.choiceTimer);
+  solos.level = soloLevels.includes(remembered.solos_level) ? remembered.solos_level : 'default';
+  solos.shown = Boolean(remembered.solos_shown);
+  renderSolos();
   renderChoices();
   // Carried until a transcription exists to match them against; showReview
   // replaces these with the server's resolution.
@@ -487,6 +527,9 @@ async function loadTrack(track) {
   seekTo(state.selection.a);
   await refreshAudition();
   await maybeLoadBeats();  // free when the CLI already tracked this track
+  // Free as well: the bands come back if they were shown and everything is
+  // cached, and otherwise the button learns what finding them would cost.
+  await loadSolos();
   persist();  // so this track shows its span in Recent even if nothing is edited
 }
 
@@ -500,6 +543,7 @@ function applySelection(fitDetail = false) {
   mix.engine?.setLoop(state.loop ? { a, b } : null);
   updateHandoff();
   updateBars();
+  soloBands.setCurrent(state.selection);
   if (fitDetail) focusDetail('fit');
 }
 
@@ -514,6 +558,7 @@ function updateSelection(a, b, done) {
   applySelection(false);
   if (done) {
     persist();
+    noteSoloChoice();  // what this selection did with the proposed spans, if any are shown
     renderSuggestion();  // the reading on screen was for the old span: hide it until the reload
     scheduleAuditionReload();
     refreshModelStatus();  // a span-scoped separation may or may not cover the new span
@@ -741,6 +786,9 @@ async function maybeLoadBeats() {
   // A grid arriving is what a "press Beats first" page is waiting for, and
   // it changes the page's signature, so this asks again exactly then.
   schedulePageRefresh();
+  // The bands sit on the bar lines, so a new time signature or downbeat
+  // redraws them; a selection change alone asks nothing (soloSignature).
+  if (solos.shown) loadSolos();
 }
 
 function applyBeats() {
@@ -762,6 +810,11 @@ function applyBeats() {
       ? `No steady pulse: ${free.map(([a, b]) => `${clock(a, false)}–${clock(b, false)}`).join(', ')}`
       : 'A steady pulse throughout';
   }
+  // The chart is read against the meter it will be laid over.
+  changesField.setContext({
+    timeSignature: state.beats?.time_signature ?? state.timeSignature,
+    barsPerChorus: state.barsPerChorus,
+  });
   const reset = $('form-reset');
   reset.hidden = state.formStart === null;
   if (state.formStart !== null) {
@@ -1437,6 +1490,294 @@ async function pollJob(jobId) {
     body: JSON.stringify({ path: state.track.path }),
   }).catch(() => state.track);
   await refreshAudition();
+}
+
+// ── Find the solos (roadmap O3) ─────────────────────────────────────────────
+/* Where the solos might be, proposed from the whole track's stems and the
+   bar grid (gui/solos.py over solo_spans.py; docs/solo-spans.md measures
+   it: a span edge within two bars of 71% of solo starts and 73% of ends).
+
+   The flow is the Beats chip's. /solos never computes anything slow: it
+   answers with the spans, or with what is missing -- the beat grid, a
+   whole-file stem set, the stems' envelopes -- and the estimate when a
+   whole-track separation is one of them, which the button shows before it
+   is pressed. Pressing it starts ONE job that makes exactly what is
+   missing, then asks again.
+
+   A band click selects its span through updateSelection, like a drag, and
+   every selection made while the bands are shown is reported to the server
+   (noteSoloChoice), which records against the proposal it is about whether
+   the listener accepted it, adjusted it (by how much) or drew their own
+   over it. Nothing here sets the Stem menu or the ensemble. */
+
+const SOLO_STAGE_LABELS = {
+  ingest: 'Loading',
+  beats: 'Beats',
+  separate: 'Separating',
+  envelopes: 'Reading stems',
+};
+const SOLO_CHOICE_DEBOUNCE_MS = 600;
+// The listener's span is still "the one they clicked" while the two mostly
+// overlap -- the server's CONTAINMENT_FLOOR, mirrored so the origin is let
+// go of at the same moment the server stops honouring it.
+const SOLO_CONTAINMENT_FLOOR = 0.5;
+
+function fillSoloLevels() {
+  const node = $('solo-levels');
+  node.replaceChildren(...soloLevels.map((level) => {
+    const button = document.createElement('button');
+    button.className = 'chip';
+    button.type = 'button';
+    button.dataset.soloLevel = level;
+    button.textContent = SOLO_LEVEL_LABELS[level] ?? level;
+    button.title = {
+      fewer: 'Fewer, longer spans: cuts only where the band changes most. Misses more solo edges, and puts fewer cuts inside a solo.',
+      default: 'The measured default: about seven spans on a typical record.',
+      more: 'More, shorter spans: finds a few more edges, at about twice the cuts inside solos.',
+    }[level] ?? level;
+    button.addEventListener('click', () => setSoloLevel(level));
+    return button;
+  }));
+  renderSolos();
+}
+
+function soloParams() {
+  const params = new URLSearchParams({ level: solos.level });
+  if (state.timeSignature) params.set('time_signature', state.timeSignature);
+  if (state.anchor !== null) params.set('anchor', state.anchor.toFixed(3));
+  return params;
+}
+
+const soloSignature = () => `${state.track?.id}|${soloParams()}`;
+
+const waitText = (seconds) =>
+  (seconds < 90 ? `~${Math.ceil(seconds)} s` : `~${Math.ceil(seconds / 60)} min`);
+
+/* The free path: what /solos says now, without starting anything. */
+async function loadSolos({ force = false } = {}) {
+  if (!state.track) return null;
+  const signature = soloSignature();
+  if (!force && signature === solos.signature) return solos.data ?? solos.probe;
+  // Claimed before the answer arrives, so the grid's own reload (maybeLoadBeats)
+  // and the track's load do not both ask the same question.
+  solos.signature = signature;
+  const token = ++solos.token;
+  let answer;
+  try {
+    answer = await api(`/api/tracks/${state.track.id}/solos?${soloParams()}`);
+  } catch (error) {
+    if (token === solos.token) {
+      solos.signature = null;
+      if (solos.shown) toast(`Find the solos: ${error.message}`, true);
+    }
+    return null;
+  }
+  if (token !== solos.token) return null;
+  solos.data = answer.ready ? answer : null;
+  solos.probe = answer.ready ? null : answer;
+  renderSolos();
+  return answer;
+}
+
+/* The button: find them (running the job if anything is missing), or, once
+   they are on screen, hide and show them like the Beats chip. */
+async function findSolos() {
+  if (!state.track || solos.jobId) return;
+  if (solos.data && solos.shown) {
+    solos.shown = false;
+    renderSolos();
+    persist();
+    return;
+  }
+  solos.shown = true;
+  const answer = await loadSolos({ force: true });
+  if (!answer) return;
+  persist();
+  if (!answer.ready) await runSolosJob();
+}
+
+async function runSolosJob() {
+  const track = state.track;
+  let job;
+  try {
+    job = await post('/api/jobs', { path: track.path, model: soloSeparationModel, kind: 'solos' });
+  } catch (error) {
+    toast(error.message, true);
+    return;
+  }
+  solos.jobId = job.id;
+  renderSolos();
+  renderSoloProgress(job);
+  const done = await watchJob(job.id, (update) => {
+    if (state.track === track && solos.jobId === job.id) renderSoloProgress(update);
+  });
+  if (state.track !== track || solos.jobId !== job.id) return;  // the listener moved on
+  solos.jobId = null;
+  if (done && done.state === 'error') toast(done.error, true);
+  if (done && done.state === 'cancelled') {
+    solos.shown = false;
+    toast('Find the solos: cancelled');
+  }
+  // A whole-track separation made here is on disk for panel 2 as well: its
+  // chips should say so. Its Stem menu is left as it was.
+  await refreshModelStatus();
+  // The job tracked the beats if they were not cached: the grid is free now.
+  if (!state.beats) await maybeLoadBeats();
+  await loadSolos({ force: true });
+  if (solos.shown && solos.data) {
+    const count = solos.data.spans.length;
+    toast(`${count} span${count === 1 ? '' : 's'} proposed: click one to select it`);
+  }
+  persist();
+}
+
+function renderSoloProgress(update) {
+  const chip = $('solos-find');
+  const stage = SOLO_STAGE_LABELS[update.stage] ?? 'Finding the solos';
+  const percent = `${Math.round((update.fraction ?? 0) * 100)}%`;
+  chip.textContent = update.cancel_requested
+    ? 'Cancelling…'
+    : `${stage} ${percent} ${remainingText(update)}`.trim();
+}
+
+async function cancelSolos() {
+  if (!solos.jobId) return;
+  $('solos-cancel').disabled = true;
+  try {
+    await post(`/api/jobs/${solos.jobId}/cancel`, {});
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+function setSoloLevel(level) {
+  if (level === solos.level) return;
+  solos.level = level;
+  renderSolos();
+  persist();
+  loadSolos();
+}
+
+function renderSolos() {
+  const find = $('solos-find');
+  const running = Boolean(solos.jobId);
+  const showing = Boolean(solos.shown && solos.data && state.track);
+  $('solos-cancel').hidden = !running;
+  $('solos-cancel').disabled = false;
+  find.disabled = running;
+  find.classList.toggle('active', showing);
+  if (!running) {
+    const probe = solos.probe;
+    const separating = probe && (probe.needs ?? []).includes('separate');
+    find.textContent = showing
+      ? 'Solos'
+      : separating && probe.estimate_s
+        ? `Find the solos (${waitText(probe.estimate_s)})`
+        : 'Find the solos';
+    find.title = separating
+      ? `Propose where each solo starts and ends. There are no whole-track stems for this track yet, so this first separates the whole track with ${modelLabel(probe.model)}: about ${waitText(probe.estimate_s ?? 0).slice(1)} on this machine. Cancel stops it. The spans are suggestions: click one to select it.`
+      : showing
+        ? 'Hide or show the proposed solo spans.'
+        : "Propose where each solo starts and ends, from the whole track's separated stems and the bar grid. The spans are suggestions: click one to select it.";
+  }
+  $('solo-levels').hidden = !showing;
+  for (const button of $('solo-levels').querySelectorAll('button')) {
+    button.classList.toggle('active', button.dataset.soloLevel === solos.level);
+  }
+  const info = $('solos-info');
+  info.hidden = !showing;
+  $('solo-bands').hidden = !showing;
+  if (showing) {
+    const count = solos.data.spans.length;
+    info.textContent = `${count} span${count === 1 ? '' : 's'} · ${modelLabel(solos.data.model)} stems`;
+    const carried = solos.data.carried ?? 0;
+    info.title = `Read from the whole-track ${modelLabel(solos.data.model)} separation.`
+      + (carried === 1 ? ' 1 earlier choice matches no span shown now; it is kept.' : '')
+      + (carried > 1 ? ` ${carried} earlier choices match no span shown now; they are kept.` : '');
+    soloBands.setData(solos.data, state.track.duration);
+    soloBands.setCurrent(state.selection);
+    overview.setBands(solos.data.spans);
+  } else {
+    soloBands.clear();
+    overview.setBands(null);
+  }
+}
+
+function describeSolo(span) {
+  const where = `${clock(span.start, false)}–${clock(span.end, false)}`;
+  const bars = span.bars ? `${span.bars} bars, ` : '';
+  const who = span.kind === 'head'
+    ? 'The head: the opening melody, played again at the end.'
+    : span.lead === 'rhythm'
+      ? 'The melodic stems fall silent here: the rhythm section (a bass or drum solo, or trading).'
+      : `Loudest melodic stem: ${span.lead}, in the ${modelLabel(solos.data?.model)} separation. A stem of that separation only, so it does not choose your Stem menu.`;
+  const taken = {
+    accepted: '\nYou selected this span.',
+    adjusted: `\nYou selected this span and moved its edges (A ${signed(span.record?.moved?.[0])}, B ${signed(span.record?.moved?.[1])}).`,
+    ignored: '\nYou drew your own selection over this span.',
+  }[span.record?.action] ?? '';
+  return `${soloLabel(span)} · ${bars}${where}\n${who}${taken}\nClick to select it.`;
+}
+
+function signed(seconds) {
+  if (!Number.isFinite(seconds)) return '?';
+  return `${seconds >= 0 ? '+' : '−'}${Math.abs(seconds).toFixed(2)} s`;
+}
+
+/* A band was clicked: select its span through the ordinary selection flow,
+   and remember it as the origin of the selection so the record knows the
+   listener took it. */
+function chooseSolo(span) {
+  if (!state.track || !solos.data) return;
+  solos.origin = {
+    start: span.start, end: span.end, lead: span.lead, kind: span.kind,
+    level: solos.data.level, model: solos.data.model,
+  };
+  setFocusEdge('a');
+  updateSelection(span.start, span.end, true);
+  focusDetail('fit');
+  seekTo(span.start);
+}
+
+function containment(span, selection) {
+  const inter = Math.max(0, Math.min(span.end, selection.b) - Math.max(span.start, selection.a));
+  const shorter = Math.max(1e-9, Math.min(span.end - span.start, selection.b - selection.a));
+  return inter / shorter;
+}
+
+/* Report the selection just made, while proposals are on screen. Debounced:
+   a run of nudges is one decision. The server matches it to the proposal it
+   is about and writes the record (gui/solos.decide). */
+function noteSoloChoice() {
+  if (!state.track || !state.selection || !solos.shown || !solos.data) return;
+  if (solos.origin && containment(solos.origin, state.selection) < SOLO_CONTAINMENT_FLOOR) {
+    solos.origin = null;  // a selection somewhere else is no longer that click's
+  }
+  const track = state.track;
+  const body = {
+    model: solos.data.model,
+    level: solos.data.level,
+    spans: solos.data.spans.map(({ start, end, lead, kind }) => ({ start, end, lead, kind })),
+    selection: [state.selection.a, state.selection.b],
+    origin: solos.origin,
+  };
+  clearTimeout(solos.choiceTimer);
+  solos.choiceTimer = setTimeout(async () => {
+    let answer;
+    try {
+      answer = await post(`/api/tracks/${track.id}/solos/choice`, body);
+    } catch {
+      return;  // a record is worth keeping, not worth an error
+    }
+    if (state.track !== track || !answer.record || !solos.data) return;
+    const record = answer.record;
+    for (const span of solos.data.spans) {
+      if (record.model === solos.data.model
+          && Math.abs(span.start - record.start) <= 0.05
+          && Math.abs(span.end - record.end) <= 0.05) span.record = record;
+    }
+    renderSolos();
+  }, SOLO_CHOICE_DEBOUNCE_MS);
 }
 
 // ── screen 4: transcribe & review ────────────────────────────────────────────
@@ -2508,9 +2849,15 @@ function settingsPayload() {
     timing: state.timing,
     key: state.key,
     transposition: state.transposition,
+    changes: state.changes,
     erasures: erasureList(),
     additions: additionList(),
     hands: handList(),
+    // The Find the solos view. What the listener DID with a proposal is
+    // not here: the server writes `solo_proposals` itself, under the
+    // sidecar lock, and this merge leaves that key alone.
+    solos_shown: solos.shown,
+    solos_level: solos.level,
   };
 }
 
@@ -2594,6 +2941,9 @@ async function loadChoices() {
   fillSelect($('piano-notes-select'), choices.piano_notes ?? [], 'line');
   fillKeySelect(choices.keys ?? []);
   handSplit = choices.hand_split ?? handSplit;
+  soloLevels = choices.solo_levels ?? soloLevels;
+  soloSeparationModel = choices.solo_separation_model ?? soloSeparationModel;
+  fillSoloLevels();
   renderChoices();
 }
 
@@ -2855,6 +3205,23 @@ function renderLinePicker() {
   $('staves-select').hidden = !texture;
 }
 
+/* ── changes ────────────────────────────────────────────────────────────────
+   One chorus of chord symbols, typed by the listener and laid over the page
+   (chords.py). A sidecar setting like the key: committed through persist(),
+   which redraws the page. The field itself lives in changes.js. */
+const changesField = new ChangesField({
+  panel: $('changes-panel'),
+  input: $('changes-text'),
+  status: $('changes-status'),
+  toggle: $('changes-toggle'),
+  check: (body) => post('/api/changes/check', body),
+  onCommit: (text) => {
+    state.changes = text;
+    persist();
+    renderExport();
+  },
+});
+
 /* ── export ─────────────────────────────────────────────────────────────────
    The whole notation chain below transcribe is arithmetic, so this is a plain
    request with no job and no progress bar (gui/musicxml.py). A 409 is not a
@@ -2880,6 +3247,9 @@ function exportSignature() {
     texture: textureOn(),
     staves: twoStavesOn() ? 2 : 1,
     hands: twoStavesOn() ? [...state.hands].sort((x, y) => x[0] - y[0]) : [],
+    // Where the chart starts is read off the form start and chorus length,
+    // which change the page only when there is a chart to place.
+    changes: state.changes ? [state.changes, state.formStart, state.barsPerChorus] : null,
   });
 }
 
@@ -2892,6 +3262,7 @@ async function startExport() {
     const result = await post(`/api/tracks/${state.track.id}/export?${reviewParams()}`);
     state.exported = result;
     state.exportedAt = exportSignature();
+    changesField.report(result.changes);
     renderExport();
     toast(`Wrote ${result.name}`);
   } catch (error) {
@@ -2939,8 +3310,12 @@ function pageSummary(written) {
     : '';
   const staves = written.staves === 2 ? ' · two staves' : '';
   const keyName = written.key ? ` · ${written.key}${written.key_auto ? ' (auto)' : ''}` : '';
+  const changes = written.changes;
+  const chords = !changes ? ''
+    : changes.error ? ' · changes not read'
+      : ` · ${changes.placed} chord symbol${changes.placed === 1 ? '' : 's'}`;
   return `${written.bars} bars · ${written.notes} notes · ${written.time_signature}${keyName}` +
-    `${written.swing ? ' · swing' : ''}${literal}${staves}${key}`;
+    `${written.swing ? ' · swing' : ''}${literal}${staves}${key}${chords}`;
 }
 
 function renderExport(message) {
@@ -3127,6 +3502,7 @@ async function refreshPage({ force = false } = {}) {
       pageView.show(result.pages, result.digest, { sameLayout: result.width === page.width });
     }
     page.width = result.width;
+    changesField.report(result.changes);
     const count = result.page_count;
     $('page-info').textContent =
       `${pageSummary(result)} · ${count} page${count === 1 ? '' : 's'}`;
@@ -3490,6 +3866,8 @@ for (const button of $('review-ab').querySelectorAll('button')) {
 }
 
 $('beats-toggle').addEventListener('click', toggleBeats);
+$('solos-find').addEventListener('click', findSolos);
+$('solos-cancel').addEventListener('click', cancelSolos);
 $('second-voice-toggle').addEventListener('click', toggleSecondVoice);
 
 $('click-toggle').addEventListener('click', () => {

@@ -151,6 +151,55 @@ The first time you open a track, the whole track is selected. Narrow the
 selection down to the solo. Use the Overview to find your way around a long
 file, and the Detail view to place the edges exactly.
 
+### Find the solos
+
+On a record with several solos, **Find the solos** (above the Overview)
+proposes where each one starts and ends. It reads who is playing from the
+whole track's separated stems and puts each boundary on a bar line of the
+beat grid. The proposals appear as a row of bands under the Overview, and
+the waveform above is tinted to match.
+
+- **Click a band** to select its span. A and B land on its edges, exactly
+  as if you had placed them, and you can move either edge from there.
+- **The label** on a band names the loudest melodic stem there, in the
+  separation the proposal was read from: `other`, `guitar`, `piano` and so
+  on. **rhythm** means the melodic stems fall silent, as in a bass or drum
+  solo. **head** marks the tune's melody at the start and the end. The
+  label is only a hint. It never changes your Stem menu or the ensemble,
+  because Demucs 6-stem sometimes files a horn under `guitar` where
+  BS-RoFormer files it under `other`. Choose both in Step 2 as usual.
+- **fewer**, **default** and **more** set how readily a boundary is
+  proposed. **more** finds a few more solo edges, but cuts inside a solo
+  twice as often. **fewer** cuts less and leaves more edges for you to find.
+- **Solos** hides and shows the bands.
+
+The first time, the button may have work to do. If there are no stems for
+the whole track, it first separates the whole track with Demucs 6-stem,
+which takes about three minutes for a ten-minute track on a CPU. The button
+says how long before you press it, for example **Find the solos (~4 min)**,
+and **Cancel** stops it. Reading the stems then takes a few seconds. After
+that the bands come straight back whenever you open the track. If a
+BS-RoFormer separation of the whole track is already on disk, it is used
+instead, and nothing is separated. Deleting those stems in the Cache panel
+deletes what was read from them too.
+
+How close are the proposals? On 77 solos from the Weimar Jazz Database, a
+band edge falls within two bars of about 70% of solo starts and ends, and
+about a quarter of the solos come out as one band, ready in one click.
+Expect to adjust the rest.
+
+- A change of instrument is easy to find. A player who plays the head and
+  then solos is hard, and so are two players on the same instrument
+  trading, and anything inside an open vamp.
+- The edges sit on the bar lines of the whole track's beat grid. Until you
+  set a downbeat, the bar lines drawn for your selection can sit a beat or
+  two from those, so check A and B on the Detail view.
+
+What you do with a proposal is saved in the track's settings file:
+whether you selected a band, how far you then moved its edges, or whether
+you drew your own selection over it. It stays on your computer. It is a
+record of where the proposals were right and where they were not.
+
 ### Placing A and B
 
 On the Detail waveform, only the orange **A** and **B** handles change the
@@ -558,15 +607,68 @@ switched on are written in.
 If you keep editing after an export, the export bar says the file on disk
 is older than what you see.
 
+### Chord symbols
+
+SwingScribe does not hear the chords. You type them, once, and it writes
+them over every chorus of the page. Click **Changes** in the export bar and
+type one chorus of the tune's changes, at concert pitch, the way a chart is
+written:
+
+```
+| Dm7 G7 | Cmaj7 | Em7b5 . A7b9 . | Dm7 / G7 / |
+| C6 | % | N.C. | G7alt |
+```
+
+- `|` separates the bars. Line breaks are only layout, and a `|` at the
+  start or end of a line does not make an empty bar.
+- Chords in one bar share it evenly: two chords in 4/4 fall on beats 1
+  and 3, four fall one on each beat.
+- `.` or `/` holds the chord before it for one share, so `C . F G` is C for
+  two beats, then F, then G. The shares must divide the bar's beats: three
+  chords in a 4/4 bar are refused, because only you know which one gets two
+  beats.
+- `%` alone in a bar repeats the bar before it. A bar with nothing new in it
+  needs `%` or `/`; it cannot be left empty.
+- `N.C.` is no chord.
+- Spellings are the usual jazz ones: `C`, `Cm` or `C-`, `Cmaj7`, `CΔ` or
+  `C^7`, `C7`, `Cm7` or `C-7`, `Cm7b5` or `Cø`, `Cdim` or `C°7`, `C+` or
+  `Caug`, `C6`, `Cm6`, `C6/9`, `C9`, `C11`, `C13`, `Csus4`, `C7sus4`,
+  `Cadd9`, `Cm(maj7)`, `C7alt`, alterations such as `C7b9`, `C7#9`,
+  `C7#11`, `C7b5`, `C13b9` or `C7(b9,#11)`, and slash chords such as
+  `C7/E`. Flats and sharps are `b` and `#` (or `♭` and `♯`).
+
+Anything SwingScribe cannot read is shown in red under the field, naming
+the bar and the chord, for example **bar 3, 'Cmaj7#': unknown chord
+quality**. It never guesses: a wrong chord over a solo is worse than none.
+Until the chart reads, the page is drawn and exported without chord symbols;
+your text is kept as you typed it.
+
+The chart is one chorus, and it repeats from the **form start** (the bar 1
+you set with <kbd>F</kbd>, see the bar grid) through your span. So a span
+that starts in the middle of the third chorus gets the third chorus's bar
+over its bar 1, and the line under the field says so, for example **page
+bar 1 is chart bar 5, chorus 3**. With no form start but a **Chorus length**,
+the chart starts at the first gold chorus line on the roll; with neither, it
+starts on the first bar of your span. If you have set a chorus length, the
+chart must be exactly that many bars long, or it is refused.
+
+Chord symbols are part of the page: they are saved with the track, drawn on
+the **Page** view, written into the MusicXML file, and transposed with
+**Written for**, by the same interval as its notes: on a B♭ tenor part a
+concert `Bb7` is written `C7`. On a two-staff page they sit over the treble
+staff. The **Score it** button and the ground-truth bar ignore them: they
+compare notes. MuseScore prints some chords in its own style (`Cø` opens
+as `Cm7♭5`, `C7b9` as `C7♭9`), but the chord is the same.
+
 ### Seeing the page before you export
 
 Below the export bar, **Page** shows the score Export would write, drawn in
 the app: the same notes, bars, key, rhythm, transposition and staves. It is
 redrawn a moment after anything that changes it, such as an edit on the
 roll, the **Rhythm**, **Key** or **Written for** menus, the staves, the
-downbeat or the time signature. Looking at it writes nothing; only Export
-writes the file. It needs what Export needs, a transcription and a beat
-grid, and says so while either is missing.
+downbeat, the time signature or the **Changes**. Looking at it writes
+nothing; only Export writes the file. It needs what Export needs, a
+transcription and a beat grid, and says so while either is missing.
 
 - **Scroll** to zoom, **shift-scroll** or **drag** to pan, as on the other
   views. **+** and **−** zoom in steps, and **Fit** goes back to the page's

@@ -579,6 +579,26 @@ input.rate-value[type=text] {
    change it, so say plainly that it is behind rather than pretending. */
 .export-stale { font: 11.5px var(--mono); color: var(--accent); cursor: help; }
 .export-lines { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+/* The chord chart (roadmap O4): typed like a chart, so monospaced and as
+   wide as the bar, with what the server made of it underneath -- red and
+   naming the bar when it cannot read it. */
+.changes-panel {
+  display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: start;
+  margin-top: 10px;
+}
+.changes-panel .picker-label { padding-top: 7px; }
+#changes-text {
+  width: 100%; min-height: 3.4em; resize: vertical; box-sizing: border-box;
+  font: 12.5px/1.5 var(--mono); color: var(--text);
+  background: var(--bg); border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius); padding: 6px 10px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+#changes-text:focus { outline: none; border-color: var(--accent); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 3px var(--accent-ring); }
+#changes-text::placeholder { color: var(--muted); }
+.changes-status { grid-column: 2; font: 11.5px var(--mono); line-height: 1.4; }
+.changes-status.error { color: var(--danger); }
 #score-line { font: 12px var(--mono); cursor: help; }
 /* The measure is only worth reading when enough of their score lined up
    with ours; below that it is a number about the wrong music. */
@@ -758,3 +778,49 @@ input.rate-value[type=text] {
   color: var(--second-voice);
   background: color-mix(in srgb, var(--second-voice) 14%, transparent);
 }
+
+/* ── Find the solos (roadmap O3) ─────────────────────────────────────────
+   The proposed spans: a strip of bands under the Overview, one button per
+   span, positioned on the Overview's time axis. A cool blue of their own --
+   they are suggestions, not the selection (the accent) and not the stem
+   (--lead) -- with the head in the chorus gold, since a head is the form
+   and not a soloist. The label is text; the canvas tints the same spans
+   behind the waveform (WaveView.setBands). */
+:root {
+  --solo-band: rgba(120, 190, 255, 0.07);
+  --solo-head: rgba(255, 212, 121, 0.08);
+  --solo-edge: rgba(120, 190, 255, 0.6);
+  --solo-ink: #9fcbff;
+}
+.solo-bands {
+  position: relative; height: 24px; margin-top: 4px;
+  border-radius: var(--radius-sm);
+}
+.solo-band {
+  position: absolute; top: 0; bottom: 0;
+  min-width: 3px; padding: 0 6px;
+  font: 500 11px/22px var(--font); text-align: left;
+  color: var(--solo-ink);
+  background: rgba(120, 190, 255, 0.10);
+  border: 1px solid rgba(120, 190, 255, 0.28);
+  border-radius: 4px; box-shadow: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.solo-band.alt { background: rgba(120, 190, 255, 0.05); }
+.solo-band.head {
+  color: var(--chorus);
+  background: rgba(255, 212, 121, 0.08); border-color: rgba(255, 212, 121, 0.3);
+}
+.solo-band.rhythm { color: var(--muted); }
+.solo-band:hover:not(:disabled) {
+  background: rgba(120, 190, 255, 0.2); border-color: rgba(120, 190, 255, 0.6);
+}
+.solo-band.head:hover:not(:disabled) { background: rgba(255, 212, 121, 0.18); }
+.solo-band.current {
+  border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
+}
+.solo-band.taken-accepted, .solo-band.taken-adjusted { font-weight: 600; }
+.solo-levels { display: inline-flex; gap: 3px; }
+.solo-levels button.chip { padding: 3px 8px; font-size: 11.5px; text-transform: none; letter-spacing: normal; }
+#solos-find, #solos-cancel { text-transform: none; letter-spacing: normal; }
+.wave-label .solos-info { font: 11px var(--mono); color: var(--solo-ink); }

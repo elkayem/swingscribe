@@ -39,7 +39,19 @@ JOB_STAGES: dict[str, tuple[tuple[str, float], ...]] = {
     # Transcription runs on an already-separated stem, so this is the CREPE pass
     # alone — ~30s for a span, not minutes.
     "transcribe": (("transcribe", 1.0),),
+    # Find the solos (gui/solos.py) when no whole-file stem set is on disk:
+    # a whole-track htdemucs_6s separation is nearly all of it (~2.7 min per
+    # ten minutes of audio on CPU); the beat grid and the envelopes are
+    # seconds each. With a set on disk the job takes SOLOS_CACHED_STAGES.
+    "solos": (("ingest", 0.01), ("beats", 0.03), ("separate", 0.90), ("envelopes", 0.06)),
 }
+# A Find the solos job with the stems already on disk: the beat grid when it
+# is not cached (~5-8 s) and the envelopes (3-9 s), about evenly.
+SOLOS_CACHED_STAGES: tuple[tuple[str, float], ...] = (
+    ("ingest", 0.05),
+    ("beats", 0.35),
+    ("envelopes", 0.60),
+)
 
 
 @dataclass
@@ -66,6 +78,9 @@ class Job:
     estimate_s: float | None = None
     # Seconds of audio the separator was given, for teaching the estimate.
     audio_seconds: float | None = None
+    # This job's own stage weights, when they depend on what it will find on
+    # disk (a Find the solos job that need not separate); else its kind's.
+    stages: tuple[tuple[str, float], ...] | None = None
     cancel_requested: bool = False
 
     def remaining_s(self, now: float | None = None) -> float | None:
@@ -232,8 +247,10 @@ class JobRunner:
             job.cancel_requested = True
         return job
 
-    def _pool_for(self, kind: str) -> ThreadPoolExecutor:
-        return self._light if kind in LIGHT_KINDS else self._heavy
+    def _pool_for(self, kind: str, heavy: bool | None = None) -> ThreadPoolExecutor:
+        if heavy is None:
+            heavy = kind not in LIGHT_KINDS
+        return self._heavy if heavy else self._light
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
@@ -265,7 +282,13 @@ class JobRunner:
         variant: str = "",
         estimate_s: float | None = None,
         audio_seconds: float | None = None,
+        stages: tuple[tuple[str, float], ...] | None = None,
+        heavy: bool | None = None,
     ) -> Job:
+        """Queue a job. `heavy` overrides the kind's lane for a job whose
+        cost depends on what is on disk: a Find the solos job separates
+        (heavy) only when no whole-file stem set exists, and otherwise must
+        not wait behind someone else's separation for seconds of numpy."""
         if kind not in JOB_STAGES:
             raise ValueError(f"unknown job kind {kind!r}")
         existing = self.active_for(str(path), model, kind, variant)
@@ -279,11 +302,12 @@ class JobRunner:
             variant=variant,
             estimate_s=estimate_s,
             audio_seconds=audio_seconds,
+            stages=stages,
         )
         with self._lock:
             self._jobs[job.id] = job
             self._by_target[(job.path, model, kind, variant)] = job.id
-        future: Future = self._pool_for(kind).submit(self._run, job, config, model)
+        future: Future = self._pool_for(kind, heavy).submit(self._run, job, config, model)
         future.add_done_callback(lambda _f: None)
         return job
 
@@ -301,6 +325,8 @@ class JobRunner:
             with progress.sink(lambda event: self._on_progress(job, event)):
                 if job.kind == "transcribe":
                     self._run_transcribe(job, config, model)
+                elif job.kind == "solos":
+                    self._run_solos(job, config, model)
                 elif job.kind == "separate":
                     self._run_separation(job, config, model)
                 else:
@@ -332,7 +358,9 @@ class JobRunner:
         pipeline.run(job.path, run_config, stages=[("ingest", ingest.run), ("beats", beats.run)])
         job.message = "beat grid ready"
 
-    def _run_separation(self, job: Job, config: Config, model: str) -> None:
+    def _run_separation(
+        self, job: Job, config: Config, model: str, started_at: float | None = None
+    ) -> None:
         """Separate in a CHILD PROCESS, so the listener can cancel it.
 
         A torch computation cannot be interrupted from another thread, and
@@ -358,6 +386,7 @@ class JobRunner:
             args=(job.path, run_config.model_dump_json(), model, queue),
             daemon=True,
         )
+        started_at = job.started_at if started_at is None else started_at
         process.start()
         separated = False  # did the separator actually run, or reuse stems?
         try:
@@ -398,9 +427,47 @@ class JobRunner:
         if separated and job.audio_seconds:
             # Teach the estimate this machine's speed — only from a run that
             # did the work, never from one that found the stems on disk.
-            timings.record(
-                run_config.cache_dir, model, job.audio_seconds, time.time() - job.started_at
+            timings.record(run_config.cache_dir, model, job.audio_seconds, time.time() - started_at)
+
+    def _run_solos(self, job: Job, config: Config, model: str) -> None:
+        """Find the solos: whatever the proposal needs that is not on disk.
+
+        The beat grid (seconds, and cached for the Beats chip too); a
+        whole-track `model` separation when no whole-file stem set exists
+        (`gui/solos.whole_file_set`), in a child process like any other so
+        Cancel stops it; then the stems' envelopes, cached beside them. The
+        proposal itself is arithmetic on those and is not a job: the page
+        asks `/solos` once this is done.
+        """
+        from swingscribe import pipeline
+        from swingscribe.gui import library, solos
+        from swingscribe.stages import beats, ingest
+
+        pipeline.run(job.path, config, stages=[("ingest", ingest.run), ("beats", beats.run)])
+        if job.cancel_requested:
+            raise JobCancelled()
+        document = library.ingested_document(job.path, config)
+        found = solos.whole_file_set(document, config)
+        if found is None:
+            whole = config.model_copy(
+                update={"separate": config.separate.model_copy(update={"span": None})}
             )
+            # Timed from here, not from the job's start: the beat tracker's
+            # seconds must not teach the estimate a slower separator.
+            self._run_separation(job, whole, model, started_at=time.time())
+            found = solos.whole_file_set(document, config)
+            if found is None:
+                raise RuntimeError(
+                    f"the {model} separation finished without a complete set of stems"
+                )
+        used, stems = found
+
+        def report(fraction: float, message: str) -> None:
+            self._on_progress(job, progress.ProgressEvent("envelopes", fraction, message))
+
+        solos.build_envelopes(stems, report=report, cancelled=lambda: job.cancel_requested)
+        job.result = {"model": used}
+        job.message = "solos ready"
 
     def _run_transcribe(self, job: Job, config: Config, model: str) -> None:
         """Transcribe the configured span (in config.transcribe) and cache the
@@ -421,7 +488,7 @@ class JobRunner:
         """Map a stage-local fraction onto the whole job's bar."""
         offset = 0.0
         weight = None
-        for name, share in JOB_STAGES[job.kind]:
+        for name, share in job.stages or JOB_STAGES[job.kind]:
             if name == event.stage:
                 weight = share
                 break

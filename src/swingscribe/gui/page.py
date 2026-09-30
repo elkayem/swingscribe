@@ -28,6 +28,7 @@ rest of the app, and CI, never need it.
 
 import contextlib
 import hashlib
+import re
 import threading
 from collections import OrderedDict
 from importlib.resources import files
@@ -121,6 +122,33 @@ def _toolkit():
     return toolkit
 
 
+# A chord symbol's <degree> that its <kind text> already spells (export.
+# _append_harmony). MusicXML says a reader does not print it; Verovio 6.3
+# prints every degree anyway, in parentheses after the text, so "E7b9"
+# came out "E7b9(♭9)" and "C7sus4" "C7sus4(4 no3)". MuseScore reads the
+# degrees and prints the chord in its own style; the view shows the text.
+_HIDDEN_DEGREE = re.compile(r'<degree print-object="no">.*?</degree>\s*', re.DOTALL)
+# N.C. is a harmony of kind "none" whose root is hidden by an empty text,
+# the schema's way and the one MuseScore prints as "N.C."; Verovio prints
+# the hidden root ("C") and drops the text. Spelled as a <numeral> whose
+# root's text is "N.C." it prints exactly that (a <function> it drops
+# altogether), so that is how the view hands it over.
+_NO_CHORD = re.compile(
+    r'<root>\s*<root-step text="">[A-G]</root-step>\s*</root>\s*<kind text="([^"]*)">none</kind>'
+)
+
+
+def for_verovio(xml: str) -> str:
+    """The page's MusicXML as Verovio must be handed it to print what the
+    file says: every degree the file marks as not printed removed, and a
+    no-chord spelled the way Verovio prints. Only chord symbols change, and
+    the memo is still keyed by the file's own text."""
+    xml = _HIDDEN_DEGREE.sub("", xml)
+    return _NO_CHORD.sub(
+        r'<numeral><numeral-root text="\1">1</numeral-root></numeral><kind text="">none</kind>', xml
+    )
+
+
 def render(xml: str, width: float | None = None) -> tuple[str, int, list[str]]:
     """Engrave MusicXML to SVG, one string per page.
 
@@ -139,7 +167,7 @@ def render(xml: str, width: float | None = None) -> tuple[str, int, list[str]]:
         # Verovio's resource loading is not documented as thread-safe.
         toolkit = _toolkit()
         toolkit.setOptions(options(width_px))
-        if not toolkit.loadData(xml):
+        if not toolkit.loadData(for_verovio(xml)):
             raise ValueError("Verovio could not read the page's MusicXML")
         pages = [toolkit.renderToSVG(page) for page in range(1, toolkit.getPageCount() + 1)]
         if not pages:

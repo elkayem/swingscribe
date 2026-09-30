@@ -81,12 +81,20 @@
   <section class="panel" id="panel-select">
     <div class="panel-head">
       <h2><span class="step">1</span> Select the span</h2>
-      <div class="panel-note">Drag on the overview to select. On the detail view, drag the <span class="handle-word">A</span>/<span class="handle-word">B</span> handles to move an edge, or tap <kbd>A</kbd> / <kbd>B</kbd> while it plays; clicking elsewhere only moves the playhead. <kbd>D</kbd> sets the downbeat at the playhead, <kbd>F</kbd> starts the form (bar 1) there. Or click a beat dot / shift-click for the form.</div>
+      <div class="panel-note">Drag on the overview to select, or press Find the solos and click a band. On the detail view, drag the <span class="handle-word">A</span>/<span class="handle-word">B</span> handles to move an edge, or tap <kbd>A</kbd> / <kbd>B</kbd> while it plays; clicking elsewhere only moves the playhead. <kbd>D</kbd> sets the downbeat at the playhead, <kbd>F</kbd> starts the form (bar 1) there. Or click a beat dot / shift-click for the form.</div>
     </div>
 
     <div class="wave-block">
-      <div class="wave-label">Overview <span class="muted" id="overview-duration"></span></div>
+      <div class="wave-label">
+        Overview <span class="muted" id="overview-duration"></span>
+        <span class="spacer"></span>
+        <span class="muted solos-info" id="solos-info" hidden></span>
+        <span class="solo-levels" id="solo-levels" role="group" aria-label="How many spans to propose" hidden></span>
+        <button class="chip" id="solos-find" title="Propose where each solo starts and ends, from the whole track's separated stems and the bar grid. Where no whole-track stems are on disk, this first separates the whole track with Demucs 6-stem, which takes minutes; the button says about how long. The spans are suggestions: click one to select it.">Find the solos</button>
+        <button class="chip" id="solos-cancel" type="button" hidden title="Stop finding the solos. A separation stops within a second; nothing it wrote is reused.">Cancel</button>
+      </div>
       <div class="wave overview" id="wave-overview"></div>
+      <div class="solo-bands" id="solo-bands" hidden></div>
     </div>
 
     <div class="wave-block">
@@ -339,11 +347,21 @@
         <select id="key-select" title="Auto reads the key signature from the notes; or choose one. Concert pitch: Written for still transposes it."></select>
         <label class="picker-label" for="timing-select" title="How the rhythm is written. Swing reads the feel out: swung pairs are written as even eighths under a 'Swing' marking. Literal writes every note on the nearest 16th or 32nd, as played, with no marking.">Rhythm</label>
         <select id="timing-select" title="Swing: swung pairs written as eighths, 'Swing' above the staff. Literal: every note on the nearest 16th or 32nd, as played."></select>
+        <button class="chip" id="changes-toggle" title="Type the tune's chord changes, one chorus, to write chord symbols over the page. They repeat from the form start (Bar 1) through the span and move with Written for.">Changes</button>
         <button class="chip" id="score-btn" hidden title="Score this notation against the loaded hand transcription: are the notes written the way a human wrote them? A different, harder question than the pitch F1 above, and it always reads lower.">Score it</button>
         <button class="chip active" id="page-toggle" title="Show or hide the page below: the score Export would write, engraved in the app and redrawn as you edit. (P)">Page</button>
         <span class="spacer"></span>
         <span class="export-stale" id="export-stale" hidden>file on disk is older than what you see</span>
         <a class="chip" id="export-download" hidden download title="Download the MusicXML file.">Download</a>
+      </div>
+      <!-- The chord chart: typed by the listener, never recognised
+           (swingscribe/chords.py). Saved with the track, drawn on the page. -->
+      <div class="changes-panel" id="changes-panel" hidden>
+        <label class="picker-label" for="changes-text">Changes</label>
+        <textarea id="changes-text" rows="3" spellcheck="false" autocomplete="off"
+                  placeholder="| Dm7 G7 | Cmaj7 | Em7b5 . A7b9 . | Dm7 / G7 / |"
+                  title="One chorus of the tune's changes, concert pitch. | separates bars; chords in a bar share it evenly; . or / holds the chord before it for a share; % repeats the bar before; N.C. is no chord."></textarea>
+        <span class="changes-status muted" id="changes-status"></span>
       </div>
       <!-- Two lines, not one: where the file went and how it scored are both
            worth keeping on screen, and the second used to hide the first. -->

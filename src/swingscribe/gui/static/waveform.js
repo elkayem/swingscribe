@@ -51,6 +51,7 @@ export class WaveView {
     this._beatsPainted = false;
     this.barSet = null;
     this.chorusSet = null;
+    this.bands = null;                    // proposed solo spans, [{start, end, kind}]
 
     this._buildOverlays();
     this._bindPointer();
@@ -107,6 +108,15 @@ export class WaveView {
 
   setOverlay(data) { this.overlay = data; this.draw(); }
 
+  /* Find the solos: the proposed spans, tinted behind the waveform in
+     alternation with a hairline at each boundary, so the strip of labelled
+     bands under the Overview can be read against the audio. Drawn only;
+     the Overview's own gestures are unchanged. */
+  setBands(spans) {
+    this.bands = spans && spans.length ? spans : null;
+    this.draw();
+  }
+
   setSelection(a, b) {
     this.selection = a === null || b === null ? null : { a, b };
     this.draw();
@@ -142,6 +152,8 @@ export class WaveView {
     const base = style.getPropertyValue('--wave').trim() || '#4c5468';
     const lit = style.getPropertyValue('--wave-lit').trim() || '#97a1bb';
     const lead = style.getPropertyValue('--lead').trim() || '#56cfc0';
+
+    if (this.bands) this._drawBands(width, height, style);
 
     if (this.peaks) {
       this._drawEnvelope(this.peaks, base, width, height);
@@ -208,6 +220,26 @@ export class WaveView {
     }
     ctx.fill();
     ctx.globalAlpha = 1;
+  }
+
+  _drawBands(width, height, style) {
+    const ctx = this.ctx;
+    const tint = style.getPropertyValue('--solo-band').trim() || 'rgba(120, 190, 255, 0.07)';
+    const head = style.getPropertyValue('--solo-head').trim() || 'rgba(255, 212, 121, 0.08)';
+    const edge = style.getPropertyValue('--solo-edge').trim() || 'rgba(120, 190, 255, 0.45)';
+    this.bands.forEach((band, index) => {
+      const x0 = this.timeToX(band.start);
+      const x1 = this.timeToX(band.end);
+      if (x1 <= 0 || x0 >= width) return;
+      if (band.kind === 'head' || index % 2 === 0) {
+        ctx.fillStyle = band.kind === 'head' ? head : tint;
+        ctx.fillRect(x0, 0, Math.max(0, x1 - x0), height);
+      }
+      if (index > 0) {
+        ctx.fillStyle = edge;
+        ctx.fillRect(Math.round(x0) - 0.5, 0, 1, height);
+      }
+    });
   }
 
   /* The bar grid transcription will quantize against, drawn so the eye can

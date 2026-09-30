@@ -34,6 +34,7 @@ from swingscribe.gui import ground_truth, library, peaks, review, storage, timin
 from swingscribe.gui import jobs as gui_jobs
 from swingscribe.gui import musicxml as gui_musicxml
 from swingscribe.gui import page as gui_page
+from swingscribe.gui import solos as gui_solos
 from swingscribe.gui import suggestion as gui_suggestion
 from swingscribe.model import NoteEvent
 from swingscribe.notation import HAND_SPLIT
@@ -83,6 +84,27 @@ class JobRequest(BaseModel):
     # For a pianist: "oracle" (the default: the line picked from the piano
     # model's full output) or "crepe" (issue #8). Ignored for a horn.
     line: str | None = None
+
+
+class ChangesRequest(BaseModel):
+    """The Changes field as typed, with the meter it will be laid over."""
+
+    text: str = ""
+    time_signature: str | None = None
+    bars_per_chorus: int | None = None
+
+
+class SoloChoiceRequest(BaseModel):
+    """A selection the listener made while proposed solo spans were on the
+    Overview: the spans they could see (with the stem set and level they were
+    read at), the selection, and the span they clicked to make it, if any.
+    `gui/solos.decide` turns it into the record for the sidecar."""
+
+    model: str
+    level: str = gui_solos.DEFAULT_LEVEL
+    spans: list[dict[str, Any]] = []
+    selection: tuple[float, float]
+    origin: dict[str, Any] | None = None
 
 
 class StateRequest(BaseModel):
@@ -387,6 +409,11 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             "keys": [[fifths, name] for fifths, name in KEY_SIGNATURES.items()],
             "transpositions": list(TRANSPOSITIONS),
             "default_transposition": config.notate.transposition,
+            # Find the solos: the fewer/more control, from the table the
+            # server maps to a penalty, and the separation it runs.
+            "solo_levels": list(gui_solos.LEVELS),
+            "default_solo_level": gui_solos.DEFAULT_LEVEL,
+            "solo_separation_model": gui_solos.SEPARATION_MODEL,
             "library_dir": str(library.library_dir(config)),
         }
 
@@ -499,6 +526,122 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             span = (start, end)
         entry = resolve(track_id)
         return gui_suggestion.suggestion(entry["document"], config, model, span)
+
+    @app.get("/api/tracks/{track_id}/solos")
+    def get_solos(
+        track_id: str,
+        level: str = gui_solos.DEFAULT_LEVEL,
+        time_signature: str | None = None,
+        pulses_per_bar: int | None = None,
+        anchor: float | None = None,
+    ) -> dict[str, Any]:
+        """Where the solos might be: proposed spans for the Overview's bands
+        (roadmap O3, `gui/solos.py` over `solo_spans`), or ready:false with
+        what is missing.
+
+        Never computes anything slow, like `/beats`: it needs the beat grid,
+        a whole-file stem set and that set's envelopes, all cached, and when
+        any is not it says which (`needs`), with the separation's estimate
+        when a whole-track separation is one of them. The page then starts a
+        kind="solos" job, which makes exactly those, and asks again. The
+        proposal on top is a fraction of a second of arithmetic, re-run on
+        every call like the meter, so the fewer/more control and a new time
+        signature or downbeat are instant.
+
+        A read, never a write: each span carries the listener's record for
+        it, matched by content, and nothing here sets a selection, a stem or
+        an ensemble.
+        """
+        from swingscribe import pipeline
+        from swingscribe.stages import beats, ingest
+
+        if level not in gui_solos.LEVELS:
+            raise HTTPException(400, f"unknown level {level!r}")
+        entry = resolve(track_id)
+        document = entry["document"]
+        duration = float(document.audio.duration)
+        cached = pipeline.cached_document(
+            entry["path"], config, stages=[("ingest", ingest.run), ("beats", beats.run)]
+        )
+        grid = cached.beat_grid if cached else None
+        found = gui_solos.whole_file_set(document, config)
+        env = gui_solos.cached_envelopes(found[1]) if found else None
+        model = found[0] if found else gui_solos.SEPARATION_MODEL
+        needs = []
+        if grid is None or not grid.beats:
+            needs.append("beats")
+        if found is None:
+            needs.append("separate")
+        if env is None:
+            needs.append("envelopes")
+        if needs:
+            body: dict[str, Any] = {"ready": False, "needs": needs, "model": model, "level": level}
+            if found is None:
+                body["audio_seconds"] = round(duration, 1)
+                body["estimate_s"] = round(timings.estimate(config.cache_dir, model, duration), 1)
+            return body
+        overrides = {
+            key: value
+            for key, value in {
+                "time_signature": time_signature,
+                "pulses_per_bar": pulses_per_bar,
+                "anchor": anchor,
+            }.items()
+            if value is not None
+        }
+        try:
+            lines = gui_solos.bar_line_times(grid, config, duration, overrides)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        payload = gui_solos.propose(env, lines, model, level)
+        settings = library.load_settings(entry["path"], config, track_id)
+        return {"ready": True, **gui_solos.annotate(payload, gui_solos.records_of(settings))}
+
+    @app.post("/api/tracks/{track_id}/solos/choice")
+    def post_solo_choice(track_id: str, request: SoloChoiceRequest) -> dict[str, Any]:
+        """Record what the listener did with the proposals on screen when a
+        selection was made: accepted, adjusted (by how much) or ignored
+        (`gui/solos.decide`). Kept in the sidecar's `solo_proposals`, one
+        record per proposal, matched by content; a record for a span not on
+        screen now is never touched. A selection about no proposal records
+        nothing."""
+        if request.level not in gui_solos.LEVELS:
+            raise HTTPException(400, f"unknown level {request.level!r}")
+        lo, hi = sorted(float(v) for v in request.selection)
+        if not hi > lo:
+            raise HTTPException(400, "the selection must end after it starts")
+
+        def usable(span: Any) -> bool:
+            return (
+                isinstance(span, dict)
+                and isinstance(span.get("start"), (int, float))
+                and isinstance(span.get("end"), (int, float))
+                and span["end"] > span["start"]
+            )
+
+        spans = [span for span in request.spans if usable(span)]
+        origin = request.origin if usable(request.origin) else None
+        entry = resolve(track_id)
+        made: dict[str, Any] = {"record": None}
+
+        def change(settings: dict[str, Any]) -> dict[str, Any]:
+            record = gui_solos.decide(
+                spans,
+                (lo, hi),
+                origin,
+                gui_solos.records_of(settings),
+                request.model,
+                request.level,
+            )
+            made["record"] = record
+            if record is None:
+                return {}
+            stored = settings.get(gui_solos.SIDECAR_KEY)
+            existing = stored if isinstance(stored, list) else []
+            return {gui_solos.SIDECAR_KEY: gui_solos.merge(existing, record)}
+
+        library.update_settings(entry["path"], config, change, track_id)
+        return made
 
     @app.get("/api/tracks/{track_id}/stem")
     def get_stem_slice(
@@ -871,7 +1014,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         """
         inputs = page_inputs(track_id, model, stem, start, end, line, piano_notes)
         try:
-            notation, xml = gui_musicxml.page_of(**inputs)
+            notation, xml, changes = gui_musicxml.page_of(**inputs)
         except gui_musicxml.NotReady as exc:
             raise HTTPException(409, str(exc)) from exc
         except OSError as exc:
@@ -901,10 +1044,21 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
                     inputs["settings"],
                     inputs["texture"],
                 ).name,
-                **gui_musicxml.describe(notation, config, inputs["settings"]),
+                **gui_musicxml.describe(notation, config, inputs["settings"], changes),
             },
             # The page depends on the sidecar, which is not in the URL.
             headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/api/changes/check")
+    def post_changes_check(request: ChangesRequest) -> dict[str, Any]:
+        """Read a chord chart as the listener types it (chords.py): how many
+        bars and chords, or the bar and token it cannot read. Writes nothing
+        -- the sidecar's `changes` is saved like every other setting, and
+        the page reads it from there. A POST only because a chart is
+        several lines of text."""
+        return gui_musicxml.check_changes(
+            request.text, request.time_signature, request.bars_per_chorus, config
         )
 
     @app.get("/api/tracks/{track_id}/notation-score")
@@ -1081,12 +1235,32 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
 
     @app.post("/api/jobs")
     def post_job(request: JobRequest) -> dict[str, Any]:
-        if request.model not in config.gui.models:
+        # A Find the solos job chooses its own stem set (gui/solos.py), so
+        # the model it was sent is not the menu's to vet.
+        if request.kind != "solos" and request.model not in config.gui.models:
             raise HTTPException(400, f"unknown model {request.model!r}")
         if request.kind not in gui_jobs.JOB_STAGES:
             raise HTTPException(400, f"unknown job kind {request.kind!r}")
         entry = open_track(request.path)  # decode errors surface now, not in the worker
-        if request.kind == "transcribe":
+        if request.kind == "solos":
+            # Separate the whole track only when no whole-file set is on
+            # disk; then the job is minutes and takes the heavy lane like
+            # any separation. Otherwise it is seconds of beat tracking and
+            # numpy, and must not queue behind someone else's separation.
+            found = gui_solos.whole_file_set(entry["document"], config)
+            model = found[0] if found else gui_solos.SEPARATION_MODEL
+            duration = float(entry["document"].audio.duration)
+            job = app.state.runner.submit(
+                request.path,
+                config,
+                model,
+                "solos",
+                estimate_s=None if found else timings.estimate(config.cache_dir, model, duration),
+                audio_seconds=None if found else duration,
+                stages=gui_jobs.SOLOS_CACHED_STAGES if found else None,
+                heavy=found is None,
+            )
+        elif request.kind == "transcribe":
             if not request.stem:
                 raise HTTPException(400, "a transcribe job needs a stem")
             run_config = review_config(

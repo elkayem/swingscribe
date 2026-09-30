@@ -10,7 +10,9 @@ dependency group (CLAUDE.md), which CI never installs.
 
 import hashlib
 import json
+import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -501,10 +503,40 @@ def load_settings(audio_path: str | Path, config: Config, track_id: str) -> dict
     return {}
 
 
+# One writer at a time. Every write is read-merge-write, and two requests
+# land together in FastAPI's thread pool: the page's debounced state save and
+# the Find the solos record (`update_settings`) after a selection, say. Each
+# merges only its own keys, but a write built from a file read BEFORE the
+# other's write lands puts the other's old value back.
+_settings_lock = threading.RLock()
+
+
 def save_settings(audio_path: str | Path, settings: dict[str, Any], config: Config) -> Path:
     """Merge and write, falling back to the cache dir if the audio's folder is
     not writable (a read-only library, a mounted share). Returns where it went,
     so the UI can say."""
+    with _settings_lock:
+        return _save_settings(audio_path, settings, config)
+
+
+def update_settings(
+    audio_path: str | Path,
+    config: Config,
+    change: Callable[[dict[str, Any]], dict[str, Any]],
+    track_id: str | None = None,
+) -> dict[str, Any]:
+    """Read this track's settings, merge in what `change` returns for them,
+    and write -- all under the one lock, so a list read here cannot be
+    overwritten by a write that read it before. Returns what was merged."""
+    with _settings_lock:
+        current = load_settings(audio_path, config, track_id or file_digest(audio_path))
+        updates = change(current)
+        if updates:
+            _save_settings(audio_path, updates, config)
+        return updates
+
+
+def _save_settings(audio_path: str | Path, settings: dict[str, Any], config: Config) -> Path:
     path = settings_path(audio_path)
     merged = _read_json(path) | settings
     merged["file"] = Path(audio_path).name  # so the file is identifiable on sight

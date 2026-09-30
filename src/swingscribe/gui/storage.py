@@ -114,11 +114,13 @@ def _remove_tree(path: Path) -> None:
 def busy_targets(jobs: list[dict[str, Any]]) -> set[tuple[str, str]]:
     """(source path, model) of every separation that is queued or running,
     from JobRunner.all() snapshots. A directory one of these is writing into
-    must not be deleted out from under it."""
+    must not be deleted out from under it. A Find the solos job counts: it
+    may be separating the whole track, and it writes its envelopes into the
+    stems directory it reads (gui/solos.py)."""
     return {
         (_norm(job["path"]), job["model"])
         for job in jobs
-        if job.get("kind") == "separate" and job.get("state") in ("queued", "running")
+        if job.get("kind") in ("separate", "solos") and job.get("state") in ("queued", "running")
     }
 
 

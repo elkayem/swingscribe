@@ -25,16 +25,28 @@ Beside the audio, like `ab`, `audition` and `click` before it -- never in the
 cache. You are going to open this in MuseScore, and a file you have to dig out
 of a cache directory is a file you will not open. The span is in the name, so
 exporting a second chorus does not overwrite the first.
+
+## Chord symbols
+
+The sidecar's `changes` is one chorus of chord symbols the listener typed
+(chords.py). Export and the page view lay it over the page; the Score button
+never sees it, because a chord symbol is not a note and the hand scores are
+compared note for note. A chart that does not parse, or whose length is not
+the Chorus length the listener set, is REPORTED (`changes.error`) and the
+page is written without symbols rather than refused: the notes are the page,
+and a typo in the changes must not cost the listener their export.
 """
 
 from pathlib import Path
 from typing import Any
 
+from swingscribe import chords
 from swingscribe.config import KEY_SIGNATURES, TIMINGS, TRANSPOSITIONS, Config
-from swingscribe.model import Document, NoteEvent
+from swingscribe.model import BeatGrid, Document, Notation, NoteEvent
 from swingscribe.notation import (
     bar_grid_for_settings,
     fold_texture,
+    form_bar_of_page,
     meter_from_settings,
     notation_for_span,
     with_chords,
@@ -108,12 +120,30 @@ def page_tags(config: Config, settings: dict[str, Any], texture: bool) -> list[s
     return tags
 
 
+def cached_grid(audio_path: str | Path, config: Config) -> BeatGrid:
+    """The tracked beat grid, from the cache only; NotReady if the Beats
+    button has not been pressed. See `bar_grid` for why it never tracks."""
+    from swingscribe import pipeline
+    from swingscribe.stages import beats, ingest
+
+    cached = pipeline.cached_document(
+        audio_path,
+        config,
+        stages=[("ingest", ingest.run), ("beats", beats.run)],
+    )
+    grid = cached.beat_grid if cached else None
+    if grid is None or not grid.beats:
+        raise NotReady("no beat grid yet - press Beats first")
+    return grid
+
+
 def bar_grid(
     audio_path: str | Path,
     config: Config,
     settings: dict[str, Any],
     duration: float,
     near: tuple[float, float] | None = None,
+    grid: BeatGrid | None = None,
 ) -> tuple[list[float], float | None]:
     """The beat grid AS THE ROLL DRAWS IT, and the beat it counts bars from.
 
@@ -133,18 +163,13 @@ def bar_grid(
     whatever the cache stored (pipeline._for_path); the path passed in is the
     file the request is actually about, and re-deriving a cache key from
     anything else looks up a different track.
-    """
-    from swingscribe import pipeline
-    from swingscribe.stages import beats, ingest
 
-    cached = pipeline.cached_document(
-        audio_path,
-        config,
-        stages=[("ingest", ingest.run), ("beats", beats.run)],
-    )
-    grid = cached.beat_grid if cached else None
-    if grid is None or not grid.beats:
-        raise NotReady("no beat grid yet - press Beats first")
+    `grid` is the tracked grid when the caller already read it (the page
+    needs it again for the chord chart): reading it costs a hash of the
+    whole audio file, so it is read once.
+    """
+    if grid is None:
+        grid = cached_grid(audio_path, config)
     # One derivation, shared with the eval harness (notation.py): the
     # listener's meter settings over the repaired grid, and with no downbeat
     # set, the automatic one voted around `near` -- the span on the page.
@@ -190,6 +215,7 @@ def build_notation(
     added: list[dict[str, Any]] | None = None,
     texture: bool = False,
     left: list[dict[str, Any]] | None = None,
+    grid: BeatGrid | None = None,
 ):
     """The reviewed span as a Notation, or raise something the user can fix.
 
@@ -217,6 +243,8 @@ def build_notation(
     piano model heard, folded into chords (`notation.fold_texture`) and
     quantized as a texture. With `left` given as well the page is a grand
     staff, `notes` the right hand and `left` the left.
+
+    `grid` is the cached tracked grid if the caller has read it already.
     """
     if not notes and not added and not left:
         raise NotReady("nothing to notate - every note in this span is silenced")
@@ -224,7 +252,7 @@ def build_notation(
     duration = document.audio.duration if document.audio else 0.0
     region = run_config.transcribe.region or (0.0, None)
     near = (float(region[0]), float(duration if region[1] is None else region[1]))
-    beats, anchor = bar_grid(audio_path, config, settings, duration, near)
+    beats, anchor = bar_grid(audio_path, config, settings, duration, near, grid)
     stem = run_config.transcribe.stem
     signature, pulses = meter_from_settings(
         settings.get("time_signature"), settings.get("pulses_per_bar"), config
@@ -275,17 +303,28 @@ def page_of(
     added: list[dict[str, Any]] | None = None,
     texture: bool = False,
     left: list[dict[str, Any]] | None = None,
-):
-    """The page Export writes, as (Notation, MusicXML text), written nowhere.
+) -> tuple[Notation, str, dict[str, Any] | None]:
+    """The page Export writes, as (Notation, MusicXML text, what became of
+    the chord chart), written nowhere.
 
     The one assembly both the Export button and the in-app page view go
     through (gui/page.py). The page on screen has to be the file on disk
     byte for byte -- a view that drew a second reading of the same notes
     would be showing the listener a page they cannot export -- so the view
     renders exactly this string rather than a Notation of its own.
+
+    The third value is `changes_status`'s report, None when the listener
+    has typed no changes.
     """
     from swingscribe.stages.export import to_musicxml
 
+    chart, problem = chart_of(settings, config)
+    # The tracked grid is read once, here, only when the chart needs the
+    # form's bar numbers -- and only once there is something to notate, so a
+    # span with every note silenced still says so before asking for Beats.
+    grid = None
+    if chart is not None and counts_from_form(settings) and (notes or added or left):
+        grid = cached_grid(audio_path, config)
     notation = build_notation(
         document,
         config,
@@ -297,8 +336,133 @@ def page_of(
         added,
         texture=texture,
         left=left,
+        grid=grid,
     )
-    return notation, to_musicxml(notation, part_name=Path(audio_path).stem)
+    status = problem
+    if chart is not None:
+        notation, status = place_changes(
+            notation, chart, document, config, run_config, settings, grid
+        )
+    return notation, to_musicxml(notation, part_name=Path(audio_path).stem), status
+
+
+def counts_from_form(settings: dict[str, Any]) -> bool:
+    """Whether the chart starts where the roll numbers bar 1 -- at the form
+    start the listener set, or the first bar line when they set a chorus
+    length and no form start, which is where the roll's gold chorus lines
+    then begin -- rather than on the page's own bar 1."""
+    chorus = settings.get("bars_per_chorus")
+    return settings.get("form_start") is not None or (isinstance(chorus, int) and chorus > 1)
+
+
+def chart_of(
+    settings: dict[str, Any], config: Config
+) -> tuple[chords.Chart | None, dict[str, Any] | None]:
+    """The sidecar's `changes` as a chart, or (None, a report of why not).
+    (None, None) when there are none. A chart whose length is not the
+    listener's chorus length is refused: one of the two is wrong, and
+    repeating a 12-bar chart over a 32-bar form puts every symbol after bar
+    12 in the wrong place."""
+    text = settings.get("changes")
+    if not isinstance(text, str) or not text.strip():
+        return None, None
+    try:
+        signature, _pulses = meter_from_settings(
+            settings.get("time_signature"), settings.get("pulses_per_bar"), config
+        )
+        beats_per_bar: int | None = signature[0]
+    except ValueError:
+        beats_per_bar = None  # the page will say what is wrong with the meter
+    try:
+        chart = chords.parse_chart(text, beats_per_bar)
+    except chords.ChartError as exc:
+        return None, _report(None, error=str(exc), bar=exc.bar, token=exc.token)
+    chorus = settings.get("bars_per_chorus")
+    if isinstance(chorus, int) and chorus > 1 and len(chart.bars) != chorus:
+        return None, _report(
+            chart,
+            error=(
+                f"the chart has {len(chart.bars)} bars but a chorus is {chorus} (Chorus "
+                "length) - type one whole chorus, or change the chorus length"
+            ),
+        )
+    return chart, None
+
+
+def _report(chart: chords.Chart | None, **fields) -> dict[str, Any]:
+    """The chart's status, in the shape the Changes field and the export
+    line both read."""
+    return {
+        "bars": len(chart.bars) if chart else 0,
+        "chords": chart.chord_count if chart else 0,
+        "placed": 0,
+        "chart_bar": None,
+        "chorus": None,
+        "before": 0,
+        "from": None,
+        "error": None,
+        "bar": None,
+        "token": None,
+        **fields,
+    }
+
+
+def check_changes(
+    text: str, time_signature: str | None, bars_per_chorus: int | None, config: Config
+) -> dict[str, Any]:
+    """The Changes field's check as the listener types: parse and count,
+    against the meter and chorus length they have set. Nothing is placed or
+    stored."""
+    settings = {
+        "changes": text,
+        "time_signature": time_signature,
+        "bars_per_chorus": bars_per_chorus,
+    }
+    chart, problem = chart_of(settings, config)
+    if problem is not None:
+        return problem
+    return _report(chart)
+
+
+def place_changes(
+    notation: Notation,
+    chart: chords.Chart,
+    document: Document,
+    config: Config,
+    run_config: Config,
+    settings: dict[str, Any],
+    grid: BeatGrid | None,
+) -> tuple[Notation, dict[str, Any]]:
+    """The chart over the page, and a report of where its bars landed.
+
+    The chart starts at the form's bar 1 when the listener has told us where
+    that is (`counts_from_form`), numbered on the same grid as the roll's bar
+    lines, and at the page's own bar 1 when they have not.
+    """
+    origin = "span start"
+    form_bar: int | None = 1
+    if grid is not None:
+        duration = document.audio.duration if document.audio else 0.0
+        region = run_config.transcribe.region or (0.0, None)
+        near = (float(region[0]), float(duration if region[1] is None else region[1]))
+        form_bar = form_bar_of_page(
+            grid.beats, grid.downbeats, settings, config, duration, region, near
+        )
+        origin = "form start" if settings.get("form_start") is not None else "chorus lines"
+    if form_bar is None:
+        return notation, _report(chart, error="the grid has no bar lines to count the form on")
+    scale = 2 if settings.get("double_time") else 1
+    placed = chords.place(chart, notation, form_bar, scale)
+    count = len(chart.bars)
+    inside = form_bar >= 1
+    return placed, _report(
+        chart,
+        placed=sum(len(bar.harmony) for bar in placed.bars),
+        chart_bar=(form_bar - 1) % count + 1 if inside else None,
+        chorus=(form_bar - 1) // count + 1 if inside else None,
+        before=0 if inside else 1 - form_bar,
+        **{"from": origin},
+    )
 
 
 def page_path(
@@ -319,11 +483,18 @@ def page_path(
     )
 
 
-def describe(notation, config: Config, settings: dict[str, Any]) -> dict[str, Any]:
+def describe(
+    notation,
+    config: Config,
+    settings: dict[str, Any],
+    changes: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """What the page holds, in the words the export bar says it: shared by
-    Export and the page view so the two lines cannot disagree."""
+    Export and the page view so the two lines cannot disagree. `changes` is
+    `page_of`'s report on the chord chart, None when there is none."""
     signature = notation.bars[0].time_signature
     return {
+        "changes": changes,
         "bars": len(notation.bars),
         "notes": sum(1 for bar in notation.bars for n in bar.notes if not n.is_rest),
         "key_fifths": notation.key_fifths,
@@ -354,7 +525,7 @@ def export_span(
     """Write the reviewed span to MusicXML and say what was written."""
     from swingscribe.benchmark import readability
 
-    notation, xml = page_of(
+    notation, xml, changes = page_of(
         document,
         config,
         run_config,
@@ -378,7 +549,7 @@ def export_span(
     return {
         "path": str(path),
         "name": path.name,
-        **describe(notation, config, settings),
+        **describe(notation, config, settings, changes),
         "readability": readable["readability"],
         "tie_rate": readable["tie_rate"],
         "short_rests": readable["short_rests"],
