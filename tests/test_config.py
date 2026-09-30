@@ -75,3 +75,18 @@ def test_environment_overrides_the_yaml(tmp_path, monkeypatch):
     assert config.cache_dir == tmp_path / "from-env"
     assert config.gui.library_dir == "/env/music"
     assert config.gui.port == 9999  # the yaml's other gui field survives the merge
+
+
+def test_the_horn_hole_filler_is_on_by_default_and_can_be_switched_off(monkeypatch):
+    """Basic Pitch fills a horn's holes by default (docs/frontend-bakeoff.md);
+    the environment switches it off like any other field, and a horn with it
+    off keys as a horn did before it existed."""
+    assert Config().transcribe.horn_fill_gaps is True
+    assert Config().stage_config("transcribe")["horn_fill_gaps"] is True
+    monkeypatch.setenv("SWINGSCRIBE_TRANSCRIBE__HORN_FILL_GAPS", "false")
+    off = Config()
+    assert off.transcribe.horn_fill_gaps is False
+    assert "horn_fill_gaps" not in off.stage_config("transcribe")
+    assert "horn_fill_gaps" not in Config(transcribe={"ensemble": "trio"}).stage_config(
+        "transcribe"
+    )

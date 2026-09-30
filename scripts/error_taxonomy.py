@@ -466,10 +466,12 @@ def discover(db, runs, log=print):
         name = run_eval.sidecar_name(sidecar_path, sidecar)
         if name not in runs or not (run_eval.BENCH / name).is_file():
             continue
-        # The Omnibook set stays out of the WJazzD identification, as it does
-        # in run_eval: several of its sides are in the database too, and are
-        # already scored from benchmark/wjazzd/ under their own names.
-        if run_eval.is_omnibook(name):
+        # The Omnibook set and the PDF pages stay out of the WJazzD
+        # identification, as they do in run_eval (is_located): several of their
+        # recordings are in the database too -- a page's audio is often a copy
+        # of a WJazzD track -- and are already scored from benchmark/wjazzd/
+        # under their own names.
+        if run_eval.is_located(name):
             continue
         run = runs[name]
         onsets = np.array([n["onset"] for n in run["notes"]])

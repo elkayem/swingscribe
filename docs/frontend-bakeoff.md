@@ -346,3 +346,239 @@ halves:
 `--subset tuning --wjazz-only` restricts a run to the declared tuning
 subset. Everything written is under `<scratch>` or `~/bakeoff`: the notes
 are derived from commercial recordings and never enter the repo.
+
+## Shipped (2026-09-30)
+
+The hybrid is the default for every horn. What ships, and the numbers it
+reads through the product path rather than through this bake-off's
+instrument.
+
+### What ships
+
+- **`swingscribe/basic_pitch.py`**, a numba-free port of what the WSL run
+  executed: basic-pitch 0.4.0's windowing (`window_audio_file`,
+  `run_inference`, `unwrap_output`), `get_infered_onsets`,
+  `output_to_notes_polyphonic` without the melodia trick, and
+  `model_frames_to_time` verbatim. `scipy.signal.argrelmax` is a numpy
+  mask; the decoder keeps the upstream's dtypes. Apache-2.0, credited in
+  the module and in `packaging/NOTICES.md`.
+- **The graph**, `swingscribe/basic-pitch-nmp.onnx`: basic-pitch 0.4.0's
+  `saved_models/icassp_2022/nmp.onnx` byte for byte (SHA-256
+  `2c3c1d14...`, held by a test), 230 KB, its licence beside it. It runs on
+  **onnxruntime 1.29.0**, now in the `ml` group at the version the `omr` and
+  `roformer` groups already locked, so `uv.lock` moved by two lines. It
+  loads and runs under Smart App Control on the dev machine. `*.onnx` is
+  gitignored as model weights, so the wheel names it as a hatch artifact.
+- **The stage**: `transcribe.analyze`, LAST (after the line's own bleed
+  floors, as measured), calls `_fill_horn_holes` when
+  `TranscribeConfig.uses_horn_fill` -- `horn_fill_gaps` (default True) and
+  not `uses_piano_oracle`. The gates are `horn_fill_*` fields at the
+  bake-off's values (onset 0.8, frame 0.3, 23 ms, a 40 ms hole, amplitude
+  0.3, +4 ms). A filled note's source is `<stem>:basic-pitch`. Without
+  onnxruntime, or with its DLL refused, the stage prints `Basic Pitch
+  unavailable (...); keeping CREPE` and returns CREPE's line.
+- **Keys.** The fields dump only where they act (the `model_serializer`
+  TranscribeConfig already had): a horn with the fill on keys differently,
+  as it must; a horn with it off keys exactly as before; a pianist's dump
+  never carries them, whatever their values. Over run_eval's 122 run keys:
+  the 100 horn fingerprints moved, the 22 pianist takes' did not, and the
+  pianists' cached notes are identical to the pre-change snapshot, 22 of 22.
+- **Cost.** About a second of CPU per solo once the session is up (109 s of
+  audio in 0.9 s, 168 s in 1.2 s; the first call in a process adds ~6 s of
+  imports). A whole horn run through run_eval on the GPU took 4-55 s,
+  median 11, CREPE's pass included (100 runs); the fill added 1,167 notes
+  to 94 of them.
+
+### Fidelity: the port against the WSL run
+
+Over the bake-off's 111 regions (37,531 notes in the WSL decode), matching
+a note by pitch and onset within 1 ms:
+
+| what differs from the WSL run | notes identical | within a frame | port only | WSL only |
+|---|---|---|---|---|
+| nothing (the port's decoder on the WSL posteriorgrams) | 37,531 | 0 | 0 | 0 |
+| onnxruntime 1.29 on Windows; soxr resampling; posteriorgrams rounded to float16 as the bake-off stored them | 37,531 | 0 | 0 | 0 |
+| torchaudio resampling, float16 | 37,496 | 9 | 22 | 26 |
+| **torchaudio, float32 (what ships)** | **37,502** | **16** | **166** | **13** |
+
+The decoder, the windowing and the graph are exact. The resampler adds or
+drops 48 notes in 37,531 (22 + 26) and moves 9 by a frame; decoding
+float32 rather than the bake-off's float16 storage keeps about 140 more
+notes that rounding had put under a threshold. Posteriorgram |difference|, shipped path against WSL: mean
+0.0001 (frames) and 0.0002 (onsets).
+
+Re-scored with `frontend_bakeoff.py` from the port's own notes (the same
+fixed CREPE fit, the same gates): WJazzD **+0.0071 [+0.0051, +0.0093]**,
+49 up / 1 down / 23 level over 73, against the WSL run's +0.0070 with the
+same counts. The resampler and the float32 decode move the hybrid by
++0.0001: held out +0.0067 both ways, the tuning subset +0.0078 against
++0.0077, and the Omnibook, hand-score and page rows of both tables
+identical to the fourth decimal.
+
+### Through the product path (run_eval)
+
+`scripts/run_eval.py --db wjazz/wjazzd.db --cache-dir
+benchmark/.swingscribe-cache`, every horn re-transcribed by the stage (CREPE
+on the GPU, Basic Pitch on the CPU). Other work was in progress in the same
+checkout, so a CONTROL card was scored first: the same working tree with
+the fill switched off by environment and the notes read from the
+pre-change cache. It reproduces **all 3,628 pinned numbers**, so every
+move below is the fill's. The stage's notes match the bake-off's
+prediction (the CREPE line filled from the port's notes by `fill_gaps`)
+exactly (onsets within 2 ms) on 95 of 100 horn runs; the other five
+differ by one or two notes each -- a CREPE onset one 10 ms frame away on
+the GPU, or one fill decided the other way beside it.
+
+Every pinned summary mean that moved, paired over the same tracks (95%
+interval resampled by recording; up / down / level by recording; `*` the
+interval excludes zero):
+
+| set | measure | before | after | change | n | up / down / level |
+|---|---|---|---|---|---|---|
+| WJazzD | note F1 | 0.8580 | **0.8651** | **+0.0071 [+0.0052, +0.0094]*** | 73 | 52 / 2 / 19 |
+| | (precision) | 0.8720 | 0.8697 | -0.0023 [-0.0033, -0.0013]* | 73 | 5 / 30 / 38 |
+| | (recall) | 0.8467 | 0.8626 | +0.0159 [+0.0125, +0.0198]* | 73 | 62 / 0 / 11 |
+| | beat F1 | 0.9424 | 0.9425 | +0.0001 [+0.0000, +0.0002] | 73 | 2 / 0 / 71 |
+| | placement (Flex-Q collateral) | 0.8555 | 0.8582 | +0.0027 [+0.0008, +0.0050]* | 73 | 28 / 16 / 29 |
+| | confidence AUC against the false positives | 0.6456 | 0.6474 | +0.0018 [-0.0012, +0.0050] | 73 | 30 / 30 / 13 |
+| | false positives in the least-confident 10% | 0.2697 | 0.2597 | -0.0100 [-0.0211, -0.0000]* | 73 | 22 / 34 / 17 |
+| | ... in the least-confident 20% | 0.4100 | 0.4115 | +0.0015 [-0.0041, +0.0072] | 73 | 31 / 24 / 18 |
+| | pooled: AUC / low 10% / low 20% / false positives | 0.6374 / 0.2516 / 0.3936 / 4,320 | 0.6403 / 0.2431 / 0.3953 / 4,512 | pooled, not paired | 73 | |
+| Omnibook | pitch F1 | 0.7905 | **0.7975** | **+0.0070 [+0.0046, +0.0099]*** | 22 | 15 / 0 / 7 |
+| | note F1 | 0.5368 | 0.5417 | +0.0049 [+0.0031, +0.0068]* | 22 | 15 / 0 / 7 |
+| | rhythm | 0.7796 | 0.7843 | +0.0047 [-0.0023, +0.0110] | 22 | 14 / 7 / 1 |
+| | value | 0.7113 | 0.7197 | +0.0084 [+0.0028, +0.0141]* | 22 | 15 / 4 / 3 |
+| | placement | 0.8571 | 0.8600 | +0.0029 [-0.0008, +0.0063] | 22 | 12 / 4 / 6 |
+| | readability | 0.9979 | 0.9975 | -0.0004 [-0.0010, +0.0002] | 22 | 1 / 3 / 18 |
+| | edit cost per 100 notes | 68.15 | 67.33 | -0.81 [-1.57, -0.10]* | 22 | 8 / 13 / 1 |
+| | ... deletions | 11.21 | 9.42 | -1.79 [-2.27, -1.34]* | 22 | 0 / 21 / 1 |
+| | ... insertions | 6.99 | 8.00 | +1.01 [+0.74, +1.30]* | 22 | 22 / 0 / 0 |
+| | ... value beside a hearing edit | 14.16 | 13.78 | -0.38 [-0.75, +0.01] | 22 | 5 / 16 / 1 |
+| | ... share beside a hearing edit | 0.4220 | 0.4069 | -0.0151 [-0.0232, -0.0079]* | 22 | 3 / 18 / 1 |
+| | ... pitch / position / position beside / value | 11.51 / 16.29 / 11.67 / 22.15 | 11.53 / 16.44 / 11.62 / 21.96 | all intervals span zero | 22 | |
+| hand scores (12; the 5 horns can move) | note F1 | 0.5368 | 0.5373 | +0.0005 [-0.0008, +0.0022] | 12 | 2 / 1 / 9 |
+| | pitch F1 (not a pinned mean) | 0.8629 | 0.8625 | -0.0004 [-0.0010, +0.0000] | 12 | 0 / 1 / 11 |
+| | rhythm (not a pinned mean) | 0.8455 | 0.8413 | -0.0043 [-0.0108, +0.0001] | 12 | 0 / 3 / 9 |
+| | placement | 0.9026 | 0.9004 | -0.0022 [-0.0051, -0.0003]* | 12 | 0 / 4 / 8 |
+| | edit cost per 100 notes | 55.28 | 56.07 | +0.80 [+0.02, +1.99]* | 12 | 4 / 0 / 8 |
+| | ... insertions | 11.44 | 11.83 | +0.39 [+0.07, +0.80]* | 12 | 4 / 0 / 8 |
+| | ... deletions | 5.70 | 5.52 | -0.19 [-0.36, -0.03]* | 12 | 0 / 4 / 8 |
+| | ... position / value | 12.90 / 19.60 | 13.23 / 19.91 | +0.32 [-0.01, +0.84] / +0.30 [+0.00, +0.78] | 12 | |
+| PDF pages, silver (3) | pitch F1 | 0.8665 | 0.8705 | +0.0040 [+0.0017, +0.0084]* | 3 | 1 / 0 / 2 |
+| | note F1 | 0.5350 | 0.5381 | +0.0031 [-0.0004, +0.0058] | 3 | 2 / 0 / 1 |
+| | rhythm | 0.8211 | 0.8187 | -0.0024 [-0.0033, -0.0010]* | 3 | 0 / 2 / 1 |
+| | edit cost per 100 notes | 56.28 | 56.16 | -0.12 [-0.51, +0.46] | 3 | 1 / 2 / 0 |
+| all pages | readability | 0.9959 | 0.9955 | -0.0004 | pooled | |
+
+Smaller moves, all inside their intervals, are in the card. By instrument
+on WJazzD: alto 0.840 -> 0.849 (13), tenor 0.865 -> 0.870 (21), trumpet
+0.867 -> 0.872 (26), trombone 0.826 -> 0.830 (5), soprano 0.801 -> 0.841
+(3), guitar 0.887 -> 0.891 (1). The two solos down are Chet Baker's Long
+Ago and Far Away (0.8988 -> 0.8961) and Wayne Shorter's Footprints (0.7564
+-> 0.7505). The product path reads 52 / 2 / 19 where the bake-off read 49 /
+1 / 23 at the same mean, because run_eval fits each solo on its own notes
+(`identify_all` on the hybrid's), where the bake-off froze CREPE's fit
+(beat F1 moved on two solos), and five runs differ by a note or two.
+
+**Nothing moved for a pianist**: 11 tracks, both takes, 644 per-track
+numbers, every one identical to the control; the pianists' paired
+summaries (`pianist_*`) did not move either.
+
+Two costs on the record:
+
+- **The listener's hand scores read a little worse.** Four of their five
+  horn pages gain notes the transcriber did not write (insertions +0.39
+  per 100 reference notes over the twelve); four sit slightly less on the
+  bar (-0.0022) and three lose a little rhythm. A human transcriber who
+  leaves an ornament out is not wrong, and the bake-off's page table said
+  the same before this shipped. The Omnibook, which writes its sixteenths,
+  gains pitch and note F1 on 15 sides and loses none, and value on 15 of
+  22.
+- **Confidence now mixes two scales.** A filled note's `confidence` is
+  Basic Pitch's amplitude (0.3-1.0); a CREPE note's is its periodicity. The
+  least-confident tenth of a solo now holds 26% of its false positives,
+  not 27% (-0.0100 [-0.0211, -0.0000]), with the AUC level. The review
+  shades by confidence (E5); calibrating the filled notes onto CREPE's
+  scale is a follow-up, not a reason to hold the fill.
+
+### The error taxonomy (docs/error-taxonomy.md)
+
+After `wjazz_reviews.py` on both sets, so every class has its frame
+evidence again (73 of 73 WJazzD solos, 22 of 22 Omnibook sides). Counts
+paired by solo; every class named here moved beyond two paired standard
+errors, and "beyond 2 sd" means beyond the class's spread across solo sets
+too.
+
+- **WJazzD, 73 solos**: errors 7,624 -> 7,227; misses 3,304 -> 2,715;
+  false positives 2,085 -> 2,271; pairs 2,235 -> 2,241.
+  Down (solos down / up): `too_short` 771 -> 546 (51 / 1; beyond 2 sd),
+  `squeezed` 1,124 -> 928 (50 / 1), `dropped` 179 -> 105 (43 / 0; beyond
+  2 sd), `merged` 473 -> 423 (23 / 2), `tracked_other` 257 -> 228 (18 /
+  0), `loose` 229 -> 201 (22 / 8), `dropped_register` 47 -> 29 (11 / 0),
+  `timing_late` 360 -> 346 (10 / 1).
+  Up (solos up / down): `fragment_neighbour` 632 -> 686 (31 / 0),
+  `split_sustain` 579 -> 617 (19 / 0), `fragment_other` 189 -> 226 (16 /
+  0), `neighbour` 841 -> 870 (24 / 6), `between_notes` 263 -> 287 (18 /
+  0), `attack_transient` 204 -> 216, `between_phrases` 101 -> 113,
+  `body_late` 170 -> 178, `bleed_cross_stem` 101 -> 107,
+  `bleed_register` 30 -> 34.
+- **Omnibook, 22 sides**: errors 2,743 -> 2,660; misses 1,085 -> 903;
+  false positives 658 -> 757.
+  Down (sides down / up): `squeezed` 470 -> 385 (19 / 0), `tracked_other`
+  152 -> 125 (16 / 0), `too_short` 127 -> 90 (14 / 1; beyond 2 sd),
+  `dropped` 55 -> 34 (10 / 3).
+  Up (sides up / down): `fragment_other` 195 -> 239 (17 / 0),
+  `fragment_neighbour` 262 -> 296 (17 / 2), `between_phrases` 72 -> 78
+  (5 / 0).
+
+The fill does what the bake-off said it would: the classes of a short note
+CREPE never segmented -- `too_short`, `squeezed`, `dropped` -- lose 495 on
+WJazzD. What it adds is the fragment (a filled note beside a line note at a
+neighbouring or other pitch, `fragment_*` +94) and `split_sustain` (+38, a
+filled onset inside a held reference note). `neighbour` reads 870, the
+bake-off's own count for this hybrid.
+
+The WJazzD block was classified from the notes cache WITHOUT the three PDF
+pages: `error_taxonomy.discover` skips the Omnibook keys because those
+sides are WJazzD solos too, but not the pages, which joined on 09-29 after
+the last taxonomy pin, and two of them (Embraceable You, Cheese Cake) are
+WJazzD solos 56 and 121 again. Classified with them, the block read 75
+solos, two of them twice and without a review trace (17 `unclassified`).
+Left out, it describes the same 73 solos run_eval's WJazzD mean is over.
+
+### The triples (docs/triples.md)
+
+The (c) row is ours -- our cached transcription over the solo, on our grid,
+against the cropped page -- so it is the one the fill can move. Over the 8
+triples:
+
+| measure | (c) before | (c) after | change | up / down / level | hearing share of the distance, before -> after |
+|---|---|---|---|---|---|
+| rhythm | 0.7741 | 0.7801 | +0.0060 [-0.0006, +0.0139] | 4 / 3 / 1 | 0.034 of 0.226 (15%) -> 0.028 of 0.220 (13%) |
+| value | 0.7292 | 0.7372 | +0.0080 [-0.0005, +0.0169] | 5 / 3 / 0 | 0.052 of 0.271 (19%) -> 0.044 of 0.263 (17%) |
+| coverage | 0.8514 | 0.8660 | +0.0147 [+0.0079, +0.0224] | 8 / 0 / 0 | 0.044 of 0.149 (30%) -> 0.030 of 0.134 (22%) |
+| on the bar | 0.8345 | 0.8364 | +0.0019 [-0.0032, +0.0080] | 2 / 2 / 4 | 0.017 of 0.166 (10%) -> 0.015 of 0.164 (9%) |
+
+Coverage rises on all eight: the page's notes we now have (the (c) input
+went from 2,557 to 2,613 notes, matched 2,165 -> 2,195, missing 352 ->
+322). WRITING remains the dominant share everywhere (0.185 of rhythm's
+0.220), which is what A1 already said.
+
+### Pins
+
+Both moved on purpose, 2026-09-30, from the runs above:
+`tests/regression/real-audio-baselines.json` from the hybrid card (3,628
+numbers, none new or gone; every per-track number of the 100 horn runs
+may move, no pianist's did), and `tests/regression/taxonomy-baseline.json`
+(WJazzD over its 73 solos, the Omnibook over its 22). The pre-A2 pins, and
+the CREPE-only notes cache they were made from, are what any variant that
+means to compare with CREPE ALONE must be scored against now: the live
+pins and `.benchmark-notes-c0.2-d0.0.json` hold the hybrid for every horn.
+With the fill switched off (`SWINGSCRIBE_TRANSCRIBE__HORN_FILL_GAPS=false`)
+a horn keys exactly as it did before, so its CREPE-only notes are one
+re-transcription away.
+
+The kill criterion for step 2 (fine-tune) is unchanged in shape and now
+read off the product: beat the hybrid on WJazzD note F1 over the dev split
+(0.8651 through run_eval; 0.8650 by this bake-off's instrument) and on the
+Omnibook's sub-eighth recall (0.7034), without costing pianist precision.

@@ -2,8 +2,58 @@
 
 SwingScribe is MIT licensed (see `LICENSE`). It runs on the libraries and
 model weights below, each under its own terms. The portable folder ships the
-libraries; the model weights are downloaded by SwingScribe on first use into
-`%LOCALAPPDATA%\SwingScribe\models` and are never redistributed by it.
+libraries and one small model, Basic Pitch's; the other model weights are
+downloaded by SwingScribe on first use into `%LOCALAPPDATA%\SwingScribe\models`
+and are never redistributed by it.
+
+## Model weights shipped inside SwingScribe
+
+**Basic Pitch** (Spotify; Rachel M. Bittner, Juan José Bosch, David Rubinstein,
+Gabriel Meseguer-Brocal and Sebastian Ewert, "A Lightweight
+Instrument-Agnostic Model for Polyphonic Note Transcription and Multipitch
+Estimation", ICASSP 2022), licensed under the Apache License, Version 2.0.
+It fills the holes in a horn's line (docs/frontend-bakeoff.md). SwingScribe
+ships its ICASSP 2022 model graph unmodified as
+`swingscribe\basic-pitch-nmp.onnx` (basic-pitch 0.4.0's
+`saved_models/icassp_2022/nmp.onnx`, 230 KB), and `swingscribe\basic_pitch.py`
+is a port of parts of basic-pitch 0.4.0's `inference.py` and
+`note_creation.py` to plain numpy (the package itself is not used). The
+licence text is beside the graph, `swingscribe\basic-pitch-LICENSE.txt`.
+Basic Pitch's NOTICE file reads:
+
+```
+Basic Pitch
+Copyright 2022 Spotify AB
+
+This product includes software developed at
+Spotify AB (http://www.spotify.com/).
+
+This product includes software from Librosa (ISC).
+* Copyright (C) 2013--2017, librosa development team.
+
+This product includes software from mir_eval (MIT)
+* Copyright (C) 2014 Colin Raffel
+
+This product includes software from numpy (BSD)
+* Copyright (C) 2005-2022, NumPy Developers.
+
+This product includes software from pretty-midi (MIT)
+* Copyright (C) 2014 Colin Raffel
+
+This product includes software from resampy (ISC)
+* Copyright (C) 2016, Brian McFee
+
+This product includes software from scipy (BSD)
+* Copyright (C) 2001-2002 Enthought, Inc. 2003-2022, SciPy Developers
+
+This product includes software from tensorflow (Apache 2.0)
+* Copyright (C) 2019 Google, LLC <packages@tensorflow.org>
+
+The tests for `basic-pitch` include audio files from the
+Vocadito dataset liscened under Creative Commons
+Attribution 4.0 International. The dataset can be found at:
+https://zenodo.org/record/5578807#.YnRm5vPMKDU
+```
 
 ## Model weights (downloaded on first use)
 

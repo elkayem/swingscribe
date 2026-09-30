@@ -924,3 +924,135 @@ def test_the_piano_oracle_gets_a_passthrough_numba_when_its_dll_is_blocked(monke
 
     assert twice(21) == 42
     assert numba.njit(twice) is twice
+
+
+# ── A2: Basic Pitch fills the holes in a HORN's line ─────────────────────
+
+
+def _crepe_line(*onsets, pitch=60):
+    return [
+        NoteEvent(onset=t, duration=0.2, pitch=pitch, confidence=0.9, source="other:crepe")
+        for t in onsets
+    ]
+
+
+def test_basic_pitch_fills_a_hole_in_a_horns_line_and_nothing_else(monkeypatch):
+    """The bake-off's hybrid: Basic Pitch's note where the line has a hole,
+    at the bake-off's gates. Its note under a line note, and its faint one,
+    stay out; CREPE's notes come back as the same objects."""
+    pytest.importorskip("numpy", reason="ml dependency group not installed")
+    from swingscribe import basic_pitch
+    from swingscribe.stages import transcribe as stage
+
+    seen = {}
+
+    def heard(whole, rate, region, **decode):
+        seen.update(decode, region=region)
+        return [
+            {"onset": 1.01, "duration": 0.10, "pitch": 60, "confidence": 0.9},  # the line's own
+            {"onset": 1.50, "duration": 0.05, "pitch": 62, "confidence": 0.5},  # a hole
+            {"onset": 2.50, "duration": 0.05, "pitch": 63, "confidence": 0.2},  # too faint
+        ]
+
+    monkeypatch.setattr(basic_pitch, "transcribe", heard)
+    crepe = _crepe_line(1.0, 2.0, 3.0)
+    tc = TranscribeConfig(region=(0.5, 3.5))
+    line = stage._fill_horn_holes(None, 44100, tc, crepe)
+    assert [n.onset for n in line] == [1.0, pytest.approx(1.504), 2.0, 3.0]  # 4 ms late
+    assert line[0] is crepe[0] and line[2] is crepe[1] and line[3] is crepe[2]
+    assert (line[1].pitch, line[1].confidence, line[1].source) == (62, 0.5, "other:basic-pitch")
+    assert seen == {
+        "onset_threshold": 0.8,
+        "frame_threshold": 0.3,
+        "min_note_ms": 23.0,
+        "region": (0.5, 3.5),
+    }
+
+
+def test_the_horn_hole_is_40ms_not_the_pianists_60(monkeypatch):
+    """A note 50 ms after a line onset is a hole for a horn: the piano's 60
+    ms kept out exactly the short notes the horn line is missing."""
+    pytest.importorskip("numpy", reason="ml dependency group not installed")
+    from swingscribe import basic_pitch
+    from swingscribe.stages import transcribe as stage
+
+    monkeypatch.setattr(
+        basic_pitch,
+        "transcribe",
+        lambda *a, **k: [{"onset": 1.046, "duration": 0.04, "pitch": 62, "confidence": 0.6}],
+    )
+    crepe = [NoteEvent(onset=1.0, duration=0.06, pitch=60, confidence=0.9, source="other:crepe")]
+    crepe += _crepe_line(2.0)
+    line = stage._fill_horn_holes(None, 44100, TranscribeConfig(region=(0.0, 3.0)), crepe)
+    assert [n.pitch for n in line] == [60, 62, 60]
+    wide = TranscribeConfig(region=(0.0, 3.0), horn_fill_gap_ms=60.0)
+    assert [n.pitch for n in stage._fill_horn_holes(None, 44100, wide, crepe)] == [60, 60]
+
+
+def test_without_onnxruntime_a_horn_keeps_crepes_line_and_says_so(monkeypatch, capsys):
+    """CI has no ml group, and Application Control can refuse a DLL: either
+    way the stage reports it and keeps the line, never crashes. Rendered at
+    the model's own rate so no resampler is needed to reach the import."""
+    np = pytest.importorskip("numpy", reason="ml dependency group not installed")
+    from swingscribe import basic_pitch
+    from swingscribe.stages import transcribe as stage
+
+    basic_pitch.session.cache_clear()
+    _block_imports(monkeypatch, "onnxruntime")
+    crepe = _crepe_line(1.0, 2.0)
+    rate = basic_pitch.SAMPLE_RATE
+    try:
+        line = stage._fill_horn_holes(
+            np.zeros(rate * 4, np.float32), rate, TranscribeConfig(region=(0.5, 3.0)), crepe
+        )
+    finally:
+        basic_pitch.session.cache_clear()
+    assert line == crepe
+    assert "Basic Pitch unavailable" in capsys.readouterr().out
+
+
+def test_an_empty_line_is_not_given_one():
+    from swingscribe.stages import transcribe as stage
+
+    assert stage._fill_horn_holes(None, 44100, TranscribeConfig(), []) == []
+
+
+def test_only_a_horn_with_the_fill_on_uses_it():
+    assert TranscribeConfig().uses_horn_fill
+    assert not TranscribeConfig(horn_fill_gaps=False).uses_horn_fill
+    assert not TranscribeConfig(ensemble="trio").uses_horn_fill
+    assert not TranscribeConfig(ensemble="solo-piano").uses_horn_fill
+    assert not TranscribeConfig(piano_oracle=True).uses_horn_fill
+
+
+def test_the_horn_fill_moves_every_horn_key_and_no_pianists():
+    """Staleness is the unforgivable cache bug: a horn with the fill on
+    writes different notes, so its key must move -- and does, because its
+    dump carries the fill's fields. A pianist never reads them, so its dump
+    must not carry them, whatever their values; and a horn with the fill off
+    keys exactly as every horn did before the fields existed."""
+    horn = TranscribeConfig().model_dump(mode="json")
+    assert horn["horn_fill_gaps"] is True
+    assert horn["horn_fill_onset_threshold"] == 0.8
+    assert horn["horn_fill_gap_ms"] == 40.0
+
+    off = TranscribeConfig(horn_fill_gaps=False).model_dump(mode="json")
+    assert not any(name.startswith("horn_fill") for name in off)
+    assert {k: v for k, v in horn.items() if not k.startswith("horn_fill")} == off
+
+    for ensemble in ("trio", "solo-piano"):
+        pianist = TranscribeConfig(ensemble=ensemble).model_dump(mode="json")
+        assert not any(name.startswith("horn_fill") for name in pianist)
+        tweaked = TranscribeConfig(ensemble=ensemble, horn_fill_gaps=False, horn_fill_gap_ms=99.0)
+        assert tweaked.model_dump(mode="json") == pianist
+
+
+def test_a_changed_horn_fill_setting_is_a_different_key():
+    from swingscribe.cache import canonical_json
+
+    def key(**fields):
+        return canonical_json(TranscribeConfig(**fields).model_dump(mode="json"))
+
+    assert key() != key(horn_fill_onset_threshold=0.7)
+    assert key() != key(horn_fill_gaps=False)
+    assert key(ensemble="trio") == key(ensemble="trio", horn_fill_onset_threshold=0.7)

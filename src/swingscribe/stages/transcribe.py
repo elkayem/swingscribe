@@ -28,6 +28,13 @@ CREPE's per-frame pitch bins (pitch_step_cost), so leaving the line the
 soloist is on has to be paid for. See `viterbi_bins` for why that matters and
 what it does not fix.
 
+A fifth, found by the A2 bake-off (docs/frontend-bakeoff.md): **the short
+note**. CREPE's segmentation hears 49% of WJazzD's notes under 60 ms; a
+note-level model, Basic Pitch, hears 60% on the same stems. No CREPE gate
+buys them back (every sweep is on the record), so a HORN's finished line has
+its holes filled from Basic Pitch (`_fill_horn_holes`, swingscribe/
+basic_pitch.py). A pianist's line is the piano model's and never gets it.
+
 Heavy imports (torch, torchcrepe, numpy, soundfile) stay inside functions:
 this module must stay importable without the ml dependency group.
 
@@ -828,6 +835,76 @@ def _consult_piano_oracle(
     return line, extra, oracle
 
 
+def _fill_horn_holes(
+    whole, rate: int, tc: TranscribeConfig, notes: list[NoteEvent], *, log: bool = False
+) -> list[NoteEvent]:
+    """A horn's line with Basic Pitch's notes merged in where it has a hole.
+
+    `corroborate.fill_gaps` -- the pianist's gap-filler -- with Basic Pitch
+    as the oracle and the bake-off's gates (TranscribeConfig.horn_fill_*):
+    a copied note needs a 40 ms hole, the line's register (an octave of the
+    local median) and an amplitude of 0.3, and lands 4 ms late. CREPE's
+    notes are returned untouched, as the same objects; a filled note's
+    source says where it came from.
+
+    `whole` is the WHOLE stem, not the cropped region: the model hears the
+    region plus a second either side, as it did when it was measured.
+
+    Unavailable is not an error: without onnxruntime (CI, or an install
+    without the ml group) or with its DLL refused, the stage says so and
+    keeps CREPE's line, exactly as the piano oracle does. Anything else
+    raises -- a bug here must not pass for a missing model.
+    """
+    if not notes:
+        return notes
+    from swingscribe import basic_pitch
+    from swingscribe import corroborate as corroboration
+
+    try:
+        progress.report("transcribe", 0.9, "filling holes with Basic Pitch")
+        heard = basic_pitch.transcribe(
+            whole,
+            rate,
+            tc.region,
+            onset_threshold=tc.horn_fill_onset_threshold,
+            frame_threshold=tc.horn_fill_frame_threshold,
+            min_note_ms=tc.horn_fill_min_note_ms,
+        )
+    except (ImportError, OSError) as exc:
+        print(f"transcribe: Basic Pitch unavailable ({type(exc).__name__}: {exc}); keeping CREPE")
+        return notes
+    as_dicts = [
+        {"onset": n.onset, "duration": n.duration, "pitch": n.pitch, "confidence": n.confidence}
+        for n in notes
+    ]
+    originals = {id(d): n for d, n in zip(as_dicts, notes, strict=True)}
+    merged, stats = corroboration.fill_gaps(
+        as_dicts,
+        heard,
+        gap_tolerance=tc.horn_fill_gap_ms / 1000.0,
+        min_confidence=tc.horn_fill_min_confidence,
+        onset_shift=tc.horn_fill_onset_shift_ms / 1000.0,
+    )
+    if log or stats["filled"]:
+        print(
+            f"transcribe: Basic Pitch heard {len(heard)} notes; "
+            f"filled {stats['filled']} hole(s) in the line"
+        )
+    line = []
+    for n in merged:
+        original = originals.get(id(n))
+        if original is None:
+            original = NoteEvent(
+                onset=n["onset"],
+                duration=n["duration"],
+                pitch=int(n["pitch"]),
+                confidence=n["confidence"],
+                source=f"{tc.stem}:basic-pitch",
+            )
+        line.append(original)
+    return line
+
+
 def analyze(
     stem_path: str, tc: TranscribeConfig, *, log: bool = False
 ) -> tuple[list[NoteEvent], FrameDiagnostics]:
@@ -842,8 +919,8 @@ def analyze(
     import torchaudio
 
     data, rate = soundfile.read(stem_path, dtype="float32", always_2d=True)
-    mono = data.mean(axis=1)
-    mono, region_offset = crop_region(mono, rate, tc.region)
+    whole = data.mean(axis=1)  # Basic Pitch hears a margin either side of the region
+    mono, region_offset = crop_region(whole, rate, tc.region)
     if log and tc.region:
         print(f"transcribe: region {tc.region[0]:.1f}-{tc.region[1]:.1f}s of {tc.stem} stem")
 
@@ -943,6 +1020,13 @@ def analyze(
         )
     if log and len(notes) != before:
         print(f"transcribe: {before - len(notes)} notes rejected as bleed under the line's level")
+
+    # A2: a horn's line with Basic Pitch's notes where it has a HOLE. Last,
+    # because that is what was measured: the bake-off filled the harness's
+    # finished CREPE line (docs/frontend-bakeoff.md), and a filled note is the
+    # model's word, not the line's, so the line's own floors do not judge it.
+    if tc.uses_horn_fill:
+        notes = _fill_horn_holes(whole, rate, tc, notes, log=log)
 
     diagnostics = FrameDiagnostics(
         hop_s=hop_s,

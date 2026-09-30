@@ -293,12 +293,50 @@ class TranscribeConfig(BaseModel):
     # 20 ms is the measured median lead, not the F1-optimal value
     # (docs/error-taxonomy-review.md, 3b.2).
     piano_line_onset_shift_ms: float = 20.0
+    # ── A2: Basic Pitch fills the holes in a HORN's line ─────────────────
+    # CREPE's segmentation drops the short note: it hears 49% of WJazzD's
+    # notes under 60 ms, Basic Pitch (Spotify, Apache-2.0, a 230 KB ONNX
+    # graph vendored in the package -- swingscribe/basic_pitch.py) hears 60%.
+    # As the LINE the model loses in every form (its weak onsets on a horn
+    # stem are the comping); as a hole-filler -- `corroborate.fill_gaps`,
+    # the pianist's, with Basic Pitch as the oracle -- it read WJazzD note F1
+    # 0.8580 -> 0.8650, +0.0070 [+0.0051, +0.0093], 49 up / 1 down over 73
+    # (+0.0067 on the 51 not used to choose these numbers) and the
+    # Omnibook's sub-eighth recall 0.660 -> 0.703, 21 of 22 sides up
+    # (docs/frontend-bakeoff.md). ON by default for horns; a pianist never
+    # reads it -- the pianist's line is the piano model's, and its key must
+    # not move -- so `uses_piano_oracle` gates every use and the dump below.
+    horn_fill_gaps: bool = True
+    # The decode: an onset peak of at least this, a note held while the
+    # frame activation stays over `horn_fill_frame_threshold`, and longer
+    # than this many ms (Basic Pitch's own 127.7 ms default deletes exactly
+    # the notes in question: recall under 60 ms 0.098). The onset threshold
+    # is the one that matters -- weaker onsets on a horn stem are the band;
+    # 0.7-0.8 is a plateau on the tuning subset, 0.4 cost 16 of 22 solos.
+    horn_fill_onset_threshold: float = 0.8
+    horn_fill_frame_threshold: float = 0.3
+    horn_fill_min_note_ms: float = 23.0
+    # The hole: no line onset within this of the copied one (the piano's 60
+    # ms keeps out exactly the short notes in question; 30-40 ms is the
+    # plateau), and the model's amplitude at least this.
+    horn_fill_gap_ms: float = 40.0
+    horn_fill_min_confidence: float = 0.3
+    # Basic Pitch's matched onsets sit 3-4 ms early on the tuning subset;
+    # every copied onset is moved this much late.
+    horn_fill_onset_shift_ms: float = 4.0
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
         """Leave the line-selection fields OUT of the dump while the line is
         CREPE's or the track is a horn's, so those key exactly as they did
         before the fields existed.
+
+        The horn hole-filler's fields are the same rule the other way round:
+        they are dumped only where they act -- a horn with the fill ON -- so a
+        pianist's key did not move when they arrived, and a horn with the
+        fill switched OFF keys exactly as every horn did before (its cached
+        CREPE passes are still whole). A horn with the fill on keys
+        differently, as it must: its notes are different.
 
         Every transcribe cache key — the pipeline's stage key, the GUI's
         review key, run_eval's note fingerprint — is a hash of this dump. A
@@ -320,7 +358,18 @@ class TranscribeConfig(BaseModel):
                 "piano_line_onset_shift_ms",
             ):
                 data.pop(name, None)
+        if not self.uses_horn_fill:
+            for name in type(self).model_fields:
+                if name.startswith("horn_fill_"):
+                    data.pop(name, None)
         return data
+
+    @property
+    def uses_horn_fill(self) -> bool:
+        """Whether Basic Pitch fills the holes in this line: a horn's, with
+        the fill on. Never a pianist's (its line is the piano model's), and
+        this is the one gate the stage and the cache key both read."""
+        return self.horn_fill_gaps and not self.uses_piano_oracle
 
     @property
     def uses_piano_oracle(self) -> bool:

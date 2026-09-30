@@ -289,3 +289,34 @@ def test_the_merged_line_stays_in_time_order():
     line = [note(0.0, 67, 0.1), note(1.0, 67, 0.1), note(2.0, 67, 0.1)]
     merged, _stats = fill_gaps(line, [loud(1.5, 70), loud(0.5, 69)])
     assert [n["onset"] for n in merged] == sorted(n["onset"] for n in merged)
+
+
+# ── fill_gaps with Basic Pitch as the oracle (a HORN's line, A2) ─────────
+
+
+def heard(onset: float, pitch: int, amplitude: float, duration: float = 0.05) -> dict:
+    """A Basic Pitch note: an amplitude as `confidence`, and NO velocity."""
+    return {"onset": onset, "pitch": pitch, "duration": duration, "confidence": amplitude}
+
+
+def test_a_note_models_amplitude_is_read_as_the_confidence_itself():
+    """No `velocity`, so nothing is divided by 127: an amplitude of 0.35
+    clears the horn's 0.3 floor and one of 0.25 does not."""
+    line = [note(0.0, 67, 0.1), note(1.0, 67, 0.1)]
+    merged, stats = fill_gaps(line, [heard(0.5, 70, 0.35)], min_confidence=0.3)
+    assert stats["filled"] == 1 and merged[1]["confidence"] == 0.35
+    _merged, stats = fill_gaps(line, [heard(0.5, 70, 0.25)], min_confidence=0.3)
+    assert stats["filled"] == 0
+
+
+def test_a_short_note_just_after_a_line_note_is_a_hole_at_40ms_only():
+    """The horn's gate. A sixteenth at bebop tempo sits 50-60 ms from its
+    neighbour, and the piano's 60 ms tolerance called that "not a hole"."""
+    line = [note(0.0, 67, 0.04), note(1.0, 67, 0.1)]
+    oracle = [heard(0.046, 69, 0.6)]
+    _merged, stats = fill_gaps(line, oracle, min_confidence=0.3, onset_shift=0.004)
+    assert stats["filled"] == 0  # the piano's 60 ms
+    merged, stats = fill_gaps(
+        line, oracle, gap_tolerance=0.04, min_confidence=0.3, onset_shift=0.004
+    )
+    assert stats["filled"] == 1 and merged[1]["onset"] == pytest.approx(0.050)

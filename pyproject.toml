@@ -63,6 +63,16 @@ ml = [
     # Application Control blocks here (see torchcrepe above, same reason).
     # NOT basic-pitch: it pulls resampy (numba) and TensorFlow.
     "piano-transcription-inference>=0.0.6",
+    # A2 (2026-09-30): runs Basic Pitch's ONNX graph, which fills the holes
+    # in a horn's line (swingscribe/basic_pitch.py, docs/frontend-bakeoff.md).
+    # Not the basic-pitch PACKAGE -- see the line above; the graph (230 KB,
+    # Apache-2.0) is vendored in the package and the decoder ported to numpy.
+    # The version the omr and roformer groups already lock, so the lock moved
+    # by two lines. Upper bound is SMART APP CONTROL, as torch's and
+    # verovio's are: 1.29.0's DLLs load here (homr and the separator have run
+    # on them since 2026-09-02); a new release is new bytes, so load the graph
+    # under SAC before raising it.
+    "onnxruntime>=1.29,<1.30",
 ]
 # Local GUI (plan §13, M8). Its own group for the same reason as `ml`: plain
 # `uv sync` — and therefore CI — must stay light. Dev machines opt in with
@@ -142,6 +152,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/swingscribe"]
+# Basic Pitch's graph ships inside the package (swingscribe/basic_pitch.py).
+# `.gitignore` ignores every *.onnx as model weights, and hatchling leaves
+# ignored files out of a wheel -- which is how the portable build installs
+# SwingScribe -- so it is named here as an artifact.
+artifacts = ["src/swingscribe/basic-pitch-nmp.onnx"]
 
 [tool.ruff]
 target-version = "py311"

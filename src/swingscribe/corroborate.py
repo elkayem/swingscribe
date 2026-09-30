@@ -21,7 +21,8 @@ a working transcriber look broken, and telling them apart needs no ground
 truth at all — just the second opinion.
 
 Everything here is pure numpy over plain note dicts, so it runs in CI. The
-model that produces the second opinion lives in `piano.py`.
+model that produces the pianist's second opinion lives in `piano.py`; a
+horn's, which only ever fills holes (`fill_gaps`), in `basic_pitch.py`.
 """
 
 from typing import Any
@@ -267,10 +268,20 @@ def fill_gaps(
     - the oracle's VELOCITY. Its quietest reports are pedal ring and sympathetic
       resonance; the melody is rarely the softest thing sounding.
 
-    HORNS MUST NEVER REACH THIS. A piano model asked about a saxophone vouches
-    for nothing, so every hole would be filled with nothing, and the register
-    test would then be measuring noise. `TranscribeConfig.uses_piano_oracle`
-    is the gate — see `stages/transcribe.py`.
+    HORNS MUST NEVER REACH THIS WITH THE PIANO MODEL. A piano model asked
+    about a saxophone vouches for nothing, so every hole would be filled with
+    nothing, and the register test would then be measuring noise.
+    `TranscribeConfig.uses_piano_oracle` is the gate — see
+    `stages/transcribe.py`.
+
+    A horn reaches it with a DIFFERENT oracle (A2, 2026-09-30): Basic Pitch,
+    a note-level model trained on many instruments (`basic_pitch.py`),
+    whose notes carry no `velocity`, so their `confidence` -- the model's
+    amplitude, 0-1 -- is what `min_confidence` reads. Two gates were
+    re-measured for it (docs/frontend-bakeoff.md): the hole narrows to 40
+    ms, because the piano's 60 keeps out exactly the short notes a horn's
+    line is missing, and the confidence floor is 0.3. WJazzD note F1 0.8580
+    -> 0.8650 over 73 solos, 49 up and 1 down.
     """
     if not oracle or not notes:
         return list(notes), {"input": len(notes), "filled": 0, "kept": len(notes)}

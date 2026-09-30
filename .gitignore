@@ -24,6 +24,9 @@ tests/fixtures/*
 *.pt
 *.pth
 *.onnx
+# ...except the one graph that ships inside the package (A2 step 1.5):
+# without it a wheel builds clean and every horn silently keeps CREPE's line.
+!src/swingscribe/basic-pitch-nmp.onnx
 .swingscribe-cache/
 .cache/
 models/
