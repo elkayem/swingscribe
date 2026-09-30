@@ -249,10 +249,20 @@ def choose_reading(
     prior: tuple[dict[str, float], float] | None = None,
     next_occupied: bool = False,
     previous_pushed: bool = False,
+    pushed_last: bool = False,
 ) -> tuple[int, str]:
     """Pick the subdivision the notes in one beat actually fit, and under
     which timing reading: ("warped", the beat is swung) or ("raw", the beat
     is straight or ternary).
+
+    `pushed_last` is R28's one exception (QuantizeConfig.tuplet_pushed_last,
+    docs/writing-round2.md): with `inside`, a ternary grid may still be read
+    when exactly one onset leaves the beat, provided it is the LAST, sits
+    from LAG_PUSH_MIN on (the next downbeat played early, the threshold the
+    lag rule already uses), the figure before it starts on the downbeat,
+    the others alone pass the tuplet gate, and the next beat has no note of
+    its own at the line (`next_occupied`), so the pushed note lands nowhere
+    taken.
 
     `prior_weight`, in beats per nat, adds to each (grid, reading)
     candidate's snap error the surprisal of the figure it writes -- minus
@@ -359,7 +369,17 @@ def choose_reading(
         # Inside is judged on the grid in question: the sixth that lands a
         # sixteenth-triplet's last note at 5/6 is inside, whatever thirds say.
         voting = sum(1 for r in raw if snap(r, divisions)[0] < 1.0 - 1e-9) if inside else len(raw)
-        return voting >= gate and voting == len(raw)
+        if voting >= gate and voting == len(raw):
+            return True
+        return (
+            pushed_last
+            and inside
+            and not next_occupied
+            and voting == len(raw) - 1
+            and voting >= gate
+            and max(raw) >= LAG_PUSH_MIN
+            and snap(min(raw), divisions)[0] <= 1e-9
+        )
 
     allowed = [d for d in candidates if d % 3 != 0 or ternary_ok(d)]
     if not allowed:
@@ -569,6 +589,9 @@ def quantize_notes(
     figure_prior_weight: float = 0.0,
     timing: str = "swing",
     polyphonic: bool = False,
+    late_downbeat_max_onsets: int = 0,
+    isolated_lag_max_onsets: int = 0,
+    tuplet_pushed_last: bool = False,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -631,6 +654,8 @@ def quantize_notes(
         placed.append((index, position - index, max(0.0, warped_end - warped_start), pitch, chord))
         raw_by_beat.setdefault(index, []).append(position - index)
     lags = line_lag(raw_by_beat, lag_window_beats, lag_cap, lag_floor)
+    if isolated_lag_max_onsets > 0:
+        lags = {**isolated_lags(raw_by_beat, lags, isolated_lag_max_onsets, lag_cap), **lags}
 
     # Per note: beat index, lag-corrected warped position, duration, pitch,
     # lag-corrected raw offset, chord, and what the replay needs to put the
@@ -742,6 +767,7 @@ def quantize_notes(
                 o < 0.25 for o in per_beat.get(index + 1, []) + per_beat_raw.get(index + 1, [])
             ),
             previous_pushed=(index - 1) in pushed,
+            pushed_last=tuplet_pushed_last,
         )
         if prior is not None:
             grid = grids[index]
@@ -756,6 +782,20 @@ def quantize_notes(
         for index in quarter_triplet_pairs(per_beat_raw, beats, sections):
             grids[index] = grids[index + 1] = 3
 
+    def written_offsets(index: int) -> list[float]:
+        """A beat's notated offsets, snapped exactly as the loop below snaps
+        them: raw for a ternary or straight beat, warped otherwise."""
+        grid = grids.get(index, finest)
+        if grid % 3 == 0 or readings.get(index) == "raw":
+            return [snap(r, grid)[0] for r in per_beat_raw.get(index, [])]
+        return [snap(o, grid)[0] for o in per_beat.get(index, [])]
+
+    moved = (
+        late_downbeats({i: written_offsets(i) for i in per_beat}, late_downbeat_max_onsets)
+        if late_downbeat_max_onsets > 0
+        else set()
+    )
+
     out, positions = [], []
     for index, position, duration, pitch, raw, chord, original, star, star_l, lag in warped:
         grid = grids.get(index, finest)
@@ -769,11 +809,13 @@ def quantize_notes(
         # notation its feel back (swing AND lag) with no changes there, and
         # restore_residual stays exact by construction: unwarp(replay +
         # (original - replay)) is the raw position.
-        if grid % 3 == 0 or readings.get(index) == "raw":
-            notated_offset, _ = snap(raw, grid)
+        straight = grid % 3 == 0 or readings.get(index) == "raw"
+        notated_offset, _ = snap(raw if straight else position - index, grid)
+        if index in moved and abs(notated_offset - 0.25) < 1e-9:
+            notated_offset = 0.0  # the beat's late downbeat (late_downbeats)
+        if straight:
             played = relag_phase(notated_offset, lag)
         else:
-            notated_offset, _ = snap(position - index, grid)
             played = relag_phase(unwarp_phase(notated_offset, star_l), lag)
         replay_position = index + warp_phase(played, star)
         snapped = index + notated_offset
@@ -1074,6 +1116,91 @@ def line_lag(
     return lags
 
 
+# The first onset of a beat from here up to LAG_CANDIDATE_MAX is a downbeat
+# played late, for `isolated_lags`: the sounded band in which a human page
+# writes the beat 69% of the time and the "e" 11% (docs/triples.md, "0.19-0.31"),
+# widened to the band quantize's 16th grid sends to the "e".
+ISOLATED_LAG_MIN = 0.15
+# ...and the beat before must hold nothing from here on, where the eighth
+# grid already sends a note to this beat's line (`_collides_on_eighths` uses
+# the same line): shifted exactly onto its line, the late downbeat would
+# share it with that note. Guarded at LAG_PUSH_MIN, as `line_lag` is, the
+# rule dropped 18 of the WJazzD instrument's notes at two onsets; with this
+# guard and the last-onset one below, none (docs/writing-round2.md).
+ISOLATED_LAG_BEFORE_MAX = 0.75
+
+
+def isolated_lags(
+    raw_by_beat: dict[int, list[float]],
+    window_lags: dict[int, float],
+    max_onsets: int,
+    cap: float,
+) -> dict[int, float]:
+    """A lag for each beat that R29's window gave none, where the beat's own
+    first onset says the downbeat was played late (docs/writing-round2.md).
+
+    `line_lag` takes a median over a window, so a line on the beat with one
+    laid-back downbeat in it reads no lag, and that note is written on the
+    "e" -- 3.2% of the matched notes on the triples' human onsets, every one
+    sounded 0.20-0.30 late (docs/triples.md). Here a beat of at most
+    `max_onsets` onsets whose first sits from ISOLATED_LAG_MIN to
+    LAG_CANDIDATE_MAX is shifted by it (capped at `cap`), exactly as a
+    window lag would shift it, unless the beat before holds a note from
+    ISOLATED_LAG_BEFORE_MAX on: a grid may write that note on this beat's
+    line, and the shifted downbeat would share it (a note lost).
+
+    Off (QuantizeConfig.isolated_lag_max_onsets 0) and not recommended: up
+    on human onsets at three onsets, level on the hand scores and the
+    Omnibook at two, and at three it still drops one note of 198,983 on the
+    WJazzD instrument.
+    """
+    out: dict[int, float] = {}
+    for index, offsets in raw_by_beat.items():
+        if index in window_lags or not offsets or len(offsets) > max_onsets:
+            continue
+        first = min(offsets)
+        if not ISOLATED_LAG_MIN <= first <= LAG_CANDIDATE_MAX:
+            continue
+        # A last onset from LAG_PUSH_MIN on is not shifted (unlag_phase) but
+        # IS unwarped by the lag, which lowers the beat's swing point: warped
+        # it was the "a", straight it is the next beat's line, on its note.
+        if max(offsets) >= LAG_PUSH_MIN:
+            continue
+        before = raw_by_beat.get(index - 1)
+        if before and max(before) >= ISOLATED_LAG_BEFORE_MAX:
+            continue
+        out[index] = min(cap, first)
+    return out
+
+
+def late_downbeats(written: dict[int, list[float]], max_onsets: int) -> set[int]:
+    """Beats whose first note, written on the "e", is written on the beat
+    instead (QuantizeConfig.late_downbeat_max_onsets, docs/writing-round2.md).
+
+    `written` is every beat's notated offsets as the grid choice left them.
+    A beat qualifies when it holds at most `max_onsets` notes, its earliest
+    is on the "e" (so nothing of its own is on the beat line), and the beat
+    before wrote nothing onto that line (a note pushed to 1.0): moving the
+    note there loses nothing. A post-snap reading of the one note, not a
+    shift of the beat: the notes after it stay where the grid put them.
+
+    Off and not recommended: right on human onsets, decided DOWN on the hand
+    scores. On our own notes almost half the notes it moves are written
+    neither on the beat nor on the "e" by the page -- mostly later, in a
+    beat the page holds more notes in than we heard.
+    """
+    out = set()
+    for index, offsets in written.items():
+        if not offsets or len(offsets) > max_onsets:
+            continue
+        if abs(min(offsets) - 0.25) > 1e-9:
+            continue
+        if any(o >= 1.0 - 1e-9 for o in written.get(index - 1, [])):
+            continue
+        out.add(index)
+    return out
+
+
 def _collides_on_eighths(offsets: list[float], before: list[float], after: list[float]) -> bool:
     """Would reading this beat on the eighth grid put a note on a neighbour's?
 
@@ -1160,6 +1287,9 @@ def settings(qc: QuantizeConfig) -> dict:
         "figure_prior_weight": qc.figure_prior_weight,
         "timing": qc.timing,
         "polyphonic": qc.polyphonic,
+        "late_downbeat_max_onsets": qc.late_downbeat_max_onsets,
+        "isolated_lag_max_onsets": qc.isolated_lag_max_onsets,
+        "tuplet_pushed_last": qc.tuplet_pushed_last,
     }
 
 

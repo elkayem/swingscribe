@@ -644,19 +644,56 @@ class QuantizeConfig(BaseModel):
     # one position are a chord, not a grid too coarse. Set by the GUI's
     # "All notes" page (notation.py), never by a user directly.
     polyphonic: bool = False
+    # Writing research, round 2 (docs/writing-round2.md): three rules for the
+    # classes the triples expose (docs/triples.md), each OFF, each measured
+    # on the triples' human onsets, the twelve hand scores, the Omnibook and
+    # the WJazzD instrument -- and none recommended: each shrinks its class
+    # on human onsets and none is decided up on the pages. None dumps
+    # anything at its default, so no quantize key and no pin moved when they
+    # arrived.
+    #
+    # A beat of at most this many onsets whose FIRST onset is written on the
+    # "e", with nothing on the beat line before it, has that note written on
+    # the beat instead (quantize.late_downbeats): a downbeat played late
+    # inside a line that does not lag, which R29's window median cannot see.
+    # Decided DOWN on the hand scores' rhythm at 2 and 3. 0 is off.
+    late_downbeat_max_onsets: int = 0
+    # The same late downbeat read as a per-beat LAG instead (R29's shift,
+    # applied to one beat): a beat of at most this many onsets whose first
+    # onset sits 0.15-0.35 of a beat late and whose last sits before
+    # quantize.LAG_PUSH_MIN, with no window lag and nothing from 0.75 on in
+    # the beat before, is shifted by that onset (quantize.isolated_lags).
+    # Level on every set at 2; at 3 it drops a note. 0 is off.
+    isolated_lag_max_onsets: int = 0
+    # Let a ternary reading send the beat's LAST onset to the next beat line
+    # when it sits from quantize.LAG_PUSH_MIN on -- the next downbeat played
+    # early -- the figure before it starts on the beat, and the next beat
+    # has no note of its own there. R28 (`tuplet_needs_onsets_inside`)
+    # refuses every such beat, so a triplet followed by an anticipated
+    # downbeat was written in sixteenths. Half right on human onsets (the
+    # page writes thirds in 5 of 18 such beats), level on the pages.
+    # False is off.
+    tuplet_pushed_last: bool = False
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
-        """Leave `timing` and `polyphonic` out of the dump at their defaults,
-        so every quantize key reads exactly as it did before they existed --
-        the same device as TranscribeConfig's line fields. Quantize is only
-        arithmetic, but a key that moves for a change that alters no note is
-        a cache miss for nothing, and the pinned harness runs read these."""
+        """Leave `timing`, `polyphonic` and the round-2 rules out of the dump
+        at their defaults, so every quantize key reads exactly as it did
+        before they existed -- the same device as TranscribeConfig's line
+        fields. Quantize is only arithmetic, but a key that moves for a
+        change that alters no note is a cache miss for nothing, and the
+        pinned harness runs read these."""
         data = handler(self)
         if data.get("timing") == "swing":
             data.pop("timing", None)
-        if not data.get("polyphonic"):
-            data.pop("polyphonic", None)
+        for field in (
+            "polyphonic",
+            "late_downbeat_max_onsets",
+            "isolated_lag_max_onsets",
+            "tuplet_pushed_last",
+        ):
+            if not data.get(field):
+                data.pop(field, None)
         return data
 
 
@@ -694,14 +731,28 @@ class NotateConfig(BaseModel):
     # its last eight and D major over the whole. The part's transposition
     # still moves the written signature.
     key: int | None = None
+    # A note ON a beat line whose next onset is on a later beat line, a whole
+    # number of beats away and no more than this many, is written to fill
+    # the gap (notate.notated_durations): the quarter a transcriber writes
+    # where we wrote an eighth and an eighth rest. From the beat to the next
+    # beat both human corpora hold the note 92% of the time (Omnibook 347
+    # gaps, the twelve hand scores 249), while from the "and" they disagree
+    # (78% held against 29%). It is decided DOWN on value anyway, like
+    # `legato_cap` (docs/writing-round2.md): the gap it sees is OUR gap, and
+    # in two of three of ours the page's is not a beat -- a note only the
+    # page has, or the next note anticipated -- so our eighth and rest was
+    # right. 0 is off.
+    hold_to_beat: float = 0.0
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
-        """Leave `key` out of the dump while it is None, so every notate key
-        reads exactly as it did before the field existed."""
+        """Leave `key` and `hold_to_beat` out of the dump at their defaults,
+        so every notate key reads exactly as it did before they existed."""
         data = handler(self)
         if data.get("key") is None:
             data.pop("key", None)
+        if not data.get("hold_to_beat"):
+            data.pop("hold_to_beat", None)
         return data
 
     @property

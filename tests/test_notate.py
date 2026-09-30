@@ -822,3 +822,62 @@ def test_ballad_grids_are_writable_as_tuplet_32nds():
     assert [t for _s, _d, t in tenths] == [(5, 4)] * 5
     assert abs(tuplet_value(1.0 / 10.0, (5, 4)) - 0.125) < 1e-9
     assert abs(sum(d for _s, d, _t in tenths) - 0.5) < 1e-9
+
+
+# -- hold_to_beat (docs/writing-round2.md) --------------------------------
+#
+# `legato_cap` fills a gap by its LENGTH; the human pages decide by where it
+# STARTS. From the beat to the next beat both corpora hold the note 92% of
+# the time; from the "and" they disagree.
+
+
+def _held(notation, bar_index: int, beat: float) -> float:
+    return next(
+        n.duration
+        for n in notation.bars[bar_index].notes
+        if not n.is_rest and abs(n.beat - beat) < 1e-9
+    )
+
+
+def test_hold_to_beat_writes_a_quarter_from_the_beat_and_nothing_else():
+    """Beat one to beat two becomes a quarter; beat two to the "and" of
+    three (a gap of a beat and a half), the "and" of three to the "and" of
+    four (from the "and") and beat four's phrase break keep their rests."""
+    from swingscribe.stages.notate import build
+
+    notes = [
+        _q(1, 0.0, 0.4, 60),
+        _q(1, 1.0, 0.4, 62),
+        _q(1, 2.5, 0.4, 64),
+        _q(1, 3.5, 0.4, 65),
+        _q(2, 1.0, 0.4, 67),
+        _q(2, 3.0, 0.5, 69),
+    ]
+    plain = build(notes, [], swing=False, transpose=0)
+    held = build(notes, [], swing=False, transpose=0, hold_to_beat=1.0)
+    assert _held(plain, 0, 0.0) == pytest.approx(0.5)
+    assert _held(held, 0, 0.0) == pytest.approx(1.0)
+    for bar_index, beat in ((0, 1.0), (0, 2.5), (0, 3.5), (1, 1.0)):
+        assert _held(held, bar_index, beat) == pytest.approx(_held(plain, bar_index, beat))
+    # Two beats from beat two of bar 2 to beat four: only under a limit of two.
+    two = build(notes, [], swing=False, transpose=0, hold_to_beat=2.0)
+    assert _held(two, 1, 1.0) == pytest.approx(2.0)
+    assert _held(two, 0, 1.0) == pytest.approx(_held(plain, 0, 1.0))
+
+
+def test_hold_to_beat_is_off_by_default_keys_nothing_and_reaches_build():
+    from swingscribe.config import Config
+    from swingscribe.model import Document
+
+    assert Config().notate.hold_to_beat == 0.0
+    assert "hold_to_beat" not in Config().stage_config("notate")
+    notes = [_q(1, 0.0, 0.4, 60), _q(1, 1.0, 0.4, 62), _q(1, 2.0, 1.0, 64)]
+    document = Document(audio_path="solo.wav", sample_rate=44100, quantized={"other": notes})
+    plain = notate.run(document, Config()).notation
+    assert _held(plain, 0, 0.0) == pytest.approx(0.5)
+    config = Config()
+    config.notate.hold_to_beat = 1.0
+    assert config.notate.model_dump(mode="json")["hold_to_beat"] == 1.0
+    held = notate.run(document, config).notation
+    assert _held(held, 0, 0.0) == pytest.approx(1.0)
+    assert _held(held, 0, 1.0) == pytest.approx(1.0)

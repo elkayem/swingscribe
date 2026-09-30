@@ -1315,3 +1315,178 @@ def test_the_texture_fold_is_relative_to_the_beat_and_never_reaches_a_32nd_run()
     assert pitches == [60, 67, 69]
     assert chords == [[64], [], []]
     assert durations == [0.5, 0.1, 0.1]
+
+
+# ── writing research, round 2 (docs/writing-round2.md): three rules, all off ──
+
+
+def _line_with(beat_offsets: dict[int, list[float]], beat: float = 0.4, count: int = 14):
+    """An on-time line of eighth pairs, with the beats named in
+    `beat_offsets` played at those offsets instead. No swing spans, so what
+    is snapped is the raw timing."""
+    beats = [i * beat for i in range(count + 4)]
+    onsets = []
+    for i in range(2, count + 2):
+        onsets.extend(beats[i] + o * beat for o in beat_offsets.get(i, [0.0, 0.5]))
+    return onsets, beats
+
+
+def _written_by_beat(onsets, beats, **kwargs):
+    quantized, positions = quantize_notes(
+        onsets, [0.1] * len(onsets), [60] * len(onsets), beats, [], [], **kwargs
+    )
+    by_beat: dict[int, list[float]] = {}
+    for q in quantized:
+        by_beat.setdefault(int(q.beat), []).append(round(q.beat, 3))
+    return by_beat, quantized, positions
+
+
+def test_late_downbeats_names_a_lone_e_only_where_the_beat_line_is_free():
+    from swingscribe.stages.quantize import late_downbeats
+
+    written = {
+        4: [0.0, 0.5],
+        5: [0.25, 0.5],  # the late downbeat
+        6: [0.5, 1.0],  # pushes a note onto beat 7's line...
+        7: [0.25, 0.75],  # ...so beat 7's "e" must stay where it is
+        8: [0.25, 0.5, 0.75, 0.875],  # four notes: a run, not a late downbeat
+    }
+    assert late_downbeats(written, 3) == {5}
+    assert late_downbeats(written, 4) == {5, 8}
+    assert late_downbeats(written, 0) == set()
+
+
+def test_a_late_downbeat_in_an_on_time_line_is_written_on_the_beat_when_asked():
+    """Beat 8 is played (0.28, 0.5, 0.75) inside a line on the beat: the
+    window lag sees one late beat among on-time ones and takes nothing out,
+    so the sixteenth grid writes the "e". The rule writes the beat, keeps
+    every note, and the performance still replays exactly."""
+    onsets, beats = _line_with({8: [0.28, 0.5, 0.75]})
+    plain, _q, _p = _written_by_beat(onsets, beats)
+    assert plain[8] == [8.25, 8.5, 8.75]
+    asked, quantized, positions = _written_by_beat(onsets, beats, late_downbeat_max_onsets=3)
+    assert asked[8] == [8.0, 8.5, 8.75]
+    assert len(quantized) == len(onsets)
+    exact = replay_onsets(quantized, positions, beats, [], restore_residual=True)
+    assert max(abs(a - b) for a, b in zip(exact, onsets, strict=True)) < 1e-9
+    # Off by default: the same call without it is the plain reading.
+    assert _written_by_beat(onsets, beats, late_downbeat_max_onsets=0)[0][8] == plain[8]
+
+
+def test_a_late_downbeat_is_not_moved_onto_a_note_pushed_from_the_beat_before():
+    """Beat 7 ends with a note at 0.92 that the grid writes on beat 8's line;
+    beat 8's own "e" then has nowhere to go and stays, and no note is lost."""
+    onsets, beats = _line_with({7: [0.0, 0.5, 0.92], 8: [0.28, 0.5, 0.75]})
+    asked, quantized, _p = _written_by_beat(onsets, beats, late_downbeat_max_onsets=3)
+    assert len(quantized) == len(onsets)
+    assert asked[8] == [8.0, 8.25, 8.5, 8.75]
+
+
+def test_isolated_lags_shift_a_lone_late_beat_that_the_window_leaves_alone():
+    from swingscribe.stages.quantize import isolated_lags
+
+    raw = {i: [0.0, 0.5] for i in range(13)}
+    raw[4] = [0.25, 0.75]  # a lone late downbeat: shifted, to the cap
+    raw[5] = [0.0, 0.9]  # beat 5 plays beat 6's downbeat early...
+    raw[6] = [0.2, 0.7]  # ...so beat 6 is not shifted onto it
+    raw[8] = [0.25, 0.5, 0.75]  # three onsets: only under a limit of three
+    raw[9] = [0.1, 0.6]  # too little to be late
+    # Late, but its last onset is the next downbeat played early: the lag
+    # would unwarp it onto beat 12's line, where beat 12 has its own note.
+    raw[11] = [0.22, 0.9]
+    assert isolated_lags(raw, {}, 2, 0.2) == {4: 0.2}
+    assert isolated_lags(raw, {}, 3, 0.2) == {4: 0.2, 8: 0.2}
+    assert isolated_lags(raw, {}, 3, 0.3) == {4: 0.25, 8: 0.25}
+    assert isolated_lags(raw, {4: 0.1, 8: 0.1}, 3, 0.2) == {}  # a window lag stands
+
+
+def test_an_isolated_lag_writes_a_laid_back_pair_as_beat_and_and():
+    """(0.2, 0.82) with beat 9 starting on its line: on eighths the offbeat
+    would land on beat 9's note, so the collision guard keeps sixteenths and
+    the pair is written on the "e" and the "a" -- a human writes the beat
+    and the "and". Shifted by its own late downbeat, the pair is an eighth
+    pair."""
+    onsets, beats = _line_with({8: [0.2, 0.82]})
+    plain, _q, _p = _written_by_beat(onsets, beats)
+    assert plain[8] == [8.25, 8.75]
+    asked, quantized, positions = _written_by_beat(onsets, beats, isolated_lag_max_onsets=2)
+    assert asked[8] == [8.0, 8.5]
+    assert len(quantized) == len(onsets)
+    exact = replay_onsets(quantized, positions, beats, [], restore_residual=True)
+    assert max(abs(a - b) for a, b in zip(exact, onsets, strict=True)) < 1e-9
+
+
+def test_a_triplet_may_push_its_last_onset_to_the_next_line_when_asked():
+    """R28 refuses a ternary reading any of whose onsets thirds send to 1.0.
+    (0.02, 0.35, 0.68, 0.93) is a triplet and the next downbeat played
+    early; the exception reads it so, but not where the next beat has its
+    own note at the line, not for a last onset before LAG_PUSH_MIN, and not
+    for a figure that does not start on the beat."""
+    from swingscribe.stages.quantize import choose_reading
+
+    figure = [0.02, 0.35, 0.68, 0.93]
+    kwargs = {"raw_offsets": figure, "inside": True}
+    assert choose_reading(figure, (2, 4, 3), 3, 0.05, **kwargs)[0] == 4
+    assert choose_reading(figure, (2, 4, 3), 3, 0.05, pushed_last=True, **kwargs) == (3, "raw")
+    occupied = choose_reading(
+        figure, (2, 4, 3), 3, 0.05, pushed_last=True, next_occupied=True, **kwargs
+    )
+    assert occupied[0] != 3
+    laid_back = [0.1, 0.35, 0.6, 0.85]  # the last is not the next downbeat
+    assert (
+        choose_reading(
+            laid_back, (2, 4, 3), 3, 0.05, raw_offsets=laid_back, inside=True, pushed_last=True
+        )[0]
+        != 3
+    )
+    late = [0.3, 0.55, 0.8, 0.95]  # starts on no downbeat
+    assert (
+        choose_reading(late, (2, 4, 3), 3, 0.05, raw_offsets=late, inside=True, pushed_last=True)[0]
+        != 3
+    )
+
+
+def test_the_pushed_triplet_keeps_every_note_on_the_page():
+    """Through quantize_notes: beat 8 is written as a triplet and its fourth
+    note on beat 9's line, where beat 9 has nothing of its own; with a note
+    of beat 9's own there, the beat is read binary and nothing is lost."""
+    onsets, beats = _line_with({8: [0.02, 0.35, 0.68, 0.93], 9: [0.5]})
+    asked, quantized, _p = _written_by_beat(
+        onsets, beats, tuplet_pushed_last=True, tuplet_needs_onsets_inside=True
+    )
+    assert len(quantized) == len(onsets)
+    assert asked[8] == [8.0, 8.333, 8.667]
+    assert asked[9] == [9.0, 9.5]
+    busy, _b = _line_with({8: [0.02, 0.35, 0.68, 0.93]})
+    written, quantized, _p = _written_by_beat(
+        busy, _b, tuplet_pushed_last=True, tuplet_needs_onsets_inside=True
+    )
+    assert len(quantized) == len(busy)
+    assert all(abs(b * 3 - round(b * 3)) > 1e-6 or b == int(b) for b in written[8])
+
+
+def test_the_round_two_rules_ship_off_and_key_nothing():
+    """All three off; at their defaults they dump nothing, so no quantize
+    key and no pin moved when they arrived; switched on, they key."""
+    from swingscribe.stages.quantize import settings
+
+    qc = Config().quantize
+    assert qc.late_downbeat_max_onsets == 0
+    assert qc.isolated_lag_max_onsets == 0
+    assert qc.tuplet_pushed_last is False
+    dumped = Config().stage_config("quantize")
+    for field in ("late_downbeat_max_onsets", "isolated_lag_max_onsets", "tuplet_pushed_last"):
+        assert field not in dumped
+    on = qc.model_copy(
+        update={
+            "late_downbeat_max_onsets": 3,
+            "isolated_lag_max_onsets": 2,
+            "tuplet_pushed_last": True,
+        }
+    )
+    assert on.model_dump(mode="json")["late_downbeat_max_onsets"] == 3
+    assert on.model_dump(mode="json")["isolated_lag_max_onsets"] == 2
+    assert on.model_dump(mode="json")["tuplet_pushed_last"] is True
+    assert settings(on)["late_downbeat_max_onsets"] == 3
+    assert settings(on)["isolated_lag_max_onsets"] == 2
+    assert settings(on)["tuplet_pushed_last"] is True

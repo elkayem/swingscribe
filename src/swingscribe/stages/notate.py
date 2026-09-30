@@ -741,6 +741,7 @@ def notated_durations(
     bars_index,
     legato_fill: float,
     legato_cap: float = 0.0,
+    hold_to_beat: float = 0.0,
 ) -> list[tuple[int, float, float, int]]:
     """Played lengths → written lengths.
 
@@ -776,8 +777,22 @@ def notated_durations(
     value, and leaves anything longer as a note followed by a real rest.
     Default 0.0, which is off. The shipped pipeline passes neither this nor a
     non-zero `legato_fill`, and all 436 baselines were verified unchanged.
+
+    ## `hold_to_beat` — the cap, asked only where the pages agree, and wrong
+
+    Counted over the human pages, a note on the beat whose next onset is on
+    the next beat is held -- a quarter -- 92% of the time in both the
+    Omnibook (347) and the twelve hand scores (249); from the "and" the same
+    one-beat gap is held 78% in the Omnibook and 29% by the listener. So
+    `hold_to_beat` fills a gap only from a note ON a beat line to an onset a
+    whole number of beats later, no more than `hold_to_beat` of them. 0 is
+    off, and it stays off (docs/writing-round2.md): value falls on every
+    set, 0 of 21 Omnibook sides up, because the gap it sees is OUR gap. In
+    two of three of our beat-long gaps on WJazzD's own onsets the page's is
+    not a beat -- a note only the page has, or the next note anticipated --
+    and there our eighth and rest was the page's eighth.
     """
-    if len(events) < 2 or (legato_fill <= 0 and legato_cap <= 0):
+    if len(events) < 2 or (legato_fill <= 0 and legato_cap <= 0 and hold_to_beat <= 0):
         return events
     absolute = [bars_index.start_of(bar) + beat for bar, beat, _d, _p in events]
     out = []
@@ -786,7 +801,14 @@ def notated_durations(
             gap = absolute[index + 1] - absolute[index]
             within_cap = legato_cap > 0 and gap <= legato_cap + TICK
             holds = legato_fill > 0 and duration >= legato_fill * gap
-            if gap > TICK and (within_cap or holds):
+            whole = round(gap)
+            to_beat = (
+                hold_to_beat > 0
+                and _close(beat, round(beat))
+                and _close(gap, whole)
+                and 1 <= whole <= hold_to_beat + TICK
+            )
+            if gap > TICK and (within_cap or holds or to_beat):
                 duration = gap
         out.append((bar, beat, duration, pitch))
     return out
@@ -802,6 +824,7 @@ def build(
     legato_cap: float = 0.0,
     literal: bool = False,
     key_fifths: int | None = None,
+    hold_to_beat: float = 0.0,
 ) -> Notation:
     """Quantized notes → bars of spelled, tied, rest-filled notation.
 
@@ -827,7 +850,7 @@ def build(
     last_bar = max(n.bar for n in quantized)
     bars_index = _Bars(sections, first_bar, last_bar + 4)
     events = notated_durations(
-        without_overlap(quantized, bars_index), bars_index, legato_fill, legato_cap
+        without_overlap(quantized, bars_index), bars_index, legato_fill, legato_cap, hold_to_beat
     )
     # Values before gaps. `close_short_gaps` extends a note to the NEXT ONSET,
     # which is already on the grid, so what it produces is grid-aligned by
@@ -921,6 +944,7 @@ def run(document: Document, config: Config) -> Document:
         legato_cap=config.notate.legato_cap,
         literal=config.quantize.timing != "swing",
         key_fifths=config.notate.key,
+        hold_to_beat=config.notate.hold_to_beat,
     )
     print(
         f"notate: {len(notation.bars)} bars, key {notation.key_fifths:+d} fifths, "
