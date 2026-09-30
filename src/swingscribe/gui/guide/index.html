@@ -37,7 +37,8 @@
     background: var(--panel);
     position: sticky; top: 0;
   }
-  header .brand { font-weight: 700; letter-spacing: 0.02em; }
+  header .brand { font-weight: 700; letter-spacing: 0.02em; color: var(--text); text-decoration: none; }
+  header .brand:hover { color: var(--accent); }
   header .sub { color: var(--muted); font-size: 13px; }
   .page {
     max-width: 820px;
@@ -103,7 +104,9 @@
 <body>
 
 <header>
-  <span class="brand">SwingScribe</span>
+  <!-- Home: the website's landing page, or the app itself when the app
+       serves this guide at /guide/. -->
+  <a class="brand" href="../">SwingScribe</a>
   <span class="sub">User guide</span>
 </header>
 
