@@ -31,6 +31,8 @@
   "applicationCategory": "MultimediaApplication",
   "applicationSubCategory": "Music transcription",
   "operatingSystem": "Windows 10, Windows 11, Linux",
+  "memoryRequirements": "8 GB RAM (16 GB recommended)",
+  "storageRequirements": "2.5 GB",
   "downloadUrl": "https://github.com/elkayem/swingscribe/releases/latest",
   "installUrl": "https://github.com/elkayem/swingscribe/blob/master/INSTALL.md",
   "image": "https://elkayem.github.io/swingscribe/images/social-card.png",
@@ -199,6 +201,7 @@
   .start .card p + p { margin-top: 12px; }
   .start ol { margin: 12px 0 18px; padding-left: 22px; color: #b8bdcb; font-size: 16px; }
   .start li { margin: 4px 0; }
+  .start .card p.update { margin: 0 0 18px; color: var(--muted); font-size: 15px; }
   pre {
     background: #0a0b0e; border: 1px solid var(--line); border-radius: 9px;
     padding: 14px 16px; overflow-x: auto; margin: 12px 0 0;
@@ -266,7 +269,7 @@
         Source on GitHub
       </a>
     </div>
-    <p class="cta-note"><span data-release>About 450 MB</span> &middot; Windows 10 and 11 &middot; No GPU needed &middot;
+    <p class="cta-note"><span data-release>About 450 MB</span> &middot; Windows 10 and 11 &middot; 8 GB RAM &middot; No GPU needed &middot;
       Linux <a href="#start">from source</a> &middot; MIT licence</p>
     <figure class="shot">
       <img src="images/swing-comparison.png" width="2560" height="1736"
@@ -291,7 +294,8 @@
         <h3>Writes swing, not arithmetic</h3>
         <p>It measures how hard each passage swings and how far the soloist sits behind
           the beat. Then it writes eighths as eighths and keeps the triplets that were
-          really played, guided by statistics from 245 human jazz transcriptions.</p>
+          really played, guided by statistics from 245 human jazz transcriptions. Want it
+          exactly as played instead? A literal page in sixteenths is one menu away.</p>
       </div>
       <div class="card">
         <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h2M6 8v8M10 4v16M14 8v8M18 10v4M22 12h0"/></svg></div>
@@ -311,7 +315,7 @@
         <h3>Handles pianists too</h3>
         <p>A dedicated piano model hears every key a pianist strikes, and SwingScribe
           picks the melody out of the chords. Switch on any other note it heard to write
-          a chord.</p>
+          a chord, or write everything it heard, both hands, on treble and bass staves.</p>
       </div>
       <div class="card">
         <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></div>
@@ -359,8 +363,9 @@
           measures the swing section by section and removes the soloist's lag behind the
           band. Then it reads each beat at the simplest rhythm the notes support.</p></div></li>
       <li><span class="n">5</span><div><h3>Export MusicXML</h3>
-        <p>Open the result in MuseScore, Finale, Sibelius or Dorico, in concert pitch or
-          transposed for B&#9837; and E&#9837; instruments.</p></div></li>
+        <p>Open the result in MuseScore, Finale, Sibelius or Dorico, in the key SwingScribe
+          detects or one you choose, at concert pitch or transposed for B&#9837; and
+          E&#9837; instruments.</p></div></li>
     </ol>
   </div>
 </section>
@@ -421,13 +426,18 @@
       <div class="card">
         <h3>Windows app</h3>
         <p>A ready-to-run folder that holds everything the app needs, including its own
-          Python. You need Windows 10 or 11 (64-bit) and about 2.5 GB of free disk.</p>
+          Python. You need Windows 10 or 11 (64-bit), 8 GB of RAM (16 GB recommended)
+          and about 2.5 GB of free disk.</p>
         <ol>
           <li>Download the zip (<span data-release>about 450 MB</span>).</li>
           <li>Extract it somewhere with a short path, such as <code>C:\SwingScribe</code>.</li>
           <li>Double-click <code>setup.cmd</code> once.</li>
           <li>Use the SwingScribe icon. The app opens in your browser.</li>
         </ol>
+        <p class="update">Updating from an earlier version? Install the new one beside the
+          old folder, never over it. The
+          <a href="https://github.com/elkayem/swingscribe/blob/master/INSTALL.md#updating">installation
+          guide</a> has the steps, and your models, cache and settings carry over.</p>
         <div class="cta">
           <a class="btn btn-primary" data-download href="https://github.com/elkayem/swingscribe/releases/latest">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16"/></svg>
@@ -438,8 +448,8 @@
       </div>
       <div class="card">
         <h3>From source</h3>
-        <p>On Windows or Linux, with <a href="https://docs.astral.sh/uv/">uv</a>. macOS is
-          untested.</p>
+        <p>On Windows or Linux, with <a href="https://docs.astral.sh/uv/">uv</a> and 8 GB
+          of RAM (16 GB recommended). macOS is untested.</p>
         <pre><code>git clone https://github.com/elkayem/swingscribe.git
 cd swingscribe
 uv sync --group ml --group gui --group roformer
@@ -479,8 +489,9 @@ uv run python -m swingscribe gui</code></pre>
     <details>
       <summary>What do I get at the end?</summary>
       <p>A MusicXML file of the solo, with bar lines, a key signature and the swing
-        written the way players read it. MuseScore, Finale, Sibelius and Dorico all
-        open it, and it can be transposed for B&#9837; and E&#9837; instruments.</p>
+        written the way players read it, or a literal rhythm if you prefer. A pianist
+        can be written on two staves. MuseScore, Finale, Sibelius and Dorico all open
+        it, and it can be transposed for B&#9837; and E&#9837; instruments.</p>
     </details>
     <details>
       <summary>How long does a solo take?</summary>
