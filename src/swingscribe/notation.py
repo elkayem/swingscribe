@@ -300,22 +300,95 @@ def bar_grid_for_settings(
     than over the whole track (`meter._auto_anchor`, D32). It defaults to the
     settings' own `region`.
     """
-    if near is None and settings.get("region"):
-        lo, hi = settings["region"]
-        near = (float(lo), float(duration if hi is None else hi))
-    overrides = {
-        key: value
-        for key, value in {
-            "time_signature": settings.get("time_signature"),
-            "pulses_per_bar": settings.get("pulses_per_bar"),
-            "anchor": settings.get("anchor"),
-        }.items()
-        if value is not None
-    }
-    meter_config = config.meter.model_copy(update=overrides)
+    near = _near_of(settings, duration, near)
+    meter_config = _meter_config(settings, config)
     repaired, sections = meter.bar_grid(beats, downbeats, meter_config, duration, near=near)
     anchor = sections[0].anchor if sections else settings.get("anchor")
     return [beat.time for beat in repaired], anchor
+
+
+def _near_of(
+    settings: dict, duration: float, near: tuple[float, float] | None
+) -> tuple[float, float] | None:
+    """The span the automatic downbeat is voted around: `near`, or the
+    settings' own region."""
+    if near is None and settings.get("region"):
+        lo, hi = settings["region"]
+        near = (float(lo), float(duration if hi is None else hi))
+    return near
+
+
+def _meter_config(settings: dict, config: Config, *extra: str):
+    """The meter config under the listener's per-track settings: their time
+    signature, pulse count and downbeat, and any `extra` MeterConfig fields
+    (form_start, bars_per_chorus) the caller also reads."""
+    fields = ("time_signature", "pulses_per_bar", "anchor", *extra)
+    overrides = {key: settings[key] for key in fields if settings.get(key) is not None}
+    return config.meter.model_copy(update=overrides)
+
+
+def bar_number_at(
+    beats: list[float], lines: list[tuple[float, int]], downbeat: float, pulses_per_bar: int
+) -> int | None:
+    """The roll's bar number for the bar that starts on `downbeat`, a beat of
+    `beats`: the nearest numbered bar line's number, plus the whole bars
+    between them COUNTED IN BEATS on the same grid. Exact whenever the
+    downbeat is in phase with the lines (the phase is global, meter.
+    derive_sections), and right across free time, where the roll draws no
+    line to read a number off."""
+    if not lines or not beats:
+        return None
+    line_time, number = min(lines, key=lambda line: abs(line[0] - downbeat))
+    steps = meter.nearest_index(beats, downbeat) - meter.nearest_index(beats, line_time)
+    return number + round(steps / max(1, pulses_per_bar))
+
+
+def page_downbeat(
+    beats: list[float],
+    region: tuple[float, float | None],
+    anchor: float | None,
+    pulses_per_bar: int,
+) -> float | None:
+    """The beat page bar 1 starts on -- the one `notation_for_span` counts
+    bars from -- or None if the span is too short to bar out."""
+    kept = span_beats(beats, region)
+    if len(kept) < MIN_BEATS:
+        return None
+    return span_anchor(beats, kept, anchor, pulses_per_bar, region[0] or 0.0)
+
+
+def form_bar_of_page(
+    beats: list[float],
+    downbeats: list[float],
+    settings: dict,
+    config: Config,
+    duration: float,
+    region: tuple[float, float | None],
+    near: tuple[float, float] | None = None,
+) -> int | None:
+    """Which bar of the tune's form the page's bar 1 is, numbered exactly as
+    the roll numbers it (`/beats`): bar 1 at the listener's form start, or
+    at the first bar line when they set none, on the repaired grid under
+    their meter settings.
+
+    For the chord chart (chords.place): a solo that starts in the middle of
+    the third chorus of a 32-bar tune reads 65 + 4 = 69 here, and gets bar 5
+    of the chart over its bar 1. Counted on `bar_grid_for_settings`'s own
+    grid from the downbeat `notation_for_span` counts from, so the chart
+    and the page cannot disagree about which bar is which. None if the span
+    is too short for a page or the grid has no bar lines.
+    """
+    near = _near_of(settings, duration, near)
+    meter_config = _meter_config(settings, config, "form_start", "bars_per_chorus")
+    repaired, sections = meter.bar_grid(beats, downbeats, meter_config, duration, near=near)
+    times = [beat.time for beat in repaired]
+    anchor = sections[0].anchor if sections else settings.get("anchor")
+    _signature, pulses = meter.resolve_meter(meter_config)
+    downbeat = page_downbeat(times, region, anchor, pulses)
+    if downbeat is None:
+        return None
+    lines = meter.bar_lines(repaired, sections, meter_config.form_start)
+    return bar_number_at(times, lines, downbeat, pulses)
 
 
 def notation_for_span(
@@ -356,12 +429,13 @@ def notation_for_span(
     """
     from swingscribe.stages import notate, quantize, swing
 
-    kept = span_beats(beats, region)
-    if len(kept) < MIN_BEATS:
-        return None
     # Resolved on the tracked grid, before any doubling: the beat it names
     # survives doubling, and its phase is a fact about the tracked pulse.
-    anchor = span_anchor(beats, kept, anchor, pulses_per_bar, region[0] or 0.0)
+    # One function with the chord chart's placement (`form_bar_of_page`),
+    # so the two cannot count bar 1 from different beats.
+    anchor = page_downbeat(beats, region, anchor, pulses_per_bar)
+    if anchor is None:
+        return None
     # Every note gets a beat to land on, however early or late it is against
     # the tracked grid (`cover`): a grid that ends before a note drops it.
     # Bar 1 is still a TRACKED beat -- chosen above, before any continuation.

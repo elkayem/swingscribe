@@ -17,6 +17,20 @@ That last point is easy to get wrong in a way that looks right. Transposing
 the notes without transposing the key signature produces a part that sounds
 correct and is covered in accidentals.
 
+The chord symbols (roadmap O4, chords.py) move with them, and by INTERVAL,
+not by key: a concert B♭7 on a tenor part is C7, a concert G♭7 (the tritone
+substitute in F) is A♭7 whatever the written key's sharps say, because the
+listener's spelling is the chord's function. A symbol never needs a double
+accidental, so one that would take one is respelled: F## is G.
+
+## Chord symbols
+
+`<harmony>` has no duration. Each is written in the first voice's stream
+just before the note or rest it falls in, with an `<offset>` for the part of
+that note it comes after -- a chord that changes under a held note is the
+common case, and moving it to the next note would move the change. On a
+grand staff they sit over the treble staff only.
+
 ## Divisions
 
 MusicXML measures duration in integer divisions of a quarter note, so the
@@ -35,8 +49,8 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 from swingscribe.config import Config
-from swingscribe.model import Document, NotatedNote, Notation
-from swingscribe.stages.notate import QUARTER, spell
+from swingscribe.model import ChordSymbol, Document, NotatedNote, Notation
+from swingscribe.stages.notate import NATURAL_FIFTHS, QUARTER, spell
 
 DIVISIONS = 840  # per quarter note: divisible by 8, 3, 5, 7 (32nds, tuplets)
 
@@ -75,6 +89,72 @@ def fifths_for_transpose(semitones: int) -> int:
 
 def _duration_ticks(note: NotatedNote) -> int:
     return int(round(note.duration * DIVISIONS))
+
+
+def _ticks(quarters: float) -> int:
+    return int(round(quarters * DIVISIONS))
+
+
+# The letter names in fifths order, F at -1 through B at 5 (NATURAL_FIFTHS).
+_FIFTHS_LETTERS = "FCGDAEB"
+
+
+def written_root(step: str, alter: int, semitones: int) -> tuple[str, int]:
+    """A chord root (or slash bass) moved by the part's transposition, as an
+    INTERVAL: the line of fifths shifted by the interval's fifths, so B♭ up
+    a major second is C and G♭ is A♭. A double sharp or flat is respelled
+    one enharmonic step toward the naturals -- no chord symbol wants F##.
+    """
+    fifths = NATURAL_FIFTHS[step] + 7 * alter + fifths_for_transpose(semitones)
+    for _ in range(2):
+        written_alter = (fifths + 1) // 7
+        if written_alter > 1:
+            fifths -= 12
+        elif written_alter < -1:
+            fifths += 12
+        else:
+            break
+    written_alter = (fifths + 1) // 7
+    return _FIFTHS_LETTERS[fifths - 7 * written_alter + 1], written_alter
+
+
+def _append_harmony(
+    parent, symbol: ChordSymbol, transpose: int, offset: int, staves: int = 1
+) -> None:
+    """One <harmony>, in the schema's order: root, kind, bass, degrees, then
+    offset and staff.
+
+    `kind` carries its meaning as the element and the listener's spelling as
+    `text`, which is what a reader prints; the degrees are data for a reader
+    that respells chords in its own style, and `print-object="no"` keeps one
+    that prints the text from printing them a second time ("C7b9b9").
+    """
+    harmony = ElementTree.SubElement(parent, "harmony", {"print-frame": "no"})
+    root = ElementTree.SubElement(harmony, "root")
+    if symbol.kind == "none":
+        # N.C.: the schema still wants a root; an empty text hides it.
+        ElementTree.SubElement(root, "root-step", {"text": ""}).text = symbol.root_step
+    else:
+        step, alter = written_root(symbol.root_step, symbol.root_alter, transpose)
+        ElementTree.SubElement(root, "root-step").text = step
+        if alter:
+            ElementTree.SubElement(root, "root-alter").text = str(alter)
+    ElementTree.SubElement(harmony, "kind", {"text": symbol.text}).text = symbol.kind
+    if symbol.bass_step is not None:
+        step, alter = written_root(symbol.bass_step, symbol.bass_alter, transpose)
+        bass = ElementTree.SubElement(harmony, "bass")
+        ElementTree.SubElement(bass, "bass-step").text = step
+        if alter:
+            ElementTree.SubElement(bass, "bass-alter").text = str(alter)
+    for degree in symbol.degrees:
+        element = ElementTree.SubElement(harmony, "degree", {"print-object": "no"})
+        ElementTree.SubElement(element, "degree-value").text = str(degree.value)
+        ElementTree.SubElement(element, "degree-alter").text = str(degree.alter)
+        ElementTree.SubElement(element, "degree-type").text = degree.type
+    if offset:
+        ElementTree.SubElement(harmony, "offset").text = str(offset)
+    if staves > 1:
+        ElementTree.SubElement(harmony, "staff").text = "1"
 
 
 def tuplet_groups(notes: list[NotatedNote]) -> dict[int, str]:
@@ -298,12 +378,28 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
         # undoing the last one's advance or it lands in the next bar. Every
         # voice fills its bar, so the rewind is the previous voice's length.
         written = 0
+        # Chord symbols ride in the first voice's stream (the treble staff's
+        # line): each just before the note it falls in, offset into it.
+        chords = sorted(bar.harmony, key=lambda symbol: symbol.beat)
         for offset, (_number, voice_notes) in enumerate(voices_of(bar)):
             if offset:
                 backup = ElementTree.SubElement(measure, "backup")
                 ElementTree.SubElement(backup, "duration").text = str(written)
             marks = tuplet_groups(voice_notes)
+            cursor = 0
             for position, note in enumerate(voice_notes):
+                if not offset:
+                    length = _duration_ticks(note)
+                    while chords and _ticks(chords[0].beat) < cursor + length:
+                        symbol = chords.pop(0)
+                        _append_harmony(
+                            measure,
+                            symbol,
+                            notation.transpose,
+                            max(0, _ticks(symbol.beat) - cursor),
+                            notation.staves,
+                        )
+                    cursor += length
                 _append_note(
                     measure,
                     note,
@@ -313,6 +409,14 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
                     staves=notation.staves,
                 )
             written = sum(_duration_ticks(n) for n in voice_notes)
+        # A symbol past the first voice's last note (a bar that does not fill
+        # its signature, or holds no notes at all) still goes in, offset from
+        # where the writing stopped. Notate fills every bar, so this is for
+        # a Notation built by hand.
+        for symbol in chords:
+            _append_harmony(
+                measure, symbol, notation.transpose, _ticks(symbol.beat) - written, notation.staves
+            )
 
     ElementTree.indent(root, space="  ")
     body = ElementTree.tostring(root, encoding="unicode")

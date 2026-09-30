@@ -136,10 +136,47 @@ class NotatedNote(BaseModel):
     staff: int = 1
 
 
+class ChordDegree(BaseModel):
+    """One alteration of a chord symbol, as MusicXML's <degree>: value 9,
+    alter -1, type "add" is the flat nine of C7b9. `type` is "alter" when the
+    kind already holds the degree (the flat five of a dominant), "add" when it
+    does not, "subtract" for a degree left out."""
+
+    value: int
+    alter: int = 0
+    type: str = "add"
+
+
+class ChordSymbol(BaseModel):
+    """A chord symbol over the page (roadmap O4), from changes the listener
+    typed (chords.py) -- never recognised from the audio.
+
+    CONCERT pitch, like every note: the root and bass are transposed once, at
+    export, with the part (stages/export.py). `kind` is MusicXML's <kind>
+    value, the chord's meaning; `text` is the suffix as the listener spelled
+    it ("-7", "m7b5", "Δ"), which is what a reader prints, because a jazz
+    chart's spelling is a house style the kind value cannot carry.
+    """
+
+    beat: float = 0.0  # quarter notes from the start of its bar
+    root_step: str = "C"
+    root_alter: int = 0
+    kind: str = "major"
+    text: str = ""
+    degrees: list[ChordDegree] = []
+    bass_step: str | None = None  # a slash chord's bass: C7/E
+    bass_alter: int = 0
+
+
 class NotatedBar(BaseModel):
     number: int
     time_signature: tuple[int, int]
     notes: list[NotatedNote] = []
+    # Chord symbols over this bar, in beat order (chords.place). MIGRATION:
+    # additive with a default, like NotatedNote.voice: every cached Notation
+    # deserializes with none and no cache key moves -- keys come from stage
+    # config, and no stage writes this; only the GUI's page assembly does.
+    harmony: list[ChordSymbol] = []
 
 
 class Notation(BaseModel):
