@@ -64,6 +64,15 @@ never change a key.
   spectral flux, and torchcrepe is imported through a resampy shim
   (transcribe._import_torchcrepe) with the numba-free weighted_argmax
   decoder. Never add librosa, resampy, or numba-dependent packages.
+- **verovio joined the `gui` group** (2026-09-30, O1, the listener approved):
+  6.3.0 is the only release probed under Smart App Control (its `.pyd` and
+  the delvewheel `msvcp140` DLL load), so it is bounded `<6.4` exactly as
+  torch is bounded `<2.13`; re-probe before widening. It ships in the
+  portable folder. No macOS wheel exists for 6.3.0.
+- **numpy is NOT in CI.** Plain `uv sync` installs pydantic and pyyaml only;
+  a test of anything that imports numpy at module level must
+  `pytest.importorskip("numpy")` first. `ada4c95` broke seven CI tests that
+  way; the WSL mirror (plain `uv sync`) is the check before pushing.
 - MuScriptor weights are CC BY-NC: when it arrives (M10) it goes behind its own
   extras group and module boundary so the NC license never touches core (§11).
 
@@ -555,6 +564,44 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   before it are a pickup in bar 0. `run_eval` has no roll but takes the
   anchor `meter.bar_grid` gives the roll (R22); its rhythm number is
   gap-based and phase-immune either way.
+- **The Page view is Export's own MusicXML, engraved on the server by
+  Verovio** (2026-09-30, O1, `gui/page.py`, `GET /api/tracks/{id}/page`,
+  `static/page.js`). `page_inputs` in app.py gathers exactly what Export
+  gathers and `gui_musicxml.page_of` builds the one string both use, so the
+  view cannot show a page the button would not write, and it writes
+  nothing. One SVG per page at the panel's width, memoised by (width,
+  MusicXML) digest; the client sends `known=` and gets `pages: null` when
+  nothing changed. **Verovio's default resource path is per THREAD**: a
+  FastAPI worker got the build machine's path and "Bravura font could not
+  be loaded", so the toolkit is built with `toolkit(False)` and pointed at
+  `files("verovio") / "data"` on every call. Ink colour comes from CSS
+  (Verovio strokes in `currentColor`); Paper/Page toggles are per-viewer
+  localStorage, never the sidecar.
+- **The Ensemble menu carries a SUGGESTION from the stems, never a setting**
+  (2026-09-30, O2, `routing.py`, `gui/suggestion.py`, docs/routing.md).
+  Trio needs the piano loudest melodic stem in >= 0.9 of the span's active
+  seconds AND >= 6 dB over the next melodic stem AND within 9 dB of the
+  loudest of all six; horn-led needs share <= 0.6 and margin <= +3 dB;
+  anything else, a partial stem set, under 15 s of melody, or any
+  separator but bsroformer_sw gets NO suggestion. 111 of 111 benchmark
+  spans right; no horn span, and no horn window from the 15 s floor up
+  (n=200,966), passes either piano test alone. It shows only while the
+  sidecar has no ensemble; only Apply or Keep writes. Never loosen a
+  threshold or lower the floor without re-running
+  `scripts/routing_survey.py`'s floor sweep and reading the JOINT worst.
+  htdemucs_6s files 3 of 5 piano solos under `guitar`, hence no
+  suggestion there.
+- **Solo spans can be PROPOSED, and nothing calls it yet** (2026-09-30, O3,
+  `solo_spans.py`, docs/solo-spans.md): exact optimal partitioning of
+  per-bar stem levels and gated cepstra from the quick htdemucs_6s
+  whole-file stems, plus the head-in's end from the chroma repeat stripe.
+  A span edge within two bars of 71% of 77 WJazzD solo starts and 73% of
+  ends (chance 0.12). Only the penalty is cross-validated. Its
+  `score_boundaries` is the SECOND justified exception to mir_eval (spans
+  are contiguous, the tolerance is in bars, the reference is partial);
+  `match_boundaries` prints mir_eval's one-to-one count beside it. A span's
+  lead label names a stem OF THE SEPARATION IT WAS READ FROM: never carry
+  it across separations, never let it set `ensemble`.
 - **`ensemble` and `transposition` are per-track sidecar fields with menus
   built from `config.ENSEMBLES`/`TRANSPOSITIONS`.** Neither is inferable from
   the signal — one says who is playing, the other which horn — so both can only
@@ -1330,11 +1377,45 @@ list of what is actually wrong; run everything with one command:
   Joy Spring were REFUSED against the audio on disk (32%, 26%, 47%
   coverage): other takes, whatever `figure_prior.OVERLAP` assumed. A
   bar-line STEP on a page is the page's or the grid's: Cheese Cake's page
-  and WJazzD's annotation of the same solo both step a beat at bar 84
-  (our grid), Gingerbread Boy's page steps on its own bar 102, which the
+  and WJazzD's annotation of the same solo both step a beat there (bar 83
+  on the page, whose pickup is bar 0; bar 84 on WJazzD's) -- our grid, Gingerbread Boy's page steps on its own bar 102, which the
   OMR filled with six beats (the page). Check the page's unfilled bars
   before charging a step to the grid.
 
+- **The card asks three more questions** (2026-09-30,
+  docs/metrics-e4-e6.md). EDIT COST per 100 reference notes
+  (`benchmark.edit_cost`, off the SAME alignment rhythm and value read):
+  insertions, deletions, pitch, position, value and a bar edit, one exact
+  DP. Hand scores 55.3 (n=12), Omnibook 68.1 (22), silver pages 56.3 (3);
+  hearing edits are 40-44%, notation edits with no hearing edit beside them
+  19-24%, the rest unassigned -- do not quote it as saying either lever is
+  bigger. CONFIDENCE against mir_eval's own false positives: AUC 0.646 per
+  solo, 0.637 pooled (n=73). Erasure rankings are printed, never pinned: a
+  label only matches on the stems it was made on (132 of 141 on today's
+  Roformer stems, 1 of 235 on Demucs-era stems). STRATA by tempo class,
+  style and instrument, printed, never pinned. On a PDF page a bar-line
+  step that the page's own overfull bars account for is the PAGE's
+  (`evaluation.page_steps`).
+- **The triples split a page's distance into WRITING, GRID and HEARING**
+  (2026-09-30, A1, `triples.py`, `scripts/triples.py`, docs/triples.md): a
+  solo with its recording, WJazzD's onsets and beats, and a human page of
+  the same take, cropped to the solo by content (a take check five wrong
+  pairings fail). Over 8 (six Omnibook sides, Embraceable You, Cheese
+  Cake): rhythm writing 0.185 / grid 0.006 / hearing 0.034, value 0.218 /
+  0.000 / 0.052. Only 12% of the notes we misplace on HUMAN onsets sounded
+  nearer the page's place: the rest is convention. Run `scripts/triples.py
+  --ab` after any quantize or notate change: the (a) row judges a rule with
+  no hearing or grid error in the way. The first human ballad page favours
+  R31 on all four measures; one page, so it stays off.
+- **A pretrained note model is a hole-filler, not a line** (2026-09-30, A2
+  step 1, docs/frontend-bakeoff.md). Basic Pitch runs only in WSL
+  (`scripts/bakeoff_basic_pitch_wsl.py`): its package imports librosa and
+  resampy. As the line it loses in every form; as a HORN hole-filler
+  (`corroborate.fill_gaps`, onset 0.8, a 40 ms hole) WJazzD note F1 0.8580
+  -> 0.8650, 49 up / 1 down over 73, Omnibook sub-eighth recall 0.660 ->
+  0.703. Its default 128 ms minimum note length deletes exactly the notes
+  in question -- never judge it on defaults. It is NOT the neighbour fix
+  (right pitch on 3-15% of CREPE's 841).
 - **WJazzD (`score_wjazz.py`) is audio against audio** — a human's per-note
   onsets in seconds for the same recording. Asks "did we hear what was
   played?" and is the right measure of `transcribe`. Currently **mean note F1

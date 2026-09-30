@@ -64,8 +64,8 @@ means: pitch F1 0.867, note F1 0.535, rhythm 0.821, value 0.762, placement
 0.712, over 3.
 
 They already show what a triple is for. The bar-line trace puts Cheese Cake
-a beat off the page from bar 84, and WJazzD's own trace of the same solo
-puts it a beat off from bar 84 too: two independent references agree, so
+a beat off the page from bar 83 (the page's pickup is bar 0), and WJazzD's
+own trace of the same solo puts it a beat off at the same notes (its bar 84): two independent references agree, so
 the slip is OUR grid's (D33's kind). Gingerbread Boy's two-beat step sits
 exactly on the page's bar 102, which the OMR filled with six beats of 4/4:
 the page's error, not ours. A step on an OMR page is worth checking against
@@ -127,104 +127,164 @@ Omnibook:
 The gates were set from the pages' own reading quality, before any page was
 scored, and must not be moved to make a score look better.
 
-### E4. Edit cost per 100 notes -- PLANNED
+### E4. Edit cost per 100 notes -- DONE 2026-09-30
 
-The number a user feels: the insertions, deletions, pitch fixes, rhythm fixes
-and bar shift that turn our page into the human's, from the existing
-time-free alignment. It folds pitch F1, rhythm, value and placement -- four
-numbers with coverage caveats today -- into one. MV2H (McLeod and Steedman,
-2018) is the published joint measure for audio-to-score transcription and is
-the outside cross-check. New scoring beside mir_eval: needs the listener's
-sign-off (CLAUDE.md).
+`benchmark.edit_cost`, off the same alignment rhythm and value read
+(docs/metrics-e4-e6.md): the insertions, deletions, pitch, position, value and
+bar edits that turn our page into the human's, per 100 reference notes.
+Hand scores 55.3 (n=12), Omnibook 68.1 (22), silver pages 56.3 (3). Hearing
+edits (insert, delete, pitch) are 40-44% of them; notation edits with no
+hearing edit beside them are 19-24%; the 35-38% between are notation damage
+next to a hearing edit, unassigned. Pianists: the oracle line costs 52.0
+against the CREPE line's 60.1 (paired -8.1 [-12.4, -3.4], 6 of 7). MV2H, the
+outside cross-check, is a Java download still to approve.
 
-### E5. Does confidence point at the errors -- PLANNED
+### E5. Does confidence point at the errors -- DONE 2026-09-30
 
-The share of wrong notes among the least-confident 10% and 20% of notes. The
-roll already shades by confidence (AUC 0.830 against 302 erasure labels); a
-better curve makes review cheaper even when F1 does not move.
+WJazzD, n=73: confidence AUC 0.646 per solo, 0.637 pooled; the
+least-confident fifth of notes holds 39% of the 4,320 false positives -- about
+2x chance, so shading helps review but is not yet strong. The listener's
+erasures only match on the stems they were made on (132 of 141 on today's
+Roformer stems, 1 of 235 on the Demucs-era stems): re-anchor the old labels
+before issue #8 trains on them.
 
-### E6. Stratified means -- PLANNED
+### E6. Stratified means -- DONE 2026-09-30
 
-Every mean also by tempo class, era, instrument and notated value. A mixed
-mean is how the ballad gap (D16) stayed invisible.
+Printed and in `--json`, never pinned. The ballad gap is one line on the
+card: 3 of the 73 scored WJazzD solos are SLOW and none MEDIUM SLOW.
 
 ## 3. Accuracy research, ranked
 
-### A1. Hearing against writing, on the triples
+### A1. Hearing against writing, on the triples -- DONE 2026-09-30
 
-Feed WJazzD's human onsets (not ours) through swing, quantize and notate, and
-score the page against the human page of the same take. Every difference is
-the notater's. This is the instrument the quantizer has lacked since D36
-showed WJazzD's tatum layer is an algorithm's. Candidates today: the 14 name
-matches in the PDF corpus (Cheese Cake, Hawkins' Body and Soul, Joy Spring,
-Punjab, Embraceable You, ...) plus the six Omnibook sides already under
-`benchmark/wjazzd/`. *Needs*: a take check per pair; no new code in the
-pipeline. *Kill*: none -- it is a measurement.
+docs/triples.md. Eight triples (six Omnibook sides WJazzD annotated, KC Blues
+included, and the silver pages Embraceable You and Cheese Cake), each notated
+three ways against the same page cropped to the solo by content: (a) WJazzD's
+onsets on WJazzD's grid, (b) the same onsets on our grid, (c) our notes. The
+page's distance is mostly WRITING:
 
-### A2. A note-level front end for horns
+| | writing 1-(a) | grid (a)-(b) | hearing (b)-(c) |
+|---|---|---|---|
+| rhythm | 0.185 | 0.006 | 0.034 |
+| value | 0.218 | 0.000 | 0.052 |
 
-The leading error classes are ones no threshold reaches (the gate sweeps are
-on the record): notes under an eighth are 27% of the Omnibook's notes and 54%
-of its outright misses, and semitone `neighbour` errors are 38% of its
-deficit. On the worst WJazzD solos the misread notes' pitch trace sits a
-median half a semitone off -- the pitch genuinely lay between two notes
-(scoops, falls, short notes), which is a decision about the whole note.
+Only 12% of the notes we misplace on human onsets sounded nearer the page's
+place: the rest is transcriber convention (the swung "and" written on the
+beat, the laid-back beat, anticipations). Largest classes, as a share of
+intervals: half-beat displacements 5.7% (partly OMR), triplets read binary
+3.3% (the page writes 13.2% tuplets, we write 4.1%), a ballad's sixteenths as
+eighths 2.3%, a lone laid-back downbeat on the "e" 2.1%. Every shipped rule
+switched off does worse on (a) or level; `legato_cap` is worse on all 8. The
+first human ballad page (Embraceable You, 72 bpm) favours R31 on all four
+measures -- one page, so R31 stays off until A3's pages arrive.
 
-1. **Bake-off, no training.** Run a pretrained note-level model (Basic Pitch
-   is small and ships an ONNX graph; onnxruntime is already in the `omr`
-   group) over the cached stems and score it through `run_eval` and the error
-   taxonomy, by notated value.
-2. **Fine-tune** a small onset-and-pitch head on the Roformer stems with
-   WJazzD's labels, so it learns our separation's bleed. 35k labelled notes
-   today, ~200k with the full WJazzD audio; split by performer, and never on
-   a test-split track.
+Read beside E4: by EDIT COUNT hearing is the largest block; by RHYTHM on the
+notes both sides hold, writing is. Both levers are real, and they need
+different work.
 
-*Kill*: it must beat CREPE on WJazzD note F1 over the dev split AND on the
-Omnibook's sub-eighth recall, without costing pianist precision. *Needs*: new
-dependencies (the listener's call), and a decision on weights trained on
-commercial recordings (the MuScriptor precedent: its own group, never core).
+### A2. A note-level front end for horns -- step 1 DONE 2026-09-30
+
+docs/frontend-bakeoff.md. Basic Pitch (Apache-2.0, 230 KB ONNX), run in WSL
+on the harness's own stems:
+
+- **As the line it loses in every form** (best -0.011 WJazzD note F1;
+  pianist precision falls 0.07-0.18).
+- **As a horn hole-filler it passes the kill criterion untrained**: CREPE's
+  line plus Basic Pitch notes where the line has a 40 ms hole
+  (`corroborate.fill_gaps`, onset 0.8): WJazzD note F1 0.8580 -> 0.8650,
+  +0.0070 [+0.0051, +0.0093], 49 up / 1 down over 73 (+0.0067 on the 51 not
+  used for tuning); under-60 ms recall 0.489 -> 0.563; Omnibook sub-eighth
+  recall 0.660 -> 0.703 (21 of 22 up). Hand-score rhythm -0.004, not decided;
+  pianists untouched by construction.
+- **It is not the neighbour fix**: it has the right pitch on 3-15% of CREPE's
+  841 semitone errors, and a pitch vote costs F1.
+- **The ceiling**: CREPE and Basic Pitch combined perfectly would reach
+  WJazzD recall 0.908 against 0.836 -- the fine-tune's target.
+
+**Step 1.5, ship the hybrid for horns**: onnxruntime in the `ml` group (it
+already loads under Smart App Control for `omr`), the ONNX graph vendored
+with its NOTICE, a numpy port of the note decoder, a `TranscribeConfig` field
+that dumps nothing at its default. **Step 2, fine-tune**, now has to beat the
+hybrid (0.8650 dev, 0.7034 sub-eighth recall), not CREPE.
 
 ### A3. Ballads
 
 R31's ballad grids are off because no human ballad page existed. The corpus
 has ~24; paired, they judge R31 and the slow-tempo notation D16 said the
-benchmark could not see.
+benchmark could not see. The first one (A1) already leans toward turning R31
+back on.
 
 ### A4. Pianists
 
 Ten Bud Powell pages would take the pianist set from 7 to ~17, on 1940s-50s
 piano the piano model (trained on clean recordings) has not heard. Line
-selection (issue #8) is still the pianist's leading error.
+selection (issue #8) is still the pianist's leading error. A candidate model
+(docs/landscape.md): Edwards et al.'s augmented Kong checkpoint (CC BY 4.0,
+104 MB, a download to approve), which needs a second loader -- upstream
+downloads its own weights over any file under 160 MB.
 
 ### A5. The swing era and the clarinet
 
 Nothing from before bebop is measured, in either benchmark. The swing
-estimator's floors (milestone M4) and the lag rule (R29) were set on bebop and hard
-bop; a lighter swing and a two-beat feel are a different population.
+estimator's floors (milestone M4) and the lag rule (R29) were set on bebop and
+hard bop; a lighter swing and a two-beat feel are a different population.
+
+### A6. Learn the transcriber's reading -- NEW
+
+A1 says what remains on the page is convention, not timing, and every hand
+rule R27-R33 is small and noisy on eight pages. The published direction
+(docs/landscape.md: the Rhythm Perceiver, ICASSP 2026) predicts a per-beat
+figure from evidence; ours would sit inside `choose_grid` as a re-ranker over
+the candidates it already enumerates, with the counted prior as its class
+prior and every note-keeping guard intact. First the cheap test: score our
+quantizer with the paper's per-beat "beat signature" accuracy on the Omnibook,
+where the paper reads 0.53 on its easier 60% of tracks. Training data is the
+constraint: WJazzD onsets aligned to paired PDF pages (A1's triples at scale)
+and our transcriptions of the tier-A pages; evaluation is the triples' (a)
+row, the listener's pages and the Omnibook, never Flex-Q.
 
 ## 4. The first run
 
-### O1. Show the page in the app
+### O1. Show the page in the app -- DONE 2026-09-30
 
-The product is a page, and today it is seen only after Export, in MuseScore.
-Verovio (a Python wheel, LGPL) renders MusicXML to SVG on the server, which
-keeps the frontend free of JavaScript dependencies. A dependency to approve.
+A Page view renders exactly the MusicXML Export would write (one code path),
+server-side with Verovio 6.3.0 (LGPL-3.0, loads under Smart App Control,
+ships in the portable folder), and redraws on every change that changes the
+page. Next: link the page to the playhead (Verovio's timemap), and show the
+hand score's bars beside ours when one is loaded.
 
-### O2. Route the ensemble and the lead stem automatically
+### O2. Route the ensemble and the lead stem automatically -- DONE 2026-09-30
 
-From which stem carries the span's energy, as a suggestion with its reason
-and a one-click override. The guide's troubleshooting has to say "a piano
-solo is not getting the piano model": the default is wrong for every piano
-solo. The 108 sidecars the listener set (11 trio) are the test. A suggested
-transposition from an instrument classifier trained on WJazzD's labels comes
-after (published on exactly this data: Gomez, Abesser and Cano, ISMIR 2018).
+`routing.suggest` (docs/routing.md): 111 of 111 benchmark spans right on the
+Roformer stems, no horn span or window ever called trio; nothing suggested on
+htdemucs_6s, from a partial stem set or from under 15 s of melody. The GUI
+shows it beside the Ensemble menu with its reason and Apply/Keep, only on a
+track with no ensemble of its own, and never writes anything by itself.
+Open: a labelled bass solo, a solo-piano record and a vibes/organ lead.
 
-### O3. Propose the solo spans
+### O3. Propose the solo spans -- research DONE 2026-09-30, GUI next
 
-A new user's first job is finding A and B on a waveform. Propose spans where
-the lead stem's activity changes, snapped to chorus boundaries on the bar
-grid, from the quick htdemucs separation the batch already locates with.
-WJazzD's located solos are the ground truth.
+`solo_spans.propose` (docs/solo-spans.md) from the quick htdemucs_6s stems
+and the bar grid: a span edge within two bars of 71% of WJazzD's solo starts
+and 73% of its ends (chance 0.12), 7.5 boundaries a recording. Next: "Find
+the solos" on the Overview, bands a click turns into A and B, and a log of
+what the listener does with each proposal (the labels the benchmark lacks).
+
+### O4. Chord symbols on the page -- NEW
+
+Every human transcription service and every lead-sheet competitor delivers
+the changes; we deliver none (docs/landscape.md section 6). Start from changes
+the listener supplies (typed, or read from a lead sheet's MusicXML
+`<harmony>`), snapped to the bar grid we already trust and written as
+`<harmony>`; Verovio and MuseScore render them. Recognition comes later, and
+only once measured on jazz vocabulary (WJazzD's per-beat chords are the
+ground truth).
+
+### O5. Pin a beat, re-derive the rest -- NEW
+
+Cheese Cake's page and WJazzD's annotation both show our grid slipping a beat
+at bar 83-84; the downbeat is one click but a mid-solo slip is not. Let the
+listener pin a beat and have `repair_beats` re-derive the grid around it.
 
 ## 5. Ruled out
 
@@ -232,11 +292,32 @@ WJazzD's located solos are the ground truth.
 cached reviews the median tuning offset is 6.6 cents, 9 exceed 20 cents and
 none exceed 30 (circular mean of CREPE's pitch over confident in-note frames).
 
+**Basic Pitch as the line**, and as a pitch voter (A2).
+
+**Loosening the tuplet gate, sixteenth triplets, `legato_cap`** -- re-measured
+on the triples' human onsets, all worse or level (A1).
+
 ## 6. Order
 
-1. E1-E3 (done 2026-09-29), while the listener gathers tier-A audio.
-2. Pair and locate the tier-A pages; A1 on the triples; A3 and A4 fall out
-   of the new pages with no pipeline change.
-3. O1 and O2, which need no new measurement.
-4. A2's bake-off; the fine-tune only if the bake-off shows the front end, not
-   the stems, is the limit.
+1. E1-E6, A1, O1, O2 and A2's bake-off: done 2026-09-29/30.
+2. Ship A2's hybrid for horns (step 1.5) and O4's typed changes; wire O3 into
+   the GUI. The cheapest measured gains on the table.
+3. Pair and locate the tier-A pages (the listener's audio); every one that
+   WJazzD also annotated becomes a triple. A3 and A4 fall out with no pipeline
+   change.
+4. A6: the beat-signature comparison first, then a learned re-ranker trained
+   on the paired pages.
+5. A2 step 2 (fine-tune) only against the hybrid's bar.
+
+## 7. Decisions waiting on the listener
+
+- **Downloads**, each stated before it happens: the FiloSax-trained saxophone
+  CRNN (Riley and Dixon; weights tagged MIT but trained on non-commercial
+  data, so an opt-in group like MuScriptor's), Edwards et al.'s piano
+  checkpoint (CC BY 4.0, 104 MB, Zenodo), MV2H (MIT, Java, GitHub), Banquet
+  (query-by-audio separation, weights licence unknown).
+- **A head-to-head with AnthemScore 6.3 and Klangio** (docs/landscape.md): the
+  first needs a local trial install, the second uploading commercial
+  recordings to a cloud service -- the listener's call either way.
+- **Per-span ensembles**: the sidecar holds one ensemble per track, so a
+  record with a horn solo and a piano solo can only be right for one.
