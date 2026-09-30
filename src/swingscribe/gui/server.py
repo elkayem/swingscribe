@@ -1,17 +1,44 @@
 """Launching the GUI: uvicorn on localhost, and a browser pointed at it."""
 
+import logging
 import os
 import sys
 import threading
+import traceback
 import webbrowser
 from urllib.parse import urlencode
 
 from swingscribe.config import Config
-from swingscribe.gui.app import create_app
+
+
+def not_a_dropped_connection(record: logging.LogRecord) -> bool:
+    """Filter for the `asyncio` logger: False only for a browser's dropped connection.
+
+    On Windows, when the browser closes a connection, the proactor event loop
+    tears the transport down by shutting down a socket the browser has already
+    reset, and asyncio reports the ConnectionResetError as an unhandled
+    callback error (CPython bpo-39010) -- a full traceback between the progress
+    lines that reads as a crash and is not one. Recognised by where it was
+    raised, never by its message: any other exception, and a reset raised
+    anywhere but that teardown, still prints.
+    """
+    if not record.exc_info or not isinstance(record.exc_info[1], ConnectionResetError):
+        return True
+    return not any(
+        frame.f_code.co_name == "_call_connection_lost"
+        and frame.f_globals.get("__name__") == "asyncio.proactor_events"
+        for frame, _ in traceback.walk_tb(record.exc_info[2])
+    )
 
 
 def serve(config: Config) -> None:
+    # Imported here, like uvicorn, so the filter above is testable without
+    # the gui dependency group.
     import uvicorn
+
+    from swingscribe.gui.app import create_app
+
+    logging.getLogger("asyncio").addFilter(not_a_dropped_connection)
 
     url = f"http://{config.gui.host}:{config.gui.port}/"
     if config.gui.open_track:
