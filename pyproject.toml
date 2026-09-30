@@ -73,6 +73,14 @@ ml = [
 gui = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    # The page view's engraver (gui/page.py). Upper bound is SMART APP
+    # CONTROL, as torch's is: SAC judges every compiled FILE by Microsoft's
+    # reputation graph, so a release too new to have earned any can be
+    # refused on the dev machine (WinError 4551) whatever its API. Probed
+    # 2026-09-29: 6.3.0's wheel (one compiled module) loads. A 6.3.x patch
+    # is new bytes too, so re-test the page view after any relock that moves
+    # it; raise the bound only after loading the new wheel here, SAC on.
+    "verovio>=6.3.0,<6.4",
 ]
 # scripts/wjazz_batch.py's progress spreadsheet. Its own group, same reasoning
 # as ml/gui: plain `uv sync` stays light. Needs ml + gui too (it drives the

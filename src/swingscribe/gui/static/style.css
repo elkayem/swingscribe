@@ -545,6 +545,25 @@ input.rate-value[type=text] {
 /* Small selects that sit inline with a button rather than in a form. */
 .picker-label { font-size: 12px; color: var(--muted); cursor: help; }
 .review-bar select, .export-bar select { padding: 5px 26px 5px 9px; font-size: 12.5px; }
+/* What the stems say about who is playing (roadmap O2), under the Ensemble
+   menu. Neutral on purpose: it is a suggestion, not a warning, and the
+   accent is the selection's colour. "quiet" is the stems agreeing with the
+   menu, or saying nothing: one muted line, no buttons. */
+.suggest-bar {
+  display: flex; align-items: center; gap: 3px 10px; flex-wrap: wrap;
+  margin: -4px 0 12px; padding: 8px 12px;
+  background: var(--panel-2); border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-sm); font-size: 12.5px;
+}
+.suggest-bar.quiet { background: transparent; border-color: var(--hairline); padding: 5px 12px; }
+.suggest-head { font-weight: 600; color: var(--text); cursor: help; }
+.suggest-bar.quiet .suggest-head { font-weight: 400; color: var(--muted); }
+/* The reason always starts its own line: a flex item's basis is clamped by
+   its max-width before lines are broken, so on a wide window a capped
+   reason sat beside the headline instead of under it. */
+.suggest-break { flex-basis: 100%; height: 0; }
+.suggest-reason { font-size: 12px; line-height: 1.45; max-width: 120ch; }
+.suggest-bar code { font: 11.5px var(--mono); color: var(--text-2); }
 
 /* ── export ─────────────────────────────────────────────────────────────── */
 /* Below the ear test on purpose: exporting is the last thing you do, after
@@ -565,6 +584,40 @@ input.rate-value[type=text] {
    with ours; below that it is a number about the wrong music. */
 #score-line.untrusted { color: var(--gt-wrong); }
 #score-line.off-the-bar { color: var(--gt-wrong); font-weight: 600; }
+
+/* ── the page ───────────────────────────────────────────────────────────── */
+/* Verovio's SVG draws in `currentColor` for strokes and the inherited fill
+   for everything else, so the ink is set here, not in the SVG: light on the
+   app's dark ground by default, black on white with Paper. Its inner <svg>
+   carries color="black" as a presentation attribute, which any author rule
+   outranks -- hence the rule on every svg, not only the outer one. */
+.page-wrap { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); }
+.page-view {
+  --ink: var(--text);
+  --sheet: #121319;
+  position: relative;
+  height: 72vh; min-height: 320px;
+  overflow: auto; resize: vertical;
+  background: #0a0b0f; border: 1px solid var(--hairline); border-radius: 10px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+  padding: 12px;
+  cursor: grab; user-select: none; touch-action: none;
+}
+.page-view.panning { cursor: grabbing; }
+.page-view.paper { --ink: #111216; --sheet: #fbfaf6; }
+.page-sheets { margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.page-sheet {
+  background: var(--sheet); color: var(--ink);
+  border-radius: 4px; box-shadow: var(--shadow-1);
+}
+.page-sheet svg { display: block; width: 100%; height: auto; color: var(--ink); fill: currentColor; }
+.page-message {
+  padding: 28px 16px; text-align: center;
+  color: var(--muted); font-size: 12.5px; cursor: default;
+}
+.page-message.error { color: var(--danger); }
+#page-info { font: 11.5px var(--mono); }
+.wave-label .page-zoom { font: 11px var(--mono); color: var(--accent); text-transform: none; letter-spacing: normal; }
 
 /* ── ground truth ───────────────────────────────────────────────────────── */
 .gt-bar {

@@ -27,6 +27,7 @@ libraries; the model weights are downloaded by SwingScribe on first use into
 | python-audio-separator | MIT — its models come from the UVR project; credit to UVR and its developers, as its licence asks |
 | onnxruntime | MIT |
 | FastAPI, Starlette, uvicorn | MIT, MIT, BSD-3-Clause |
+| Verovio | LGPL-3.0 — engraves the in-app page view; shipped unmodified as its own module (`verovio\`, with the Microsoft C++ runtime it bundles in `verovio.libs\`), so it can be replaced. Its music fonts (Leipzig, Bravura, Leland, Petaluma) and its Liberation text font are under the SIL Open Font License |
 | pydantic, pydantic-settings | MIT |
 | mir_eval | MIT |
 | pretty_midi | MIT |

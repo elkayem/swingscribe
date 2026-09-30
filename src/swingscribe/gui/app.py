@@ -33,6 +33,8 @@ from swingscribe.gui import erasures as gui_erasures
 from swingscribe.gui import ground_truth, library, peaks, review, storage, timings
 from swingscribe.gui import jobs as gui_jobs
 from swingscribe.gui import musicxml as gui_musicxml
+from swingscribe.gui import page as gui_page
+from swingscribe.gui import suggestion as gui_suggestion
 from swingscribe.model import NoteEvent
 from swingscribe.notation import HAND_SPLIT
 
@@ -473,6 +475,31 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             "stems": library.selectable_stems(document, config, model, span),
         }
 
+    @app.get("/api/tracks/{track_id}/suggestion")
+    def get_suggestion(
+        track_id: str,
+        model: str,
+        start: float | None = None,
+        end: float | None = None,
+    ) -> dict[str, Any]:
+        """Who the stems say is playing over the selection: a suggested
+        ensemble and lead stem with its reason (roadmap O2, `routing.py`).
+
+        A read, never a write: the page offers it beside the Ensemble menu
+        while the sidecar has no ensemble of its own, and only the listener's
+        Apply stores anything. Levels are read off the stem wavs by the
+        package (`gui/suggestion.py` over `routing.measure`), not here.
+        """
+        if model not in config.gui.models:
+            raise HTTPException(400, f"unknown model {model!r}")
+        span = None
+        if start is not None and end is not None:
+            if not end > start:
+                raise HTTPException(400, "the span must end after it starts")
+            span = (start, end)
+        entry = resolve(track_id)
+        return gui_suggestion.suggestion(entry["document"], config, model, span)
+
     @app.get("/api/tracks/{track_id}/stem")
     def get_stem_slice(
         track_id: str,
@@ -734,6 +761,56 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
 
     # ── notation ────────────────────────────────────────────────────────────
 
+    def page_inputs(
+        track_id: str,
+        model: str,
+        stem: str,
+        start: float | None,
+        end: float | None,
+        line: str | None,
+        piano_notes: str | None,
+    ) -> dict[str, Any]:
+        """Everything the page is written from, as gui/musicxml's arguments.
+
+        Shared by Export and the page view, so the page on screen is the
+        file Export writes: the same review, the same edits, the same
+        sidecar choices (rhythm, key, transposition, staves, hands). The
+        client persists before it asks, because every choice is read off
+        the sidecar.
+        """
+        entry = resolve(track_id)
+        run_config = review_config(stem, start, end, entry["path"], track_id, line)
+        payload = review.cached_review(entry["document"], run_config, model)
+        if payload is None:
+            raise HTTPException(409, "transcribe the span first")
+        texture = texture_of(run_config, piano_notes)
+        # Through resolve_edits, so the score holds exactly the notes the
+        # A/B render plays. A silenced note must not come back on the page,
+        # and an enabled candidate must reach it (as a chord, if struck with
+        # a line note — notation.with_chords).
+        edits = resolve_edits(track_id, entry, run_config, payload, texture)
+        audible = edits["audible"]
+        settings = library.load_settings(entry["path"], config, track_id)
+        # The overlay goes through erasures too: a second-voice note the
+        # listener silenced on the review screen must not reappear on the page.
+        overlay = [] if texture else payload.get("second_voice") or []
+        if overlay:
+            silenced = resolve_erasures(track_id, entry, run_config, overlay)["silenced"]
+            overlay = gui_erasures.audible(overlay, silenced)
+        grand = gui_musicxml.two_staves(settings, texture)
+        return {
+            "document": entry["document"],
+            "config": config,
+            "run_config": run_config,
+            "audio_path": entry["path"],
+            "notes": edits["right"] if grand else audible,
+            "settings": settings,
+            "second_voice": overlay,
+            "added": edits["added"],
+            "texture": texture,
+            "left": edits["left"] if grand else None,
+        }
+
     @app.post("/api/tracks/{track_id}/export")
     def post_export(
         track_id: str,
@@ -756,45 +833,79 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         view one staff or two -- are read off the sidecar like the
         transposition; the client persists before it asks.
         """
-        entry = resolve(track_id)
-        run_config = review_config(stem, start, end, entry["path"], track_id, line)
-        payload = review.cached_review(entry["document"], run_config, model)
-        if payload is None:
-            raise HTTPException(409, "transcribe the span first")
-        texture = texture_of(run_config, piano_notes)
-        # Through resolve_edits, so the score holds exactly the notes the
-        # A/B render plays. A silenced note must not come back on the page,
-        # and an enabled candidate must reach it (as a chord, if struck with
-        # a line note — notation.with_chords).
-        edits = resolve_edits(track_id, entry, run_config, payload, texture)
-        audible = edits["audible"]
-        settings = library.load_settings(entry["path"], config, track_id)
-        # The overlay goes through erasures too: a second-voice note the
-        # listener silenced on the review screen must not reappear on the page.
-        overlay = [] if texture else payload.get("second_voice") or []
-        if overlay:
-            silenced = resolve_erasures(track_id, entry, run_config, overlay)["silenced"]
-            overlay = gui_erasures.audible(overlay, silenced)
-        grand = gui_musicxml.two_staves(settings, texture)
+        inputs = page_inputs(track_id, model, stem, start, end, line, piano_notes)
         try:
-            return gui_musicxml.export_span(
-                entry["document"],
-                config,
-                run_config,
-                entry["path"],
-                edits["right"] if grand else audible,
-                settings,
-                overlay,
-                edits["added"],
-                texture=texture,
-                left=edits["left"] if grand else None,
-            )
+            return gui_musicxml.export_span(**inputs)
         except gui_musicxml.NotReady as exc:
             raise HTTPException(409, str(exc)) from exc
         except OSError as exc:
             raise HTTPException(404, f"could not read the audio for this track: {exc}") from exc
         except Exception as exc:
             raise HTTPException(500, f"could not notate the span: {exc}") from exc
+
+    @app.get("/api/tracks/{track_id}/page")
+    def get_page(
+        track_id: str,
+        model: str,
+        stem: str,
+        start: float | None = None,
+        end: float | None = None,
+        line: str | None = None,
+        piano_notes: str | None = None,
+        width: float | None = None,
+        known: str | None = None,
+    ) -> JSONResponse:
+        """The page Export would write for this span, engraved as SVG.
+
+        One SVG per page, laid out for `width` CSS pixels (gui/page.py). The
+        MusicXML is the Export button's own string (`page_inputs`,
+        `gui_musicxml.page_of`), so the view cannot show a page the button
+        would not write -- and, being a GET, it writes nothing: the file on
+        disk is still only what Export put there.
+
+        `known` is the digest the client already drew. When the page has
+        not changed it gets `pages: null` back and keeps its own, with its
+        zoom and scroll, instead of half a megabyte of identical SVG.
+        Refusals are JSON like every other endpoint's: 409 is a step still
+        owed (transcribe, Beats), 501 a machine without Verovio.
+        """
+        inputs = page_inputs(track_id, model, stem, start, end, line, piano_notes)
+        try:
+            notation, xml = gui_musicxml.page_of(**inputs)
+        except gui_musicxml.NotReady as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(404, f"could not read the audio for this track: {exc}") from exc
+        except Exception as exc:
+            raise HTTPException(500, f"could not notate the span: {exc}") from exc
+        try:
+            digest, width_px, pages = gui_page.render(xml, width)
+        except gui_page.Unavailable as exc:
+            raise HTTPException(501, str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(500, f"could not engrave the page: {exc}") from exc
+        unchanged = known == digest
+        return JSONResponse(
+            {
+                "digest": digest,
+                "width": width_px,
+                "unchanged": unchanged,
+                "pages": None if unchanged else pages,
+                "page_count": len(pages),
+                # The name Export would give the file, so the view can say
+                # which page it is showing.
+                "name": gui_musicxml.page_path(
+                    config,
+                    inputs["run_config"],
+                    inputs["audio_path"],
+                    inputs["settings"],
+                    inputs["texture"],
+                ).name,
+                **gui_musicxml.describe(notation, config, inputs["settings"]),
+            },
+            # The page depends on the sidecar, which is not in the URL.
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/api/tracks/{track_id}/notation-score")
     def get_notation_score(

@@ -264,7 +264,7 @@ def build_notation(
     return notation
 
 
-def export_span(
+def page_of(
     document: Document,
     config: Config,
     run_config: Config,
@@ -275,9 +275,15 @@ def export_span(
     added: list[dict[str, Any]] | None = None,
     texture: bool = False,
     left: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Write the reviewed span to MusicXML and say what was written."""
-    from swingscribe.benchmark import readability
+):
+    """The page Export writes, as (Notation, MusicXML text), written nowhere.
+
+    The one assembly both the Export button and the in-app page view go
+    through (gui/page.py). The page on screen has to be the file on disk
+    byte for byte -- a view that drew a second reading of the same notes
+    would be showing the listener a page they cannot export -- so the view
+    renders exactly this string rather than a Notation of its own.
+    """
     from swingscribe.stages.export import to_musicxml
 
     notation = build_notation(
@@ -292,27 +298,32 @@ def export_span(
         texture=texture,
         left=left,
     )
-    region = run_config.transcribe.region or (0.0, None)
-    title = Path(audio_path).stem
-    signature = notation.bars[0].time_signature
-    path = export_path(
+    return notation, to_musicxml(notation, part_name=Path(audio_path).stem)
+
+
+def page_path(
+    config: Config,
+    run_config: Config,
+    audio_path: str | Path,
+    settings: dict[str, Any],
+    texture: bool = False,
+) -> Path:
+    """Where Export writes this review's page: the span, the take and the
+    page's choices in the name (`export_path`). The page view names the
+    same file, so it says which page it is showing."""
+    return export_path(
         audio_path,
-        region,
+        run_config.transcribe.region or (0.0, None),
         take_of(config, run_config.transcribe.piano_line),
         page_tags(config, settings, texture),
     )
-    xml = to_musicxml(notation, part_name=title)
-    try:
-        path.write_text(xml, encoding="utf-8")
-    except OSError as exc:
-        raise NotReady(f"could not write beside the audio: {exc}") from exc
 
-    # Reference-free, a property of the page just written (benchmark.py):
-    # reported with the export because this is the moment the page exists.
-    readable = readability(notation)
+
+def describe(notation, config: Config, settings: dict[str, Any]) -> dict[str, Any]:
+    """What the page holds, in the words the export bar says it: shared by
+    Export and the page view so the two lines cannot disagree."""
+    signature = notation.bars[0].time_signature
     return {
-        "path": str(path),
-        "name": path.name,
         "bars": len(notation.bars),
         "notes": sum(1 for bar in notation.bars for n in bar.notes if not n.is_rest),
         "key_fifths": notation.key_fifths,
@@ -325,6 +336,49 @@ def export_span(
         "staves": notation.staves,
         "transpose": notation.transpose,
         "time_signature": f"{signature[0]}/{signature[1]}",
+    }
+
+
+def export_span(
+    document: Document,
+    config: Config,
+    run_config: Config,
+    audio_path: str,
+    notes: list[dict[str, Any]],
+    settings: dict[str, Any],
+    second_voice: list[dict[str, Any]] | None = None,
+    added: list[dict[str, Any]] | None = None,
+    texture: bool = False,
+    left: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Write the reviewed span to MusicXML and say what was written."""
+    from swingscribe.benchmark import readability
+
+    notation, xml = page_of(
+        document,
+        config,
+        run_config,
+        audio_path,
+        notes,
+        settings,
+        second_voice,
+        added,
+        texture=texture,
+        left=left,
+    )
+    path = page_path(config, run_config, audio_path, settings, texture)
+    try:
+        path.write_text(xml, encoding="utf-8")
+    except OSError as exc:
+        raise NotReady(f"could not write beside the audio: {exc}") from exc
+
+    # Reference-free, a property of the page just written (benchmark.py):
+    # reported with the export because this is the moment the page exists.
+    readable = readability(notation)
+    return {
+        "path": str(path),
+        "name": path.name,
+        **describe(notation, config, settings),
         "readability": readable["readability"],
         "tie_rate": readable["tie_rate"],
         "short_rests": readable["short_rests"],

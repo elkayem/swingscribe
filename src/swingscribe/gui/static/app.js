@@ -10,6 +10,7 @@ import { WaveView } from './waveform.js';
 import { MixEngine, StemEngine } from './engine.js';
 import { CLASSES, PianoRoll } from './review.js';
 import { initStorage } from './storage.js';
+import { PageView } from './page.js';
 import { playPitch } from './tone.js';
 import { RateControl } from './rate.js';
 
@@ -189,6 +190,35 @@ const pianoRoll = new PianoRoll($('pianoroll'), $('lane-f0'), $('lane-gate'), {
     sound(state.review?.notes[index]);
   },
 });
+
+const PAGE_DEBOUNCE_MS = 350;
+// The server lays a page out in steps of this many pixels (gui/page.py);
+// a resize smaller than a step would engrave the same page.
+const PAGE_WIDTH_STEP = 40;
+
+// The page Export would write, engraved on the server (gui/page.py) and
+// redrawn whenever something that changes it changes; see refreshPage.
+const pageView = new PageView($('page-view'), $('page-message'), {
+  onZoom: (zoom) => {
+    const node = $('page-zoom');
+    node.hidden = Math.abs(zoom - 1) < 0.005;
+    node.textContent = `${Math.round(zoom * 100)}%`;
+  },
+});
+const page = {
+  shown: readPref('page-shown', true),
+  paper: readPref('page-paper', false),
+  timer: null,
+  // Bumped by every request and by invalidatePage: an answer is drawn only
+  // if its token is still the latest (the suggestion's rule, below).
+  token: 0,
+  // What the last page asked for was drawn from -- drawn, refused, or still
+  // on its way. A refresh with the same signature asks nothing (see
+  // refreshPage for why a refusal keeps it).
+  signature: null,
+  width: 0,         // the width it was laid out for, as the server rounded it
+};
+const PAGE_OWED = 'The page appears here once the span is transcribed.';
 
 // ── screen 1: the track picker ──────────────────────────────────────────────
 
@@ -418,6 +448,17 @@ async function loadTrack(track) {
   state.exported = null;
   state.exportedAt = null;
   state.notationScore = null;
+  // The last track's page, and any answer still on its way for it, describe
+  // the last track: drop both, and open the next page at the top rather than
+  // where the last one was being read.
+  invalidatePage();
+  page.width = 0;
+  pageView.say(PAGE_OWED);
+  $('page-info').textContent = '';
+  // The last track's suggestion describes the last track's stems.
+  suggestion.token += 1;
+  suggestion.signature = null;
+  suggestion.data = null;
   renderChoices();
   // Carried until a transcription exists to match them against; showReview
   // replaces these with the server's resolution.
@@ -473,6 +514,7 @@ function updateSelection(a, b, done) {
   applySelection(false);
   if (done) {
     persist();
+    renderSuggestion();  // the reading on screen was for the old span: hide it until the reload
     scheduleAuditionReload();
     refreshModelStatus();  // a span-scoped separation may or may not cover the new span
     if (state.anchor === null && state.beats) maybeLoadBeats();  // the automatic downbeat follows the span
@@ -696,6 +738,9 @@ async function maybeLoadBeats() {
     state.beats = null;
   }
   applyBeats();
+  // A grid arriving is what a "press Beats first" page is waiting for, and
+  // it changes the page's signature, so this asks again exactly then.
+  schedulePageRefresh();
 }
 
 function applyBeats() {
@@ -1110,6 +1155,9 @@ async function loadAudition({ keepReview = false } = {}) {
   renderMixer();
   await drawStemOverlay(token);
   if (!keepReview) invalidateReview();
+  // A new span, model or separation may say something new about who is
+  // playing; the same one is not asked again (suggestionSignature).
+  refreshSuggestion();
 }
 
 /* The span, and the slice of it on screen when the stem view is zoomed in. */
@@ -1454,6 +1502,7 @@ function foldEdits() {
    describe a different passage. */
 function invalidateReview() {
   state.review = null;
+  invalidatePage();  // a page still on its way was engraved from these notes
   // The file on disk survives — deleting the memory of it would be a lie in
   // the other direction. It is simply behind now, which renderExport says.
   state.notationScore = null;
@@ -1597,6 +1646,7 @@ async function showReview(payload) {
         : `${n} erased note${n === 1 ? ' is' : 's are'} already gone from this transcription — labels kept`,
     );
   }
+  schedulePageRefresh();
   await loadGroundTruth();
   await loadReviewAudio();
 }
@@ -2466,6 +2516,9 @@ function settingsPayload() {
 
 function persist() {
   if (!state.track) return;
+  // Whatever was worth remembering may be worth redrawing: the page is read
+  // off the sidecar, and refreshPage skips a request that would not change it.
+  schedulePageRefresh();
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
     post(`/api/tracks/${state.track.id}/state`, { state: settingsPayload() })
@@ -2603,6 +2656,170 @@ function renderEnsembleHint() {
     : '· no piano model — pick Trio or Solo piano for a pianist';
 }
 
+/* ── who the stems say is playing (roadmap O2) ──────────────────────────────
+   The menu above defaults to Horn-led, so a piano solo nobody remembered to
+   mark loses the piano model. The stems already on disk say who leads:
+   routing.py reads their levels over the span (a read of wavs, ~0.5 s for a
+   75-second solo, not a job) and answers with an ensemble, a lead stem and
+   its reason -- or with no suggestion, when it is unsure.
+
+   Three rules this code must keep:
+   - Shown only while the sidecar has NO ensemble (state.ensemble null). A
+     listener's own choice is never second-guessed, and nothing changes
+     until they press Apply (or Keep, which stores what the menu shows).
+   - The server's answer is shown VERBATIM. The rule never calls a horn
+     trio (0 of 100 horn spans on the Roformer, 0 of 200,966 horn windows
+     at its 15 s floor, docs/routing.md), and a horn sent to the piano
+     model loses its whole line, so the page never upgrades "no
+     suggestion" into anything.
+   - A reading belongs to ONE span, model and stem set. Moving A or B
+     reloads the audition after a debounce, and until the new reading
+     lands the old one is not shown and cannot be applied: a trio read off
+     the piano solo must not be stored after the selection has grown into
+     the horn solo before it. */
+const suggestion = { token: 0, signature: null, data: null };
+
+function suggestionSignature() {
+  if (!state.track || !state.selection) return null;
+  const { a, b } = state.selection;
+  return [state.track.id, state.model, a.toFixed(3), b.toFixed(3), state.stems.join(',')].join('|');
+}
+
+/* The reading on hand, if it describes what is selected now. */
+function currentSuggestion() {
+  const data = suggestion.data;
+  if (!data || suggestion.signature !== suggestionSignature()) return null;
+  return data;
+}
+
+async function refreshSuggestion() {
+  const live = state.track && state.selection && state.model && state.stems.length;
+  if (!live || state.ensemble !== null) {
+    renderSuggestion();
+    return;
+  }
+  const signature = suggestionSignature();
+  if (signature === suggestion.signature) { renderSuggestion(); return; }
+  const token = ++suggestion.token;
+  suggestion.signature = signature;
+  suggestion.data = null;
+  renderSuggestion();
+  let data = null;
+  try {
+    data = await api(`/api/tracks/${state.track.id}/suggestion?model=${state.model}${spanParams()}`);
+  } catch (_error) {
+    // A suggestion that cannot be read is no suggestion; every control
+    // around it still works, so no toast.
+    if (token === suggestion.token) suggestion.signature = null;
+  }
+  if (token !== suggestion.token) return;  // the span or the model moved on
+  suggestion.data = data;
+  renderSuggestion();
+}
+
+/* Text with `stem` names set as code, without building HTML from it. */
+function setCodeText(node, text) {
+  node.replaceChildren(...String(text).split('`').map((part, index) => {
+    if (index % 2 === 0) return document.createTextNode(part);
+    const code = document.createElement('code');
+    code.textContent = part;
+    return code;
+  }));
+}
+
+function renderSuggestion() {
+  const strip = $('ensemble-suggestion');
+  const data = currentSuggestion();
+  if (!data || state.ensemble !== null || !state.stems.length) { strip.hidden = true; return; }
+  const menu = $('ensemble-select');
+  const current = menu.value || menu.dataset.fallback;
+  const label = (value) => LABELS[value] ?? value;
+  const head = $('suggestion-head');
+  const apply = $('suggestion-apply');
+  const keep = $('suggestion-keep');
+  const offered = Boolean(data.ensemble);
+  const sameEnsemble = data.ensemble === current;
+  const sameStem = !data.stem || data.stem === state.leadStem;
+  const differs = offered && !(sameEnsemble && sameStem);
+
+  strip.classList.toggle('quiet', !differs);
+  apply.hidden = !differs;
+  keep.hidden = !differs;
+  if (!offered) {
+    head.textContent = 'No suggestion from the stems';
+  } else if (!differs) {
+    setCodeText(head, `The stems agree: ${label(data.ensemble)}, lead stem \`${data.stem}\``);
+  } else {
+    setCodeText(head, `Suggested: ${label(data.ensemble)}, lead stem \`${data.stem}\``);
+    apply.title = `Set Ensemble to ${label(data.ensemble)} and Lead stem to ${data.stem}. ` +
+      'The review is cleared, so transcribe the span again.';
+    // Only the stem differs (a guitar lead in `guitar`, say): keeping is
+    // about the stem, and the ensemble is what gets stored either way.
+    keep.textContent = sameEnsemble ? 'Keep as is' : `Keep ${label(current)}`;
+    keep.title = `Store ${label(current)} as this track's ensemble, so the suggestion is not ` +
+      'offered again. The lead stem and the review stay as they are.';
+  }
+  const source = offered
+    ? `Read from the ${data.model} stems over the span (${data.active_s ?? '?'} s with melody). ` +
+      `Confidence ${Number(data.confidence).toFixed(2)}: how far past the thresholds, not a probability.`
+    : '';
+  // Agreement is one quiet line with its reason on hover: nothing to act
+  // on, and it appears on every horn track. A suggestion or a refusal
+  // shows its reason, because the reason is what the listener acts on.
+  const agree = offered && !differs;
+  head.title = agree ? `${data.reason.replaceAll('`', '')}\n\n${source}` : source;
+  setCodeText($('suggestion-reason'), data.reason ?? '');
+  $('suggestion-reason').hidden = agree;
+  strip.querySelector('.suggest-break').hidden = agree;
+  strip.hidden = false;
+}
+
+/* The listener's click, and the only way the suggestion reaches the sidecar.
+   The same steps as choosing both menus by hand: fold the edits while the
+   old view still names them, store, and clear what no longer describes the
+   span (a new stem reloads the audition, which clears the review itself). */
+async function applySuggestion() {
+  const data = currentSuggestion();
+  if (!data?.ensemble || state.ensemble !== null) { renderSuggestion(); return; }
+  const menu = $('ensemble-select');
+  const ensembleChanges = data.ensemble !== (menu.value || menu.dataset.fallback);
+  const stemChanges = Boolean(data.stem) && data.stem !== state.leadStem
+    && state.stems.includes(data.stem);
+  foldEdits();
+  state.ensemble = data.ensemble;
+  menu.value = data.ensemble;
+  renderEnsembleHint();
+  renderLinePicker();
+  if (stemChanges) {
+    state.leadStem = data.stem;
+    $('lead-stem').value = data.stem;
+    $('legend-stem').textContent = data.stem;
+    state.mixer.clear();
+    updateHandoff();
+  }
+  renderSuggestion();
+  await persistNow();  // review_config reads the ensemble back off the sidecar
+  if (stemChanges) await loadAudition();
+  else if (ensembleChanges) invalidateReview();
+  // No "transcribe again" here: a take already cached for the new choice
+  // comes straight back, and the Transcribe button says which it is.
+  const what = [ensembleChanges && LABELS[data.ensemble], stemChanges && `lead stem ${data.stem}`]
+    .filter(Boolean).join(', ');
+  toast(what ? `Applied: ${what}` : `Kept ${LABELS[data.ensemble] ?? data.ensemble}`);
+}
+
+/* Disagreeing is a choice too: store what the menu already shows. It is the
+   routing the review was already made under (the server's default), so the
+   review stands. */
+async function keepCurrentEnsemble() {
+  if (state.ensemble !== null) return;
+  const menu = $('ensemble-select');
+  state.ensemble = menu.value || menu.dataset.fallback;
+  renderSuggestion();
+  await persistNow();
+  toast(`Kept ${LABELS[state.ensemble] ?? state.ensemble} for this track`);
+}
+
 function renderChoices() {
   const ensemble = $('ensemble-select');
   const transpose = $('transpose-select');
@@ -2711,7 +2928,24 @@ async function startNotationScore() {
   }
 }
 
+/* What a page holds, said the one way both the export line and the page view
+   say it: from gui/musicxml.describe, which both endpoints return. */
+function pageSummary(written) {
+  const key = written.transpose
+    ? ` · written ${written.transpose > 0 ? '+' : ''}${written.transpose}`
+    : '';
+  const literal = written.timing && written.timing !== 'swing'
+    ? ` · ${(LABELS[written.timing] ?? written.timing).toLowerCase()}`
+    : '';
+  const staves = written.staves === 2 ? ' · two staves' : '';
+  const keyName = written.key ? ` · ${written.key}${written.key_auto ? ' (auto)' : ''}` : '';
+  return `${written.bars} bars · ${written.notes} notes · ${written.time_signature}${keyName}` +
+    `${written.swing ? ' · swing' : ''}${literal}${staves}${key}`;
+}
+
 function renderExport(message) {
+  // Every change the export line reports as "behind" changes the page too.
+  schedulePageRefresh();
   const info = $('export-info');
   const link = $('export-download');
   const stale = $('export-stale');
@@ -2740,17 +2974,7 @@ function renderExport(message) {
     link.hidden = true;
     return;
   }
-  const key = written.transpose
-    ? ` · written ${written.transpose > 0 ? '+' : ''}${written.transpose}`
-    : '';
-  const literal = written.timing && written.timing !== 'swing'
-    ? ` · ${(LABELS[written.timing] ?? written.timing).toLowerCase()}`
-    : '';
-  const staves = written.staves === 2 ? ' · two staves' : '';
-  const keyName = written.key ? ` · ${written.key}${written.key_auto ? ' (auto)' : ''}` : '';
-  info.textContent =
-    `${written.bars} bars · ${written.notes} notes · ${written.time_signature}${keyName}` +
-    `${written.swing ? ' · swing' : ''}${literal}${staves}${key} → ${written.path}`;
+  info.textContent = `${pageSummary(written)} → ${written.path}`;
   // What Auto found, beside the choice, so choosing a different key starts
   // from knowing what the detector heard.
   const auto = $('key-select').options[0];
@@ -2820,6 +3044,141 @@ function barLineWarning(s) {
   return ` · BAR LINES OFF: ${share}% of matched notes sit ${beats} beat${beats === 1 ? '' : 's'} ` +
     `${early ? 'early' : 'late'} — move the downbeat that far ${early ? 'earlier' : 'later'}`;
 }
+
+/* ── the page ───────────────────────────────────────────────────────────────
+   What Export would write, shown before it is written: the same request
+   Export makes (gui/app.py page_inputs), engraved to SVG on the server, so
+   the page on screen IS the file the button writes. It is redrawn after
+   anything that changes it -- an edit, the Rhythm, Key or Written-for menus,
+   the staves, the hands, the downbeat or time signature, double time --
+   debounced, because a sweep of the Edit tool is many edits.
+
+   Looking at it writes nothing: the file on disk is still only ever what
+   Export last put there, and the export line still says when it is behind. */
+
+/* A per-viewer convenience, not a judgement about a track: kept in the
+   browser, never in the sidecar. Storage can be absent or refuse. */
+function readPref(name, fallback) {
+  try {
+    const value = localStorage.getItem(`swingscribe.${name}`);
+    return value === null ? fallback : value === 'true';
+  } catch {
+    return fallback;
+  }
+}
+
+function writePref(name, value) {
+  try { localStorage.setItem(`swingscribe.${name}`, String(value)); } catch { /* not kept */ }
+}
+
+/* Everything the page on screen was drawn from. The export's signature is
+   most of it; double time and the width it is laid out for are the rest --
+   and whether a beat grid exists, which is not a choice but is the one fix
+   for a refusal ("press Beats first") that would otherwise change nothing
+   here, so a page refused for want of one could never be asked for again. */
+function pageSignature() {
+  return JSON.stringify({
+    page: exportSignature(),
+    doubleTime: state.doubleTime,
+    line: state.line,
+    ensemble: state.ensemble,
+    beats: Boolean(state.beats),
+    width: Math.round(pageView.layoutWidth / PAGE_WIDTH_STEP),
+  });
+}
+
+/* The page on screen no longer describes what is selected -- another track,
+   or a review that has gone. An answer still on its way for it is dropped
+   (the suggestion's token rule), and the next refresh asks afresh. */
+function invalidatePage() {
+  page.token += 1;
+  page.signature = null;
+}
+
+function schedulePageRefresh() {
+  clearTimeout(page.timer);
+  page.timer = setTimeout(() => refreshPage(), PAGE_DEBOUNCE_MS);
+}
+
+async function refreshPage({ force = false } = {}) {
+  if (serverStopped || !state.track) return;
+  $('page-wrap').hidden = !page.shown;
+  if (!page.shown) return;
+  if (!state.review || !state.selection || !state.leadStem) {
+    invalidatePage();  // an answer still on its way is for notes no longer here
+    pageView.say(PAGE_OWED);
+    $('page-info').textContent = '';
+    return;
+  }
+  const signature = pageSignature();
+  // Asked already, and nothing the page is drawn from has changed since:
+  // whether that page was drawn, refused, or is still on its way.
+  if (!force && signature === page.signature) return;
+  page.signature = signature;
+  const token = ++page.token;
+  try {
+    await persistNow();  // read off the sidecar, as Export reads it
+    if (token !== page.token) return;  // the track, the review or the choice moved on
+    const params = reviewParams({ width: String(Math.round(pageView.layoutWidth)) });
+    if (pageView.digest) params.set('known', pageView.digest);
+    const result = await api(`/api/tracks/${state.track.id}/page?${params}`);
+    if (token !== page.token) return;  // a newer request, or another track
+    if (!result.unchanged) {
+      pageView.show(result.pages, result.digest, { sameLayout: result.width === page.width });
+    }
+    page.width = result.width;
+    const count = result.page_count;
+    $('page-info').textContent =
+      `${pageSummary(result)} · ${count} page${count === 1 ? '' : 's'}`;
+    $('page-info').title =
+      `What Export would write, as ${result.name}. Nothing is written until you press it.`;
+  } catch (error) {
+    if (token !== page.token) return;
+    /* A refusal KEEPS the signature. Every persist() schedules a refresh, so
+       forgetting it re-asked for the same refused page on every click
+       anywhere in the app for as long as the cause stood. Kept, the page is
+       asked for again exactly when something it is drawn from changes --
+       which every fix does: Beats (the grid is in the signature), a
+       transcription (a new review token), a note switched back on, a wider
+       span -- or when the Page button shows it again (force). */
+    // 409 is a step still owed (Beats, a transcription), said plainly;
+    // anything else is a fault, and says so in red.
+    pageView.say(error.message, { error: error.status !== 409 });
+    $('page-info').textContent = '';
+  }
+}
+
+function setPageShown(shown) {
+  page.shown = shown;
+  writePref('page-shown', shown);
+  $('page-toggle').classList.toggle('active', shown);
+  $('page-wrap').hidden = !shown;
+  if (shown) refreshPage({ force: true });
+}
+
+function setPaper(paper) {
+  page.paper = paper;
+  writePref('page-paper', paper);
+  $('page-paper').classList.toggle('active', paper);
+  $('page-view').classList.toggle('paper', paper);
+}
+
+$('page-toggle').addEventListener('click', () => setPageShown(!page.shown));
+$('page-paper').addEventListener('click', () => setPaper(!page.paper));
+$('page-fit').addEventListener('click', () => pageView.fit());
+for (const button of document.querySelectorAll('[data-page-zoom]')) {
+  button.addEventListener('click', () =>
+    pageView.zoomBy(button.dataset.pageZoom === 'in' ? 1.25 : 0.8));
+}
+// A page laid out for a wider panel than the one it sits in reads as small
+// type; a resize past one layout step asks for the page again.
+new ResizeObserver(() => {
+  if (page.shown && page.width && Math.abs(pageView.layoutWidth - page.width) >= PAGE_WIDTH_STEP) {
+    schedulePageRefresh();
+  }
+}).observe($('page-view'));
+setPageShown(page.shown);
+setPaper(page.paper);
 
 // ── events ──────────────────────────────────────────────────────────────────
 
@@ -2949,12 +3308,16 @@ $('ensemble-select').addEventListener('change', async (event) => {
   state.ensemble = event.target.value;
   renderEnsembleHint();
   renderLinePicker();
+  renderSuggestion();  // the listener has chosen: the suggestion steps aside
   await persistNow();  // review_config reads this back off the sidecar
   // This one DOES change the notes: a trio consults the polyphonic piano model
   // and a horn never does (M7b). So the span needs transcribing again.
   invalidateReview();
   toast('Ensemble changed — transcribe the span again');
 });
+
+$('suggestion-apply').addEventListener('click', applySuggestion);
+$('suggestion-keep').addEventListener('click', keepCurrentEnsemble);
 
 $('line-select').addEventListener('change', async (event) => {
   state.line = event.target.value;
@@ -3308,6 +3671,10 @@ document.addEventListener('keydown', (event) => {
       // eXport. Every other control on the review screen has a key; this is
       // the one you press most once a span is settled.
       if (state.review) startExport();
+      break;
+    case 'p':
+      // Page: what Export would write, shown or put away.
+      setPageShown(!page.shown);
       break;
     case 'v':
       // Voice. Toggling the overlay off is how you check the line underneath

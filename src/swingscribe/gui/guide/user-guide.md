@@ -106,7 +106,7 @@ and <kbd>Enter</kbd> act on whichever section you last played or clicked in.
 ### Zooming and panning
 
 The same gestures work on the Detail waveform in section 1, the stem
-waveform in section 2, and the piano roll in section 3.
+waveform in section 2, and the piano roll and the page in section 3.
 
 - **Scroll** to zoom around the pointer.
 - **Shift-scroll** or **drag** to pan. A trackpad's sideways swipe pans too.
@@ -264,7 +264,8 @@ every stem the model produced (`other`, `vocals`, `guitar`, `piano`,
 
 A sum helps when a model has switched the soloist between stems mid-phrase
 (see Troubleshooting). The menu starts on `piano` for a piano ensemble and
-on `other` for everything else.
+on `other` for everything else. On a track with no ensemble yet, the
+suggestion in step 3 (see "Who is playing") names a lead stem too.
 
 ### Audition
 
@@ -298,6 +299,43 @@ polyphonic piano model, which hears every note played. A horn never is,
 because a piano model asked about a saxophone vouches for nothing. The note
 beside the menu says whether the piano model will be consulted. Changing
 the ensemble clears the review, so transcribe again afterwards.
+
+Until a track has an ensemble of its own, SwingScribe suggests one. Once
+the span is separated, a line under the menus says who the stems say is
+playing, for example **Suggested: Trio (piano), lead stem `piano`**, with
+the reason underneath. It compares how loud each stem is over your
+selection, second by second: over a piano solo the `piano` stem carries
+the line and the stem a horn is filed under goes quiet.
+
+- **Apply** sets Ensemble and Lead stem to the suggestion.
+- **Keep** stores what the menu shows now, so you are not asked again.
+- Nothing changes until you click one of them. Once the track has an
+  ensemble (chosen from the menu, applied or kept) the line goes away, and
+  a choice you made is never changed for you.
+- When the stems agree with the menus, the line is one quiet sentence.
+  Hover over it for the reason.
+
+**No suggestion** means the stems cannot decide, and the reason says why.
+The two possible mistakes are not equal. A piano solo left on Horn-led only
+misses the piano model's help. A horn sent to the piano model loses its
+whole line, because the piano model cannot vouch for a single saxophone
+note. So Trio is suggested only when the piano clearly carries the
+selection. On the 111 solos SwingScribe is measured on, the suggestion was
+right every time and never called a horn solo Trio.
+
+- It needs **BS-RoFormer** stems. The Demucs models give no suggestion:
+  Demucs 6-stem sometimes files a piano solo under `guitar`, and the
+  four-stem models have no piano stem.
+- It needs all six of BS-RoFormer's stems, and at least 15 seconds of
+  melody in the selection.
+- Select the solo itself. A horn solo selected together with the piano solo
+  after it is suggested Horn-led, with a note to select the piano solo
+  alone. A piano solo selected with up to 8 to 12 seconds of the horn solo
+  before it can still be suggested Trio, and the piano model then judges
+  those horn seconds too.
+- Vibes, organ and Rhodes are untested. The suggestion reads the `piano`
+  stem, so if one of them lands there it would be suggested Trio. Check by
+  ear before you apply it.
 
 **Line** (pianists only) chooses where the melody comes from:
 
@@ -520,6 +558,28 @@ switched on are written in.
 If you keep editing after an export, the export bar says the file on disk
 is older than what you see.
 
+### Seeing the page before you export
+
+Below the export bar, **Page** shows the score Export would write, drawn in
+the app: the same notes, bars, key, rhythm, transposition and staves. It is
+redrawn a moment after anything that changes it, such as an edit on the
+roll, the **Rhythm**, **Key** or **Written for** menus, the staves, the
+downbeat or the time signature. Looking at it writes nothing; only Export
+writes the file. It needs what Export needs, a transcription and a beat
+grid, and says so while either is missing.
+
+- **Scroll** to zoom, **shift-scroll** or **drag** to pan, as on the other
+  views. **+** and **−** zoom in steps, and **Fit** goes back to the page's
+  own width.
+- **Paper** switches between light notes on the dark background and black
+  on white, the way the page will print.
+- The **Page** chip in the export bar, or <kbd>P</kbd>, hides the page and
+  shows it again. This browser remembers the choice.
+
+The page is laid out for the width of the panel, so a line holds more bars
+than a printed page does. MuseScore lays out the exported file its own way,
+but the notes, bars and key signature are the same.
+
 ## Keyboard shortcuts
 
 Shortcuts need a track open. They are ignored while the focus is in a text
@@ -547,6 +607,7 @@ field, a menu or a slider.
 - <kbd>Esc</kbd>: with the Hands tool, clear the selection.
 - <kbd>V</kbd>: show or hide the piano model's candidates.
 - <kbd>X</kbd>: export MusicXML.
+- <kbd>P</kbd>: show or hide the page.
 - <kbd>Ctrl+Z</kbd>: undo an edit.
 - <kbd>Ctrl+Shift+Z</kbd> or <kbd>Ctrl+Y</kbd>: redo.
 
@@ -619,6 +680,10 @@ and each one downloads on first use under its own terms.
 - The **high-resolution piano transcription** model by Kong et al.
   ([paper](https://arxiv.org/abs/2010.01815)), used for pianists, is CC BY
   4.0.
+- **Verovio** ([verovio.org](https://www.verovio.org)) is not a model but
+  the music engraving library that draws the page view. It is LGPL-3.0,
+  and SwingScribe uses it unmodified. Its music fonts are under the SIL
+  Open Font License.
 
 `NOTICES.md` lists every model and library. It sits beside the launcher in
 the Windows app, and under `packaging/` in the repository.
@@ -639,7 +704,10 @@ fix it. If the grid itself runs at half or double the right speed, pass
 
 **A piano solo is not getting the piano model.** Check **Ensemble**. Unless
 it is set to **Trio (piano)** or **Solo piano**, the piano model is never
-consulted.
+consulted. On a track with no ensemble yet, separate the span with
+BS-RoFormer and read the suggestion under the menus (see "Who is playing").
+If it says there is no suggestion, its reason says why: a selection under
+15 seconds of melody, a Demucs separation, or a horn in the selection.
 
 **A separation is stuck, or you picked the wrong model.** Click **Cancel**,
 pick a different model or span, and separate again.
