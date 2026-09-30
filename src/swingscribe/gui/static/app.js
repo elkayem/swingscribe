@@ -72,6 +72,7 @@ const state = {
   carriedHands: [],         // stored hand choices with no note in this view
   handSelection: new Set(), // note indices the Hands tool has selected
   timing: null,             // swing | literal-16 | literal-32; null = server default
+  key: null,                // concert key signature in fifths; null = detect it
   transposition: null,      // the exported part's key; null = server default
   exported: null,           // {path, bars, notes, ...} from the last export
   exportedAt: null,         // what the tree looked like when it was written
@@ -412,6 +413,7 @@ async function loadTrack(track) {
   state.pianoNotes = remembered.piano_notes === 'all' ? 'all' : 'line';
   state.staves = remembered.staves === 2 ? 2 : 1;
   state.timing = remembered.timing ?? null;
+  state.key = Number.isInteger(remembered.key) ? remembered.key : null;
   state.transposition = remembered.transposition ?? null;
   state.exported = null;
   state.exportedAt = null;
@@ -2454,6 +2456,7 @@ function settingsPayload() {
     piano_notes: state.pianoNotes,
     staves: state.staves,
     timing: state.timing,
+    key: state.key,
     transposition: state.transposition,
     erasures: erasureList(),
     additions: additionList(),
@@ -2536,8 +2539,25 @@ async function loadChoices() {
   fillSelect($('transpose-select'), choices.transpositions ?? [], choices.default_transposition ?? 'C');
   fillSelect($('timing-select'), choices.timings ?? [], choices.default_timing ?? 'swing');
   fillSelect($('piano-notes-select'), choices.piano_notes ?? [], 'line');
+  fillKeySelect(choices.keys ?? []);
   handSplit = choices.hand_split ?? handSplit;
   renderChoices();
+}
+
+/* The Key menu: Auto first, then every signature the server accepts, named
+   as its major and relative minor. Values are fifths as strings; '' is Auto.
+   After an export, Auto names the key it found (renderExport). */
+function fillKeySelect(keys) {
+  const node = $('key-select');
+  const auto = document.createElement('option');
+  auto.value = '';
+  auto.textContent = 'Auto';
+  node.replaceChildren(auto, ...keys.map(([fifths, name]) => {
+    const option = document.createElement('option');
+    option.value = String(fifths);
+    option.textContent = name;
+    return option;
+  }));
 }
 
 /* The two takes of a pianist's line, named for what does the hearing. Values
@@ -2592,6 +2612,10 @@ function renderChoices() {
   if (transpose.options.length) transpose.value = state.transposition ?? transpose.dataset.fallback;
   if (line.options.length) line.value = state.line ?? line.dataset.fallback;
   if (timing.options.length) timing.value = state.timing ?? timing.dataset.fallback;
+  const key = $('key-select');
+  key.value = state.key === null ? '' : String(state.key);
+  // A new track has not been exported yet: Auto has found nothing to name.
+  if (key.options.length) key.options[0].textContent = 'Auto';
   if ($('piano-notes-select').options.length) $('piano-notes-select').value = state.pianoNotes;
   $('staves-select').value = String(state.staves);
   renderEnsembleHint();
@@ -2635,6 +2659,7 @@ function exportSignature() {
     timeSignature: state.timeSignature,
     anchor: state.anchor,
     timing: state.timing,
+    key: state.key,
     texture: textureOn(),
     staves: twoStavesOn() ? 2 : 1,
     hands: twoStavesOn() ? [...state.hands].sort((x, y) => x[0] - y[0]) : [],
@@ -2722,9 +2747,14 @@ function renderExport(message) {
     ? ` · ${(LABELS[written.timing] ?? written.timing).toLowerCase()}`
     : '';
   const staves = written.staves === 2 ? ' · two staves' : '';
+  const keyName = written.key ? ` · ${written.key}${written.key_auto ? ' (auto)' : ''}` : '';
   info.textContent =
-    `${written.bars} bars · ${written.notes} notes · ${written.time_signature}` +
+    `${written.bars} bars · ${written.notes} notes · ${written.time_signature}${keyName}` +
     `${written.swing ? ' · swing' : ''}${literal}${staves}${key} → ${written.path}`;
+  // What Auto found, beside the choice, so choosing a different key starts
+  // from knowing what the detector heard.
+  const auto = $('key-select').options[0];
+  if (auto && written.key_auto && written.key) auto.textContent = `Auto — ${written.key}`;
   link.href = `/api/tracks/${state.track.id}/export?${reviewParams()}`;
   link.hidden = false;
 }
@@ -2865,6 +2895,15 @@ $('transpose-select').addEventListener('change', (event) => {
   // Only changes how the page is written, never which notes were heard, so the
   // review stands and this is a re-export rather than a re-transcription. The
   // file already on disk is now behind, and says so rather than disappearing.
+  renderExport();
+  persist();
+});
+
+$('key-select').addEventListener('change', (event) => {
+  const value = event.target.value;
+  state.key = value === '' ? null : Number(value);
+  // Only the page's signature and spelling: a re-export, never a
+  // re-transcription. The file on disk says it is behind.
   renderExport();
   persist();
 });

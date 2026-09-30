@@ -587,3 +587,105 @@ def test_a_literal_32nd_page_is_never_read_as_triplets():
     assert all(abs(n.duration * 8 - round(n.duration * 8)) < 1e-6 for n in written)
     for bar in literal.bars:
         assert sum(n.duration for n in bar.notes) == pytest.approx(4.0)
+
+
+# ── the grid's edges, and the listener's key ──────────────────────────────
+
+
+def test_cover_continues_the_grid_at_its_edge_tempo():
+    from swingscribe.notation import cover
+
+    beats = [1.0, 2.0, 3.0, 4.0, 5.0]
+    assert cover(beats, 3.0, 4.5) == beats  # already covered: untouched
+    assert cover(beats, -0.5, 7.0) == [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+
+
+def test_a_chord_just_before_the_first_tracked_beat_lands_on_bar_one():
+    """Blossom Dearie's opening chord is struck a tenth of a beat before the
+    tracker's first beat. A note with no beat to fall in was dropped
+    silently; the grid is continued backwards so it lands on the downbeat."""
+    beats = grid(count=40, start=0.4)
+    notes = [ev(0.35, 62, 0.4)] + line(beats[1:30])
+    notation = notation_for_span("t.wav", notes, beats, (0.0, beats[30]), stem="other", anchor=0.4)
+    sounded = [
+        (bar.number, n.beat, n.pitch)
+        for bar in notation.bars
+        for n in bar.notes
+        if not n.is_rest and not n.tie_stop
+    ]
+    assert (1, 0.0, 62) in sounded
+    assert len(sounded) == len(notes)  # nothing lost at either edge
+    assert notation.bars[0].number == 1  # and no pickup bar invented for it
+
+
+def test_a_note_after_the_last_tracked_beat_is_kept():
+    beats = grid(count=30, start=0.0)
+    notes = line(beats[4:29]) + [ev(beats[-1] + 0.1, 72, 0.3)]
+    notation = notation_for_span("t.wav", notes, beats, (0.0, beats[-1] + 1.0), stem="other")
+    assert 72 in {n.pitch for bar in notation.bars for n in bar.notes if not n.is_rest}
+
+
+def test_the_swing_reading_never_sees_a_continued_beat(monkeypatch):
+    """The swing stage tiles its windows from the grid's first beat, so beats
+    added at the front would move every window and could flip a weak
+    reading. It is read over the tracked beats only."""
+    from swingscribe.stages import swing
+
+    seen = []
+    original = swing.run
+
+    def spy(document, config):
+        seen.append(list(document.beat_grid.beats))
+        return original(document, config)
+
+    monkeypatch.setattr(swing, "run", spy)
+    beats = grid(count=40, start=3.0)
+    notes = [ev(2.9, 60), *swung_line(beats)]
+    notation = notation_for_span("t.wav", notes, beats, (0.0, beats[-1]), stem="other")
+    assert seen and min(seen[0]) >= beats[0] and max(seen[0]) <= beats[-1]
+    assert notation.swing  # and the reading still reaches the page
+
+
+def with_key(fifths: int) -> Config:
+    config = Config()
+    return config.model_copy(update={"notate": config.notate.model_copy(update={"key": fifths})})
+
+
+def test_the_listeners_key_is_the_pages_key_and_spells_its_notes():
+    """A D-major line is detected as two sharps; chosen as E-flat it is
+    written with three flats, and its F-sharp becomes G-flat."""
+    beats = grid(count=40, start=0.0)
+    notes = line(beats, [62, 66, 69, 74])
+    region = (beats[0], beats[-1])
+    auto = notation_for_span("t.wav", notes, beats, region, stem="other")
+    chosen = notation_for_span("t.wav", notes, beats, region, stem="other", config=with_key(-3))
+    assert auto.key_fifths == 2 and chosen.key_fifths == -3
+
+    def spellings(notation):
+        return {
+            (n.step, n.alter)
+            for bar in notation.bars
+            for n in bar.notes
+            if not n.is_rest and n.pitch % 12 == 6
+        }
+
+    assert spellings(auto) == {("F", 1)}
+    assert spellings(chosen) == {("G", -1)}
+
+
+def test_the_listeners_key_holds_on_both_staves():
+    beats = grid(count=40, start=0.0)
+    region = (beats[0], beats[-1])
+    right = line(beats[4:20], [74, 78, 81])
+    left = line(beats[4:20:2], [50, 57])
+    notation = notation_for_span(
+        "t.wav", right, beats, region, stem="other", left_hand=left, config=with_key(-1)
+    )
+    assert notation.staves == 2 and notation.key_fifths == -1
+
+
+def test_no_chosen_key_leaves_the_notate_key_alone():
+    config = Config()
+    assert config.notate.key is None
+    assert "key" not in config.stage_config("notate")
+    assert with_key(-1).notate.model_dump(mode="json")["key"] == -1

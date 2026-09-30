@@ -30,7 +30,7 @@ exporting a second chorus does not overwrite the first.
 from pathlib import Path
 from typing import Any
 
-from swingscribe.config import TIMINGS, TRANSPOSITIONS, Config
+from swingscribe.config import KEY_SIGNATURES, TIMINGS, TRANSPOSITIONS, Config
 from swingscribe.model import Document, NoteEvent
 from swingscribe.notation import (
     bar_grid_for_settings,
@@ -82,6 +82,13 @@ def timing_of(config: Config, settings: dict[str, Any]) -> str:
     the button)."""
     stored = settings.get("timing")
     return stored if stored in TIMINGS else config.quantize.timing
+
+
+def key_of(settings: dict[str, Any]) -> int | None:
+    """The listener's key signature in fifths, or None to detect it. A value
+    this build does not offer is detection, not an error."""
+    stored = settings.get("key")
+    return stored if isinstance(stored, int) and stored in KEY_SIGNATURES else None
 
 
 def two_staves(settings: dict[str, Any], texture: bool) -> bool:
@@ -154,15 +161,16 @@ def notate_config(
     (NotateConfig), so it can only ever come from the person listening. An
     unrecognised value falls back to concert rather than raising: a hand-edited
     sidecar should not be able to break the button. The timing is the same
-    kind of choice -- swing eighths or a literal grid -- and `texture` says
-    the notes are a piano texture, whose collisions are chords.
+    kind of choice -- swing eighths or a literal grid -- and so is the key
+    signature; `texture` says the notes are a piano texture, whose
+    collisions are chords.
     """
     stored = settings.get("transposition")
     transposition = stored if stored in TRANSPOSITIONS else config.notate.transposition
     return config.model_copy(
         update={
             "notate": config.notate.model_copy(
-                update={"transposition": transposition, "title": title}
+                update={"transposition": transposition, "title": title, "key": key_of(settings)}
             ),
             "quantize": config.quantize.model_copy(
                 update={"timing": timing_of(config, settings), "polyphonic": texture}
@@ -308,6 +316,10 @@ def export_span(
         "bars": len(notation.bars),
         "notes": sum(1 for bar in notation.bars for n in bar.notes if not n.is_rest),
         "key_fifths": notation.key_fifths,
+        # The concert key, named, and whether it was detected or chosen: the
+        # Key menu shows the detected one beside "Auto".
+        "key": KEY_SIGNATURES.get(notation.key_fifths, ""),
+        "key_auto": key_of(settings) is None,
         "swing": notation.swing,
         "timing": timing_of(config, settings),
         "staves": notation.staves,

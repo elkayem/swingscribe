@@ -584,6 +584,10 @@ def quantize_notes(
     """
     if len(beats) < 2:
         return [], []
+    if polyphonic:
+        onsets, durations, pitches, chords = fold_near_onsets(
+            onsets, durations, pitches, chords, beats
+        )
     if timing != "swing":
         return literal_notes(
             onsets,
@@ -796,6 +800,51 @@ def quantize_notes(
 
 # Grid points per beat for each literal timing (QuantizeConfig.timing).
 LITERAL_DIVISIONS = {"literal-16": 4, "literal-32": 8}
+
+# In a piano texture, onsets closer than this many BEATS are one chord: half
+# a 32nd, the finest step the page can write, so no grid could honestly put
+# them apart. Relative to the beat because a roll is a gesture of a few tens
+# of milliseconds whatever the tempo, and a 32nd is not: on Blossom Dearie's
+# 56 bpm ballad a left-hand roll 52 ms wide (just past the 50 ms texture
+# fold) was kept apart on the 32nd grid and wrote a lone 32nd pickup in an
+# empty bar 0. A real 32nd run is twice this far apart and is never folded.
+TEXTURE_FOLD_BEATS = 1.0 / 16.0
+
+
+def fold_near_onsets(
+    onsets: list[float],
+    durations: list[float],
+    pitches: list[int],
+    chords: list[list[int]] | None,
+    beats: list[float],
+    width: float = TEXTURE_FOLD_BEATS,
+) -> tuple[list[float], list[float], list[int], list[list[int]]]:
+    """A piano texture's notes with every onset cluster narrower than
+    `width` beats folded into its earliest note, as a chord lasting as long as
+    its longest member (`notation.with_chords`' rule for a texture). Notes
+    off the grid are left alone; nothing is dropped."""
+    extras = chords if chords is not None else [[] for _ in onsets]
+    order = sorted(range(len(onsets)), key=lambda i: (onsets[i], pitches[i]))
+    heads: list[list] = []  # [position, onset, duration, pitch, members]
+    for i in order:
+        position = beat_position(onsets[i], beats)
+        head = heads[-1] if heads else None
+        if (
+            position is not None
+            and head is not None
+            and head[0] is not None
+            and position - head[0] < width
+        ):
+            head[2] = max(head[2], durations[i])
+            head[4].update({pitches[i], *extras[i]})
+            continue
+        heads.append([position, onsets[i], durations[i], pitches[i], set(extras[i])])
+    return (
+        [h[1] for h in heads],
+        [h[2] for h in heads],
+        [h[3] for h in heads],
+        [sorted(h[4] - {h[3]}) for h in heads],
+    )
 
 
 def literal_notes(

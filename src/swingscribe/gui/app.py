@@ -19,7 +19,15 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from swingscribe.config import ENSEMBLES, LINES, PIANO_NOTES, TIMINGS, TRANSPOSITIONS, Config
+from swingscribe.config import (
+    ENSEMBLES,
+    KEY_SIGNATURES,
+    LINES,
+    PIANO_NOTES,
+    TIMINGS,
+    TRANSPOSITIONS,
+    Config,
+)
 from swingscribe.gui import audio as gui_audio
 from swingscribe.gui import erasures as gui_erasures
 from swingscribe.gui import ground_truth, library, peaks, review, storage, timings
@@ -372,6 +380,9 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             "default_timing": config.quantize.timing,
             "piano_notes": list(PIANO_NOTES),
             "hand_split": HAND_SPLIT,
+            # The Key menu: every signature the sidecar's `key` may hold, by
+            # fifths, named as its major and relative minor.
+            "keys": [[fifths, name] for fifths, name in KEY_SIGNATURES.items()],
             "transpositions": list(TRANSPOSITIONS),
             "default_transposition": config.notate.transposition,
             "library_dir": str(library.library_dir(config)),

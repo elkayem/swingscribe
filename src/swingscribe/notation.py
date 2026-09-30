@@ -97,6 +97,49 @@ def span_beats(
     return [b for b in beats if low - margin <= b <= high + margin]
 
 
+def edge_period(intervals: list[float]) -> float:
+    """The tempo at one edge of a grid: the median of its outermost few beat
+    lengths, so one tracker slip at the edge does not set it."""
+    usable = [i for i in intervals if i > 0]
+    if not usable:
+        return 0.0
+    usable.sort()
+    return usable[len(usable) // 2]
+
+
+def cover(beats: list[float], low: float, high: float, edge_beats: int = 4) -> list[float]:
+    """The grid, continued at its own edge tempo until it reaches `low` and
+    passes `high`.
+
+    Quantize places a note by the beat it falls in, and a note before the
+    first beat or after the last has none: it was dropped, silently. The
+    tracker's first beat can land a tenth of a beat AFTER the music's first
+    downbeat -- Blossom Dearie's More Than You Know opens with a chord at
+    0.29-0.36 s against a first tracked beat at 0.40 s -- and the meter
+    stage cannot continue the grid backwards past the start of the file.
+    Here it can: a beat before 0 s is only arithmetic, and what matters is
+    that every note in the span has a beat to be placed against, so the
+    chord lands on bar 1's downbeat instead of vanishing.
+    """
+    if len(beats) < 2:
+        return list(beats)
+    head = edge_period([b - a for a, b in zip(beats, beats[1 : edge_beats + 1], strict=False)])
+    tail = edge_period(
+        [b - a for a, b in zip(beats[-edge_beats - 1 :], beats[-edge_beats:], strict=False)]
+    )
+    before: list[float] = []
+    first = beats[0]
+    while head > 0 and first > low:
+        first -= head
+        before.append(first)
+    after: list[float] = []
+    last = beats[-1]
+    while tail > 0 and last <= high:
+        last += tail
+        after.append(last)
+    return [*reversed(before), *beats, *after]
+
+
 def with_chords(
     line: list[NoteEvent],
     extras: list[NoteEvent],
@@ -319,6 +362,14 @@ def notation_for_span(
     # Resolved on the tracked grid, before any doubling: the beat it names
     # survives doubling, and its phase is a fact about the tracked pulse.
     anchor = span_anchor(beats, kept, anchor, pulses_per_bar, region[0] or 0.0)
+    # Every note gets a beat to land on, however early or late it is against
+    # the tracked grid (`cover`): a grid that ends before a note drops it.
+    # Bar 1 is still a TRACKED beat -- chosen above, before any continuation.
+    tracked = (beats[0], beats[-1])
+    onsets = [n.onset for n in (*notes, *(left_hand or ()), *(second_voice or ()))]
+    low = min([region[0] or 0.0, *onsets]) - MARGIN_SECONDS
+    high = max([beats[-1] if region[1] is None else region[1], *onsets]) + MARGIN_SECONDS
+    kept = span_beats(cover(beats, low, high), region)
     if double_time:
         # Double-time feel (the listener's checkbox): the notated pulse is
         # twice the tracked one, so each tracked beat is split at its
@@ -347,21 +398,49 @@ def notation_for_span(
     staves = left_hand is not None
     right, left = list(notes), list(left_hand or [])
     lead_is_left = staves and not right and bool(left)
-    document = Document(
-        audio_path=audio_path,
-        sample_rate=sample_rate,
-        beat_grid=BeatGrid(beats=kept, downbeats=[], beats_per_bar=pulses_per_bar),
-        meter=[section_for(kept, anchor, time_signature, pulses_per_bar)],
-        notes={stem: left if lead_is_left else right},
+
+    def on_grid(grid: list[float]) -> Document:
+        return Document(
+            audio_path=audio_path,
+            sample_rate=sample_rate,
+            beat_grid=BeatGrid(beats=grid, downbeats=[], beats_per_bar=pulses_per_bar),
+            meter=[section_for(grid, anchor, time_signature, pulses_per_bar)],
+            notes={stem: left if lead_is_left else right},
+        )
+
+    # The swing reading is taken over the TRACKED beats only, exactly as it
+    # was before the grid could be continued. The stage tiles its windows
+    # from the grid's first beat, so a few beats added at the front move
+    # every window, and a weak reading flips: Blossom Dearie's page went from
+    # 32 beats warped to none for want of one early chord. The continued
+    # beats are there to place notes on, not to be evidence about the feel.
+    inside = [i for i, b in enumerate(kept) if tracked[0] - 1e-9 <= b <= tracked[1] + 1e-9]
+    shift = inside[0] if inside else 0
+    read = swing.run(on_grid(kept[shift : inside[-1] + 1] if inside else kept), run_config)
+    document = on_grid(kept).model_copy(
+        update={
+            "swing": [
+                span.model_copy(
+                    update={
+                        "start_beat": span.start_beat + shift,
+                        "end_beat": span.end_beat + shift,
+                    }
+                )
+                for span in read.swing
+            ]
+        }
     )
-    for stage in (swing.run, quantize.run, notate.run):
+    for stage in (quantize.run, notate.run):
         document = stage(document, run_config)
     notation = document.notation
     if staves:
         other = right if lead_is_left else left
         follower = _notate_only(other, document, run_config) if other else None
+        key = run_config.notate.key
         notation = (
-            merge_staves(follower, notation) if lead_is_left else merge_staves(notation, follower)
+            merge_staves(follower, notation, key)
+            if lead_is_left
+            else merge_staves(notation, follower, key)
         )
     if notation is not None and double_time:
         notation.double_time = True
@@ -370,14 +449,15 @@ def notation_for_span(
     return notation
 
 
-def merge_staves(right: Notation | None, left: Notation | None) -> Notation:
+def merge_staves(right: Notation | None, left: Notation | None, key: int | None = None) -> Notation:
     """Two separately notated hands as ONE grand-staff Notation.
 
     Bar by bar over the union of both hands' bars, so a bar one hand sits
     out is a whole rest on its staff rather than a staff that runs out of
     bars: MusicXML measures hold every staff of the part at once. The key
     is read ONCE, over both hands' sounding notes chords and all, and both
-    are respelled in it -- two staves in two keys is not a piano part.
+    are respelled in it -- two staves in two keys is not a piano part. A
+    `key` the listener chose (NotateConfig.key) is used instead of reading.
     """
     from swingscribe.stages import notate
 
@@ -393,7 +473,8 @@ def merge_staves(right: Notation | None, left: Notation | None) -> Notation:
         if not note.is_rest
         for pitch in (note.pitch, *note.chord)
     ]
-    key = notate.detect_key(sounding) if sounding else template.key_fifths
+    if key is None:
+        key = notate.detect_key(sounding) if sounding else template.key_fifths
     merged: list[NotatedBar] = []
     signature = (4, 4)
     for number in range(numbers[0], numbers[-1] + 1) if numbers else ():

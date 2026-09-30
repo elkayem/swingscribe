@@ -379,6 +379,28 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   edit uses. The Hands tool: box selects, Ctrl-box adds, ↑/↓ assign.
   Export tags the file name (`.all`, `.2staves`, `.literal16`) so no
   choice overwrites another page.
+- **Every note in the span gets a beat** (2026-09-29, `notation.cover`).
+  Quantize places a note by the beat it falls in, and one before the first
+  tracked beat or after the last was DROPPED, silently: Blossom Dearie's
+  More Than You Know opens with a chord at 0.29-0.36 s against a first
+  tracked beat at 0.40 s, and the meter stage cannot continue a grid past
+  0 s. `notation_for_span` continues the grid at its edge tempo (a beat
+  before 0 s is arithmetic), but bar 1 is still a TRACKED beat, and the
+  swing reading is taken over the tracked beats only, its spans shifted
+  onto the continued grid: the stage tiles its windows from the grid's
+  first beat, and two added beats flipped that track's weak reading from
+  32 beats warped to none. On a texture, onsets closer than half a 32nd
+  (`quantize.TEXTURE_FOLD_BEATS`, 1/16 of a beat) are one chord
+  (`fold_near_onsets`): the same opening's left-hand roll, 52 ms wide, was
+  a lone 32nd pickup in an empty bar 0.
+- **The key signature can be chosen** (2026-09-29, `NotateConfig.key`, sidecar
+  `key` in fifths, the export bar's Key menu from `config.KEY_SIGNATURES`,
+  "Auto" naming what `detect_key` found). Detection is one duration-weighted
+  profile over the whole page, now counting chord members; a tune that
+  modulates has no single answer (the Dearie page: D minor over its first 8
+  bars, B-flat major over its last 8, D major over the whole). `merge_staves`
+  takes the chosen key for both staves; `key` dumps nothing at None, so no
+  notate key moved.
 - **One gesture rule on every view (2026-09-07): scroll zooms, shift-scroll
   or drag pans.** On the Detail waveform only the A/B handles (and Set A/B,
   the nudges) change the selection — a drag elsewhere pans, a click seeks —

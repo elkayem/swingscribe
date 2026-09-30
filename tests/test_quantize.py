@@ -1287,3 +1287,31 @@ def test_the_new_fields_leave_every_existing_quantize_key_alone():
     literal = config.quantize.model_copy(update={"timing": "literal-32", "polyphonic": True})
     assert literal.model_dump(mode="json")["timing"] == "literal-32"
     assert literal.model_dump(mode="json")["polyphonic"] is True
+
+
+def test_a_roll_narrower_than_half_a_32nd_is_one_chord_in_a_texture():
+    """At 60 bpm a 50 ms roll is a twentieth of a beat: no written value can
+    put its notes apart, so on a piano texture they are one chord. Kept
+    apart, Blossom Dearie's opening left hand wrote a lone 32nd pickup."""
+    beats = [float(i) for i in range(20)]
+    quantized, positions = quantize_notes(
+        [4.94, 4.99, 6.0], [0.5, 1.2, 0.5], [50, 57, 62], beats, [], [], polyphonic=True
+    )
+    assert [(round(n.beat, 6), n.pitch, n.chord) for n in quantized] == [
+        (5.0, 50, [57]),
+        (6.0, 62, []),
+    ]
+    assert len(positions) == 2
+
+
+def test_the_texture_fold_is_relative_to_the_beat_and_never_reaches_a_32nd_run():
+    from swingscribe.stages.quantize import fold_near_onsets
+
+    beats = [float(i) for i in range(20)]
+    onsets, durations, pitches, chords = fold_near_onsets(
+        [1.0, 1.02, 1.125, 1.25], [0.2, 0.5, 0.1, 0.1], [60, 64, 67, 69], None, beats
+    )
+    assert onsets == [1.0, 1.125, 1.25]  # the 32nds stay notes of their own
+    assert pitches == [60, 67, 69]
+    assert chords == [[64], [], []]
+    assert durations == [0.5, 0.1, 0.1]

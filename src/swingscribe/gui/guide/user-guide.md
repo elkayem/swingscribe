@@ -488,6 +488,15 @@ press **Beats** first.
 Nothing in the audio says which horn is playing, so this has to come from
 you. The key signature moves with it.
 
+**Key** sets the key signature, at concert pitch. **Auto** reads it from the
+notes over the whole span, and after an export it names what it found, for
+example **Auto — D major / B minor**. A tune that moves between keys has no
+single right answer, so choose the signature you want instead. Each is
+listed as a major key and its relative minor, which share one signature, for
+example **F major / D minor**. The notes are spelled to suit it (B♭ rather
+than A♯), a two-staff page uses it on both staves, and **Written for** still
+transposes it for a horn.
+
 **Rhythm** sets how the timing is written:
 
 - **Swing — eighths** is the default. The swing is read out of the playing:

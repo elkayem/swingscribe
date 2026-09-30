@@ -801,15 +801,20 @@ def build(
     legato_fill: float = 0.0,
     legato_cap: float = 0.0,
     literal: bool = False,
+    key_fifths: int | None = None,
 ) -> Notation:
     """Quantized notes → bars of spelled, tied, rest-filled notation.
 
     `literal` says quantize wrote a literal timing (no triplets, a 16th or
-    32nd grid); see `snap_values`."""
+    32nd grid); see `snap_values`. `key_fifths` is the listener's key
+    signature; None detects one from the notes, chord members included."""
     if not quantized:
-        return Notation(swing=swing, transpose=transpose, title=title)
+        return Notation(swing=swing, transpose=transpose, title=title, key_fifths=key_fifths or 0)
 
-    key_fifths = detect_key([(n.pitch, n.duration_beats) for n in quantized])
+    if key_fifths is None:
+        key_fifths = detect_key(
+            [(pitch, n.duration_beats) for n in quantized for pitch in (n.pitch, *n.chord)]
+        )
     # Start where the MUSIC starts, not where the soloist does. A player who
     # comes in on bar 2 leaves bar 1 as a bar of rests, which is what a reader
     # expects; a score whose first measure is numbered 2 is a score with a bar
@@ -915,6 +920,7 @@ def run(document: Document, config: Config) -> Document:
         legato_fill=config.notate.legato_fill,
         legato_cap=config.notate.legato_cap,
         literal=config.quantize.timing != "swing",
+        key_fifths=config.notate.key,
     )
     print(
         f"notate: {len(notation.bars)} bars, key {notation.key_fifths:+d} fifths, "

@@ -1667,3 +1667,32 @@ def test_quit_is_a_no_op_without_a_server(tmp_path):
     returning normally."""
     client = TestClient(gui_app.create_app(Config(cache_dir=tmp_path / "cache")))
     assert client.post("/api/quit").status_code == 200
+
+
+def test_the_key_comes_from_the_sidecar_and_is_named(world, monkeypatch):
+    track = _seed_review(world, monkeypatch, pitches=(64, 66, 67, 69))
+    _seed_beats(monkeypatch, world)
+    auto = world["client"].post(f"/api/tracks/{track['id']}/export", params=SPAN).json()
+    assert auto["key_auto"] is True and auto["key"]
+    world["client"].post(f"/api/tracks/{track['id']}/state", json={"state": {"key": -3}})
+    chosen = world["client"].post(f"/api/tracks/{track['id']}/export", params=SPAN).json()
+    assert chosen["key_fifths"] == -3
+    assert chosen["key"] == "E♭ major / C minor"
+    assert chosen["key_auto"] is False
+    assert "<fifths>-3</fifths>" in pathlib.Path(chosen["path"]).read_text(encoding="utf-8")
+
+
+def test_a_key_this_build_does_not_offer_is_detected_instead(world, monkeypatch):
+    track = _seed_review(world, monkeypatch, pitches=(64, 66))
+    _seed_beats(monkeypatch, world)
+    world["client"].post(f"/api/tracks/{track['id']}/state", json={"state": {"key": 11}})
+    written = world["client"].post(f"/api/tracks/{track['id']}/export", params=SPAN).json()
+    assert written["key_auto"] is True
+
+
+def test_config_offers_every_key_signature(world):
+    from swingscribe.config import KEY_SIGNATURES
+
+    keys = world["client"].get("/api/config").json()["keys"]
+    assert [fifths for fifths, _name in keys] == list(KEY_SIGNATURES)
+    assert dict(map(tuple, keys))[-1] == "F major / D minor"

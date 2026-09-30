@@ -36,6 +36,26 @@ TRANSPOSITIONS: tuple[str, ...] = get_args(Transposition)
 # literal ones snap every onset to the nearest 16th or 32nd, feel and all.
 Timing = Literal["swing", "literal-16", "literal-32"]
 TIMINGS: tuple[str, ...] = get_args(Timing)
+# The key signatures a listener may choose instead of the detected one
+# (NotateConfig.key), by fifths: sharps positive, flats negative. Each names
+# its major and its relative minor, because they share one signature and
+# the listener knows which the tune is in. Six either way, as the detector's
+# own spellings run (F# rather than Gb at +6, Db rather than C# at -5).
+KEY_SIGNATURES: dict[int, str] = {
+    -6: "G♭ major / E♭ minor",
+    -5: "D♭ major / B♭ minor",
+    -4: "A♭ major / F minor",
+    -3: "E♭ major / C minor",
+    -2: "B♭ major / G minor",
+    -1: "F major / D minor",
+    0: "C major / A minor",
+    1: "G major / E minor",
+    2: "D major / B minor",
+    3: "A major / F♯ minor",
+    4: "E major / C♯ minor",
+    5: "B major / G♯ minor",
+    6: "F♯ major / D♯ minor",
+}
 # Which of a pianist's notes reach the roll and the page: the melody line
 # (with any candidates switched on), or everything the piano model heard.
 # A per-track GUI choice (sidecar `piano_notes`), never a stage setting.
@@ -617,6 +637,23 @@ class NotateConfig(BaseModel):
     # against the hand scores is an eighth where the human wrote a quarter,
     # 119 of them a note we followed with a rest the human did not write.
     legato_cap: float = 0.0
+    # The CONCERT key signature, in fifths (KEY_SIGNATURES), when the listener
+    # has chosen one; None detects it from the notes (notate.detect_key). A
+    # detection is one profile over the whole page, and a tune that moves
+    # between keys has no single right answer to find: Blossom Dearie's More
+    # Than You Know reads D minor over its first eight bars, B-flat major over
+    # its last eight and D major over the whole. The part's transposition
+    # still moves the written signature.
+    key: int | None = None
+
+    @model_serializer(mode="wrap")
+    def _key_stable_dump(self, handler):
+        """Leave `key` out of the dump while it is None, so every notate key
+        reads exactly as it did before the field existed."""
+        data = handler(self)
+        if data.get("key") is None:
+            data.pop("key", None)
+        return data
 
     @property
     def transpose(self) -> int:
