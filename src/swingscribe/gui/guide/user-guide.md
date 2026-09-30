@@ -639,6 +639,12 @@ pick a different model or span, and separate again.
 tab does not stop it. Open `http://127.0.0.1:8420/` again and click
 **Quit**, or close the console window.
 
+**Copying text from the console window.** Clicking in the window does not
+select text. On Windows a selection there pauses the app until it ends, so
+SwingScribe switches that off. To copy an error message, right-click in the
+window, choose **Mark**, select the text, and press <kbd>Enter</kbd>. The
+app waits while you do.
+
 **Windows refuses to run `swingscribe.exe`.** If `uv run swingscribe ...`
 fails with `An Application Control policy has blocked this file (os error
 4551)`, Smart App Control is refusing the small `.exe` stub that the

@@ -7,8 +7,14 @@ never seen and will not run: `uv run swingscribe` dies with
 version pin can fix it because the stub is rebuilt on every sync (CLAUDE.md,
 "This machine"). A module entry point is plain Python read by an interpreter
 that is already trusted, so it sidesteps the stub entirely.
+
+Every launcher reaches this file (the `.cmd` shim, the desktop icon, the
+portable build), so it is also where QuickEdit goes off: a click in the
+console window would otherwise freeze a running job (`console.py`).
 """
 
 from swingscribe.cli import main
+from swingscribe.console import quick_edit_disabled
 
-raise SystemExit(main())
+with quick_edit_disabled():
+    raise SystemExit(main())

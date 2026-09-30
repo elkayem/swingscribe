@@ -404,6 +404,14 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   `Origin` is not this server's: a page on another site can POST to
   localhost and the request takes effect unread. Closing the tab does NOT
   stop the server; the guide says so.
+- **The launcher switches QuickEdit OFF** (2026-09-29, `console.py`, wrapped
+  round `main()` in `__main__.py`). In the classic console a click starts a
+  selection and every process writing to the window blocks until it ends: a
+  Roformer separation sat at chunk 10 of 45 for twelve minutes, CPU and GPU
+  idle, and went on when the window was resized. A job "stalled" with zero
+  CPU is this first; attach to the console and read its buffer
+  (`GetConsoleSelectionInfo`, `ReadConsoleOutputCharacterW`) before
+  suspecting the stage.
 - **The shipped app is a PORTABLE FOLDER in a zip, not an installer**
   (2026-09-13, docs/packaging-plan.md piece 3). Smart App Control judges
   every executable by the reputation of its exact bytes, so a PyInstaller

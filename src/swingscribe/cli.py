@@ -393,4 +393,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from swingscribe.console import quick_edit_disabled
+
+    with quick_edit_disabled():
+        raise SystemExit(main())
