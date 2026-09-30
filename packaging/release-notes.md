@@ -1,4 +1,4 @@
-**Windows:** download the zip below, extract it somewhere with a short path such as `C:\SwingScribe`, and double-click `setup.cmd` once. The [installation guide](https://github.com/elkayem/swingscribe/blob/master/INSTALL.md) has the details.
+**Windows:** download the zip below, extract it somewhere with a short path such as `C:\SwingScribe`, and double-click `setup.cmd` once. It needs Windows 10 or 11 (64-bit) and 8 GB of RAM, 16 GB recommended. The [installation guide](https://github.com/elkayem/swingscribe/blob/master/INSTALL.md) has the details.
 
 **Updating from an earlier version:** install the new version beside the old one, never over it.
 

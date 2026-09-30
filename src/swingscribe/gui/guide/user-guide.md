@@ -662,9 +662,10 @@ installer generates, not SwingScribe itself. Run
 A first launch can also fail once while Windows checks the file's
 reputation, and then pass on a retry.
 
-**A separation fails with "the separation process crashed".** It needs a
-few GB of free memory. Close other programs and try again, or choose
-**htdemucs**, a much smaller model.
+**A separation fails with "the separation process crashed".** With the
+default model a separation needs about 4.5 GB of free memory, and the app
+itself holds about 2 GB once it has transcribed something. Close other
+programs and try again, or choose **htdemucs**, a much smaller model.
 
 **A download fails with `CERTIFICATE_VERIFY_FAILED`.** Your network
 inspects encrypted traffic and signs it with its own certificate, as many

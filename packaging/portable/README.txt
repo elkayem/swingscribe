@@ -1,7 +1,9 @@
 SwingScribe -- jazz audio in, swing-aware notation out
 =======================================================
 
-This folder is the whole program. Nothing needs to be installed.
+This folder is the whole program. Nothing needs to be installed. It needs
+8 GB of RAM, 16 GB recommended: a separation with the default model uses
+about 4.5 GB while it runs.
 
 Getting started
 ---------------
@@ -99,9 +101,10 @@ If something goes wrong
        SSL_CERT_FILE and REQUESTS_CA_BUNDLE, both set to that file, for
        example C:\SwingScribe-certs\cacert.pem.
     4. Quit SwingScribe and start it again from the icon.
-- "The separation process crashed" and a mention of memory: separation
-  needs a few GB of free memory. Close other programs and try again, or
-  choose htdemucs in the separator menu, a much smaller model.
+- "The separation process crashed" and a mention of memory: a separation
+  with the default model needs about 4.5 GB of free memory. Close other
+  programs and try again, or choose htdemucs in the separator menu, a much
+  smaller model.
 
 The user guide (the Help button in the app) covers every control.
 Licences of the models and libraries: NOTICES.md beside this file.

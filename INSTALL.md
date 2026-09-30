@@ -17,10 +17,16 @@ shows you how to use it.
 
 ## The Windows app
 
-**You need:** Windows 10 or 11 (64-bit) and about 2.5 GB of free disk space.
-That covers the 1.3 GB app folder, about half a gigabyte of AI models that
-download on first use, and some room for the cache. Separated stems need
-more space as you work. The app's Cache panel frees it track by track.
+**You need:** Windows 10 or 11 (64-bit), 8 GB of RAM (16 GB recommended),
+and about 2.5 GB of free disk space. The disk space covers the 1.3 GB app
+folder, about half a gigabyte of AI models that download on first use, and
+some room for the cache. Separated stems need more space as you work. The
+app's Cache panel frees it track by track.
+
+The memory goes on separation. With the default model a separation uses
+about 4.5 GB while it runs, on top of about 2 GB the app itself holds once
+it has transcribed something. On an 8 GB computer, close other large
+programs before you separate, or choose **htdemucs**, a much smaller model.
 
 ### Install
 
@@ -134,7 +140,8 @@ that mentions `CERTIFICATE_VERIFY_FAILED`. To fix it:
 
 ### If a separation crashes
 
-A separation needs a few GB of free memory. When it runs out, the job
+A separation with the default model needs about 4.5 GB of free memory.
+When it runs out, the job
 fails with "the separation process crashed" and a mention of memory.
 Close other programs and try again, or choose **htdemucs** in the
 separator menu, a much smaller model.
@@ -143,6 +150,8 @@ separator menu, a much smaller model.
 
 **You need:**
 
+- 8 GB of RAM, 16 GB recommended. A separation with the default model
+  uses about 4.5 GB while it runs.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/), the Python
   package manager. It installs Python 3.11 for you if needed.
 - [git](https://git-scm.com/).
