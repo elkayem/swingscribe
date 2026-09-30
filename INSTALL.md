@@ -69,9 +69,28 @@ picker starts in, which is your Music folder by default.
 
 ### Updating
 
-Extract the new version to a new folder, run its `setup.cmd`, and delete the
-old folder. The models and the cache are shared between versions, so nothing
-downloads again.
+Install the new version beside the old one, then remove the old one. Never
+extract a new version over an old folder: unzipping replaces files but never
+removes the ones a new version dropped, and the leftovers can break it.
+
+1. **Quit SwingScribe** with its **Quit** button. Windows cannot rename or
+   delete a folder while the app in it is running.
+2. **Rename the old folder**, for example from `SwingScribe` to
+   `SwingScribe-old`. The zip always extracts a folder named `SwingScribe`,
+   so extracting it in the same place would otherwise mean replacing files.
+   Extracting somewhere else works too.
+3. **Extract the new version and run its `setup.cmd`.** It points the
+   desktop icon, the Start Menu entry and the Settings > Apps entry at the
+   new folder. Windows may ask about the scripts again, as on the first
+   install.
+4. **Start SwingScribe from the icon** and check that it opens.
+5. **Delete the old folder by hand.** Do not run its `uninstall.cmd`. It
+   removes the icons and the Settings > Apps entry by name, and those now
+   belong to the new version.
+
+The downloaded models, the cache and the `.swingscribe.json` files beside
+your audio are shared between versions and stay where they are. Nothing
+downloads again, and every track opens the way you left it.
 
 ### Uninstalling
 

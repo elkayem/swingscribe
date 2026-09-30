@@ -45,9 +45,21 @@ starts (the launcher defaults it to your Music folder).
 
 Updating
 --------
-Extract the new version to a new folder, run its setup.cmd, delete the old
-folder. The downloaded weights and the cache are shared, so nothing is
-downloaded again.
+Install the new version beside the old one, then remove the old one. Never
+extract a new version over an old folder: unzipping never removes the files
+a new version dropped, and the leftovers can break it.
+  1. Quit SwingScribe with its Quit button.
+  2. Rename the old folder, for example to SwingScribe-old. The zip always
+     extracts a folder named SwingScribe.
+  3. Extract the new version and run its setup.cmd. It points the icons and
+     the Settings > Apps entry at the new folder.
+  4. Start SwingScribe from the icon and check that it opens.
+  5. Delete the old folder by hand. Do not run its uninstall.cmd: it
+     removes the icons and the Apps entry, which now belong to the new
+     version.
+The downloaded weights, the cache and the .swingscribe.json files beside
+your music are shared between versions, so nothing downloads again and
+every track opens the way you left it.
 
 Uninstalling
 ------------
