@@ -227,6 +227,13 @@
       <span class="muted" id="ensemble-hint"></span>
       <label class="picker-label" for="line-select" id="line-label" title="Which detector supplies the line, for a pianist only. CREPE hears one pitch at a time and the piano model checks it; or the piano model hears every note and a sequence picker chooses the melody among them. Two takes of the same span — compare them by ear." hidden>Line</label>
       <select id="line-select" hidden title="Which detector supplies the line, for a pianist. Either the pitch tracker checked by the piano model, or the piano model's own notes with the melody picked out of them. Two takes of the same span — compare them by ear."></select>
+      <label class="picker-label" for="piano-notes-select" id="piano-notes-label" hidden title="For a pianist: the melody line (usually the top note, with any piano-model notes you switch on), or every note the piano model heard — both hands, chords and all. Switching costs no re-transcription.">Piano notes</label>
+      <select id="piano-notes-select" hidden title="The melody line, or every note the piano model heard. Switching costs no re-transcription."></select>
+      <label class="picker-label" for="staves-select" id="staves-label" hidden title="Write all the piano's notes on one staff, or on two: the right hand on a treble staff over the left hand on a bass staff. The first guess puts middle C and up in the right hand; the Hands tool moves any note.">Staves</label>
+      <select id="staves-select" hidden title="One staff, or a grand staff: right hand on treble, left hand on bass.">
+        <option value="1">One staff</option>
+        <option value="2">Two staves (treble + bass)</option>
+      </select>
       <span class="muted" id="review-range"></span>
       <span class="spacer"></span>
       <span class="muted" id="review-summary" hidden></span>
@@ -275,7 +282,14 @@
           <div class="tool-group" id="tool-group">
             <button class="chip active" data-tool="inspect" title="Click a note to inspect it, hear its pitch and move the playhead there. Drag to pan. (E)">Inspect</button>
             <button class="chip" data-tool="erase" title="Click a note to silence it — heard right, but not the solo — or click a faint piano-model note to add it. Drag a box to silence a run, alt-drag to restore one. Shift-drag pans. (E)">Edit</button>
+            <button class="chip" data-tool="hands" id="hands-tool" hidden title="Choose which staff notes go on. Drag a box to select notes, Ctrl-drag to add another group, click a note to select it, Ctrl-click to add or remove one. Then Right hand (↑) or Left hand (↓). Shift-drag pans, Esc clears. (H)">Hands</button>
           </div>
+          <span class="hand-controls" id="hand-controls" hidden>
+            <span class="muted" id="hand-selection">nothing selected</span>
+            <button class="chip" id="to-right" disabled title="Put the selected notes on the treble staff, in the right hand. (↑)">Right hand ↑</button>
+            <button class="chip" id="to-left" disabled title="Put the selected notes on the bass staff, in the left hand. (↓)">Left hand ↓</button>
+            <button class="chip" id="to-guess" disabled title="Forget your choice for the selected notes: middle C and up goes back to the right hand, below it to the left.">Reset to guess</button>
+          </span>
           <button class="chip" id="second-voice-toggle" hidden
                   title="Show, faintly, every note the piano model heard that the line left out. With the Edit tool, click one to add it to the transcription — written as a chord if it sounds with a line note. (V)">piano model</button>
           <span class="muted" id="silenced-count">nothing silenced</span>
@@ -311,6 +325,8 @@
         <button id="export-btn" title="Write this span as MusicXML beside the audio file, with the span in the filename, ready to open in MuseScore. Silenced notes are left out and added ones written in. (X)">Export MusicXML</button>
         <label class="picker-label" for="transpose-select" title="The part's key. Nothing in the audio says which horn it was, so this can only come from you — and the key signature moves with it.">Written for</label>
         <select id="transpose-select" title="The instrument the part is written for. Nothing in the audio says which horn it was, so this can only come from you; the key signature moves with it."></select>
+        <label class="picker-label" for="timing-select" title="How the rhythm is written. Swing reads the feel out: swung pairs are written as even eighths under a 'Swing' marking. Literal writes every note on the nearest 16th or 32nd, as played, with no marking.">Rhythm</label>
+        <select id="timing-select" title="Swing: swung pairs written as eighths, 'Swing' above the staff. Literal: every note on the nearest 16th or 32nd, as played."></select>
         <button class="chip" id="score-btn" hidden title="Score this notation against the loaded hand transcription: are the notes written the way a human wrote them? A different, harder question than the pitch F1 above, and it always reads lower.">Score it</button>
         <span class="spacer"></span>
         <span class="export-stale" id="export-stale" hidden>file on disk is older than what you see</span>

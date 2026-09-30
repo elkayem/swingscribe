@@ -363,3 +363,83 @@ def test_two_triplet_beats_are_still_two_brackets():
     third = 1.0 / 3.0
     notes = [note(k * third, third, tuplet=(3, 2)) for k in range(6)]
     assert tuplet_groups(notes) == {0: "start", 2: "stop", 3: "start", 5: "stop"}
+
+
+# ── two staves ──────────────────────────────────────────────────────────────
+
+
+def _grand_staff() -> Notation:
+    """A right hand of two halves over a left hand of one whole note."""
+    return Notation(
+        title="Grand staff",
+        staves=2,
+        bars=[
+            NotatedBar(
+                number=1,
+                time_signature=(4, 4),
+                notes=[
+                    NotatedNote(beat=0.0, duration=2.0, pitch=72, step="C", octave=5, chord=[76]),
+                    NotatedNote(beat=2.0, duration=2.0, pitch=74, step="D", octave=5),
+                    NotatedNote(beat=0.0, duration=4.0, pitch=48, step="C", octave=3, staff=2),
+                ],
+            )
+        ],
+    )
+
+
+def test_a_grand_staff_declares_two_staves_and_a_clef_for_each():
+    root = document(_grand_staff())
+    attributes = root.find("part/measure/attributes")
+    assert attributes.findtext("staves") == "2"
+    clefs = {
+        c.get("number"): (c.findtext("sign"), c.findtext("line")) for c in attributes.iter("clef")
+    }
+    assert clefs == {"1": ("G", "2"), "2": ("F", "4")}
+    # Schema order: <staves> after <time>, before the clefs.
+    order = [child.tag for child in attributes]
+    assert order.index("time") < order.index("staves") < order.index("clef")
+
+
+def test_every_note_names_its_staff_and_the_bass_has_its_own_voice():
+    """MusicXML voices are per part, so the bass staff's voice is 5 -- a
+    reader would otherwise merge the two staves' voice 1."""
+    root = document(_grand_staff())
+    notes = list(root.iter("note"))
+    assert [n.findtext("staff") for n in notes] == ["1", "1", "1", "2"]
+    assert [n.findtext("voice") for n in notes] == ["1", "1", "1", "5"]
+    backup = root.find("part/measure/backup")
+    assert backup.findtext("duration") == str(4 * DIVISIONS)
+
+
+def test_each_staff_fills_its_bar():
+    root = document(_grand_staff())
+    by_staff: dict[str, int] = {}
+    for n in root.iter("note"):
+        if n.find("chord") is None:
+            staff = n.findtext("staff")
+            by_staff[staff] = by_staff.get(staff, 0) + int(n.findtext("duration"))
+    assert by_staff == {"1": 4 * DIVISIONS, "2": 4 * DIVISIONS}
+
+
+def test_staff_sits_between_type_and_notations():
+    notation = _grand_staff()
+    notation.bars[0].notes[0] = notation.bars[0].notes[0].model_copy(update={"tie_start": True})
+    element = next(document(notation).iter("note"))
+    order = [child.tag for child in element]
+    assert order.index("type") < order.index("staff") < order.index("notations")
+
+
+def test_a_one_staff_page_names_no_staff():
+    """The common path stays what it was: no <staves>, an unnumbered clef."""
+    root = document(Notation(bars=[bar_of([note(0.0, 4.0)])]))
+    assert root.find("part/measure/attributes/staves") is None
+    assert root.find("part/measure/attributes/clef").get("number") is None
+    assert all(n.find("staff") is None for n in root.iter("note"))
+
+
+def test_the_swing_marking_sits_over_the_treble_staff():
+    notation = _grand_staff()
+    notation.swing = True
+    direction = document(notation).find("part/measure/direction")
+    assert direction.findtext("direction-type/words") == "Swing"
+    assert direction.findtext("staff") == "1"

@@ -43,9 +43,19 @@ same rule against the candidate POOL (`pool`: the model's notes the line does
 not already hold) rather than the line. Piano only, because only a pianist
 has a pool worth offering. An enabled candidate struck with a line note
 reaches the page as a chord on it (notation.with_chords).
+
+## Hands (2026-09-29)
+
+On a two-staff piano page every note sits on the treble or the bass staff.
+The first guess is the pitch (`notation.guess_hand`); a note the listener
+moves is stored in the sidecar's `hands` list as {onset, pitch, hand} and
+matched back by the same rule. Erasures made on the "All notes" view carry
+`piano_notes: "all"` and are resolved only there (`split_by_texture`).
 """
 
 from typing import Any
+
+from swingscribe.notation import HANDS, guess_hand
 
 # How far a note may have moved and still be the same note. Ten milliseconds is
 # the transcriber's frame hop, so a note that survives a config change usually
@@ -166,6 +176,91 @@ def _in_span(erasure: dict[str, Any], span: tuple[float, float] | None) -> bool:
     return lo - TOLERANCE_S <= erasure.get("onset", -1.0) <= hi + TOLERANCE_S
 
 
+def match(records: list[dict[str, Any]], notes: list[dict[str, Any]]) -> dict[int, int]:
+    """Record index -> note index, for every stored record that finds its note.
+
+    Pitch exact, onset within TOLERANCE_S, pairs assigned greedily nearest
+    first, one note per record and one record per note -- the rule `resolve`
+    documents, shared by every kind of stored edit so none of them can
+    disagree about what "the same note" means.
+    """
+    candidates = []
+    for ri, record in enumerate(records):
+        pitch = record.get("pitch")
+        onset = record.get("onset")
+        if pitch is None or onset is None:
+            continue
+        for ni, note in enumerate(notes):
+            if note["pitch"] != pitch:
+                continue
+            distance = abs(note["onset"] - onset)
+            if distance <= TOLERANCE_S:
+                candidates.append((distance, ri, ni))
+    # (distance, record, note) sorts nearest-first and ties break on index, so
+    # the same inputs always produce the same assignment.
+    candidates.sort()
+    pairs: dict[int, int] = {}
+    claimed_notes: set[int] = set()
+    for _, ri, ni in candidates:
+        if ri in pairs or ni in claimed_notes:
+            continue
+        pairs[ri] = ni
+        claimed_notes.add(ni)
+    return pairs
+
+
+def split_by_texture(
+    records: list[dict[str, Any]], texture: bool
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(the records made on this view, the rest).
+
+    A pianist has two views of one span -- the melody line, and everything
+    the piano model heard ("All notes") -- and an erasure means something
+    different on each: a left-hand note erased as "not the solo" on the line
+    is exactly what the All-notes page is for. So each view resolves only
+    its own erasures (records made on All notes carry `piano_notes: "all"`;
+    every older record is the line's), and the other view's are carried
+    through untouched. Never dropped: they are still labels.
+    """
+    mine = [r for r in records if (r.get("piano_notes") == "all") == texture]
+    rest = [r for r in records if (r.get("piano_notes") == "all") != texture]
+    return mine, rest
+
+
+def resolve_hands(
+    assignments: list[dict[str, Any]],
+    notes: list[dict[str, Any]],
+    span: tuple[float, float] | None = None,
+) -> dict[str, Any]:
+    """Match the listener's hand assignments onto the All-notes view.
+
+    Each record is {onset, pitch, hand} for a note the listener put on a
+    staff by hand; every other note takes `notation.guess_hand`. Matched by
+    content like an erasure, because a re-transcription renumbers every
+    note. `right` and `left` are the note indices assigned; `carried` and
+    `unmatched` mean what they do for erasures, and nothing is dropped.
+    """
+    valid = [a for a in assignments if a.get("hand") in HANDS]
+    pairs = match(valid, notes)
+    carried = [record for index, record in enumerate(valid) if index not in pairs]
+    return {
+        "right": sorted(ni for ri, ni in pairs.items() if valid[ri]["hand"] == "right"),
+        "left": sorted(ni for ri, ni in pairs.items() if valid[ri]["hand"] == "left"),
+        "carried": carried,
+        "unmatched": [r for r in carried if _in_span(r, span)],
+        "stored": len(valid),
+    }
+
+
+def hands_of(notes: list[dict[str, Any]], resolved: dict[str, Any] | None) -> list[str]:
+    """Every note's hand: the listener's where they set one, else the guess."""
+    chosen = {}
+    if resolved:
+        chosen.update(dict.fromkeys(resolved.get("right", []), "right"))
+        chosen.update(dict.fromkeys(resolved.get("left", []), "left"))
+    return [chosen.get(index, guess_hand(note["pitch"])) for index, note in enumerate(notes)]
+
+
 def resolve(
     erasures: list[dict[str, Any]],
     notes: list[dict[str, Any]],
@@ -197,31 +292,9 @@ def resolve(
     A `moved` erasure is the one worth a second look: something is still
     sounding there, at a different pitch.
     """
-    candidates = []
-    for ei, erasure in enumerate(erasures):
-        pitch = erasure.get("pitch")
-        onset = erasure.get("onset")
-        if pitch is None or onset is None:
-            continue
-        for ni, note in enumerate(notes):
-            if note["pitch"] != pitch:
-                continue
-            distance = abs(note["onset"] - onset)
-            if distance <= TOLERANCE_S:
-                candidates.append((distance, ei, ni))
-    # (distance, erasure, note) sorts nearest-first and ties break on index, so
-    # the same inputs always produce the same assignment.
-    candidates.sort()
-
-    claimed_notes: set[int] = set()
-    claimed_erasures: set[int] = set()
-    for _, ei, ni in candidates:
-        if ei in claimed_erasures or ni in claimed_notes:
-            continue
-        claimed_erasures.add(ei)
-        claimed_notes.add(ni)
-
-    carried = [erasure for index, erasure in enumerate(erasures) if index not in claimed_erasures]
+    pairs = match(erasures, notes)
+    claimed_notes = set(pairs.values())
+    carried = [erasure for index, erasure in enumerate(erasures) if index not in pairs]
     unmatched = [e for e in carried if _in_span(e, span)]
     onsets = [note["onset"] for note in notes]
     moved = [e for e in unmatched if any(abs(t - e["onset"]) <= TOLERANCE_S for t in onsets)]

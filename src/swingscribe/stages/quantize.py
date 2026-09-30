@@ -567,6 +567,8 @@ def quantize_notes(
     slow_beat_s: float = 0.0,
     slow_beat_grids: tuple[int, ...] = (6, 8),
     figure_prior_weight: float = 0.0,
+    timing: str = "swing",
+    polyphonic: bool = False,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -575,9 +577,24 @@ def quantize_notes(
     beat-within-bar is the notation, and reconstructing absolute time from it
     would fail for anything outside a meter section — a pickup, a rubato
     intro — which is exactly where a round-trip check matters most.
+
+    A literal `timing` bypasses all of it for `literal_notes`. `polyphonic`
+    folds notes the grid puts on one position into a chord (`merge_chords`)
+    rather than losing one of them.
     """
     if len(beats) < 2:
         return [], []
+    if timing != "swing":
+        return literal_notes(
+            onsets,
+            durations,
+            pitches,
+            beats,
+            sections,
+            LITERAL_DIVISIONS[timing],
+            chords=chords,
+            polyphonic=polyphonic,
+        )
     by_beat, _track = pooled_phase(spans, straight_bur_ceiling)
     finest = max(1, resolution // 4)  # grid steps per beat at full resolution
     # Coarse to fine. An eighth-note grid is offered first so a beat holding
@@ -772,7 +789,138 @@ def quantize_notes(
                 chord=chord,
             )
         )
+    if polyphonic:
+        return merge_chords(out, positions)
     return out, positions
+
+
+# Grid points per beat for each literal timing (QuantizeConfig.timing).
+LITERAL_DIVISIONS = {"literal-16": 4, "literal-32": 8}
+
+
+def literal_notes(
+    onsets: list[float],
+    durations: list[float],
+    pitches: list[int],
+    beats: list[float],
+    sections: list[MeterSection],
+    divisions: int,
+    chords: list[list[int]] | None = None,
+    polyphonic: bool = False,
+) -> tuple[list[QuantizedNote], list[float]]:
+    """Every onset on the NEAREST point of a fixed grid: the literal page.
+
+    No swing warp, no lag correction, no triplets, no figure prior -- a
+    swung pair lands where it was played, long-short, which is the whole
+    point of asking for it. What it keeps from the swing quantizer is the
+    one rule that is not a reading of the music: a heard note is never
+    silently lost.
+
+    - On 16ths, a beat whose onsets the grid cannot keep apart (a 32nd run)
+      is written in 32nds, that beat only, as the swing quantizer does. So
+      is a beat whose last onset the grid pushes onto the next beat's own
+      first note.
+    - Nothing finer than a 32nd can be written, so on 32nds a note that
+      lands on the previous note's grid point takes the next free one.
+    - `polyphonic` (a piano texture) keeps the collision instead and makes
+      it a chord (`merge_chords`): two notes on one grid point are a
+      chord, not a mistake.
+
+    Returns (notes, snapped positions in absolute beats), like
+    `quantize_notes`. The positions are raw beat time -- there is no warp
+    to put back, so replay them with no swing spans.
+    """
+    if len(beats) < 2:
+        return [], []
+    extras = chords if chords is not None else [[] for _ in onsets]
+    placed = []
+    for onset, duration, pitch, chord in zip(onsets, durations, pitches, extras, strict=True):
+        position = beat_position(onset, beats)
+        if position is None:
+            continue
+        end = beat_position(onset + duration, beats)
+        length = (
+            end - position if end is not None else duration / _beat_length(beats, int(position))
+        )
+        placed.append((position, max(0.0, length), pitch, list(chord)))
+    placed.sort(key=lambda note: (note[0], note[2]))
+
+    by_beat: dict[int, list[float]] = {}
+    for position, *_rest in placed:
+        by_beat.setdefault(int(position), []).append(position - int(position))
+    grids: dict[int, int] = {}
+    for index, offsets in by_beat.items():
+        grid = divisions
+        if divisions == LITERAL_DIVISIONS["literal-16"]:
+            snapped = [snap(o, grid)[0] for o in offsets]
+            pushed = any(s >= 1.0 - 1e-9 for s in snapped) and any(
+                snap(o, grid)[0] <= 1e-9 for o in by_beat.get(index + 1, [])
+            )
+            if not _keeps_apart(offsets, grid) or pushed:
+                grid = divisions * 2
+        grids[index] = grid
+
+    out: list[QuantizedNote] = []
+    positions: list[float] = []
+    previous = -math.inf
+    for position, length, pitch, chord in placed:
+        index = int(position)
+        grid = grids[index]
+        slot = index + snap(position - index, grid)[0]
+        if not polyphonic and slot <= previous + 1e-9:
+            # The next free grid point after the previous note, on this
+            # beat's grid: a 32nd late at most, and never a lost note.
+            slot = index + (math.floor((previous - index) * grid + 1e-9) + 1) / grid
+        previous = slot
+        bar, beat = bar_and_beat(slot, beats, sections)
+        out.append(
+            QuantizedNote(
+                bar=bar,
+                beat=beat,
+                duration_beats=max(1.0 / grid, snap(length, grid)[0]),
+                pitch=pitch,
+                timing_residual=position - slot,
+                chord=chord,
+            )
+        )
+        positions.append(slot)
+    if polyphonic:
+        return merge_chords(out, positions)
+    return out, positions
+
+
+def merge_chords(
+    notes: list[QuantizedNote], positions: list[float]
+) -> tuple[list[QuantizedNote], list[float]]:
+    """Fold notes on one notated position into ONE chord.
+
+    For a piano texture only. A line's two notes on one grid point are a
+    grid too coarse and notate would keep one of them; a pianist's are a
+    chord, rolled or struck a few tens of milliseconds apart. The chord
+    lasts as long as its longest member -- chord members share a stem and a
+    written value -- and keeps the first note's position, pitch and
+    residual as its head. Positions stay parallel to the notes.
+    """
+    merged: dict[tuple[int, float], int] = {}
+    out: list[QuantizedNote] = []
+    kept: list[float] = []
+    for note, position in zip(notes, positions, strict=True):
+        key = (note.bar, round(note.beat, 6))
+        at = merged.get(key)
+        if at is None:
+            merged[key] = len(out)
+            out.append(note)
+            kept.append(position)
+            continue
+        head = out[at]
+        members = set(head.chord) | set(note.chord) | {note.pitch}
+        out[at] = head.model_copy(
+            update={
+                "chord": sorted(members - {head.pitch}),
+                "duration_beats": max(head.duration_beats, note.duration_beats),
+            }
+        )
+    return out, kept
 
 
 LAG_CANDIDATE_MAX = 0.35  # a beat's first onset past this has no downbeat to be late
@@ -961,6 +1109,8 @@ def settings(qc: QuantizeConfig) -> dict:
         "slow_beat_grids": qc.slow_beat_grids,
         "quarter_triplets": qc.quarter_triplets,
         "figure_prior_weight": qc.figure_prior_weight,
+        "timing": qc.timing,
+        "polyphonic": qc.polyphonic,
     }
 
 
@@ -987,7 +1137,12 @@ def run(document: Document, config: Config) -> Document:
     )
 
     by_beat, track = pooled_phase(document.swing, qc.straight_bur_ceiling)
-    if quantized:
+    if quantized and qc.timing != "swing":
+        print(
+            f"quantize: {len(quantized)}/{len(notes)} notes placed, literal timing "
+            f"({qc.timing}), nothing warped"
+        )
+    elif quantized:
         residuals = [abs(n.timing_residual) for n in quantized]
         feel = (
             f"BUR {track / (1.0 - track):.2f}"

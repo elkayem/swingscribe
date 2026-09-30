@@ -366,3 +366,43 @@ def test_enabled_returns_the_switched_on_candidates_as_plain_notes():
     offered = erasures.pool(CANDIDATES, NOTES)
     on = erasures.enabled(offered, [1])
     assert on == [{"onset": 10.5, "duration": 0.3, "pitch": 84, "confidence": 0.7}]
+
+
+# -- hands, and the two views of a pianist's span ----------------------------
+
+
+def test_the_hand_guess_splits_at_middle_c():
+    from swingscribe.notation import guess_hand
+
+    assert guess_hand(60) == "right"
+    assert guess_hand(59) == "left"
+
+
+def test_hands_are_matched_by_content_and_the_rest_are_guessed():
+    notes = [note(10.0, 48), note(10.0, 72), note(10.5, 62), note(11.0, 55)]
+    stored = [
+        {"onset": 10.51, "pitch": 62, "hand": "left"},
+        {"onset": 11.0, "pitch": 55, "hand": "right"},
+        {"onset": 12.0, "pitch": 70, "hand": "left"},  # its note is gone
+        {"onset": 10.0, "pitch": 48, "hand": "middle"},  # not a hand
+    ]
+    resolved = erasures.resolve_hands(stored, notes, (9.0, 11.5))
+    assert resolved["left"] == [2]
+    assert resolved["right"] == [3]
+    assert resolved["carried"] == [stored[2]]
+    assert resolved["unmatched"] == []  # outside the span: out of view, not missing
+    assert erasures.hands_of(notes, resolved) == ["left", "right", "left", "right"]
+    assert erasures.hands_of(notes, None) == ["left", "right", "right", "left"]
+
+
+def test_each_view_takes_only_its_own_erasures():
+    line = {"onset": 10.0, "pitch": 48}
+    texture = {"onset": 10.0, "pitch": 48, "piano_notes": "all"}
+    assert erasures.split_by_texture([line, texture], texture=False) == ([line], [texture])
+    assert erasures.split_by_texture([line, texture], texture=True) == ([texture], [line])
+
+
+def test_match_is_the_one_rule_every_stored_edit_uses():
+    notes = [note(10.0, 60), note(10.06, 60)]
+    assert erasures.match([{"onset": 10.05, "pitch": 60}], notes) == {0: 1}
+    assert erasures.match([{"onset": 10.05, "pitch": 61}], notes) == {}

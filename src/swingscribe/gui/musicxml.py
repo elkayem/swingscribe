@@ -30,10 +30,11 @@ exporting a second chorus does not overwrite the first.
 from pathlib import Path
 from typing import Any
 
-from swingscribe.config import TRANSPOSITIONS, Config
+from swingscribe.config import TIMINGS, TRANSPOSITIONS, Config
 from swingscribe.model import Document, NoteEvent
 from swingscribe.notation import (
     bar_grid_for_settings,
+    fold_texture,
     meter_from_settings,
     notation_for_span,
     with_chords,
@@ -48,6 +49,7 @@ def export_path(
     audio_path: str | Path,
     region: tuple[float, float | None] | None,
     line: str | None = None,
+    tags: list[str] | None = None,
 ) -> Path:
     """Where this span's score goes: beside the audio, span in the name.
 
@@ -55,10 +57,12 @@ def export_path(
     bounds, so the four choruses you exported one at a time are four files
     rather than one file overwritten four times. `line` is a take other than
     the default (the pianists' Line picker): it goes in the name for the same
-    reason, so the two takes of one span can be laid side by side.
+    reason, so the two takes of one span can be laid side by side. `tags`
+    are the page choices away from their defaults (`page_tags`), for the same
+    reason again: a literal page must not overwrite the swing one.
     """
     source = Path(audio_path)
-    take = f".{line}" if line else ""
+    take = "".join(f".{part}" for part in [line, *(tags or [])] if part)
     if region is None or (region[0] in (None, 0.0) and region[1] is None):
         return source.with_name(f"{source.stem}{take}.musicxml")
     low = region[0] or 0.0
@@ -70,6 +74,31 @@ def export_path(
 def take_of(config: Config, line: str | None) -> str | None:
     """The line as it appears in a filename: None for the default take."""
     return line if line and line != config.transcribe.piano_line else None
+
+
+def timing_of(config: Config, settings: dict[str, Any]) -> str:
+    """The sidecar's rhythm choice, or the config's when it holds none (or
+    one this build does not know -- a hand-edited sidecar must not break
+    the button)."""
+    stored = settings.get("timing")
+    return stored if stored in TIMINGS else config.quantize.timing
+
+
+def two_staves(settings: dict[str, Any], texture: bool) -> bool:
+    """A grand staff: only ever for the All-notes view of a pianist."""
+    return texture and settings.get("staves") == 2
+
+
+def page_tags(config: Config, settings: dict[str, Any], texture: bool) -> list[str]:
+    """The filename tags for this page's choices away from their defaults:
+    "all" or "2staves" for a piano texture, "literal16"/"literal32"."""
+    tags = []
+    if texture:
+        tags.append("2staves" if two_staves(settings, texture) else "all")
+    timing = timing_of(config, settings)
+    if timing != "swing":
+        tags.append(timing.replace("-", ""))
+    return tags
 
 
 def bar_grid(
@@ -115,13 +144,18 @@ def bar_grid(
     return bar_grid_for_settings(grid.beats, grid.downbeats, settings, config, duration, near)
 
 
-def notate_config(config: Config, settings: dict[str, Any], title: str) -> Config:
-    """Base config with the part's key and title folded into notate.
+def notate_config(
+    config: Config, settings: dict[str, Any], title: str, texture: bool = False
+) -> Config:
+    """Base config with the part's key and title folded into notate, and
+    the listener's rhythm choice into quantize.
 
     The transposition is a property of the instrument, not of the audio
     (NotateConfig), so it can only ever come from the person listening. An
     unrecognised value falls back to concert rather than raising: a hand-edited
-    sidecar should not be able to break the button.
+    sidecar should not be able to break the button. The timing is the same
+    kind of choice -- swing eighths or a literal grid -- and `texture` says
+    the notes are a piano texture, whose collisions are chords.
     """
     stored = settings.get("transposition")
     transposition = stored if stored in TRANSPOSITIONS else config.notate.transposition
@@ -129,7 +163,10 @@ def notate_config(config: Config, settings: dict[str, Any], title: str) -> Confi
         update={
             "notate": config.notate.model_copy(
                 update={"transposition": transposition, "title": title}
-            )
+            ),
+            "quantize": config.quantize.model_copy(
+                update={"timing": timing_of(config, settings), "polyphonic": texture}
+            ),
         }
     )
 
@@ -143,6 +180,8 @@ def build_notation(
     settings: dict[str, Any],
     second_voice: list[dict[str, Any]] | None = None,
     added: list[dict[str, Any]] | None = None,
+    texture: bool = False,
+    left: list[dict[str, Any]] | None = None,
 ):
     """The reviewed span as a Notation, or raise something the user can fix.
 
@@ -165,8 +204,13 @@ def build_notation(
     note is written as a chord on it and one struck alone is a note of its
     own. Passed by Export AND Score: unlike the overlay they are the
     listener's claim about the solo, and the page is scored as written.
+
+    `texture` is a pianist's "All notes" view: `notes` are everything the
+    piano model heard, folded into chords (`notation.fold_texture`) and
+    quantized as a texture. With `left` given as well the page is a grand
+    staff, `notes` the right hand and `left` the left.
     """
-    if not notes and not added:
+    if not notes and not added and not left:
         raise NotReady("nothing to notate - every note in this span is silenced")
 
     duration = document.audio.duration if document.audio else 0.0
@@ -178,7 +222,12 @@ def build_notation(
         settings.get("time_signature"), settings.get("pulses_per_bar"), config
     )
     line = [NoteEvent(source=stem, **note) for note in notes]
-    if added:
+    left_hand = None
+    if texture:
+        line = fold_texture(line)
+        if left is not None:
+            left_hand = fold_texture([NoteEvent(source=stem, **note) for note in left])
+    elif added:
         line = with_chords(line, [NoteEvent(source=f"{stem}:added", **note) for note in added])
     notation = notation_for_span(
         audio_path,
@@ -186,18 +235,21 @@ def build_notation(
         beats,
         region,
         stem=stem,
-        config=notate_config(config, settings, Path(audio_path).stem),
+        config=notate_config(config, settings, Path(audio_path).stem, texture),
         anchor=anchor,
         time_signature=signature,
         pulses_per_bar=pulses,
         sample_rate=document.sample_rate,
         second_voice=(
-            [NoteEvent(source=stem, **note) for note in second_voice] if second_voice else None
+            [NoteEvent(source=stem, **note) for note in second_voice]
+            if second_voice and not texture
+            else None
         ),
         # The listener's double-time checkbox: a per-track judgement like the
         # time signature, stored in the sidecar, never inferred (the Omnibook
         # writes these solos as literal 32nds, which stays the default).
         double_time=bool(settings.get("double_time")),
+        left_hand=left_hand,
     )
     if notation is None or not notation.bars:
         raise NotReady("the span is too short to bar out - select at least a couple of bars")
@@ -213,18 +265,34 @@ def export_span(
     settings: dict[str, Any],
     second_voice: list[dict[str, Any]] | None = None,
     added: list[dict[str, Any]] | None = None,
+    texture: bool = False,
+    left: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Write the reviewed span to MusicXML and say what was written."""
     from swingscribe.benchmark import readability
     from swingscribe.stages.export import to_musicxml
 
     notation = build_notation(
-        document, config, run_config, audio_path, notes, settings, second_voice, added
+        document,
+        config,
+        run_config,
+        audio_path,
+        notes,
+        settings,
+        second_voice,
+        added,
+        texture=texture,
+        left=left,
     )
     region = run_config.transcribe.region or (0.0, None)
     title = Path(audio_path).stem
     signature = notation.bars[0].time_signature
-    path = export_path(audio_path, region, take_of(config, run_config.transcribe.piano_line))
+    path = export_path(
+        audio_path,
+        region,
+        take_of(config, run_config.transcribe.piano_line),
+        page_tags(config, settings, texture),
+    )
     xml = to_musicxml(notation, part_name=title)
     try:
         path.write_text(xml, encoding="utf-8")
@@ -241,6 +309,8 @@ def export_span(
         "notes": sum(1 for bar in notation.bars for n in bar.notes if not n.is_rest),
         "key_fifths": notation.key_fifths,
         "swing": notation.swing,
+        "timing": timing_of(config, settings),
+        "staves": notation.staves,
         "transpose": notation.transpose,
         "time_signature": f"{signature[0]}/{signature[1]}",
         "readability": readable["readability"],

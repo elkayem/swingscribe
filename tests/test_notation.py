@@ -485,3 +485,105 @@ def test_a_chorded_note_reaches_the_page_as_one_event_with_a_chord():
     assert [(n.pitch, n.chord) for n in chorded] == [(notes[4].pitch, [notes[4].pitch + 6])]
     for bar in notation.bars:
         assert sum(n.duration for n in bar.notes) == pytest.approx(4.0)
+
+
+# ── literal timing, piano textures, two staves ─────────────────────────────
+
+
+def swung_line(beats: list[float]) -> list[NoteEvent]:
+    """Eighth pairs swung at 2:1 on every beat of the span."""
+    out = []
+    for i, t in enumerate(beats[:-1]):
+        length = beats[i + 1] - t
+        out.append(ev(t, 60 + i % 5, length * 0.6))
+        out.append(ev(t + length * 2 / 3, 62 + i % 5, length * 0.3))
+    return out
+
+
+def with_timing(timing: str) -> Config:
+    config = Config()
+    return config.model_copy(
+        update={"quantize": config.quantize.model_copy(update={"timing": timing})}
+    )
+
+
+def test_a_literal_page_writes_the_swing_as_played_and_says_no_swing():
+    beats = grid(count=40, start=0.0)
+    notes = swung_line(beats)
+    region = (beats[0], beats[-1])
+    swung = notation_for_span("t.wav", notes, beats, region, stem="other")
+    literal = notation_for_span(
+        "t.wav", notes, beats, region, stem="other", config=with_timing("literal-16")
+    )
+    assert swung.swing and not literal.swing
+    offbeats = {round(n.beat % 1, 6) for bar in literal.bars for n in bar.notes if not n.is_rest}
+    assert 0.75 in offbeats and 0.5 not in offbeats
+    for bar in literal.bars:
+        assert sum(n.duration for n in bar.notes) == pytest.approx(4.0)
+
+
+def test_a_texture_folds_rolls_into_chords_that_last_as_long_as_their_longest_note():
+    from swingscribe.notation import fold_texture
+
+    folded = fold_texture([ev(10.0, 48, 0.9), ev(10.04, 64, 0.3), ev(10.03, 67, 0.2), ev(10.2, 72)])
+    assert [(n.onset, n.pitch, n.chord, n.duration) for n in folded] == [
+        (10.0, 48, [64, 67], 0.9),
+        (10.2, 72, [], 0.4),
+    ]
+
+
+def test_two_staves_hold_each_hand_and_share_one_key_and_one_set_of_bars():
+    beats = grid(count=40, start=0.0)
+    region = (beats[0], beats[-1])
+    right = [ev(t, 72 + (i % 3) * 2, 0.4) for i, t in enumerate(beats[4:20])]
+    left = [ev(t, 43, 1.8) for t in beats[8:28:4]]
+    notation = notation_for_span("t.wav", right, beats, region, stem="other", left_hand=left)
+    assert notation.staves == 2
+    assert {n.staff for bar in notation.bars for n in bar.notes} == {1, 2}
+    for bar in notation.bars:
+        for staff in (1, 2):
+            held = [n for n in bar.notes if n.staff == staff]
+            assert held, (bar.number, staff)  # a bar a hand sits out is a rest
+            assert sum(n.duration for n in held) == pytest.approx(4.0)
+    sounded = {n.pitch: n.staff for bar in notation.bars for n in bar.notes if not n.is_rest}
+    assert sounded[43] == 2 and sounded[72] == 1
+
+
+def test_a_page_with_no_right_hand_still_has_both_staves():
+    beats = grid(count=40, start=0.0)
+    region = (beats[0], beats[-1])
+    left = [ev(t, 43, 0.4) for t in beats[4:20]]
+    notation = notation_for_span("t.wav", [], beats, region, stem="other", left_hand=left)
+    assert notation.staves == 2
+    assert {n.staff for bar in notation.bars for n in bar.notes if not n.is_rest} == {2}
+    assert all(any(n.staff == 1 for n in bar.notes) for bar in notation.bars)
+
+
+def test_without_a_left_hand_the_page_is_one_staff():
+    beats = grid(count=40, start=0.0)
+    notation = notation_for_span("t.wav", line(beats), beats, (beats[0], beats[-1]), stem="other")
+    assert notation.staves == 1
+    assert {n.staff for bar in notation.bars for n in bar.notes} == {1}
+
+
+def test_a_literal_32nd_page_is_never_read_as_triplets():
+    """A 32nd at 3/8 of a beat is nearer a third than any sixteenth, and
+    notate used to guess the beat's grid from that -- a literal page grew
+    triplet brackets its quantizer never chose. Told it is literal, it
+    writes no tuplet and every value on the 32nd grid."""
+    beats = grid(count=40, start=0.0)
+    region = (beats[0], beats[-1])
+    notes = []
+    for i, t in enumerate(beats[4:30]):
+        notes.append(ev(t, 60 + i % 5, BEAT * 0.3))
+        notes.append(ev(t + BEAT * 3 / 8, 62 + i % 5, BEAT * 0.2))
+        notes.append(ev(t + BEAT * 5 / 8, 64 + i % 5, BEAT * 0.2))
+    literal = notation_for_span(
+        "t.wav", notes, beats, region, stem="other", config=with_timing("literal-32")
+    )
+    written = [n for bar in literal.bars for n in bar.notes]
+    assert not any(n.tuplet for n in written)
+    assert all(abs(n.beat * 8 - round(n.beat * 8)) < 1e-6 for n in written)
+    assert all(abs(n.duration * 8 - round(n.duration * 8)) < 1e-6 for n in written)
+    for bar in literal.bars:
+        assert sum(n.duration for n in bar.notes) == pytest.approx(4.0)

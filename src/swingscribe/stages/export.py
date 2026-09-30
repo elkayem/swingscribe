@@ -122,12 +122,24 @@ def tuplet_groups(notes: list[NotatedNote]) -> dict[int, str]:
     return marks
 
 
+def xml_voice(note: NotatedNote) -> int:
+    """The MusicXML voice number: 1-4 on the first staff, 5-8 on the second.
+
+    MusicXML voice numbers are per PART, not per staff, so the bass staff's
+    voice 1 must not share a number with the treble's or a reader merges
+    them. Four per staff is the convention MuseScore and Finale both write
+    and read back.
+    """
+    return note.voice + 4 * (note.staff - 1)
+
+
 def _append_note(
     parent,
     note: NotatedNote,
     transpose: int,
     written_key: int,
     tuplet_mark: str | None = None,
+    staves: int = 1,
 ) -> None:
     """One notated note, plus a <chord/> note for every other pitch it heads.
 
@@ -138,7 +150,9 @@ def _append_note(
     """
     pitches = [note.pitch] if note.is_rest else [note.pitch, *sorted(set(note.chord))]
     for index, pitch in enumerate(pitches):
-        _append_pitch(parent, note, pitch, transpose, written_key, tuplet_mark, chord=index > 0)
+        _append_pitch(
+            parent, note, pitch, transpose, written_key, tuplet_mark, chord=index > 0, staves=staves
+        )
 
 
 def _append_pitch(
@@ -149,6 +163,7 @@ def _append_pitch(
     written_key: int,
     tuplet_mark: str | None,
     chord: bool,
+    staves: int = 1,
 ) -> None:
     element = ElementTree.SubElement(parent, "note")
     if chord:
@@ -174,7 +189,7 @@ def _append_pitch(
     if note.tie_start and not note.is_rest:
         ElementTree.SubElement(element, "tie", {"type": "start"})
 
-    ElementTree.SubElement(element, "voice").text = str(note.voice)
+    ElementTree.SubElement(element, "voice").text = str(xml_voice(note))
     # Written value = sounded duration * actual/normal — 3/2 for the ordinary
     # triplet, but this must not hardcode that ratio: a quintuplet (5:4) or
     # septuplet (7:4) note needs its own.
@@ -192,6 +207,10 @@ def _append_pitch(
         modification = ElementTree.SubElement(element, "time-modification")
         ElementTree.SubElement(modification, "actual-notes").text = str(actual)
         ElementTree.SubElement(modification, "normal-notes").text = str(normal)
+    if staves > 1:
+        # After <time-modification> and before <notations>: MusicXML's note
+        # children are ordered, and a reader that validates refuses the file.
+        ElementTree.SubElement(element, "staff").text = str(note.staff)
     tied = (note.tie_start or note.tie_stop) and not note.is_rest
     if tied or tuplet_mark:
         notations = ElementTree.SubElement(element, "notations")
@@ -204,21 +223,17 @@ def _append_pitch(
 
 
 def voices_of(bar) -> list[tuple[int, list[NotatedNote]]]:
-    """The bar's notes grouped by voice, lowest voice number first.
+    """The bar's notes grouped by MusicXML voice (`xml_voice`), lowest first
+    -- so the treble staff's voices come before the bass staff's.
 
     A bar with only voice 1 — every bar, unless the piano second-voice overlay
-    is on — comes back as a single group, so the common path writes exactly
-    what it always did.
+    is on or the page has two staves — comes back as a single group, so the
+    common path writes exactly what it always did.
     """
     grouped: dict[int, list[NotatedNote]] = {}
     for note in bar.notes:
-        grouped.setdefault(note.voice, []).append(note)
+        grouped.setdefault(xml_voice(note), []).append(note)
     return sorted(grouped.items())
-
-
-def voice_notes_before(bar, number: int) -> list[NotatedNote]:
-    """Everything already written in this measure before voice `number`."""
-    return [n for n in bar.notes if n.voice < number]
 
 
 def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
@@ -256,39 +271,48 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
             ElementTree.SubElement(time, "beats").text = str(bar.time_signature[0])
             ElementTree.SubElement(time, "beat-type").text = str(bar.time_signature[1])
             if index == 0:
-                clef = ElementTree.SubElement(attributes, "clef")
-                ElementTree.SubElement(clef, "sign").text = "G"
-                ElementTree.SubElement(clef, "line").text = "2"
+                if notation.staves > 1:
+                    # A grand staff: <staves> before the clefs (the schema's
+                    # order), one numbered clef per staff.
+                    ElementTree.SubElement(attributes, "staves").text = str(notation.staves)
+                for number, (sign, line) in enumerate(_clefs(notation.staves), start=1):
+                    clef = ElementTree.SubElement(
+                        attributes, "clef", {"number": str(number)} if notation.staves > 1 else {}
+                    )
+                    ElementTree.SubElement(clef, "sign").text = sign
+                    ElementTree.SubElement(clef, "line").text = line
                 if notation.transpose:
                     _append_transpose(attributes, notation.transpose)
             previous_signature = bar.time_signature
         if index == 0 and notation.swing:
             # The one word that makes the difference between a readable jazz
             # chart and a wrong one: the eighths on the page are even.
-            direction = ElementTree.SubElement(measure, "direction", {"placement": "above"})
-            direction_type = ElementTree.SubElement(direction, "direction-type")
-            words = ElementTree.SubElement(direction_type, "words", {"font-style": "italic"})
-            words.text = "Swing"
+            _append_words(measure, "Swing", notation.staves)
         if index == 0 and notation.double_time:
             # The listener's condition for double-time pages: the page must
             # say so, or its values read as twice what was played.
-            direction = ElementTree.SubElement(measure, "direction", {"placement": "above"})
-            direction_type = ElementTree.SubElement(direction, "direction-type")
-            words = ElementTree.SubElement(direction_type, "words", {"font-style": "italic"})
-            words.text = "Notated in double time"
+            _append_words(measure, "Notated in double time", notation.staves)
         # Voices are written one after another, each rewound to the barline by
         # a <backup>. MusicXML has no interleaved form: a reader consumes a
-        # voice until the duration runs out, so voice 2 must start by undoing
-        # voice 1's advance or it lands in the next bar.
-        for offset, (number, voice_notes) in enumerate(voices_of(bar)):
+        # voice until the duration runs out, so the next voice must start by
+        # undoing the last one's advance or it lands in the next bar. Every
+        # voice fills its bar, so the rewind is the previous voice's length.
+        written = 0
+        for offset, (_number, voice_notes) in enumerate(voices_of(bar)):
             if offset:
                 backup = ElementTree.SubElement(measure, "backup")
-                ElementTree.SubElement(backup, "duration").text = str(
-                    sum(_duration_ticks(n) for n in voice_notes_before(bar, number))
-                )
+                ElementTree.SubElement(backup, "duration").text = str(written)
             marks = tuplet_groups(voice_notes)
             for position, note in enumerate(voice_notes):
-                _append_note(measure, note, notation.transpose, written_key, marks.get(position))
+                _append_note(
+                    measure,
+                    note,
+                    notation.transpose,
+                    written_key,
+                    marks.get(position),
+                    staves=notation.staves,
+                )
+            written = sum(_duration_ticks(n) for n in voice_notes)
 
     ElementTree.indent(root, space="  ")
     body = ElementTree.tostring(root, encoding="unicode")
@@ -297,6 +321,21 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
         '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" '
         '"http://www.musicxml.org/dtds/partwise.dtd">\n' + body + "\n"
     )
+
+
+def _clefs(staves: int) -> list[tuple[str, str]]:
+    """(sign, line) per staff: treble alone, or treble over bass."""
+    return [("G", "2"), ("F", "4")] if staves > 1 else [("G", "2")]
+
+
+def _append_words(measure, text: str, staves: int) -> None:
+    """An italic direction above the first staff."""
+    direction = ElementTree.SubElement(measure, "direction", {"placement": "above"})
+    direction_type = ElementTree.SubElement(direction, "direction-type")
+    words = ElementTree.SubElement(direction_type, "words", {"font-style": "italic"})
+    words.text = text
+    if staves > 1:
+        ElementTree.SubElement(direction, "staff").text = "1"
 
 
 def transpose_element(semitones: int) -> tuple[int, int, int]:

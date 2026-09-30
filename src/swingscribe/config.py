@@ -31,6 +31,15 @@ ENSEMBLES: tuple[str, ...] = get_args(Ensemble)
 # GUI's menu is built from this, never hand-copied.
 LINES: tuple[str, ...] = ("crepe", "oracle")
 TRANSPOSITIONS: tuple[str, ...] = get_args(Transposition)
+# How quantize writes rhythm (QuantizeConfig.timing): "swing" reads the feel
+# out and writes swung eighths as eighths under a "Swing" marking; the
+# literal ones snap every onset to the nearest 16th or 32nd, feel and all.
+Timing = Literal["swing", "literal-16", "literal-32"]
+TIMINGS: tuple[str, ...] = get_args(Timing)
+# Which of a pianist's notes reach the roll and the page: the melody line
+# (with any candidates switched on), or everything the piano model heard.
+# A per-track GUI choice (sidecar `piano_notes`), never a stage setting.
+PIANO_NOTES: tuple[str, ...] = ("line", "all")
 
 
 class IngestConfig(BaseModel):
@@ -554,6 +563,32 @@ class QuantizeConfig(BaseModel):
     # page score reads a little lower for them because the transcribers do
     # not write most of them (D37). 0 is off, and the old behaviour.
     figure_prior_weight: float = 0.015
+    # "swing" is everything above: warp, lag, grid choice, the prior. A
+    # literal timing snaps each onset to the NEAREST point of a fixed grid
+    # instead -- 16ths or 32nds -- with no warp, no lag correction and no
+    # triplets, so a swung pair is written long-short the way it was played
+    # and the page carries no "Swing" marking. The listener's choice per
+    # track (sidecar `timing`), made before an export. Never loses a note:
+    # see quantize.literal_notes.
+    timing: Timing = "swing"
+    # The notes are a PIANO TEXTURE, not a line: two notes the grid puts on
+    # one position are a chord, not a grid too coarse. Set by the GUI's
+    # "All notes" page (notation.py), never by a user directly.
+    polyphonic: bool = False
+
+    @model_serializer(mode="wrap")
+    def _key_stable_dump(self, handler):
+        """Leave `timing` and `polyphonic` out of the dump at their defaults,
+        so every quantize key reads exactly as it did before they existed --
+        the same device as TranscribeConfig's line fields. Quantize is only
+        arithmetic, but a key that moves for a change that alters no note is
+        a cache miss for nothing, and the pinned harness runs read these."""
+        data = handler(self)
+        if data.get("timing") == "swing":
+            data.pop("timing", None)
+        if not data.get("polyphonic"):
+            data.pop("polyphonic", None)
+        return data
 
 
 class NotateConfig(BaseModel):

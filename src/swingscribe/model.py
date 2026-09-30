@@ -129,6 +129,11 @@ class NotatedNote(BaseModel):
     # together, so they split at bar lines and tie exactly as their head does.
     # Written as <chord/> notes in MusicXML; rests never carry one.
     chord: list[int] = []
+    # Which staff of a two-staff (piano) page: 1 is the treble, the right
+    # hand; 2 the bass, the left. A one-staff page is all 1. MIGRATION:
+    # additive with a default, like `voice`: every cached Notation
+    # deserializes as staff 1 and no cache key moves.
+    staff: int = 1
 
 
 class NotatedBar(BaseModel):
@@ -161,6 +166,10 @@ class Notation(BaseModel):
     # halve them (benchmark.notation_notes), and readability must NOT — the
     # page is read as written.
     double_time: bool = False
+    # 2 is a grand staff: the right hand on a treble staff over the left on
+    # a bass staff (NotatedNote.staff), the listener's choice for a piano
+    # texture. MIGRATION: additive with a default of 1, nothing moves.
+    staves: int = 1
 
 
 class Document(BaseModel):

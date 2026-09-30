@@ -444,9 +444,20 @@ def test_beats_endpoint_rejects_a_nonsense_time_signature(world, monkeypatch):
 
 
 def _seed_review(
-    world, monkeypatch, *, stem="other", start=1.0, end=3.0, pitches=(64,), candidates=()
+    world,
+    monkeypatch,
+    *,
+    stem="other",
+    start=1.0,
+    end=3.0,
+    pitches=(64,),
+    candidates=(),
+    ensemble=None,
 ):
-    """Populate the review cache for a span without running CREPE."""
+    """Populate the review cache for a span without running CREPE.
+
+    `ensemble` must match what the sidecar says, or the server keys the
+    review differently and never finds it."""
     from dataclasses import dataclass
 
     from swingscribe.gui import library, review
@@ -490,12 +501,11 @@ def _seed_review(
     monkeypatch.setattr("swingscribe.stages.transcribe.analyze", lambda sp, tc: (notes, diag))
 
     track = open_track(world)
+    updates = {"stem": stem, "region": (start, end)}
+    if ensemble is not None:
+        updates["ensemble"] = ensemble
     config = world["config"].model_copy(
-        update={
-            "transcribe": world["config"].transcribe.model_copy(
-                update={"stem": stem, "region": (start, end)}
-            )
-        }
+        update={"transcribe": world["config"].transcribe.model_copy(update=updates)}
     )
     document = library.ingested_document(world["source"], config)
     review.analyze_and_cache(document, config, "htdemucs_ft")
@@ -1348,6 +1358,228 @@ def test_an_enabled_candidate_in_a_gap_is_a_note_of_its_own_and_sounds(world, mo
     response = world["client"].get(f"/api/tracks/{track['id']}/transcription", params=params)
     assert response.status_code == 200, response.text
     assert seen["pitches"] == [78, 75, 72]
+
+
+# ── rhythm, all notes, and two staves ──────────────────────────────────────
+
+
+SPAN = {"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0}
+
+
+def _seed_texture_review(world, monkeypatch, sidecar=None):
+    """A pianist's review (the sidecar says trio): a line of one note, and a
+    piano model that heard a chord with a bass note under it, a right-hand
+    note, and a G3 the pitch guess sends to the left hand."""
+    library.save_settings(world["source"], {"ensemble": "trio", **(sidecar or {})}, world["config"])
+    return _seed_review(
+        world,
+        monkeypatch,
+        pitches=(72,),
+        ensemble="trio",
+        candidates=[
+            {"onset": 1.1, "duration": 0.4, "pitch": 72, "velocity": 90},
+            {"onset": 1.11, "duration": 0.4, "pitch": 76, "velocity": 80},
+            {"onset": 1.1, "duration": 0.9, "pitch": 48, "velocity": 70},
+            {"onset": 1.6, "duration": 0.2, "pitch": 74, "velocity": 80},
+            {"onset": 2.1, "duration": 0.2, "pitch": 55, "velocity": 60},
+        ],
+    )
+
+
+def _staffed_pitches(path) -> dict[int, list[int]]:
+    """Sounding MIDI pitches per <staff> in a written MusicXML file (concert
+    pitch: these tests write for C)."""
+    from xml.etree import ElementTree
+
+    steps = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+    out: dict[int, list[int]] = {}
+    for note in ElementTree.parse(path).getroot().iter("note"):
+        pitch = note.find("pitch")
+        if pitch is None:
+            continue
+        midi = (
+            12 * (int(pitch.findtext("octave")) + 1)
+            + steps[pitch.findtext("step")]
+            + int(pitch.findtext("alter") or 0)
+        )
+        out.setdefault(int(note.findtext("staff") or 1), []).append(midi)
+    return out
+
+
+def test_the_all_notes_view_serves_everything_the_model_heard(world, monkeypatch):
+    track = _seed_texture_review(world, monkeypatch)
+    url = f"/api/tracks/{track['id']}/review"
+    line = world["client"].get(url, params=SPAN).json()
+    assert [n["pitch"] for n in line["notes"]] == [72]
+    assert line["piano_notes"] == "line"
+    everything = world["client"].get(url, params={**SPAN, "piano_notes": "all"}).json()
+    assert everything["piano_notes"] == "all"
+    assert [(n["onset"], n["pitch"]) for n in everything["notes"]] == [
+        (1.1, 48),
+        (1.1, 72),
+        (1.11, 76),
+        (1.6, 74),
+        (2.1, 55),
+    ]
+    assert everything["candidates"] == []  # nothing left to offer
+    assert everything["hands"]["right"] == everything["hands"]["left"] == []
+
+
+def test_a_horn_has_no_all_notes_view(world, monkeypatch):
+    """No piano model heard a saxophone's "all notes"; the request is
+    answered with the line, and says so."""
+    track = _seed_review(world, monkeypatch, pitches=(64,))
+    payload = (
+        world["client"]
+        .get(f"/api/tracks/{track['id']}/review", params={**SPAN, "piano_notes": "all"})
+        .json()
+    )
+    assert payload["piano_notes"] == "line"
+    assert [n["pitch"] for n in payload["notes"]] == [64]
+
+
+def test_an_unknown_piano_notes_view_is_refused(world, monkeypatch):
+    track = _seed_texture_review(world, monkeypatch)
+    response = world["client"].get(
+        f"/api/tracks/{track['id']}/review", params={**SPAN, "piano_notes": "most"}
+    )
+    assert response.status_code == 400
+
+
+def test_each_view_resolves_only_its_own_erasures(world, monkeypatch):
+    """A left-hand note erased as "not the solo" on the line is what the
+    All-notes page is FOR, so the two views keep separate erasures -- and
+    each carries the other's through, never dropping a label."""
+    line_erasure = {"onset": 1.1, "pitch": 72, "reason": "not-solo"}
+    all_erasure = {"onset": 2.1, "pitch": 55, "reason": "not-solo", "piano_notes": "all"}
+    track = _seed_texture_review(
+        world, monkeypatch, sidecar={"erasures": [line_erasure, all_erasure]}
+    )
+    url = f"/api/tracks/{track['id']}/review"
+    line = world["client"].get(url, params=SPAN).json()["erasures"]
+    assert line["silenced"] == [0]
+    assert line["carried"] == [all_erasure] and line["unmatched"] == []
+    everything = world["client"].get(url, params={**SPAN, "piano_notes": "all"}).json()
+    assert everything["erasures"]["silenced"] == [4]
+    assert everything["erasures"]["carried"] == [line_erasure]
+    assert everything["erasures"]["unmatched"] == []
+
+
+def test_the_listeners_hands_are_matched_back_by_content(world, monkeypatch):
+    hands = [
+        {"onset": 1.6, "pitch": 74, "hand": "left"},
+        {"onset": 2.1, "pitch": 55, "hand": "right"},
+    ]
+    track = _seed_texture_review(world, monkeypatch, sidecar={"hands": hands})
+    payload = (
+        world["client"]
+        .get(f"/api/tracks/{track['id']}/review", params={**SPAN, "piano_notes": "all"})
+        .json()
+    )
+    assert payload["hands"]["left"] == [3]
+    assert payload["hands"]["right"] == [4]
+    assert payload["hands"]["unmatched"] == []
+
+
+def test_all_notes_on_one_staff_writes_the_whole_texture_as_chords(world, monkeypatch):
+    track = _seed_texture_review(world, monkeypatch)
+    _seed_beats(monkeypatch, world)
+    written = (
+        world["client"]
+        .post(f"/api/tracks/{track['id']}/export", params={**SPAN, "piano_notes": "all"})
+        .json()
+    )
+    assert written["staves"] == 1
+    assert pathlib.Path(written["path"]).name == "Some Tune.1-3s.all.musicxml"
+    # A set: a note tied across a beat line is written twice.
+    assert set(_staffed_pitches(written["path"])[1]) == {48, 55, 72, 74, 76}
+
+
+def test_two_staves_put_each_hand_on_its_own_staff(world, monkeypatch):
+    """The guess sends the G3 to the bass and the D5 to the treble; the
+    listener has moved both, and the page follows the listener."""
+    hands = [
+        {"onset": 1.6, "pitch": 74, "hand": "left"},
+        {"onset": 2.1, "pitch": 55, "hand": "right"},
+    ]
+    track = _seed_texture_review(world, monkeypatch, sidecar={"staves": 2, "hands": hands})
+    _seed_beats(monkeypatch, world)
+    written = (
+        world["client"]
+        .post(f"/api/tracks/{track['id']}/export", params={**SPAN, "piano_notes": "all"})
+        .json()
+    )
+    assert written["staves"] == 2
+    path = pathlib.Path(written["path"])
+    assert path.name == "Some Tune.1-3s.2staves.musicxml"
+    staffed = _staffed_pitches(path)
+    assert set(staffed[1]) == {55, 72, 76}
+    assert set(staffed[2]) == {48, 74}
+    text = path.read_text(encoding="utf-8")
+    assert "<staves>2</staves>" in text
+    download = world["client"].get(
+        f"/api/tracks/{track['id']}/export", params={**SPAN, "piano_notes": "all"}
+    )
+    assert download.status_code == 200
+    assert download.content == path.read_bytes()
+
+
+def test_two_staves_is_only_ever_the_all_notes_view(world, monkeypatch):
+    track = _seed_texture_review(world, monkeypatch, sidecar={"staves": 2})
+    _seed_beats(monkeypatch, world)
+    written = world["client"].post(f"/api/tracks/{track['id']}/export", params=SPAN).json()
+    assert written["staves"] == 1
+    assert pathlib.Path(written["path"]).name == "Some Tune.1-3s.musicxml"
+
+
+def test_the_rhythm_choice_comes_from_the_sidecar(world, monkeypatch):
+    """A literal page says so in its name, so it never overwrites the swing
+    one, and carries no Swing marking."""
+    track = _seed_review(world, monkeypatch, pitches=(64, 66, 67, 69))
+    _seed_beats(monkeypatch, world)
+    world["client"].post(
+        f"/api/tracks/{track['id']}/state", json={"state": {"timing": "literal-32"}}
+    )
+    written = world["client"].post(f"/api/tracks/{track['id']}/export", params=SPAN).json()
+    assert written["timing"] == "literal-32"
+    assert written["swing"] is False
+    path = pathlib.Path(written["path"])
+    assert path.name == "Some Tune.1-3s.literal32.musicxml"
+    assert ">Swing<" not in path.read_text(encoding="utf-8")
+    download = world["client"].get(f"/api/tracks/{track['id']}/export", params=SPAN)
+    assert download.status_code == 200
+
+
+def test_a_typo_in_the_sidecar_timing_falls_back_to_swing(world, monkeypatch):
+    track = _seed_review(world, monkeypatch, pitches=(64, 66))
+    _seed_beats(monkeypatch, world)
+    world["client"].post(f"/api/tracks/{track['id']}/state", json={"state": {"timing": "loose"}})
+    written = world["client"].post(f"/api/tracks/{track['id']}/export", params=SPAN).json()
+    assert written["timing"] == "swing"
+    assert pathlib.Path(written["path"]).name == "Some Tune.1-3s.musicxml"
+
+
+def test_score_and_ground_truth_refuse_the_all_notes_view(world, monkeypatch, tmp_path):
+    track = _seed_texture_review(world, monkeypatch)
+    score = _hand_transcription(tmp_path)
+    for endpoint in ("notation-score", "ground-truth"):
+        response = world["client"].get(
+            f"/api/tracks/{track['id']}/{endpoint}",
+            params={**SPAN, "piano_notes": "all", "score": str(score)},
+        )
+        assert response.status_code == 409, endpoint
+        assert "Melody line" in response.json()["detail"]
+
+
+def test_config_offers_the_rhythm_and_piano_notes_menus(world):
+    from swingscribe.config import PIANO_NOTES, TIMINGS
+    from swingscribe.notation import HAND_SPLIT
+
+    payload = world["client"].get("/api/config").json()
+    assert payload["timings"] == list(TIMINGS)
+    assert payload["default_timing"] == "swing"
+    assert payload["piano_notes"] == list(PIANO_NOTES)
+    assert payload["hand_split"] == HAND_SPLIT == 60
 
 
 # ── quit, and the same-origin check ──────────────────────────────────────────

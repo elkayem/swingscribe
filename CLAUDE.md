@@ -336,6 +336,49 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   listener switches a note on. The `chord` fields on NoteEvent, QuantizedNote
   and NotatedNote are additive with defaults — no cached artifact or key
   moved.
+- **Rhythm is the listener's choice: swing or literal** (2026-09-29,
+  `QuantizeConfig.timing`, sidecar `timing`, the export bar's Rhythm menu
+  built from `config.TIMINGS`). `swing` is everything in M5 and stays the
+  default; `literal-16`/`literal-32` is `quantize.literal_notes`: the
+  NEAREST grid point, no warp, no lag, no triplets, no prior, no "Swing"
+  marking. It never loses a note: on 16ths a beat that cannot keep its
+  onsets apart (or pushes one onto the next beat's note) is written in
+  32nds; on 32nds a colliding line note takes the next free 32nd.
+  **Notate must be told** (`build(literal=True)`): `ternary_beats` knows
+  only sixteenths and thirds, and read a 32nd at 3/8 of a beat as a
+  triplet, so a literal page grew brackets its quantizer never chose. The
+  new fields dump nothing at their defaults (`QuantizeConfig`'s
+  serializer), so no quantize key moved and no pin moved.
+- **A pianist has two VIEWS of one review: Melody line and All notes**
+  (2026-09-29, sidecar `piano_notes`, query param `piano_notes=all`). All
+  notes is the review's `candidates` -- everything the piano model heard
+  -- served AS the notes by `resolve_edits(texture=True)`; no
+  re-transcription, and a horn never gets it (`texture_of` checks
+  `uses_piano_oracle`). It is quantized as a TEXTURE: folded into chords at
+  50 ms (`notation.fold_texture`, measured: 43% of the model's
+  consecutive onsets are under 20 ms, then a flat floor to 60, fast notes
+  from 80), each chord as long as its longest note, and
+  `QuantizeConfig.polyphonic` makes two notes on one grid point a chord
+  (`quantize.merge_chords`) instead of a grid too coarse. **Erasures are
+  per view** (`erasures.split_by_texture`; All-notes records carry
+  `piano_notes: "all"`): a left hand erased as "not the solo" on the line
+  is what the All-notes page is for. The other view's labels are carried,
+  never resolved, never dropped. Ground truth and Score refuse All notes
+  (409): the hand scores are right-hand melody.
+- **Two staves = All notes + sidecar `staves: 2`** (2026-09-29). Each hand
+  notated separately on one grid under ONE swing reading, the right
+  hand's (`notation_for_span(left_hand=...)`, `merge_staves`: union of
+  bars, whole rests where a hand sits out, one key over both hands).
+  `NotatedNote.staff` and `Notation.staves` are additive (nothing cached
+  moved); export writes `<staves>`, numbered G2/F4 clefs, `<staff>` per
+  note and bass voices as 5 (`export.xml_voice` -- voices are per part).
+  One voice per staff: a held note is cut at the next onset in ITS hand.
+  The hand guess is `notation.guess_hand` (middle C and up is right);
+  the listener's moves are the sidecar `hands` list, {onset, pitch, hand},
+  matched by content through `erasures.match`, the one rule every stored
+  edit uses. The Hands tool: box selects, Ctrl-box adds, ↑/↓ assign.
+  Export tags the file name (`.all`, `.2staves`, `.literal16`) so no
+  choice overwrites another page.
 - **One gesture rule on every view (2026-09-07): scroll zooms, shift-scroll
   or drag pans.** On the Detail waveform only the A/B handles (and Set A/B,
   the nudges) change the selection — a drag elsewhere pans, a click seeks —

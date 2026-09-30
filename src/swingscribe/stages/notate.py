@@ -495,11 +495,16 @@ MIN_REST = 0.5
 # -- which is a corrupt file in MuseScore, not a rounding nicety.
 BINARY_VALUES = [0.25 * k for k in range(1, 65)]
 TERNARY_VALUES = [k / 3.0 for k in range(1, 97)]
+# A LITERAL page (QuantizeConfig.timing) is on a 32nd grid wherever the
+# playing needed one, and has no triplets at all: its values are any number
+# of 32nds, and no beat is read as ternary.
+LITERAL_VALUES = [0.125 * k for k in range(1, 129)]
 
 
 def snap_values(
     events: list[tuple[int, float, float, int]],
     bars_index,
+    literal: bool = False,
 ) -> list[tuple[int, float, float, int]]:
     """Round each written duration to a value a reader can read.
 
@@ -557,15 +562,25 @@ def snap_values(
     has already run by this point, so rounding up past the next note would put
     two notes sounding at once in a single-line score -- and `fill_rests` would
     then be handed a negative gap.
+
+    ## A literal page
+
+    `literal` is a page quantized to the nearest 16th or 32nd, never to
+    thirds. `ternary_beats` cannot tell that from the positions: it knows
+    sixteenths and thirds, and a 32nd at 3/8 of a beat is nearer a third,
+    so the beat was read as a triplet and the page grew brackets its
+    quantizer never chose. Told, it reads no beat as ternary and keeps
+    every value on the 32nd grid.
     """
     if not events:
         return events
     absolute = [bars_index.start_of(bar) + beat for bar, beat, _d, _p in events]
-    ternary = ternary_beats(absolute)
+    ternary = set() if literal else ternary_beats(absolute)
+    binary = LITERAL_VALUES if literal else BINARY_VALUES
     out = []
     for index, (bar, beat, duration, pitch) in enumerate(events):
         gap = absolute[index + 1] - absolute[index] if index + 1 < len(events) else None
-        values = TERNARY_VALUES if int(absolute[index] // 1.0) in ternary else BINARY_VALUES
+        values = TERNARY_VALUES if int(absolute[index] // 1.0) in ternary else binary
         out.append((bar, beat, snap_value(duration, gap, values), pitch))
     return out
 
@@ -785,8 +800,12 @@ def build(
     title: str = "",
     legato_fill: float = 0.0,
     legato_cap: float = 0.0,
+    literal: bool = False,
 ) -> Notation:
-    """Quantized notes → bars of spelled, tied, rest-filled notation."""
+    """Quantized notes → bars of spelled, tied, rest-filled notation.
+
+    `literal` says quantize wrote a literal timing (no triplets, a 16th or
+    32nd grid); see `snap_values`."""
     if not quantized:
         return Notation(swing=swing, transpose=transpose, title=title)
 
@@ -809,7 +828,7 @@ def build(
     # which is already on the grid, so what it produces is grid-aligned by
     # construction and needs no second rounding; doing it the other way round
     # would round the extension back off the onset and re-open the gap.
-    events = snap_values(events, bars_index)
+    events = snap_values(events, bars_index, literal)
     # Before splitting, not after: the splitter can only pick a legal tuplet
     # group if the durations it is handed already land on the beat's grid.
     events = close_short_gaps(events, bars_index)
@@ -883,8 +902,10 @@ def run(document: Document, config: Config) -> Document:
     # Swing is a property of the track, decided once by quantize: if it warped
     # the grid, the eighths on the page are straight and the feel is a word
     # above the staff. Asking the spans again here could disagree with what
-    # was actually written, so this asks what quantize did.
-    swung = any(span.is_swung for span in document.swing)
+    # was actually written, so this asks what quantize did. A literal timing
+    # warped nothing -- its swung pairs are written long-short -- so the
+    # word would tell the reader to swing them a second time.
+    swung = config.quantize.timing == "swing" and any(span.is_swung for span in document.swing)
     notation = build(
         quantized,
         document.meter,
@@ -893,6 +914,7 @@ def run(document: Document, config: Config) -> Document:
         title=config.notate.title,
         legato_fill=config.notate.legato_fill,
         legato_cap=config.notate.legato_cap,
+        literal=config.quantize.timing != "swing",
     )
     print(
         f"notate: {len(notation.bars)} bars, key {notation.key_fifths:+d} fifths, "

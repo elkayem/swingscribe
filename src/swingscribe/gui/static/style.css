@@ -659,6 +659,16 @@ input.rate-value[type=text] {
 /* The erase tool changes what a click does, so it has to be unmistakable from
    the roll itself and not only from which chip is lit. */
 .pianoroll.erasing { cursor: cell; border-color: rgba(240, 168, 72, 0.6); box-shadow: inset 0 0 0 1px rgba(240, 168, 72, 0.25); }
+/* The Hands tool selects rather than edits, so it gets the pointer of a
+   selection and the left hand's colour on the frame. */
+.pianoroll.handing { cursor: crosshair; border-color: color-mix(in srgb, var(--left-hand) 60%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--left-hand) 25%, transparent); }
+.hand-controls { display: inline-flex; align-items: center; gap: 8px; }
+#hand-selection { font: 12px var(--mono); }
+/* The two hands of a two-staff page: the right keeps the roll's own colour,
+   the left a blue that no other layer on the roll uses while hands are shown
+   (ground truth and the candidate pool are off on that view). */
+:root { --left-hand: #5b7fe0; }
+@media (prefers-color-scheme: dark) { :root { --left-hand: #8fa7ff; } }
 .why-chip.cut { border-color: var(--muted); color: var(--muted); text-decoration: line-through; }
 
 .inspector {

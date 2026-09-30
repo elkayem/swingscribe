@@ -1126,3 +1126,164 @@ def test_the_figure_prior_ships_on_and_off_costs_nothing():
     config = Config()
     assert config.quantize.figure_prior_weight == 0.015  # R33
     assert _prior_figure_beat(0.0) == _prior_figure_beat(-1.0)
+
+
+# -- literal timing: the nearest 16th or 32nd, feel and all ------------------
+
+
+def _literal(onsets, pitches=None, durations=None, timing="literal-16", beats=None, **kwargs):
+    """Quantize on a 120 bpm grid (beat = 0.5 s) with no meter, so a note's
+    `beat` is its absolute beat position."""
+    beats = beats or [float(i) * 0.5 for i in range(40)]
+    pitches = pitches or [60 + (i % 5) for i in range(len(onsets))]
+    durations = durations or [0.1] * len(onsets)
+    return quantize_notes(onsets, durations, pitches, beats, [], [], timing=timing, **kwargs)
+
+
+def test_literal_16ths_write_a_swung_pair_long_short():
+    """The whole point of the option: at BUR 2 the offbeat sits at 2/3 of
+    the beat, and the nearest 16th is the dotted figure's 3/4 -- where the
+    swing reading writes it as the second eighth of a pair."""
+    notes, beats = generate.swung_phrase([60, 62] * 16, bpm=120.0, bur=2.0, start=0.0)
+    onsets = [n.onset for n in notes]
+    spans = swing_spans(onsets, beats)
+    durations, pitches = [n.duration for n in notes], [n.pitch for n in notes]
+    literal, _ = quantize_notes(onsets, durations, pitches, beats, spans, [], timing="literal-16")
+    swung, _ = quantize_notes(onsets, durations, pitches, beats, spans, [])
+    assert {round(n.beat % 1, 6) for n in literal} == {0.0, 0.75}
+    assert {round(n.beat % 1, 6) for n in swung} == {0.0, 0.5}
+
+
+def test_literal_32nds_are_finer():
+    beat = 0.5
+    quantized, _ = _literal([4 * beat, 4 * beat + beat * 2 / 3], timing="literal-32")
+    assert [round(n.beat, 6) for n in quantized] == [4.0, 4.625]
+
+
+def test_literal_timing_writes_no_triplets():
+    """Three notes on thirds are written on the nearest 16ths: a literal page
+    has no tuplets to offer."""
+    beat = 0.5
+    onsets = [4 * beat + f * beat for f in (0.0, 1 / 3, 2 / 3)]
+    quantized, _ = _literal(onsets)
+    assert [round(n.beat, 6) for n in quantized] == [4.0, 4.25, 4.75]
+
+
+def test_literal_timing_takes_no_lag_out():
+    """A line a sixth of a beat behind is written where it was played, on
+    the "e" -- the swing reading takes the lag out and writes it on the beat."""
+    beat = 0.5
+    onsets = [(4 + i) * beat + 0.15 * beat for i in range(12)]
+    literal, _ = _literal(onsets)
+    assert all(round(n.beat % 1, 6) == 0.25 for n in literal)
+    beats = [float(i) * 0.5 for i in range(40)]
+    swung, _ = quantize_notes(
+        onsets, [0.1] * 12, [60] * 12, beats, [], [], lag_window_beats=4, lag_floor=0.08
+    )
+    assert all(round(n.beat % 1, 6) == 0.0 for n in swung)
+
+
+def test_a_32nd_run_is_written_in_32nds_on_its_own_beat_only():
+    beat = 0.5
+    run_ = [4 * beat + f * beat for f in (0.0, 0.125, 0.25, 0.375, 0.5)]
+    after = [5 * beat + f * beat for f in (0.0, 0.5)]
+    quantized, _ = _literal(run_ + after)
+    assert len(quantized) == 7
+    positions = [round(n.beat, 6) for n in quantized]
+    assert len(set(positions)) == 7
+    assert positions[:5] == [4.0, 4.125, 4.25, 4.375, 4.5]
+    assert positions[5:] == [5.0, 5.5]
+
+
+def test_literal_32nds_never_lose_a_note_of_a_line():
+    """Nothing finer than a 32nd can be written, so the second of two notes
+    on one 32nd takes the next free one rather than vanishing."""
+    beat = 0.5
+    onsets = [4 * beat, 4 * beat + 0.005, 4 * beat + 0.3 * beat]
+    quantized, positions = _literal(onsets, timing="literal-32")
+    assert [round(n.beat, 6) for n in quantized] == [4.0, 4.125, 4.25]
+    assert positions == [4.0, 4.125, 4.25]
+
+
+def test_a_note_pushed_onto_the_next_beats_note_sends_its_beat_to_32nds():
+    beat = 0.5
+    onsets = [4 * beat, 4 * beat + 0.9 * beat, 5 * beat + 0.02 * beat]
+    quantized, _ = _literal(onsets)
+    assert [round(n.beat, 6) for n in quantized] == [4.0, 4.875, 5.0]
+
+
+def test_a_piano_collision_is_a_chord_not_a_moved_note():
+    beat = 0.5
+    onsets = [4 * beat, 4 * beat + 0.02, 5 * beat]
+    quantized, positions = _literal(
+        onsets,
+        pitches=[60, 64, 67],
+        durations=[0.1, 0.4, 0.1],
+        timing="literal-32",
+        polyphonic=True,
+    )
+    assert len(quantized) == len(positions) == 2
+    assert quantized[0].pitch == 60
+    assert quantized[0].chord == [64]
+    assert quantized[0].duration_beats == 0.75  # the longest member's, on 32nds
+    assert round(quantized[1].beat, 6) == 5.0
+
+
+def test_the_swing_reading_folds_a_piano_collision_into_a_chord_too():
+    from swingscribe.model import QuantizedNote
+    from swingscribe.stages.quantize import merge_chords
+
+    notes = [
+        QuantizedNote(bar=1, beat=0.5, duration_beats=0.5, pitch=60, timing_residual=0.0),
+        QuantizedNote(
+            bar=1, beat=0.5, duration_beats=1.0, pitch=55, timing_residual=0.1, chord=[48]
+        ),
+        QuantizedNote(bar=1, beat=1.0, duration_beats=0.5, pitch=62, timing_residual=0.0),
+    ]
+    merged, positions = merge_chords(notes, [0.5, 0.52, 1.0])
+    assert [(n.pitch, n.chord, n.duration_beats) for n in merged] == [
+        (60, [48, 55], 1.0),
+        (62, [], 0.5),
+    ]
+    assert positions == [0.5, 1.0]
+
+
+def test_literal_timing_replays_on_the_grid_with_no_swing_to_put_back():
+    notes, beats = generate.swung_phrase([60, 62] * 16, bpm=120.0, bur=2.0, start=0.0)
+    onsets = [n.onset for n in notes]
+    quantized, positions = quantize_notes(
+        onsets, [0.1] * len(onsets), [60] * len(onsets), beats, [], [], timing="literal-32"
+    )
+    replayed = replay_onsets(quantized, positions, beats, [])
+    # Within half a 32nd of what was played: the literal page's only error.
+    assert max(abs(a - b) for a, b in zip(onsets, replayed, strict=True)) <= 0.5 * 0.5 / 8 + 1e-9
+
+
+def test_the_timing_reaches_the_stage_and_swing_stays_the_default():
+    from swingscribe.stages.quantize import settings
+
+    assert Config().quantize.timing == "swing"
+    assert settings(Config().quantize)["timing"] == "swing"
+    notes, beats = generate.swung_phrase([60, 62] * 16, bpm=120.0, bur=2.0, start=0.0)
+    onsets = [n.onset for n in notes]
+    spans = swing_spans(onsets, beats)
+    document = _document(
+        onsets, [n.duration for n in notes], [n.pitch for n in notes], beats, spans
+    )
+    config = Config()
+    literal = config.model_copy(
+        update={"quantize": config.quantize.model_copy(update={"timing": "literal-16"})}
+    )
+    written = run(document, literal).quantized["other"]
+    assert {round(n.beat % 1, 6) for n in written} == {0.0, 0.75}
+
+
+def test_the_new_fields_leave_every_existing_quantize_key_alone():
+    """Default timing and polyphony dump nothing, so the stage key reads as
+    it did before either existed; a choice away from the default does key."""
+    config = Config()
+    dumped = config.stage_config("quantize")
+    assert "timing" not in dumped and "polyphonic" not in dumped
+    literal = config.quantize.model_copy(update={"timing": "literal-32", "polyphonic": True})
+    assert literal.model_dump(mode="json")["timing"] == "literal-32"
+    assert literal.model_dump(mode="json")["polyphonic"] is True

@@ -44,7 +44,15 @@ the page the harness scores is the page the listener sees.
 """
 
 from swingscribe.config import Config
-from swingscribe.model import BeatGrid, Document, MeterSection, Notation, NoteEvent
+from swingscribe.model import (
+    BeatGrid,
+    Document,
+    MeterSection,
+    NotatedBar,
+    NotatedNote,
+    Notation,
+    NoteEvent,
+)
 from swingscribe.stages import meter
 
 # Seconds of beat grid either side of the span. A note at the very edge of
@@ -56,6 +64,23 @@ MARGIN_SECONDS = 2.0
 # chord is one gesture, and the piano model's onsets for one are within a
 # frame or two of each other.
 CHORD_TOLERANCE_S = 0.03
+
+# The same fold for a piano TEXTURE (the GUI's "All notes" page), where every
+# note is the model's and a chord is not a line note with company. Measured
+# over 34 cached pianist reviews (31,600 model notes, 2026-09-29): 43% of
+# consecutive onsets are under 20 ms apart -- chords -- then a flat floor of
+# about 1.8% per 10 ms to 60 ms, rolls and grace notes with no bump of their
+# own, and the fast notes start at 80. 50 ms is the review's own cluster
+# width (gui/erasures.POOL_TOLERANCE_S) and a sixteenth at 300 bpm, so it
+# folds the roll without reaching a real run. What it misses, quantize folds
+# anyway (QuantizeConfig.polyphonic): two notes on one grid point are a chord.
+TEXTURE_CHORD_TOLERANCE_S = 0.05
+
+# The first guess at which hand plays a note on a two-staff page: middle C
+# and up on the treble staff, below it on the bass. Only a guess -- the
+# listener reassigns any note on the roll (sidecar `hands`).
+HAND_SPLIT = 60
+HANDS = ("right", "left")
 
 # Below this a span cannot support a bar grid at all -- two bars of 4/4.
 MIN_BEATS = 8
@@ -73,7 +98,10 @@ def span_beats(
 
 
 def with_chords(
-    line: list[NoteEvent], extras: list[NoteEvent], tolerance: float = CHORD_TOLERANCE_S
+    line: list[NoteEvent],
+    extras: list[NoteEvent],
+    tolerance: float = CHORD_TOLERANCE_S,
+    longest: bool = False,
 ) -> list[NoteEvent]:
     """The line with the listener's enabled extras folded in as chords.
 
@@ -85,29 +113,54 @@ def with_chords(
     on the page. An extra with no line note under it becomes a note of its
     own, and later extras may then chord onto it. Quantize sees one onset per
     chord, which is what keeps it from calling the grid too coarse.
+
+    `longest` gives each chord its LONGEST member's duration instead of the
+    head's: on a piano texture there is no line note to defer to, and the
+    head is merely the earliest of a roll.
     """
-    hosts: list[tuple[NoteEvent, set[int]]] = [
-        (note, set(note.chord)) for note in sorted(line, key=lambda n: n.onset)
+    hosts: list[tuple[NoteEvent, set[int], list[float]]] = [
+        (note, set(note.chord), [note.duration]) for note in sorted(line, key=lambda n: n.onset)
     ]
     for extra in sorted(extras, key=lambda n: n.onset):
         nearest = None
-        for host, _members in hosts:
+        for host, _members, _length in hosts:
             distance = abs(host.onset - extra.onset)
             if distance <= tolerance and (nearest is None or distance < nearest[0]):
                 nearest = (distance, host)
         if nearest is None:
-            hosts.append((extra, set()))
+            hosts.append((extra, set(), [extra.duration]))
             continue
-        for host, members in hosts:
+        for host, members, length in hosts:
             if host is nearest[1] and extra.pitch != host.pitch:
                 members.add(extra.pitch)
+                length[0] = max(length[0], extra.duration)
     return sorted(
         (
-            host.model_copy(update={"chord": sorted(members - {host.pitch})})
-            for host, members in hosts
+            host.model_copy(
+                update={
+                    "chord": sorted(members - {host.pitch}),
+                    **({"duration": length[0]} if longest else {}),
+                }
+            )
+            for host, members, length in hosts
         ),
         key=lambda n: (n.onset, n.pitch),
     )
+
+
+def fold_texture(notes: list[NoteEvent]) -> list[NoteEvent]:
+    """A piano texture as quantize must see it: one event per chord.
+
+    Every note the piano model heard, folded at TEXTURE_CHORD_TOLERANCE_S,
+    each chord as long as its longest member (see `with_chords`).
+    """
+    return with_chords([], notes, TEXTURE_CHORD_TOLERANCE_S, longest=True)
+
+
+def guess_hand(pitch: int) -> str:
+    """The first guess at a note's hand: "right" (the treble staff) from
+    middle C up, "left" (the bass staff) below it."""
+    return "right" if pitch >= HAND_SPLIT else "left"
 
 
 def span_anchor(
@@ -236,6 +289,7 @@ def notation_for_span(
     sample_rate: int = 44100,
     second_voice: list[NoteEvent] | None = None,
     double_time: bool = False,
+    left_hand: list[NoteEvent] | None = None,
 ) -> Notation | None:
     """Run swing, quantize and notate over one span. None if it is too short.
 
@@ -249,6 +303,13 @@ def notation_for_span(
     one note per grid position: two simultaneous notes in a single list are
     not a chord to it, they are a grid that is too coarse, and it would
     silently drop one of them (CLAUDE.md, M6).
+
+    `left_hand`, when given (even empty), makes a two-staff page: `notes` is
+    the right hand on the treble staff and this the left on the bass, each
+    notated separately on the same grid and under ONE swing reading -- the
+    right hand's, the melodic stream the estimator is built for, exactly as
+    the overlay takes the line's. Only a page with no right hand at all
+    reads its swing from the left.
     """
     from swingscribe.stages import notate, quantize, swing
 
@@ -283,21 +344,82 @@ def notation_for_span(
             "notate": base.notate.model_copy(update={"stem": stem}),
         }
     )
+    staves = left_hand is not None
+    right, left = list(notes), list(left_hand or [])
+    lead_is_left = staves and not right and bool(left)
     document = Document(
         audio_path=audio_path,
         sample_rate=sample_rate,
         beat_grid=BeatGrid(beats=kept, downbeats=[], beats_per_bar=pulses_per_bar),
         meter=[section_for(kept, anchor, time_signature, pulses_per_bar)],
-        notes={stem: list(notes)},
+        notes={stem: left if lead_is_left else right},
     )
     for stage in (swing.run, quantize.run, notate.run):
         document = stage(document, run_config)
     notation = document.notation
+    if staves:
+        other = right if lead_is_left else left
+        follower = _notate_only(other, document, run_config) if other else None
+        notation = (
+            merge_staves(follower, notation) if lead_is_left else merge_staves(notation, follower)
+        )
     if notation is not None and double_time:
         notation.double_time = True
-    if notation is not None and second_voice:
+    if notation is not None and second_voice and not staves:
         merge_second_voice(notation, _notate_only(second_voice, document, run_config))
     return notation
+
+
+def merge_staves(right: Notation | None, left: Notation | None) -> Notation:
+    """Two separately notated hands as ONE grand-staff Notation.
+
+    Bar by bar over the union of both hands' bars, so a bar one hand sits
+    out is a whole rest on its staff rather than a staff that runs out of
+    bars: MusicXML measures hold every staff of the part at once. The key
+    is read ONCE, over both hands' sounding notes chords and all, and both
+    are respelled in it -- two staves in two keys is not a piano part.
+    """
+    from swingscribe.stages import notate
+
+    parts = {staff: n for staff, n in ((1, right), (2, left)) if n is not None}
+    template = next((n for n in parts.values() if n.bars), None) or right or left or Notation()
+    bars_of = {staff: {bar.number: bar for bar in n.bars} for staff, n in parts.items()}
+    numbers = sorted({number for bars in bars_of.values() for number in bars})
+    sounding = [
+        (pitch, note.duration)
+        for bars in bars_of.values()
+        for bar in bars.values()
+        for note in bar.notes
+        if not note.is_rest
+        for pitch in (note.pitch, *note.chord)
+    ]
+    key = notate.detect_key(sounding) if sounding else template.key_fifths
+    merged: list[NotatedBar] = []
+    signature = (4, 4)
+    for number in range(numbers[0], numbers[-1] + 1) if numbers else ():
+        found = [bars[number] for bars in bars_of.values() if number in bars]
+        if found:
+            signature = found[0].time_signature
+        length = signature[0] * 4.0 / signature[1]
+        written: list[NotatedNote] = []
+        for staff in (1, 2):
+            bar = bars_of.get(staff, {}).get(number)
+            for note in bar.notes if bar is not None else notate.fill_rests([], length):
+                update: dict = {"staff": staff}
+                if not note.is_rest:
+                    step, alter, octave = notate.spell(note.pitch, key)
+                    update |= {"step": step, "alter": alter, "octave": octave}
+                written.append(note.model_copy(update=update))
+        merged.append(NotatedBar(number=number, time_signature=signature, notes=written))
+    return Notation(
+        bars=merged,
+        key_fifths=key,
+        swing=template.swing,
+        transpose=template.transpose,
+        title=template.title,
+        double_time=template.double_time,
+        staves=2,
+    )
 
 
 def _notate_only(notes: list[NoteEvent], document: Document, run_config: Config) -> Notation | None:

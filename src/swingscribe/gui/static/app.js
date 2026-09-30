@@ -66,6 +66,12 @@ const state = {
   click: false,             // mix a metronome onto the audition
   ensemble: null,           // horn-led | trio | solo-piano; null = server default
   line: null,               // crepe | oracle: which detector supplies a pianist's line
+  pianoNotes: 'line',       // line | all: a pianist's melody line, or everything the model heard
+  staves: 1,                // 1 | 2: the All-notes page on one staff, or treble over bass
+  hands: new Map(),         // note index -> 'right' | 'left', where the listener chose
+  carriedHands: [],         // stored hand choices with no note in this view
+  handSelection: new Set(), // note indices the Hands tool has selected
+  timing: null,             // swing | literal-16 | literal-32; null = server default
   transposition: null,      // the exported part's key; null = server default
   exported: null,           // {path, bars, notes, ...} from the last export
   exportedAt: null,         // what the tree looked like when it was written
@@ -172,6 +178,15 @@ const pianoRoll = new PianoRoll($('pianoroll'), $('lane-f0'), $('lane-gate'), {
   onToggleSilence: (index) => toggleSilence(index),
   onToggleAdd: (index) => toggleAdd(index),
   onBand: (indices, restoring) => silenceRun(indices, restoring),
+  onHandBand: (indices, additive) => selectForHands(indices, additive),
+  onHandClick: (index, additive) => {
+    if (index < 0) {
+      if (!additive) selectForHands([], false);
+      return;
+    }
+    selectForHands([index], additive, true);
+    sound(state.review?.notes[index]);
+  },
 });
 
 // ── screen 1: the track picker ──────────────────────────────────────────────
@@ -394,6 +409,9 @@ async function loadTrack(track) {
   state.scorePath = remembered.score ?? null;
   state.ensemble = remembered.ensemble ?? null;
   state.line = remembered.line ?? null;
+  state.pianoNotes = remembered.piano_notes === 'all' ? 'all' : 'line';
+  state.staves = remembered.staves === 2 ? 2 : 1;
+  state.timing = remembered.timing ?? null;
   state.transposition = remembered.transposition ?? null;
   state.exported = null;
   state.exportedAt = null;
@@ -408,6 +426,9 @@ async function loadTrack(track) {
   state.carriedAdditions = Array.isArray(remembered.additions) ? remembered.additions : [];
   state.added.clear();
   state.unmatchedAdditions = [];
+  state.carriedHands = Array.isArray(remembered.hands) ? remembered.hands : [];
+  state.hands.clear();
+  state.handSelection.clear();
   state.undoStack.length = 0;
   state.redoStack.length = 0;
   setTool('inspect');
@@ -824,12 +845,22 @@ function renderRollLegend() {
       'A note of ours the hand transcription does not have');
     item('missed', '--gt-missed', 'wash', !on('missed'),
       'A written note with nothing of ours under it');
+  } else if (twoStavesOn()) {
+    item('right hand · treble', '--lead', '', false,
+      'On the treble staff. First guess: middle C and up; the Hands tool moves any note');
+    item('left hand · bass', '--left-hand', '', false,
+      'On the bass staff. First guess: below middle C; the dashed line is the split');
+  } else if (textureOn()) {
+    item('piano model heard', '--lead', '', false,
+      'Every note the piano model heard, both hands; fainter means softer');
   } else {
     item('transcribed line', '--lead', '', false, 'The notes we heard; fainter means less confident');
   }
   item('selected', '--accent');
   item('silenced', '--lead', 'struck', false,
-    'Marked "not the solo" with the Edit tool; stays drawn, struck through');
+    textureOn()
+      ? 'Silenced with the Edit tool: left off the page; stays drawn, struck through'
+      : 'Marked "not the solo" with the Edit tool; stays drawn, struck through');
 
   const candidates = (state.review.candidates || []).length;
   const second = (state.review.second_voice || []).length;
@@ -1375,7 +1406,45 @@ function reviewParams(extra) {
   // The line choice is part of the review's identity for a pianist (it
   // changes every note); left out for the default so the key stays as it was.
   if (state.line) params.line = state.line;
+  // Which of a pianist's notes are on the roll: the note indices every edit
+  // is made against depend on it, so every request names it.
+  if (textureOn()) params.piano_notes = 'all';
   return new URLSearchParams(Object.assign(params, extra || {}));
+}
+
+/* A pianist: an ensemble the piano model is consulted for. Only then do the
+   Line and Piano notes pickers mean anything. */
+function isPianist() {
+  // From state, not the menu: a change handler reads the old answer until it
+  // stores the new choice, which is what lets it fold edits under the old view.
+  const chosen = state.ensemble ?? $('ensemble-select').dataset.fallback;
+  return pianoOracleEnsembles.includes(chosen);
+}
+
+/* The All-notes view: everything the piano model heard, not the line. */
+function textureOn() {
+  return state.pianoNotes === 'all' && isPianist();
+}
+
+/* A grand staff, and with it the Hands tool: only ever on the All-notes view. */
+function twoStavesOn() {
+  return textureOn() && state.staves === 2;
+}
+
+/* Note indices belong to one transcription, so they cannot survive — but the
+   erasures themselves must. Fold them back into the carried list before
+   dropping the indices, or changing stem would quietly destroy every label.
+   Additions and hand choices the same way. Call it BEFORE anything that
+   changes which view is on screen: each record is tagged with the view it
+   was made on, and a second call is harmless (nothing is left to fold). */
+function foldEdits() {
+  state.carried = erasureList();
+  state.silenced.clear();
+  state.carriedAdditions = additionList();
+  state.added.clear();
+  state.carriedHands = handList();
+  state.hands.clear();
+  state.handSelection.clear();
 }
 
 /* The review belongs to one span+stem. When either changes the old notes are
@@ -1394,20 +1463,15 @@ function invalidateReview() {
   $('review-summary').hidden = true;
   $('transcribe-btn').disabled = false;
   $('transcribe-btn').textContent = 'Transcribe span';
-  // Note indices belong to one transcription, so they cannot survive — but the
-  // erasures themselves must. Fold them back into the carried list before
-  // dropping the indices, or changing stem would quietly destroy every label.
-  state.carried = erasureList();
-  state.silenced.clear();
-  state.unmatched = state.carried.filter((e) => inSpan(e));
+  foldEdits();
+  state.unmatched = state.carried.filter((e) => inView(e));
   state.moved = [];  // nothing to compare against until a transcription exists
-  state.carriedAdditions = additionList();
-  state.added.clear();
-  state.unmatchedAdditions = state.carriedAdditions.filter((e) => inSpan(e));
+  state.unmatchedAdditions = state.carriedAdditions.filter((e) => inSpan(e) && !textureOn());
   state.undoStack.length = 0;
   state.redoStack.length = 0;
   pianoRoll.setSilenced(state.silenced);
   pianoRoll.setAdded(state.added);
+  pianoRoll.setHandSelection(state.handSelection);
   renderEditBar();
   // The overlay is an alignment *to* these notes, so it dies with them — but
   // the chosen score does not: it is still the right score for the next
@@ -1489,6 +1553,18 @@ async function showReview(payload) {
   state.added = new Set(additions.added);
   state.carriedAdditions = additions.carried;
   state.unmatchedAdditions = additions.unmatched;
+  // The listener's staff choices, matched onto the All-notes view by content.
+  // The line's view has none to resolve, so what is carried stays carried.
+  if (payload.hands) {
+    state.hands = new Map([
+      ...payload.hands.right.map((index) => [index, 'right']),
+      ...payload.hands.left.map((index) => [index, 'left']),
+    ]);
+    state.carriedHands = payload.hands.carried;
+  } else {
+    state.hands = new Map();
+  }
+  state.handSelection.clear();
   state.notationScore = null;
   state.undoStack.length = 0;
   state.redoStack.length = 0;
@@ -1497,6 +1573,8 @@ async function showReview(payload) {
   pianoRoll.setSilenced(state.silenced);
   pianoRoll.setAdded(state.added);
   pianoRoll.setShowSecondVoice(state.showSecond);
+  pianoRoll.setHandSelection(state.handSelection);
+  applyHands();
   renderSecondVoiceToggle(payload);
   // Park the marker at the start rather than leaving it undrawn: a playhead
   // you cannot see is not obviously one you can move.
@@ -1640,6 +1718,10 @@ function renderInspector(note, index) {
     chip('silenced', 'cut');
     remarks.push('Marked "heard right, not the solo" — it is drawn struck out and does not sound in the ear test.');
   }
+  if (twoStavesOn()) {
+    // Which staff it will be written on, and whether that was your call.
+    chip(`${handOf(index)} hand${state.hands.has(index) ? '' : ' · guess'}`);
+  }
 
   // What the hand transcription says about this note, if one is loaded.
   const verdict = state.ground?.estimate_class[index];
@@ -1726,6 +1808,7 @@ function editSnapshot() {
     carried: state.carried.map((e) => ({ ...e })),
     added: [...state.added],
     carriedAdditions: state.carriedAdditions.map((e) => ({ ...e })),
+    hands: [...state.hands],
   };
 }
 
@@ -1740,8 +1823,9 @@ function applyEditSnapshot(snapshot) {
   state.carried = snapshot.carried;
   state.added = new Set(snapshot.added ?? []);
   state.carriedAdditions = snapshot.carriedAdditions ?? state.carriedAdditions;
-  state.unmatchedAdditions = state.carriedAdditions.filter((e) => inSpan(e));
-  state.unmatched = state.carried.filter((e) => inSpan(e));
+  state.hands = new Map(snapshot.hands ?? []);
+  state.unmatchedAdditions = state.carriedAdditions.filter((e) => inSpan(e) && !textureOn());
+  state.unmatched = state.carried.filter((e) => inView(e));
   // Undo restores labels, not the server's classification of them, so keep
   // only the ones still carried rather than re-deriving what "moved" means.
   const live = new Set(state.unmatched.map(erasureId));
@@ -1751,6 +1835,13 @@ function applyEditSnapshot(snapshot) {
 function inSpan(erasure) {
   if (!state.selection) return true;
   return erasure.onset >= state.selection.a - 0.03 && erasure.onset <= state.selection.b + 0.03;
+}
+
+/* An erasure that belongs to the view on screen and the span in it. A
+   pianist's two views keep separate erasures (gui/erasures.py
+   split_by_texture): the other view's are carried, never reported here. */
+function inView(erasure) {
+  return inSpan(erasure) && (erasure.piano_notes === 'all') === textureOn();
 }
 
 function undoEdit() {
@@ -1843,6 +1934,7 @@ const erasureId = (e) => `${e.onset}:${e.pitch}`;
 function afterEdit() {
   pianoRoll.setSilenced(state.silenced);
   pianoRoll.setAdded(state.added);
+  applyHands();
   renderEditBar();
   // Silencing a note after exporting is the quietest way to end up with a
   // file on disk that no longer matches the screen, and a stale score is
@@ -1873,10 +1965,92 @@ function erasureList() {
         // Which detector's line the judgement was made on: an erasure is a
         // label, and a label that cannot describe its example is worth less.
         line: state.line || defaultLine,
+        // Made on the All-notes view, where it means "not on the page", not
+        // "not the solo": resolved only there (gui/erasures.py).
+        ...(textureOn() ? { piano_notes: 'all' } : {}),
       });
     }
   }
   return [...state.carried, ...made].sort((a, b) => a.onset - b.onset);
+}
+
+/* The staff choices written to the sidecar: everything carried, plus one
+   record per note the listener put on a staff. Matched back by content, so
+   a re-transcription cannot move a choice onto a different note. */
+function handList() {
+  const made = [];
+  if (state.review && textureOn()) {
+    for (const [index, hand] of [...state.hands].sort((a, b) => a[0] - b[0])) {
+      const note = state.review.notes[index];
+      if (!note) continue;
+      made.push({ onset: round3(note.onset), pitch: note.pitch, hand });
+    }
+  }
+  return [...state.carriedHands, ...made].sort((a, b) => a.onset - b.onset);
+}
+
+/* The hand a note is on: the listener's choice, else the pitch guess. */
+function handOf(index) {
+  const chosen = state.hands.get(index);
+  if (chosen) return chosen;
+  const note = state.review?.notes[index];
+  return note && note.pitch >= handSplit ? 'right' : 'left';
+}
+
+/* Tell the roll how to colour the notes, and show the Hands controls, for
+   exactly the view that has two staves. */
+function applyHands() {
+  const on = twoStavesOn() && Boolean(state.review);
+  pianoRoll.setHands(on ? handOf : null, handSplit);
+  $('hands-tool').hidden = !on;
+  if (!on && state.tool === 'hands') setTool('inspect');
+  renderHandControls();
+  renderRollLegend();
+}
+
+function renderHandControls() {
+  const on = twoStavesOn() && Boolean(state.review);
+  $('hand-controls').hidden = !on;
+  if (!on) return;
+  const count = state.handSelection.size;
+  $('hand-selection').textContent = count
+    ? `${count} note${count === 1 ? '' : 's'} selected`
+    : 'nothing selected';
+  for (const id of ['to-right', 'to-left', 'to-guess']) $(id).disabled = !count;
+}
+
+/* The Hands tool's selection: a rubber band or a click, replacing what was
+   selected or (Ctrl) adding to it. A Ctrl-click toggles one note. */
+function selectForHands(indices, additive, toggle = false) {
+  if (!additive) state.handSelection = new Set(indices);
+  else if (toggle) {
+    for (const index of indices) {
+      if (state.handSelection.has(index)) state.handSelection.delete(index);
+      else state.handSelection.add(index);
+    }
+  } else {
+    for (const index of indices) state.handSelection.add(index);
+  }
+  pianoRoll.setHandSelection(state.handSelection);
+  renderHandControls();
+}
+
+/* Put the selected notes in one hand, or back to the guess. The selection
+   stays, so a wrong call is one more key away from being undone. */
+function assignHands(hand) {
+  if (!state.handSelection.size || !twoStavesOn()) return;
+  pushHistory();
+  for (const index of state.handSelection) {
+    if (hand === 'guess') state.hands.delete(index);
+    else state.hands.set(index, hand);
+  }
+  afterEdit();
+  const n = state.handSelection.size;
+  toast(
+    hand === 'guess'
+      ? `${n} note${n === 1 ? '' : 's'} back to the guess`
+      : `${n} note${n === 1 ? '' : 's'} to the ${hand} hand`,
+  );
 }
 
 const round3 = (v) => Math.round(v * 1000) / 1000;
@@ -1905,6 +2079,8 @@ function additionList() {
 }
 
 function setTool(tool) {
+  // The Hands tool exists only on a two-staff page.
+  if (tool === 'hands' && !twoStavesOn()) tool = 'inspect';
   state.tool = tool;
   pianoRoll.setTool(tool);
   for (const button of $('tool-group').querySelectorAll('button')) {
@@ -2022,6 +2198,15 @@ async function loadGroundTruth() {
   if (!state.review || !state.scorePath || !state.track) {
     renderGroundTruthBar();
     return 'pending';
+  }
+  if (textureOn()) {
+    // A hand score notates a melody line; aligning a whole piano texture to
+    // it says nothing, and the server refuses it.
+    state.ground = null;
+    pianoRoll.setGroundTruth(null);
+    renderGroundTruthBar();
+    $('gt-info').textContent = 'Ground truth compares the melody line — switch Piano notes to Melody line';
+    return 'skipped';
   }
   $('gt-info').textContent = 'Aligning…';
   try {
@@ -2266,9 +2451,13 @@ function settingsPayload() {
     score: state.scorePath,
     ensemble: state.ensemble,
     line: state.line,
+    piano_notes: state.pianoNotes,
+    staves: state.staves,
+    timing: state.timing,
     transposition: state.transposition,
     erasures: erasureList(),
     additions: additionList(),
+    hands: handList(),
   };
 }
 
@@ -2308,6 +2497,11 @@ const LABELS = {
   Bb: 'B♭ — trumpet, soprano',
   'Bb-tenor': 'B♭ tenor — written +9th',
   Eb: 'E♭ — alto, baritone',
+  swing: 'Swing — eighths',
+  'literal-16': 'Literal 16ths',
+  'literal-32': 'Literal 32nds',
+  line: 'Melody line',
+  all: 'All notes',
 };
 
 let choices = null;
@@ -2340,6 +2534,9 @@ async function loadChoices() {
   pianoOracleEnsembles = choices.piano_oracle_ensembles ?? [];
   fillLineSelect(choices.lines ?? [], choices.default_line ?? defaultLine);
   fillSelect($('transpose-select'), choices.transpositions ?? [], choices.default_transposition ?? 'C');
+  fillSelect($('timing-select'), choices.timings ?? [], choices.default_timing ?? 'swing');
+  fillSelect($('piano-notes-select'), choices.piano_notes ?? [], 'line');
+  handSplit = choices.hand_split ?? handSplit;
   renderChoices();
 }
 
@@ -2353,6 +2550,9 @@ const LINE_LABELS = {
 // with no `line` gets, and what an erasure made with the picker untouched
 // is labelled with. Never decided here -- the server owns the default.
 let defaultLine = 'oracle';
+// The pitch a two-staff page's first guess splits the hands at, from
+// /api/config (notation.HAND_SPLIT): middle C and up is the right hand.
+let handSplit = 60;
 
 function fillLineSelect(values, fallback) {
   defaultLine = fallback;
@@ -2387,20 +2587,31 @@ function renderChoices() {
   const ensemble = $('ensemble-select');
   const transpose = $('transpose-select');
   const line = $('line-select');
+  const timing = $('timing-select');
   if (ensemble.options.length) ensemble.value = state.ensemble ?? ensemble.dataset.fallback;
   if (transpose.options.length) transpose.value = state.transposition ?? transpose.dataset.fallback;
   if (line.options.length) line.value = state.line ?? line.dataset.fallback;
+  if (timing.options.length) timing.value = state.timing ?? timing.dataset.fallback;
+  if ($('piano-notes-select').options.length) $('piano-notes-select').value = state.pianoNotes;
+  $('staves-select').value = String(state.staves);
   renderEnsembleHint();
   renderLinePicker();
 }
 
 /* The line picker only means something for a pianist — a horn's review
    ignores it — so it only exists on screen then: a control that is
-   permanently inert teaches people to ignore the row it sits in. */
+   permanently inert teaches people to ignore the row it sits in. The same
+   goes for Piano notes, and for the Line picker on the All-notes view,
+   where no line is drawn; Staves exists only on the All-notes view. */
 function renderLinePicker() {
-  const pianist = pianoOracleEnsembles.includes($('ensemble-select').value);
-  $('line-label').hidden = !pianist;
-  $('line-select').hidden = !pianist;
+  const pianist = isPianist();
+  const texture = textureOn();
+  $('line-label').hidden = !pianist || texture;
+  $('line-select').hidden = !pianist || texture;
+  $('piano-notes-label').hidden = !pianist;
+  $('piano-notes-select').hidden = !pianist;
+  $('staves-label').hidden = !texture;
+  $('staves-select').hidden = !texture;
 }
 
 /* ── export ─────────────────────────────────────────────────────────────────
@@ -2423,6 +2634,10 @@ function exportSignature() {
     added: [...state.added].sort((x, y) => x - y),
     timeSignature: state.timeSignature,
     anchor: state.anchor,
+    timing: state.timing,
+    texture: textureOn(),
+    staves: twoStavesOn() ? 2 : 1,
+    hands: twoStavesOn() ? [...state.hands].sort((x, y) => x[0] - y[0]) : [],
   });
 }
 
@@ -2478,11 +2693,14 @@ function renderExport(message) {
   const written = state.exported;
   const behind = Boolean(written) && state.exportedAt !== exportSignature();
 
-  $('score-btn').hidden = !(state.review && state.scorePath);
+  // The hand scores notate a melody line; a whole piano texture has nothing
+  // to be scored against (the server refuses it too).
+  $('score-btn').hidden = !(state.review && state.scorePath) || textureOn();
   stale.hidden = !behind;
   stale.title =
     'Something that would change the page has changed since it was written — the span, ' +
-    'the transposition, the notes, or which of them are silenced or added. Export again to catch it up.';
+    'the transposition, the rhythm, the notes, which of them are silenced or added, or ' +
+    'which staff they are on. Export again to catch it up.';
   info.classList.toggle('written', Boolean(written) && !behind);
   renderScoreLine();
 
@@ -2500,9 +2718,13 @@ function renderExport(message) {
   const key = written.transpose
     ? ` · written ${written.transpose > 0 ? '+' : ''}${written.transpose}`
     : '';
+  const literal = written.timing && written.timing !== 'swing'
+    ? ` · ${(LABELS[written.timing] ?? written.timing).toLowerCase()}`
+    : '';
+  const staves = written.staves === 2 ? ' · two staves' : '';
   info.textContent =
     `${written.bars} bars · ${written.notes} notes · ${written.time_signature}` +
-    `${written.swing ? ' · swing' : ''}${key} → ${written.path}`;
+    `${written.swing ? ' · swing' : ''}${literal}${staves}${key} → ${written.path}`;
   link.href = `/api/tracks/${state.track.id}/export?${reviewParams()}`;
   link.hidden = false;
 }
@@ -2647,7 +2869,44 @@ $('transpose-select').addEventListener('change', (event) => {
   persist();
 });
 
+$('timing-select').addEventListener('change', (event) => {
+  state.timing = event.target.value;
+  // How the page is written, not which notes were heard: a re-export, never
+  // a re-transcription. The file on disk says it is behind.
+  renderExport();
+  persist();
+});
+
+$('piano-notes-select').addEventListener('change', async (event) => {
+  // Fold this view's edits back into their carried lists BEFORE the view
+  // changes: each is tagged with the view it was made on (erasureList).
+  foldEdits();
+  state.pianoNotes = event.target.value === 'all' ? 'all' : 'line';
+  renderLinePicker();
+  persist();
+  // The same cached review, a different view of it: no transcription.
+  invalidateReview();
+  await refreshReviewPanel();
+  if (!state.review) toast('Transcribe the span to see its notes');
+});
+
+$('staves-select').addEventListener('change', (event) => {
+  state.staves = Number(event.target.value) === 2 ? 2 : 1;
+  state.handSelection.clear();
+  pianoRoll.setHandSelection(state.handSelection);
+  applyHands();
+  renderExport();
+  persist();
+});
+
+$('to-right').addEventListener('click', () => assignHands('right'));
+$('to-left').addEventListener('click', () => assignHands('left'));
+$('to-guess').addEventListener('click', () => assignHands('guess'));
+
 $('ensemble-select').addEventListener('change', async (event) => {
+  // The ensemble decides whether the All-notes view exists: fold the edits
+  // while the view they were made on is still the one isPianist() names.
+  foldEdits();
   state.ensemble = event.target.value;
   renderEnsembleHint();
   renderLinePicker();
@@ -2975,6 +3234,23 @@ document.addEventListener('keydown', (event) => {
       // One key for the tool, because erasing a run is a sweep: pick up the
       // tool, sweep, put it down.
       setTool(state.tool === 'erase' ? 'inspect' : 'erase');
+      break;
+    case 'h':
+      // The same for the Hands tool, on a two-staff page.
+      if (twoStavesOn() && state.review) setTool(state.tool === 'hands' ? 'inspect' : 'hands');
+      break;
+    case 'arrowup':
+    case 'arrowdown':
+      // Up to the treble staff, down to the bass: the direction the note
+      // moves on the page. Only with the Hands tool and something selected,
+      // so the arrows scroll the page as usual everywhere else.
+      if (state.tool === 'hands' && state.handSelection.size) {
+        event.preventDefault();
+        assignHands(event.key.toLowerCase() === 'arrowup' ? 'right' : 'left');
+      }
+      break;
+    case 'escape':
+      if (state.tool === 'hands' && state.handSelection.size) selectForHands([], false);
       break;
     case ' ':
       event.preventDefault();

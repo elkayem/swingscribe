@@ -19,13 +19,14 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from swingscribe.config import ENSEMBLES, LINES, TRANSPOSITIONS, Config
+from swingscribe.config import ENSEMBLES, LINES, PIANO_NOTES, TIMINGS, TRANSPOSITIONS, Config
 from swingscribe.gui import audio as gui_audio
 from swingscribe.gui import erasures as gui_erasures
 from swingscribe.gui import ground_truth, library, peaks, review, storage, timings
 from swingscribe.gui import jobs as gui_jobs
 from swingscribe.gui import musicxml as gui_musicxml
 from swingscribe.model import NoteEvent
+from swingscribe.notation import HAND_SPLIT
 
 STATIC_DIR = Path(__file__).parent / "static"
 # The user guide: a Markdown file and the page that renders it, opened in a
@@ -205,8 +206,21 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             raise HTTPException(400, f"unknown line {line!r}; one of {', '.join(LINES)}")
         return review.span_config(config, stem, start, end, ensemble, line)
 
+    def review_span(entry: dict[str, Any], run_config: Config) -> tuple[float, float] | None:
+        region = run_config.transcribe.region
+        if region is None:
+            return None
+        return (
+            region[0] or 0.0,
+            entry["document"].audio.duration if region[1] is None else region[1],
+        )
+
     def resolve_erasures(
-        track_id: str, entry: dict[str, Any], run_config: Config, notes: list[dict[str, Any]]
+        track_id: str,
+        entry: dict[str, Any],
+        run_config: Config,
+        notes: list[dict[str, Any]],
+        texture: bool = False,
     ) -> dict[str, Any]:
         """Which of this transcription's notes the listener has silenced.
 
@@ -215,18 +229,24 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         judgement about the music, not a different transcription of it. Both
         the review screen and the A/B render come through here so they cannot
         disagree about which notes sound.
+
+        `texture` is a pianist's All-notes view, which resolves only the
+        erasures made on it; the line's are carried through untouched, and
+        the other way round (gui/erasures.py `split_by_texture`).
         """
         settings = library.load_settings(entry["path"], config, track_id)
-        region = run_config.transcribe.region
-        span = (
-            None
-            if region is None
-            else (
-                region[0] or 0.0,
-                entry["document"].audio.duration if region[1] is None else region[1],
+        mine, rest = gui_erasures.split_by_texture(settings.get("erasures") or [], texture)
+        resolved = gui_erasures.resolve(mine, notes, review_span(entry, run_config))
+        return {**resolved, "carried": resolved["carried"] + rest}
+
+    def texture_of(run_config: Config, piano_notes: str | None) -> bool:
+        """Whether this request is about a pianist's All-notes view. A horn
+        has no piano model to hear "all notes", so it never is."""
+        if piano_notes is not None and piano_notes not in PIANO_NOTES:
+            raise HTTPException(
+                400, f"unknown piano_notes {piano_notes!r}; one of {', '.join(PIANO_NOTES)}"
             )
-        )
-        return gui_erasures.resolve(settings.get("erasures") or [], notes, span)
+        return piano_notes == "all" and run_config.transcribe.uses_piano_oracle
 
     # ── pages and assets ────────────────────────────────────────────────────
 
@@ -244,7 +264,11 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
     # ── library ─────────────────────────────────────────────────────────────
 
     def resolve_edits(
-        track_id: str, entry: dict[str, Any], run_config: Config, payload: dict[str, Any]
+        track_id: str,
+        entry: dict[str, Any],
+        run_config: Config,
+        payload: dict[str, Any],
+        texture: bool = False,
     ) -> dict[str, Any]:
         """Both of the listener's edits against this review, and what they leave.
 
@@ -253,29 +277,69 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         does not already hold); `audible` and `added` are the notes that reach
         a render or a page. One function, so the ear test, Export and Score
         cannot disagree about which notes the listener kept.
+
+        `texture` swaps the line for EVERYTHING the piano model heard (the
+        All-notes view): those become `notes`, there is no pool left to
+        offer, and `hands` resolves the listener's staff assignments, with
+        `right` and `left` the audible notes each hand's staff will hold.
         """
+        settings = library.load_settings(entry["path"], config, track_id)
+        span = review_span(entry, run_config)
+        if texture:
+            notes = sorted(
+                (
+                    {
+                        "onset": c["onset"],
+                        "duration": c["duration"],
+                        "pitch": c["pitch"],
+                        "confidence": c.get("confidence", 0.0),
+                    }
+                    for c in payload.get("candidates") or []
+                ),
+                key=lambda n: (n["onset"], n["pitch"]),
+            )
+            erased = resolve_erasures(track_id, entry, run_config, notes, texture=True)
+            hands = gui_erasures.resolve_hands(settings.get("hands") or [], notes, span)
+            silenced = set(erased["silenced"])
+            sides = gui_erasures.hands_of(notes, hands)
+            kept = [
+                (note, side)
+                for index, (note, side) in enumerate(zip(notes, sides, strict=True))
+                if index not in silenced
+            ]
+            stored = settings.get("additions") or []
+            return {
+                "notes": notes,
+                "erasures": erased,
+                # Additions belong to the line's view; carried, never touched.
+                "additions": {
+                    "added": [],
+                    "carried": stored,
+                    "unmatched": [],
+                    "moved": [],
+                    "stored": len(stored),
+                },
+                "candidates": [],
+                "audible": gui_erasures.audible(notes, silenced),
+                "added": [],
+                "hands": hands,
+                "right": [n for n, side in kept if side == "right"],
+                "left": [n for n, side in kept if side == "left"],
+            }
         notes = payload["notes"]
         erased = resolve_erasures(track_id, entry, run_config, notes)
         candidates = gui_erasures.pool(payload.get("candidates") or [], notes)
-        settings = library.load_settings(entry["path"], config, track_id)
-        region = run_config.transcribe.region
-        span = (
-            None
-            if region is None
-            else (
-                region[0] or 0.0,
-                entry["document"].audio.duration if region[1] is None else region[1],
-            )
-        )
         additions = gui_erasures.resolve_additions(
             settings.get("additions") or [], candidates, span
         )
         return {
+            "notes": notes,
             "erasures": erased,
             "additions": additions,
             "candidates": candidates,
             "audible": gui_erasures.audible(notes, erased["silenced"]),
             "added": gui_erasures.enabled(candidates, additions["added"]),
+            "hands": None,
         }
 
     @app.get("/api/config")
@@ -300,6 +364,14 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             # is built from the constant the validator accepts.
             "lines": list(LINES),
             "default_line": config.transcribe.piano_line,
+            # The Rhythm menu (QuantizeConfig.timing), the pianists' Piano
+            # notes menu, and the pitch the two-staff page's first guess
+            # splits the hands at -- all from the constants the server
+            # validates against, so the page cannot offer what it refuses.
+            "timings": list(TIMINGS),
+            "default_timing": config.quantize.timing,
+            "piano_notes": list(PIANO_NOTES),
+            "hand_split": HAND_SPLIT,
             "transpositions": list(TRANSPOSITIONS),
             "default_transposition": config.notate.transposition,
             "library_dir": str(library.library_dir(config)),
@@ -567,6 +639,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         start: float | None = None,
         end: float | None = None,
         line: str | None = None,
+        piano_notes: str | None = None,
     ) -> dict[str, Any]:
         """The cached transcription review for this span, or ready:false.
 
@@ -574,21 +647,30 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         they're ready" must not block. When not ready the client starts a
         kind=transcribe job and asks again. The frame diagnostics ride along —
         this endpoint is the only thing that serves them.
+
+        `piano_notes=all` serves a pianist's All-notes view of the SAME cached
+        review: everything the piano model heard as the notes, no pool, and
+        the staff assignments. Switching views costs no transcription.
         """
         entry = resolve(track_id)
         run_config = review_config(stem, start, end, entry["path"], track_id, line)
         payload = review.cached_review(entry["document"], run_config, model)
         if payload is None:
             return {"ready": False}
-        edits = resolve_edits(track_id, entry, run_config, payload)
+        texture = texture_of(run_config, piano_notes)
+        edits = resolve_edits(track_id, entry, run_config, payload, texture)
         return {
             "ready": True,
             **payload,
+            "notes": edits["notes"],
             # The pool the roll offers, not the raw model output: what the line
             # already holds is not a candidate (gui/erasures.py `pool`).
             "candidates": edits["candidates"],
+            "second_voice": [] if texture else payload.get("second_voice", []),
             "erasures": edits["erasures"],
             "additions": edits["additions"],
+            "piano_notes": "all" if texture else "line",
+            "hands": edits["hands"],
         }
 
     @app.get("/api/tracks/{track_id}/transcription")
@@ -600,6 +682,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         end: float | None = None,
         rate: float = 1.0,
         line: str | None = None,
+        piano_notes: str | None = None,
     ) -> Response:
         """The synthesized transcription for the span, as a wav.
 
@@ -619,7 +702,9 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         # stops describing the transcription you are actually keeping.
         # ... and a note the listener switched on must sound, or the ear
         # test is not describing the page they are about to export.
-        edits = resolve_edits(track_id, entry, run_config, payload)
+        edits = resolve_edits(
+            track_id, entry, run_config, payload, texture_of(run_config, piano_notes)
+        )
         notes = sorted(
             [NoteEvent(source=stem, **n) for n in edits["audible"]]
             + [NoteEvent(source=f"{stem}:added", **n) for n in edits["added"]],
@@ -646,6 +731,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         start: float | None = None,
         end: float | None = None,
         line: str | None = None,
+        piano_notes: str | None = None,
     ) -> dict[str, Any]:
         """Write the reviewed span to MusicXML beside the audio.
 
@@ -654,35 +740,43 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         (gui/musicxml.py). Preconditions the user can fix come back as 409 with
         the fix in the message; a 409 here is not an error, it is the button
         telling you which of the earlier buttons you still owe it.
+
+        The page's other choices -- rhythm, and for a pianist's All-notes
+        view one staff or two -- are read off the sidecar like the
+        transposition; the client persists before it asks.
         """
         entry = resolve(track_id)
         run_config = review_config(stem, start, end, entry["path"], track_id, line)
         payload = review.cached_review(entry["document"], run_config, model)
         if payload is None:
             raise HTTPException(409, "transcribe the span first")
+        texture = texture_of(run_config, piano_notes)
         # Through resolve_edits, so the score holds exactly the notes the
         # A/B render plays. A silenced note must not come back on the page,
         # and an enabled candidate must reach it (as a chord, if struck with
         # a line note — notation.with_chords).
-        edits = resolve_edits(track_id, entry, run_config, payload)
+        edits = resolve_edits(track_id, entry, run_config, payload, texture)
         audible = edits["audible"]
         settings = library.load_settings(entry["path"], config, track_id)
         # The overlay goes through erasures too: a second-voice note the
         # listener silenced on the review screen must not reappear on the page.
-        overlay = payload.get("second_voice") or []
+        overlay = [] if texture else payload.get("second_voice") or []
         if overlay:
             silenced = resolve_erasures(track_id, entry, run_config, overlay)["silenced"]
             overlay = gui_erasures.audible(overlay, silenced)
+        grand = gui_musicxml.two_staves(settings, texture)
         try:
             return gui_musicxml.export_span(
                 entry["document"],
                 config,
                 run_config,
                 entry["path"],
-                audible,
+                edits["right"] if grand else audible,
                 settings,
                 overlay,
                 edits["added"],
+                texture=texture,
+                left=edits["left"] if grand else None,
             )
         except gui_musicxml.NotReady as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -700,6 +794,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         start: float | None = None,
         end: float | None = None,
         line: str | None = None,
+        piano_notes: str | None = None,
     ) -> dict[str, Any]:
         """How this span's NOTATION compares to a hand transcription's.
 
@@ -708,6 +803,10 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         written the way a human wrote them, and it reads lower for that reason
         (gui/musicxml.py). Cheap enough to answer in the request: it re-notates
         cached notes, which is arithmetic.
+
+        Refused on a pianist's All-notes view: the hand scores notate the
+        right hand's line only, and a whole texture scored against a melody
+        reads as a page full of notes the human did not write (M7b).
         """
         entry = resolve(track_id)
         score_path = Path(score).expanduser()
@@ -717,6 +816,10 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             raise HTTPException(400, f"not a MuseScore file: {score_path.name}")
 
         run_config = review_config(stem, start, end, entry["path"], track_id, line)
+        if texture_of(run_config, piano_notes):
+            raise HTTPException(
+                409, "Score compares a melody line - switch Piano notes to Melody line"
+            )
         payload = review.cached_review(entry["document"], run_config, model)
         if payload is None:
             raise HTTPException(409, "transcribe the span first")
@@ -749,6 +852,8 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         start: float | None = None,
         end: float | None = None,
         line: str | None = None,
+        piano_notes: str | None = None,
+        stem: str | None = None,
     ) -> FileResponse:
         """Download a score this track has already exported.
 
@@ -765,7 +870,20 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
                 None if end is None else round(end, SPAN_PRECISION),
             )
         )
-        path = gui_musicxml.export_path(entry["path"], span, gui_musicxml.take_of(config, line))
+        settings = library.load_settings(entry["path"], config, track_id)
+        # Named the way the export named it: the page's choices ride in the
+        # filename, and a horn never has a texture whatever the request says.
+        texture = piano_notes == "all" and (
+            review_config(
+                stem or config.transcribe.stem, start, end, entry["path"], track_id
+            ).transcribe.uses_piano_oracle
+        )
+        path = gui_musicxml.export_path(
+            entry["path"],
+            span,
+            gui_musicxml.take_of(config, line),
+            gui_musicxml.page_tags(config, settings, texture),
+        )
         if not path.is_file():
             raise HTTPException(404, "not exported yet")
         return FileResponse(
@@ -795,6 +913,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         start: float | None = None,
         end: float | None = None,
         line: str | None = None,
+        piano_notes: str | None = None,
     ) -> dict[str, Any]:
         """A notated score aligned against this span's transcription.
 
@@ -802,6 +921,9 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         their onsets are what places the score horizontally (ground_truth's
         module docstring). 404 rather than transcribing: this endpoint must
         stay as cheap to poll as /review.
+
+        Aligned to the melody line only; a pianist's All-notes view is
+        refused for the reason the Score button is.
         """
         entry = resolve(track_id)
         document = entry["document"]
@@ -812,6 +934,10 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             raise HTTPException(400, f"not a MuseScore file: {score_path.name}")
 
         run_config = review_config(stem, start, end, entry["path"], track_id, line)
+        if texture_of(run_config, piano_notes):
+            raise HTTPException(
+                409, "ground truth compares a melody line - switch Piano notes to Melody line"
+            )
         payload = review.cached_review(document, run_config, model)
         if payload is None:
             raise HTTPException(404, "transcribe the span first")

@@ -79,8 +79,14 @@ export class PianoRoll {
     this.ground = null;                        // the aligned hand transcription, if any
     this.visible = new Set(CLASSES);           // which alignment classes to draw
     this.silenced = new Set();                 // note indices marked "not the solo"
-    this.tool = 'inspect';                     // inspect | erase — what a click and a drag mean
+    this.tool = 'inspect';                     // inspect | erase | hands — what a click and a drag mean
     this._band = null;                         // rubber-band rectangle while dragging
+    // A two-staff piano page: which hand each note is on (a function of the
+    // note index, or null when the page has one staff), the pitch the first
+    // guess splits at, and the notes the Hands tool has selected.
+    this.handOf = null;
+    this.handSplit = 60;
+    this.handSelection = new Set();
 
     this._drag = null;
     for (const el of [rollEl, f0El, gateEl]) {
@@ -166,6 +172,21 @@ export class PianoRoll {
     this.tool = tool;
     this._band = null;
     this.rollEl.classList.toggle('erasing', tool === 'erase');
+    this.rollEl.classList.toggle('handing', tool === 'hands');
+    this.draw();
+  }
+
+  /* Colour notes by hand (`handOf(index)` -> 'right' | 'left'), or pass null
+     for a one-staff page. `split` is the first guess's pitch, drawn as a
+     faint line so a note on the wrong side of it is easy to spot. */
+  setHands(handOf, split = this.handSplit) {
+    this.handOf = handOf;
+    this.handSplit = split;
+    this.draw();
+  }
+
+  setHandSelection(indices) {
+    this.handSelection = new Set(indices);
     this.draw();
   }
 
@@ -282,7 +303,9 @@ export class PianoRoll {
     const y = Math.min(band.y0, band.y1);
     const w = Math.abs(band.x1 - band.x0);
     const h = Math.abs(band.y1 - band.y0);
-    const color = this._css(band.restoring ? '--lead' : '--accent', '#f0a848');
+    const color = band.hands
+      ? this._css('--left-hand', '#8fa7ff')
+      : this._css(band.restoring ? '--lead' : '--accent', '#f0a848');
     ctx.fillStyle = color;
     ctx.globalAlpha = 0.12;
     ctx.fillRect(x, y, w, h);
@@ -530,6 +553,21 @@ export class PianoRoll {
       ctx.restore();
     }
 
+    // The split the first guess draws between the hands: a faint dashed line
+    // between B3 and middle C, so a note on the wrong side of it stands out.
+    if (this.handOf) {
+      const y = this.pitchToY(this.handSplit - 0.5, h);
+      ctx.save();
+      ctx.strokeStyle = this._css('--left-hand', '#8fa7ff');
+      ctx.globalAlpha = 0.45;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(0, Math.round(y) + 0.5);
+      ctx.lineTo(w, Math.round(y) + 0.5);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     this.notes.forEach((n, i) => {
       const kind = this.classOf(i);
       if (kind && !this.visible.has(kind)) return;
@@ -540,17 +578,29 @@ export class PianoRoll {
       const y = centre - noteH / 2;
       const selected = i === this.selected;
       const cut = this.silenced.has(i);
+      const picked = this.handSelection.has(i);
+      const hand = this.handOf ? this.handOf(i) : null;
       // Confidence drives fill: a faint note is one the transcriber was unsure
       // of, which is exactly what you want to eyeball.
       const alpha = 0.35 + 0.6 * Math.min(1, Math.max(0, n.confidence));
-      ctx.globalAlpha = cut ? 0.22 : selected ? 1 : alpha;
+      ctx.globalAlpha = cut ? 0.22 : selected || picked ? 1 : alpha;
       ctx.fillStyle = selected
         ? this._css('--accent', '#f0a848')
         : kind
           ? this._classColor(kind)
-          : this._css('--lead', '#56cfc0');
+          : hand === 'left'
+            ? this._css('--left-hand', '#8fa7ff')
+            : this._css('--lead', '#56cfc0');
       ctx.fillRect(x0, y, width, noteH - 1);
       ctx.globalAlpha = 1;
+      if (picked) {
+        // Selected for the Hands tool: the selection accent as an outline, so
+        // the note keeps the colour that says which hand it is on now.
+        ctx.strokeStyle = this._css('--accent', '#f0a848');
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x0 - 1.5, y - 1.5, width + 3, noteH + 2);
+        ctx.lineWidth = 1;
+      }
       if (cut) {
         // A line through the middle, in the text colour rather than a fifth
         // hue: "struck out" has to read the same whatever the note's
@@ -746,10 +796,11 @@ export class PianoRoll {
     // not know, and losing the whole gesture to that would be silly.
     try { el.setPointerCapture(event.pointerId); } catch { /* not capturable */ }
     const rect = el.getBoundingClientRect();
-    // The erase tool takes the drag for the rubber band, so panning moves to
-    // shift-drag while it is selected — one gesture each, and shift is already
-    // the zoom modifier on the wheel.
-    const banding = this.tool === 'erase' && el === this.rollEl && !event.shiftKey;
+    // The erase and hands tools take the drag for the rubber band, so panning
+    // moves to shift-drag while one is selected — one gesture each, and shift
+    // is already the zoom modifier on the wheel.
+    const banding =
+      (this.tool === 'erase' || this.tool === 'hands') && el === this.rollEl && !event.shiftKey;
     this._drag = {
       el,
       id: event.pointerId,
@@ -761,6 +812,8 @@ export class PianoRoll {
       panning: false,
       banding,
       restoring: event.altKey,
+      // Ctrl (Cmd on a Mac) adds to the Hands selection instead of replacing it.
+      additive: event.ctrlKey || event.metaKey,
     };
   }
 
@@ -778,6 +831,7 @@ export class PianoRoll {
         x1: event.clientX - rect.left,
         y1: event.clientY - rect.top,
         restoring: drag.restoring,
+        hands: this.tool === 'hands',
       };
       this.draw();
       return;
@@ -798,15 +852,28 @@ export class PianoRoll {
 
     if (drag.dragging && this._band) {
       const hits = this.notesInBand(this._band);
-      const restoring = this._band.restoring;
+      const { restoring, hands } = this._band;
       this._band = null;
       this.draw();
+      if (hands) {
+        // An empty box clears the selection, as it does in any editor.
+        if (this.opts.onHandBand) this.opts.onHandBand(hits, drag.additive);
+        return;
+      }
       if (hits.length && this.opts.onBand) this.opts.onBand(hits, restoring);
       return;
     }
     this._band = null;
 
     const rect = el.getBoundingClientRect();
+    if (this.tool === 'hands' && el === this.rollEl) {
+      // A click selects the note under it (Ctrl toggles it in the selection);
+      // a click on empty roll clears the selection and still moves the
+      // playhead, so listening needs no tool change.
+      const hit = this._hit(this.notes, event, rect, (n) => n.onset, () => true);
+      if (this.opts.onHandClick) this.opts.onHandClick(hit.index, drag.additive);
+      if (hit.index >= 0) return;
+    }
     if (this.tool === 'erase' && el === this.rollEl) {
       // Directly on a note, erase it; anywhere else, the click still places
       // the playhead, so auditioning what you just cut needs no tool change.

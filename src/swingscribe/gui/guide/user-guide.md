@@ -313,6 +313,34 @@ transcriptions, the picked melody gets more of the right notes for six
 pianists out of seven. The CREPE take is there for the passage where it
 hears better, and its export gets `.crepe` in the file name.
 
+**Piano notes** (pianists only) chooses which of the piano's notes are on the
+roll and the page:
+
+- **Melody line** is the default: the line chosen above, usually the top
+  note but not always, plus any of the piano model's notes you switch on.
+- **All notes** is everything the piano model heard, both hands, chords
+  and all. It is another view of the same transcription, so switching costs
+  no re-transcribing. Notes struck together are written as one chord, which
+  lasts as long as its longest note. Line is hidden on this view, because no
+  single line is drawn.
+
+With **All notes**, **Staves** chooses **One staff** or **Two staves (treble +
+bass)**: the right hand on a treble staff over the left hand on a bass staff.
+The first guess puts middle C and above in the right hand and everything
+below in the left. A dashed line on the roll marks that split, and the two
+hands are drawn in different colours. The **Hands** tool moves any note to
+the other hand (see below).
+
+Each staff is one voice. A note held while other notes in the same hand move
+is cut short where the next of them starts; the two hands never cut each
+other short.
+
+Silencing a note on the All-notes view is kept separate from silencing it on
+the melody line. A left-hand note you silenced as "not the solo" on the line
+is still there on the All-notes page, which is what that page is for.
+Hand transcriptions notate the melody only, so **Ground truth** and **Score
+it** work on the melody line, not on All notes.
+
 ### The piano roll
 
 The notes are drawn over the bar grid, with the same beat strip along the
@@ -332,9 +360,11 @@ Two lanes under the roll show the raw evidence:
 The section's transport plays **Original** (the default), **Transcription**
 (the notes as plain tones, with silenced notes left out) or **Both**.
 
-### Inspect and Edit
+### Inspect, Edit and Hands
 
-The two tools sit above the edit bar. <kbd>E</kbd> switches between them.
+The tools sit above the edit bar. <kbd>E</kbd> switches between Inspect and
+Edit. **Hands** appears only on a two-staff page, and <kbd>H</kbd> switches
+to it and back.
 
 - **Inspect** is the default. Click a note to move the playhead there, hear
   the note's pitch, and see the evidence behind it in the inspector below:
@@ -343,6 +373,15 @@ The two tools sit above the edit bar. <kbd>E</kbd> switches between them.
 - **Edit** changes the transcription. Click a note to silence it, or click
   it again to bring it back. Drag a box to silence every note inside it.
   Alt-drag a box to restore them. Shift-drag pans.
+- **Hands** chooses which staff notes go on. Drag a box to select the notes
+  inside it, and <kbd>Ctrl</kbd>-drag to add another group to the
+  selection. Click a note to select it alone, or <kbd>Ctrl</kbd>-click to
+  add or remove it. Then click **Right hand ↑** or **Left hand ↓**, or
+  press <kbd>↑</kbd> or <kbd>↓</kbd>. **Reset to guess** gives the selected
+  notes back to the middle-C guess. The selection stays after a move, so a
+  wrong call is one key from being put right. <kbd>Esc</kbd> clears it, and
+  shift-drag pans. Selected notes are outlined; the inspector says which
+  hand a note is on and whether that was your choice or the guess.
 
 Silenced notes stay visible, struck through, so you can see what you cut.
 **↶** and **↷** undo and redo (<kbd>Ctrl+Z</kbd> and
@@ -364,11 +403,12 @@ heard it and whether it is on the page.
 
 Edits are remembered by the note's onset and exact pitch, not by its number
 in the list, so a later transcription that renumbers every note still finds
-the right one. If a silenced note has vanished from the new transcription,
-the app says it is "already gone": good news, since the transcriber now
-agrees with you. If one now sounds at a different pitch, the app says it is
-"worth a look". **Discard** forgets unmatched silenced notes for good, and
-even that can be undone.
+the right one. The same goes for the hand you put a note in. If a silenced
+note has vanished from the new transcription, the app says it is "already
+gone": good news, since the transcriber now agrees with you. If one now
+sounds at a different pitch, the app says it is "worth a look".
+**Discard** forgets unmatched silenced notes for good, and even that can be
+undone.
 
 ## Comparing with a hand transcription
 
@@ -448,6 +488,21 @@ press **Beats** first.
 Nothing in the audio says which horn is playing, so this has to come from
 you. The key signature moves with it.
 
+**Rhythm** sets how the timing is written:
+
+- **Swing — eighths** is the default. The swing is read out of the playing:
+  a swung pair is written as two even eighths, with "Swing" above the staff,
+  the way a jazz chart is written.
+- **Literal 16ths** writes every note on the nearest sixteenth, exactly as
+  played, with no "Swing" marking. A swung pair usually comes out as a
+  dotted eighth and a sixteenth. A beat whose notes are too close together
+  for sixteenths is written in thirty-seconds.
+- **Literal 32nds** writes every note on the nearest thirty-second.
+
+Literal pages have no triplets, and a literal export gets `.literal16` or
+`.literal32` in its file name, so it never overwrites the swing page. An
+All-notes export gets `.all`, and a two-staff one `.2staves`.
+
 Bars are numbered from 1 within your span, the way a solo transcription is
 usually numbered, not from the start of the track. Notes before the first
 full bar become a pickup. Silenced notes are left out, and candidates you
@@ -477,6 +532,10 @@ field, a menu or a slider.
   grid).
 - <kbd>C</kbd>: turn the click track on or off.
 - <kbd>E</kbd>: switch between the Inspect and Edit tools.
+- <kbd>H</kbd>: switch to the Hands tool and back (two-staff page only).
+- <kbd>↑</kbd> / <kbd>↓</kbd>: with the Hands tool, put the selected notes
+  in the right or left hand.
+- <kbd>Esc</kbd>: with the Hands tool, clear the selection.
 - <kbd>V</kbd>: show or hide the piano model's candidates.
 - <kbd>X</kbd>: export MusicXML.
 - <kbd>Ctrl+Z</kbd>: undo an edit.
