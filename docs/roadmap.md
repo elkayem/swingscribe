@@ -148,6 +148,18 @@ erasures only match on the stems they were made on (132 of 141 on today's
 Roformer stems, 1 of 235 on the Demucs-era stems): re-anchor the old labels
 before issue #8 trains on them.
 
+### E7. Outside yardsticks -- DONE 2026-09-30
+
+- **MV2H** (docs/mv2h.md): hand scores 0.876, Omnibook 0.734 non-aligned,
+  over all 44 notation pages; an upstream bug (meter zeroed after the first
+  alignment in `Main -a`) found and worked around.
+- **The Rhythm Perceiver's per-beat measure** (docs/beat-signature.md): 0.577
+  on the 21 Omnibook sides whose bar lines held against the paper's 0.53 on
+  its easier 60% -- level with the published learned system, not clearly
+  past it; its onsets are better (0.83 against 0.785).
+- **The head-to-head** (docs/head-to-head.md): ready; waits on the
+  listener's AnthemScore 6.3 exports.
+
 ### E6. Stratified means -- DONE 2026-09-30
 
 Printed and in `--json`, never pinned. The ballad gap is one line on the
@@ -201,11 +213,22 @@ on the harness's own stems:
 - **The ceiling**: CREPE and Basic Pitch combined perfectly would reach
   WJazzD recall 0.908 against 0.836 -- the fine-tune's target.
 
-**Step 1.5, ship the hybrid for horns**: onnxruntime in the `ml` group (it
-already loads under Smart App Control for `omr`), the ONNX graph vendored
-with its NOTICE, a numpy port of the note decoder, a `TranscribeConfig` field
-that dumps nothing at its default. **Step 2, fine-tune**, now has to beat the
-hybrid (0.8650 dev, 0.7034 sub-eighth recall), not CREPE.
+**Step 1.5 SHIPPED 2026-09-30** (commit 14d7e7e): a numba-free port on
+onnxruntime, the graph vendored, on by default for every non-pianist.
+Product path: WJazzD note F1 0.8580 -> 0.8651 (52 up / 2 down over 73),
+Omnibook pitch F1 +0.0070, pianists unchanged; the listener's horn pages
+gain ornaments the transcriber left out (edit cost +0.80 per 100).
+
+**Second opinions tried on top** (docs/kong-bakeoff.md): the FiloSax sax
+CRNN adds +0.0026 over the hybrid on saxophones as a second hole-filler
+(Omnibook sub-eighth recall +0.033), and loses as a line; trained on
+non-commercial data, so an opt-in at most, pending the authors' terms.
+
+**Step 2, fine-tune**, has to beat the hybrid (0.8651), not CREPE. The
+ceiling for a perfect choice between CREPE and a note model is recall 0.895
+to 0.908 against the hybrid's 0.863 -- a modest prize. The fine-tune's real
+value is a model trained on OUR stems that could ship without licence
+questions; it needs the missing WJazzD audio (section 1).
 
 ### A3. Ballads
 
@@ -218,10 +241,10 @@ back on.
 
 Ten Bud Powell pages would take the pianist set from 7 to ~17, on 1940s-50s
 piano the piano model (trained on clean recordings) has not heard. Line
-selection (issue #8) is still the pianist's leading error. A candidate model
-(docs/landscape.md): Edwards et al.'s augmented Kong checkpoint (CC BY 4.0,
-104 MB, a download to approve), which needs a second loader -- upstream
-downloads its own weights over any file under 160 MB.
+selection (issue #8) is still the pianist's leading error. Edwards et al.'s
+augmented Kong checkpoint (CC BY 4.0) was measured 2026-09-30 through a new
+loader and reads LEVEL on the 11 pianists (docs/kong-bakeoff.md): the
+pianist's problem is choosing the line, not hearing the notes.
 
 ### A5. The swing era and the clarinet
 
@@ -243,6 +266,16 @@ constraint: WJazzD onsets aligned to paired PDF pages (A1's triples at scale)
 and our transcriptions of the tier-A pages; evaluation is the triples' (a)
 row, the listener's pages and the Omnibook, never Flex-Q.
 
+**2026-09-30:** the cheap test is done (E7): level with the published system,
+so a learned re-ranker is how to get past it. Four more hand rules were tried
+on the triples and none moved the pages (docs/writing-round2.md); the
+half-beat displacements turned out to be ANTICIPATION -- the page writes the
+note earlier than it was played, and nothing in the timing says so. Hand
+rules are exhausted; the model's inputs exist (onsets, beats, and the Kong
+activations kept under `C:\Users\lkmcg\swingscribe-research\kong-activations`),
+and its targets are named (triplets right 25% of the time on the Omnibook,
+sixteenth runs 26%). The training data is the paired pages.
+
 ## 4. The first run
 
 ### O1. Show the page in the app -- DONE 2026-09-30
@@ -262,15 +295,16 @@ shows it beside the Ensemble menu with its reason and Apply/Keep, only on a
 track with no ensemble of its own, and never writes anything by itself.
 Open: a labelled bass solo, a solo-piano record and a vibes/organ lead.
 
-### O3. Propose the solo spans -- research DONE 2026-09-30, GUI next
+### O3. Propose the solo spans -- DONE 2026-09-30 (research and GUI)
 
 `solo_spans.propose` (docs/solo-spans.md) from the quick htdemucs_6s stems
 and the bar grid: a span edge within two bars of 71% of WJazzD's solo starts
 and 73% of its ends (chance 0.12), 7.5 boundaries a recording. Next: "Find
 the solos" on the Overview, bands a click turns into A and B, and a log of
-what the listener does with each proposal (the labels the benchmark lacks).
+what the listener does with each proposal (the labels the benchmark lacks)
+-- all shipped 2026-09-30.
 
-### O4. Chord symbols on the page -- NEW
+### O4. Chord symbols on the page -- first version DONE 2026-09-30
 
 Every human transcription service and every lead-sheet competitor delivers
 the changes; we deliver none (docs/landscape.md section 6). Start from changes
@@ -278,7 +312,9 @@ the listener supplies (typed, or read from a lead sheet's MusicXML
 `<harmony>`), snapped to the bar grid we already trust and written as
 `<harmony>`; Verovio and MuseScore render them. Recognition comes later, and
 only once measured on jazz vocabulary (WJazzD's per-beat chords are the
-ground truth).
+ground truth). Shipped: typed changes, placed on the form, transposed with the
+part, drawn in the Page view, accepted by MuseScore. Next: import a lead
+sheet's `<harmony>`, then recognition.
 
 ### O5. Pin a beat, re-derive the rest -- NEW
 
@@ -295,29 +331,38 @@ none exceed 30 (circular mean of CREPE's pitch over confident in-note frames).
 **Basic Pitch as the line**, and as a pitch voter (A2).
 
 **Loosening the tuplet gate, sixteenth triplets, `legato_cap`** -- re-measured
-on the triples' human onsets, all worse or level (A1).
+on the triples' human onsets, all worse or level (A1). Four more writing rules
+(late downbeat, isolated lag, tuplet with a pushed last note, hold to the
+beat), default off (docs/writing-round2.md).
+
+**Banquet** query-by-audio separation: -0.290 note F1, 16 of 16 solos down
+(docs/banquet-trial.md). **Edwards' piano checkpoint**: level (A4).
 
 ## 6. Order
 
-1. E1-E6, A1, O1, O2 and A2's bake-off: done 2026-09-29/30.
-2. Ship A2's hybrid for horns (step 1.5) and O4's typed changes; wire O3 into
-   the GUI. The cheapest measured gains on the table.
-3. Pair and locate the tier-A pages (the listener's audio); every one that
-   WJazzD also annotated becomes a triple. A3 and A4 fall out with no pipeline
-   change.
-4. A6: the beat-signature comparison first, then a learned re-ranker trained
-   on the paired pages.
-5. A2 step 2 (fine-tune) only against the hybrid's bar.
+1. Done 2026-09-29/30: E1-E7, A1, A2 steps 1 and 1.5 (shipped), O1-O4.
+2. **Pair and locate the tier-A pages** (the listener's audio). Every page
+   is more ground truth for everything above, every page WJazzD also
+   annotated is a triple, and the paired pages ARE A6's training data. This
+   is now the constraint on accuracy.
+3. **A6, the learned re-ranker** inside `choose_grid`, trained on the paired
+   pages and judged on the triples, the listener's pages and the Omnibook.
+   The largest remaining lever on the page.
+4. **The head-to-head** once the listener has AnthemScore 6.3 exports.
+5. **O5 and the page view's next steps**: pin a beat and re-derive the grid;
+   link the page to the playhead; show the hand score's bars beside ours;
+   import a lead sheet's changes.
+6. **A2 step 2** (fine-tune on our stems) once the missing WJazzD audio is
+   in -- chiefly for a shippable model, the recall prize is modest.
 
 ## 7. Decisions waiting on the listener
 
-- **Downloads**, each stated before it happens: the FiloSax-trained saxophone
-  CRNN (Riley and Dixon; weights tagged MIT but trained on non-commercial
-  data, so an opt-in group like MuScriptor's), Edwards et al.'s piano
-  checkpoint (CC BY 4.0, 104 MB, Zenodo), MV2H (MIT, Java, GitHub), Banquet
-  (query-by-audio separation, weights licence unknown).
-- **A head-to-head with AnthemScore 6.3 and Klangio** (docs/landscape.md): the
-  first needs a local trial install, the second uploading commercial
-  recordings to a cloud service -- the listener's call either way.
+- **The head-to-head**: run the spans through AnthemScore 6.3's local trial
+  following docs/head-to-head.md (Klangio and Songscription would mean
+  uploading commercial recordings -- the listener's call).
+- **The FiloSax sax CRNN** as an opt-in: worth +0.0026 over what ships;
+  its weights are trained on non-commercial data, so it waits on the
+  authors' terms (docs/kong-bakeoff.md says what to ask Riley and Dixon, if
+  the listener wants to write to them).
 - **Per-span ensembles**: the sidecar holds one ensemble per track, so a
   record with a horn solo and a piano solo can only be right for one.

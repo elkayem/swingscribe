@@ -564,6 +564,30 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   before it are a pickup in bar 0. `run_eval` has no roll but takes the
   anchor `meter.bar_grid` gives the roll (R22); its rhythm number is
   gap-based and phase-immune either way.
+- **Find the solos is a suggestion, like the ensemble** (2026-09-30,
+  `gui/solos.py`, `static/solos.js`). No whole-file stems -> a cancellable
+  htdemucs_6s job first (the button shows its estimate); the proposal's
+  bands sit under the Overview with the lead label as TEXT; a click sets A
+  and B through the ordinary selection flow and never touches the Stem menu
+  or the ensemble. What the listener does with each proposal (accepted,
+  adjusted by how many seconds, ignored) is kept in the sidecar's
+  `solo_proposals`, matched by content: it is the label source the
+  benchmark lacks for heads, piano solos and fours. A lock around the
+  sidecar's read-merge-write keeps page-state saves from overwriting it.
+- **Chord symbols come from changes the LISTENER types** (2026-09-30, O4,
+  `chords.py`, sidecar `changes`, `static/changes.js`). One chorus as text
+  (bars by "|", "."/"/" holds, "%", N.C.), parsed by grammar into the
+  listener's own spelling plus a MusicXML kind and degrees; unknown
+  qualities refused with bar and token. The chart repeats from the form
+  start on the SAME repaired grid and downbeat the page uses
+  (`notation.page_downbeat`, `form_bar_of_page`); a chart that disagrees
+  with bars_per_chorus or does not parse is left off and reported -- it
+  never costs the export. `<harmony>` is transposed by the part's interval
+  with the notes and the key; staff 1 only on two staves. `NotatedBar.
+  harmony` is additive (defaults to []): no cache key moved. `for_verovio`
+  rewrites two things for the VIEW only (degrees Verovio 6.3 prints twice,
+  N.C.). No chord RECOGNITION until it is measured (WJazzD's per-beat
+  chords are the ground truth).
 - **The Page view is Export's own MusicXML, engraved on the server by
   Verovio** (2026-09-30, O1, `gui/page.py`, `GET /api/tracks/{id}/page`,
   `static/page.js`). `page_inputs` in app.py gathers exactly what Export
@@ -591,7 +615,7 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   `scripts/routing_survey.py`'s floor sweep and reading the JOINT worst.
   htdemucs_6s files 3 of 5 piano solos under `guitar`, hence no
   suggestion there.
-- **Solo spans can be PROPOSED, and nothing calls it yet** (2026-09-30, O3,
+- **Solo spans are PROPOSED, and the GUI's Find the solos shows them** (2026-09-30, O3,
   `solo_spans.py`, docs/solo-spans.md): exact optimal partitioning of
   per-bar stem levels and gated cepstra from the quick htdemucs_6s
   whole-file stems, plus the head-in's end from the chroma repeat stripe.
@@ -1396,6 +1420,24 @@ list of what is actually wrong; run everything with one command:
   style and instrument, printed, never pinned. On a PDF page a bar-line
   step that the page's own overfull bars account for is the PAGE's
   (`evaluation.page_steps`).
+- **Three outside yardsticks exist now** (2026-09-30). The Rhythm
+  Perceiver's per-beat "beat signature" accuracy (`beat_signature.py`,
+  docs/beat-signature.md): we read 0.577 on the 21 Omnibook sides whose bar
+  lines held, the paper 0.53 on its easier 60% -- level, not clearly past;
+  its onsets are better (F1 0.83 against 0.785). MV2H (docs/mv2h.md, Java
+  in WSL): hand scores 0.876, Omnibook 0.734; upstream `Main -a` zeroes
+  meter after the first alignment (Meter.getF1 consumes the ground
+  truth's groupings), so `scripts/mv2h_eval.py` reads the truth afresh per
+  alignment. And the competitor head-to-head (`scripts/head_to_head.py`,
+  docs/head-to-head.md) scores another tool's MusicXML exactly as ours;
+  fed our own pages it reproduces 714 of 714 pins; it waits on the
+  listener's AnthemScore exports.
+- **Four more writing rules, all default OFF** (2026-09-30,
+  docs/writing-round2.md): each fixes its own class on the triples' (a)
+  row and none is decided up on the listener's pages or the Omnibook. The
+  half-beat displacements are anticipation, not OMR loss (the page writes
+  the note EARLIER in 96 of 120), and not in the timing. Hand rules are
+  exhausted for now; the writing gap is A6's learned re-ranker's.
 - **The triples split a page's distance into WRITING, GRID and HEARING**
   (2026-09-30, A1, `triples.py`, `scripts/triples.py`, docs/triples.md): a
   solo with its recording, WJazzD's onsets and beats, and a human page of
@@ -1416,10 +1458,39 @@ list of what is actually wrong; run everything with one command:
   0.703. Its default 128 ms minimum note length deletes exactly the notes
   in question -- never judge it on defaults. It is NOT the neighbour fix
   (right pitch on 3-15% of CREPE's 841).
+- **...and it SHIPS: Basic Pitch fills the holes in every non-pianist's
+  line** (2026-09-30, `basic_pitch.py`, `TranscribeConfig.horn_fill_*`,
+  on by default; every horn key moved, no pianist key). A numba-free port
+  of basic-pitch 0.4.0's windowing and decoder (exact against the WSL run
+  on 37,531 notes) runs the vendored 230 KB ICASSP 2022 graph
+  (`basic-pitch-nmp.onnx`, Apache-2.0, un-ignored in .gitignore and a
+  hatch artifact -- without it a wheel builds clean and every horn
+  silently keeps CREPE) on onnxruntime 1.29 in the ml group (<1.30 for
+  SAC). Without onnxruntime the stage logs it and keeps CREPE's line
+  UNDER THE FILL'S KEY, like the piano oracle, so a later install needs
+  the cache entry re-run. Product path: WJazzD note F1 0.8580 -> 0.8651,
+  52 up / 2 down over 73 (recall +0.016, precision -0.002); Omnibook pitch
+  F1 +0.0070; the listener's horn pages gain ornaments the transcriber
+  left out (edit cost +0.80 per 100).
+- **Second opinions measured and NOT shipped** (2026-09-30,
+  docs/kong-bakeoff.md; the downloads live in
+  `C:\Users\lkmcg\swingscribe-research`, never the repo). `piano.py`'s
+  second loader reads note-only Kong checkpoints without reaching
+  upstream's size check, which wgets the piano weights over any file under
+  160 MB. Edwards et al.'s augmented piano checkpoint (CC BY 4.0) is LEVEL
+  on the 11 pianists. The FiloSax sax CRNN adds +0.0026 [+0.0016, +0.0036]
+  over the shipped hybrid as a second hole-filler on saxophones (fixed on
+  the tuning subset first; Omnibook sub-eighth recall +0.033), and loses
+  as a line on every horn (-0.018; trumpet and trombone worst) -- its
+  weights are trained on FiloSax's non-commercial data, so an opt-in group
+  at most, pending the authors' terms. Banquet (query-by-audio separation,
+  CC BY-NC-SA) is a clear negative: note F1 -0.290 on 16 of 16 horn solos
+  (docs/banquet-trial.md).
 - **WJazzD (`score_wjazz.py`) is audio against audio** — a human's per-note
   onsets in seconds for the same recording. Asks "did we hear what was
   played?" and is the right measure of `transcribe`. Currently **mean note F1
-  0.858 and mean beat F1 0.942, both over the same 73 solos** (2026-09-07,
+  0.865 and mean beat F1 0.942, both over the same 73 solos** (2026-09-30,
+  the horn hybrid; 0.858 from 2026-09-07,
   `pitch_persist_ms` 40 and the oracle onset shift; 0.855/0.941 on
   2026-09-02 with Roformer stems and the line floors, 0.801/0.940 over 20
   before). Quote
