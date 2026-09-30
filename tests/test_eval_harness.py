@@ -663,6 +663,8 @@ def test_a_track_with_any_dev_name_stays_dev(tmp_path):
 
 
 def test_the_paired_table_pairs_tracks_by_recording_and_skips_what_it_must():
+    # evaluation.paired_change resamples with numpy, which CI does not install.
+    pytest.importorskip("numpy")
     before = {
         "wjazz/So_What [Miles Davis]/note_f1": 0.80,
         "wjazz/So_What [John Coltrane]/note_f1": 0.70,
@@ -696,6 +698,7 @@ def test_the_paired_table_pairs_tracks_by_recording_and_skips_what_it_must():
 
 
 def test_a_comparison_against_another_card_informs_and_does_not_fail(capsys):
+    pytest.importorskip("numpy")  # the paired table's resampling
     card = {
         "wjazz": {"A.m4a": {"note_f1": 0.9}, "B.m4a": {"note_f1": 0.8}},
         "mscz": {},
@@ -729,3 +732,485 @@ def test_the_figure_prior_build_leaves_the_test_pages_out(tmp_path):
     assert [t.name for t in kept] == [t for t in titles if not split.is_test(t)]
     assert 0 < len(kept) < len(corpus)
     assert fp.without_test_pages(corpus, tmp_path / "absent.json", log=lambda _m: None) == corpus
+
+
+# -- edit cost, confidence, strata, the OMR step check (docs/roadmap.md E4-E6) --
+
+
+def _edit_row(cost, trusted=1.0):
+    row = dict.fromkeys(run_eval.EDIT_KEYS, 0.0)
+    row.update(edit_cost=cost, edit_deletions=cost, trusted=trusted)
+    return row
+
+
+def test_the_edit_cost_mean_is_over_trusted_default_pages():
+    """A wrong take is every note deleted and inserted: its edit cost is not
+    a reader's effort, so it is kept out of the mean exactly as its rhythm is."""
+    rows = {
+        "Omnibook/A.m4a": _edit_row(30.0),
+        "Omnibook/B.m4a": _edit_row(90.0, trusted=0.0),
+        "Omnibook/A.m4a [line=crepe]": _edit_row(10.0),
+        "Omnibook/C.m4a": {"rhythm": 0.5, "trusted": 1.0},  # scored before E4
+    }
+    s = run_eval.edit_summary(rows, "omnibook")
+    assert s["omnibook_edit_cost"] == 30.0 and s["omnibook_edit_n"] == 1.0
+    assert s["omnibook_edit_deletions"] == 30.0
+    assert run_eval.edit_summary({}, "x") == {}
+    # A listener's row carries no `trusted`: its span was drawn by ear.
+    assert run_eval.edit_summary({"A.m4a": _edit_row(20.0) | {"trusted": 1.0}}, "mscz")
+
+
+def test_the_edit_cost_is_pinned_and_a_trusted_headline():
+    card = {
+        "wjazz": {},
+        "mscz": {},
+        "notation": {"A.m4a": _edit_row(25.0) | {"trace": "bars 1-9 on the bar"}},
+        "erasures": {"A.m4a": {"erasures": 10.0, "matched": 8.0, "conf_auc": 0.8}},
+        "erasure_means": {"erasure_conf_auc": 0.8, "erasure_matched": 8.0},
+        "strata": {"wjazz": {"style": {"BEBOP": {"note_f1": 0.9, "note_f1_n": 3.0}}}},
+        "summary": {},
+    }
+    flat = run_eval.flatten(card)
+    assert flat["notation/A/edit_cost"] == 25.0
+    assert not any(key.startswith("strata") for key in flat)  # E6 is never pinned
+    # The erasures are the listener's LIVE labels: one erased note in the GUI
+    # must not fail the next run with no code change.
+    assert not any("erasure" in key for key in flat)
+    assert "edit_cost" in run_eval.HEADLINE_FIELDS and "edit_cost" in run_eval.TRUSTED_FIELDS
+    assert "edit_cost" in run_eval.LOWER_IS_BETTER
+
+
+def test_the_edit_split_is_averaged_and_read_as_three_blocks():
+    """Hearing, notation beside a hearing edit, notation alone: the split is a
+    part of position and value, so the three blocks and the bar sum to the
+    cost."""
+    row = _edit_row(40.0) | {
+        "edit_insertions": 5.0,
+        "edit_deletions": 5.0,
+        "edit_position": 10.0,
+        "edit_value": 20.0,
+        "edit_position_beside": 4.0,
+        "edit_value_beside": 11.0,
+        "edit_beside_share": 0.25,
+    }
+    s = run_eval.edit_summary({"A.m4a": row}, "mscz")
+    assert s["mscz_edit_value_beside"] == 11.0 and s["mscz_edit_beside_share"] == 0.25
+    blocks = run_eval.edit_blocks(s, "mscz")
+    assert blocks == {"hearing": 10.0, "beside": 15.0, "notation": 15.0, "bar": 0.0}
+    assert sum(blocks.values()) == s["mscz_edit_cost"]
+    # A row scored before the split leaves the split out of the mean.
+    old = run_eval.edit_summary({"A.m4a": _edit_row(40.0)}, "mscz")
+    assert "mscz_edit_value_beside" not in old and run_eval.edit_blocks(old, "mscz") is None
+
+
+def test_the_paired_table_says_which_way_is_better_for_the_edit_cost(capsys):
+    pytest.importorskip("numpy")  # paired_change's resampling
+    from swingscribe.evaluation import paired_change
+
+    change = paired_change([50.0, 60.0, 55.0], [45.0, 52.0, 50.0], ["a", "b", "c"])
+    run_eval.print_paired([("notation", "edit_cost", change), ("notation", "rhythm", change)])
+    out = capsys.readouterr().out
+    assert "notation / edit_cost (v)" in out and "notation / rhythm (v)" not in out
+    assert "lower is better" in out
+
+
+def test_the_confidence_mean_is_over_the_default_take_rows_that_have_one():
+    rows = {
+        "A.m4a": {"conf_auc": 0.8, "fp_low10": 0.3, "fp_low20": 0.5},
+        "B.m4a": {"conf_auc": 0.6, "fp_low10": 0.1, "fp_low20": 0.3},
+        "B.m4a [line=crepe]": {"conf_auc": 0.0, "fp_low10": 0.0, "fp_low20": 0.0},
+        "C.m4a": {"note_f1": 1.0},  # no false positive: no ranking
+    }
+    s = run_eval.confidence_summary(rows, "wjazz", ("fp_low10", "fp_low20"))
+    assert s == {
+        "wjazz_conf_auc": 0.7,
+        "wjazz_fp_low10": 0.2,
+        "wjazz_fp_low20": 0.4,
+        "wjazz_conf_n": 2.0,
+    }
+
+
+def test_the_erasure_mean_weighs_every_matched_erasure_once():
+    """One erased note on one track must not count as much as 120 on
+    another. Weighted by the matched count, a share is the pooled share."""
+    rows = {
+        "A.m4a": {"matched": 1.0, "conf_auc": 1.0, "erased_low10": 1.0, "erased_low20": 1.0},
+        "B.m4a": {"matched": 3.0, "conf_auc": 0.6, "erased_low10": 0.0, "erased_low20": 1 / 3},
+    }
+    s = run_eval.confidence_summary(rows, "e", ("erased_low10", "erased_low20"), weight="matched")
+    assert s["e_conf_auc"] == pytest.approx(0.7)
+    assert s["e_erased_low10"] == pytest.approx(0.25)  # 1 of the 4 erasures
+    assert s["e_erased_low20"] == pytest.approx(0.5)  # 2 of the 4
+    assert s["e_conf_n"] == 2.0
+
+
+def test_erasures_are_matched_by_content_on_the_line_view_only(tmp_path, monkeypatch):
+    """A re-transcription renumbers every note, so an index would silence --
+    and here, score -- a different note (CLAUDE.md). An erasure made on the
+    All-notes view is a judgement about a different page and is left out."""
+    monkeypatch.setattr(run_eval, "BENCH", tmp_path)
+    notes = [
+        {"onset": 1.0 + 0.5 * i, "duration": 0.4, "pitch": 60 + i, "confidence": c}
+        for i, c in enumerate([0.2, 0.9, 0.8, 0.3, 0.95, 0.85])
+    ]
+    today = {"model": "bsroformer_sw", "stem": "piano"}
+    erased = [
+        {"onset": 1.01, "pitch": 60, **today},  # note 0, 10 ms off: the same note
+        {"onset": 2.49, "pitch": 63, "model": "htdemucs_ft", "stem": "other"},  # note 3
+        {"onset": 3.0, "pitch": 70, **today},  # nothing at that pitch: in span, unmatched
+        {"onset": 1.5, "pitch": 61, "piano_notes": "all"},  # the other view
+        {"onset": 30.0, "pitch": 61, **today},  # out of the span: not counted anywhere
+    ]
+    write_sidecar(tmp_path, "Solo.m4a", erasures=erased)
+    runs = {"Solo.m4a": {"notes": notes, "region": [0.0, 10.0], **today}}
+    rows = run_eval.erasure_scores(runs)
+    entry = rows["Solo.m4a"]
+    assert (entry["erasures"], entry["matched"], entry["notes"]) == (3.0, 2.0, 6.0)
+    # Made on the run's own stems: two in span, one of which still matches.
+    assert (entry["same_stems"], entry["same_matched"]) == (2.0, 1.0)
+    # The two erased notes are the two least confident: a perfect ranking.
+    assert entry["conf_auc"] == 1.0
+    means = run_eval.erasure_means(rows)
+    assert means["erasure_erasures"] == 3.0 and means["erasure_same_matched"] == 1.0
+    assert means["erasure_conf_auc"] == 1.0
+    write_sidecar(tmp_path, "Plain.m4a")
+    runs["Plain.m4a"] = {"notes": notes, "region": [0.0, 10.0]}
+    assert "Plain.m4a" not in run_eval.erasure_scores(runs)
+
+
+def test_the_confidence_flags_must_reproduce_the_note_precision_or_the_run_stops():
+    """`wjazz_confidence` re-derives score()'s span to get at the notes it
+    scored; if that ever drifts from score() the flags would describe other
+    false positives, silently. The precision beside them is the check."""
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("mir_eval")
+
+    solo = {
+        "ref_on": np.array([1.0, 2.0, 3.0]),
+        "ref_p": [60, 62, 64],
+        "rate": 1.0,
+        "offset": 0.0,
+        "performer": "Test Player",
+    }
+    notes = [
+        {"onset": 1.0, "duration": 0.4, "pitch": 60, "confidence": 0.9},
+        {"onset": 2.0, "duration": 0.4, "pitch": 62, "confidence": 0.8},
+        {"onset": 2.5, "duration": 0.2, "pitch": 70, "confidence": 0.1},  # a false positive
+        {"onset": 3.0, "duration": 0.4, "pitch": 64, "confidence": 0.7},
+        {"onset": 9.0, "duration": 0.4, "pitch": 64, "confidence": 0.0},  # outside the span
+    ]
+    onsets = np.array([n["onset"] for n in notes])
+    ranking = run_eval.wjazz_confidence(solo, onsets, notes, 3 / 4)
+    assert (ranking.n, ranking.flagged, ranking.auc) == (4, 1, 1.0)
+    with pytest.raises(RuntimeError, match="not the note precision"):
+        run_eval.wjazz_confidence(solo, onsets, notes, 4 / 5)
+
+
+def test_the_strata_group_each_set_by_kind_and_keep_second_takes_out():
+    card = {
+        "wjazz": {
+            "A.m4a": {"note_f1": 0.9, "beat_f1": 0.95, "tempoclass": "UP", "style": "BEBOP"},
+            "B.m4a": {"note_f1": 0.7, "tempoclass": "SLOW", "style": "COOL", "instrument": "ts"},
+            "A.m4a [line=crepe]": {"note_f1": 0.1, "tempoclass": "UP"},
+            "C.m4a": {"skipped": "wrong take"},
+        },
+        "notation": {
+            "H.m4a": {"rhythm": 0.8, "value": 0.7, "edit_cost": 30.0, "tempo_class": "MEDIUM"},
+        },
+        "omnibook_notation": {
+            "Omnibook/O.m4a": {"rhythm": 0.9, "trusted": 1.0, "tempo_class": "UP"},
+            "Omnibook/P.m4a": {"rhythm": 0.1, "trusted": 0.0, "tempo_class": "UP"},
+        },
+        "wjazz_notation": {"A.m4a": {"rhythm": 0.6, "trusted": 1.0}},
+    }
+    strata = run_eval.build_strata(card)
+    assert strata["wjazz"]["tempoclass"]["UP"] == {
+        "note_f1": 0.9,
+        "note_f1_n": 1.0,
+        "beat_f1": 0.95,
+        "beat_f1_n": 1.0,
+    }
+    assert strata["wjazz"]["style"]["COOL"]["note_f1_n"] == 1.0
+    assert strata["notation"]["hand scores"]["MEDIUM"]["edit_cost"] == 30.0
+    assert strata["notation"]["Omnibook"]["UP"] == {"rhythm": 0.9, "rhythm_n": 1.0}
+    # Flex-Q takes the solo's own tempo class, from the WJazzD row.
+    assert strata["notation"]["Flex-Q (collateral)"]["UP"]["rhythm"] == 0.6
+
+
+def test_the_tempo_of_a_page_is_the_median_beat_of_its_grid():
+    beats = [i * 0.5 for i in range(40)] + [20.1]  # one stray beat does not move it
+    assert run_eval.span_bpm(beats, (0.0, 30.0)) == pytest.approx(120.0)
+    assert run_eval.span_bpm(beats, (50.0, 60.0)) is None
+
+
+def test_an_omr_pages_trace_names_the_page_bar_at_its_step():
+    """The step check reaches the row: counted as `page_steps`, and named in
+    the sentence the scorecard prints."""
+    from swingscribe.evaluation import page_bars
+
+    trace = {
+        "matches": 40,
+        "slope": 1.0,
+        "steady": True,
+        "first_bar": 1,
+        "segments": [
+            {"from": 0.0, "to": 40.5, "offset": 0.0, "beat_offset": 0.0, "matches": 20},
+            {"from": 41.0, "to": 80.0, "offset": -2.0, "beat_offset": 2.0, "matches": 20},
+        ],
+        "steps": [{"at": 41.0, "bar": 11, "change": -2.0}],
+    }
+    bars = page_bars([(str(i), 6.0 if i == 11 else 4.0, 4.0) for i in range(1, 30)])
+    differences = [(0.5 * k, 0.0) for k in range(82)] + [(41.0 + k, -2.0) for k in range(40)]
+    row = run_eval.traced(trace, 4.0, bars, differences)
+    assert row["page_steps"] == 1.0
+    assert "page bar 11 holds 6 of 4 beats -- the page's step" in row["trace"]
+    # A listener's row is not an OMR reading and gets no check at all.
+    assert "page_steps" not in run_eval.traced(trace, 4.0)
+    # The check reads the matched notes unrounded, and will not run without them.
+    with pytest.raises(ValueError):
+        run_eval.traced(trace, 4.0, bars)
+
+
+def test_an_undecided_step_is_named_and_never_counted():
+    """Half a beat left over with nothing on the page to account for it is
+    neither the grid's nor the page's: the row counts no page step and the
+    sentence names it apart."""
+    from swingscribe.evaluation import page_bars
+
+    trace = {
+        "matches": 40,
+        "slope": 1.0,
+        "steady": True,
+        "first_bar": 1,
+        "segments": [
+            {"from": 0.0, "to": 40.5, "offset": 0.0, "beat_offset": 0.0, "matches": 20},
+            {"from": 41.0, "to": 80.0, "offset": 0.5, "beat_offset": 0.5, "matches": 20},
+        ],
+        "steps": [{"at": 41.0, "bar": 11, "change": 0.5}],
+    }
+    bars = page_bars([(str(i), 4.0, 4.0) for i in range(1, 30)])
+    differences = [(0.5 * k, 0.0) for k in range(82)] + [(41.0 + k, 0.5) for k in range(40)]
+    row = run_eval.traced(trace, 4.0, bars, differences)
+    assert row["page_steps"] == 0.0
+    assert "(OMR check: Undecided: +0.5 at bar 11: residual +0.50" in row["trace"]
+
+
+def test_the_step_check_reads_the_pairs_the_trace_was_built_from():
+    """`page_differences` is the trace's own input, asked for again: split by
+    the trace's runs, it holds exactly each run's matches, at the offsets
+    the runs were labelled from."""
+    from swingscribe.benchmark import notation_notes
+    from swingscribe.score_bars import bar_line_trace
+
+    notation = _eighth_page(bars=8)
+    ours = notation_notes(notation)
+    # The page slips a beat after its fourth bar: two runs, 0 and -1.
+    slipped = _Reference(
+        [_RefNote(p + (1.0 if i >= 32 else 0.0), d, n) for i, (p, d, n) in enumerate(ours)]
+    )
+    trace = bar_line_trace(notation, slipped)
+    differences = run_eval.page_differences(notation, slipped)
+    assert [s["offset"] for s in trace["segments"]] == [0.0, -1.0]
+    assert len(differences) == trace["matches"] == len(ours)
+    for segment in trace["segments"]:
+        run = [d for p, d in differences if segment["from"] <= p <= segment["to"]]
+        assert len(run) == segment["matches"]
+        assert set(run) == {segment["offset"]}
+
+
+# -- the review of 2026-09-30: wiring the scorecard now tests, not just renders --
+
+
+class _Reference:
+    """The fields `score_notation_page` reads off an mscz.Score."""
+
+    def __init__(self, melody, beats_per_bar=4.0):
+        self.melody = melody
+        self.beats_per_bar = beats_per_bar
+
+
+class _RefNote:
+    def __init__(self, position, duration, pitch):
+        self.position, self.duration, self.pitch = position, duration, pitch
+
+
+def _eighth_page(bars=4):
+    """A 4/4 Notation of straight eighths on a line no alignment can confuse."""
+    from swingscribe.model import NotatedBar, NotatedNote, Notation
+
+    def note(beat, pitch):
+        return NotatedNote(
+            beat=beat,
+            duration=0.5,
+            pitch=pitch,
+            step="C",
+            alter=0,
+            octave=4,
+            is_rest=False,
+            tie_stop=False,
+        )
+
+    return Notation(
+        bars=[
+            NotatedBar(
+                number=b + 1,
+                time_signature=(4, 4),
+                notes=[note(0.5 * j, 60 + ((8 * b + j) * 5) % 13) for j in range(8)],
+            )
+            for b in range(bars)
+        ]
+    )
+
+
+def test_score_notation_page_hands_the_placement_verdict_to_the_edit_cost():
+    """`_notation_one`'s wiring: the bar-line agreement is read first and its
+    verdict reaches the edit cost's bar edit -- one edit for a page a beat
+    off throughout, and none for a page one slipped beat took off the bar,
+    which the shift already charges."""
+    from swingscribe.benchmark import notation_notes
+
+    notation = _eighth_page()
+    ours = notation_notes(notation)
+    per = 100.0 / len(ours)
+
+    same = _Reference([_RefNote(p, d, n) for p, d, n in ours])
+    agreement, result = run_eval.score_notation_page(notation, same)
+    assert agreement["beat_offset"] == 0.0
+    assert result["edit_bar"] == 0.0 and result["edit_cost"] == 0.0
+
+    late = _Reference([_RefNote(p + 1.0, d, n) for p, d, n in ours])
+    agreement, result = run_eval.score_notation_page(notation, late)
+    assert agreement["beat_offset"] == 3.0  # ours sit three beats into their bar
+    assert result["edit_bar"] == pytest.approx(per)
+    assert result["edit_cost"] == pytest.approx(per)
+
+    slipped = _Reference(
+        [_RefNote(p + (1.0 if i >= 8 else 0.0), d, n) for i, (p, d, n) in enumerate(ours)]
+    )
+    agreement, result = run_eval.score_notation_page(notation, slipped)
+    assert agreement["beat_offset"] != 0.0  # the mode says off: 24 notes against 8
+    assert result["edit_bar"] == 0.0
+    assert result["edit_position"] == pytest.approx(per)
+    assert result["edit_cost"] == pytest.approx(per)
+
+
+def test_the_wjazz_confidence_means_are_per_solo_and_pooled():
+    """The per-solo mean (each solo once) is not the pooled fact (each false
+    positive once); both are on the card, under names that say which."""
+    rows = {
+        "A.m4a": {"conf_auc": 0.9, "fp_low10": 0.5, "fp_low20": 1.0, "fp_n": 1.0},
+        "B.m4a": {"conf_auc": 0.5, "fp_low10": 0.0, "fp_low20": 0.25, "fp_n": 3.0},
+        "B.m4a [line=crepe]": {"conf_auc": 0.0, "fp_low10": 0.0, "fp_low20": 0.0, "fp_n": 99.0},
+    }
+    s = run_eval.wjazz_confidence_summary(rows)
+    assert s["wjazz_conf_auc"] == pytest.approx(0.7)
+    assert s["wjazz_fp_low20"] == pytest.approx(0.625)
+    assert s["wjazz_pooled_conf_auc"] == pytest.approx((0.9 + 3 * 0.5) / 4)
+    assert s["wjazz_pooled_fp_low10"] == pytest.approx(0.5 / 4)
+    assert s["wjazz_pooled_fp_low20"] == pytest.approx((1.0 + 0.75) / 4)
+    assert s["wjazz_pooled_fp_n"] == 4.0 and s["wjazz_pooled_conf_n"] == 2.0
+    # A card from before `fp_n` keeps its per-solo means and gains no pooled ones.
+    old = {k: {f: v for f, v in e.items() if f != "fp_n"} for k, e in rows.items()}
+    assert not any(key.startswith("wjazz_pooled") for key in run_eval.wjazz_confidence_summary(old))
+
+
+def test_the_pdf_page_strata_keep_the_tiers_apart():
+    """A silver page and a scan are different kinds of reference (E3); one
+    stratum would mix them the moment a bronze page is scored."""
+    silver = {"rhythm": 0.8, "silver": 1.0, "trusted": 1.0, "tempo_class": "UP"}
+    bronze = {"rhythm": 0.4, "silver": 0.0, "trusted": 1.0, "tempo_class": "UP"}
+    card = {
+        "wjazz": {},
+        "pages_notation": {
+            "Transcriptions_Other/S.m4a": silver,
+            "Transcriptions_Other/B.m4a": bronze,
+        },
+    }
+    notation = run_eval.build_strata(card)["notation"]
+    assert notation["PDF pages, silver"]["UP"] == {"rhythm": 0.8, "rhythm_n": 1.0}
+    assert notation["PDF pages, bronze"]["UP"] == {"rhythm": 0.4, "rhythm_n": 1.0}
+    assert "PDF pages" not in notation
+
+
+def test_the_scorecard_renders_every_new_section(capsys):
+    """A crash in a renderer used to show only after a nine-minute scoring
+    pass. A small card through `render`, its summary built by the same
+    functions `main` uses."""
+    edits = dict.fromkeys(run_eval.EDIT_KEYS, 0.0) | {
+        "edit_cost": 50.0,
+        "edit_insertions": 10.0,
+        "edit_position": 15.0,
+        "edit_value": 25.0,
+        "edit_position_beside": 5.0,
+        "edit_value_beside": 12.0,
+        "edit_beside_share": 0.3,
+    }
+    bar_line = {"beat_n": 40.0, "beat_offset": 0.0, "beat_share": 0.9, "on_the_bar": 0.9}
+    hand = {"bars": 10.0, "n_matched": 40.0, "rhythm": 0.8, "value": 0.7, **bar_line, **edits}
+    page = hand | {
+        "coverage": 0.8,
+        "trusted": 1.0,
+        "silver": 1.0,
+        "tempo_class": "UP",
+        "beat_steps": 1.0,
+        "page_steps": 1.0,
+        "trace": "bars 1-4 on the bar; bars 5-10 +2.0  [steps: -2.0 at bar 5]",
+    }
+    audio = {"pitch_f1": 0.9, "chroma_f1": 0.9, "onset_f1": 0.9, "note_f1": 0.8}
+    solo = {
+        "performer": "Some Player",
+        "instrument": "ts",
+        "tempo": 200.0,
+        "note_f1": 0.9,
+        "note_precision": 0.9,
+        "note_recall": 0.9,
+        "beat_f1": 0.95,
+        "conf_auc": 0.7,
+        "fp_low10": 0.3,
+        "fp_low20": 0.5,
+        "fp_n": 3.0,
+        "tempoclass": "UP",
+        "style": "BEBOP",
+    }
+    erased = {
+        "erasures": 5.0,
+        "matched": 4.0,
+        "moved": 1.0,
+        "notes": 80.0,
+        "same_stems": 4.0,
+        "same_matched": 4.0,
+        "conf_auc": 0.75,
+        "erased_low10": 0.25,
+        "erased_low20": 0.5,
+    }
+    card = {
+        "wjazz": {"A.m4a": solo},
+        "mscz": {"H.m4a": audio, "H.m4a [line=crepe]": audio},
+        "notation": {"H.m4a": hand | {"tempo_class": "MEDIUM"}, "H.m4a [line=crepe]": hand},
+        "pages": {"Transcriptions_Other/P.m4a": audio | {"silver": 1.0}},
+        "pages_notation": {"Transcriptions_Other/P.m4a": page},
+        "erasures": {"H.m4a": erased},
+    }
+    summary = {"wjazz_note_n": 1.0, "wjazz_beat_n": 1.0, "wjazz_note_f1": 0.9}
+    summary |= {"wjazz_beat_f1": 0.95, "mscz_note_f1": 0.8}
+    summary |= run_eval.wjazz_confidence_summary(card["wjazz"])
+    summary |= run_eval.edit_summary(card["notation"], "mscz")
+    summary |= run_eval.located_summary(card["pages"], card["pages_notation"], "pages_silver")
+    summary |= {"pianist_edit_cost": 50.0, "pianist_edit_cost_crepe": 55.0}
+    summary |= {"pianist_edit_cost_n": 1.0}
+    card["summary"] = summary
+    card["erasure_means"] = run_eval.erasure_means(card["erasures"])
+    card["strata"] = run_eval.build_strata(card)
+
+    run_eval.render(card)
+    out = capsys.readouterr().out
+    assert "mean edit cost 50.0 per 100 notes" in out
+    assert "= hearing 10.0 + notation beside a hearing edit 17.0 + notation alone 23.0" in out
+    assert "a mean over 1 solos, each counted once" in out
+    assert "pooled: each of the 3 false positives counted once" in out
+    assert "4 of 5 erasures in span matched" in out
+    assert "pooled: each matched erasure counted once" in out
+    assert "bar-line steps that are the page's, not the grid's: 1 of 1" in out
+    assert "edit cost 50.0 / 55.0 per 100 notes over 1" in out
+    assert "PDF pages, silver by tempo class" in out
+    assert "WJazzD by tempo class" in out

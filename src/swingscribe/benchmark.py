@@ -173,6 +173,238 @@ def score_notation(
     }
 
 
+# ── what it would cost a reader to turn our page into theirs ────────────────
+#
+# Rhythm, value, pitch F1 and placement are four answers to four questions,
+# each with its own coverage caveat, and none of them is the one a user asks
+# first: how much do I have to fix? `edit_cost` counts it, from the SAME
+# alignment `score_notation` reads (docs/roadmap.md E4), in edits per 100 of
+# the reference's notes:
+#
+#   insertions  our notes the page does not have         delete one
+#   deletions   page notes we do not have                write one in
+#   pitch       an aligned pair at the wrong pitch       change a pitch
+#   position    a matched note off the page's rhythm     move one, or shift
+#                                                        everything after
+#   value       a matched note of the wrong length       change a value
+#   bar         the page starts on the wrong beat        move bar 1, once
+#
+# Position and value use rhythm's and value's own test (NOTATION_TOLERANCE).
+# Value tests every matched note, as value does, so a page that scores value
+# 1.0 costs nothing in value. Position does NOT stop at rhythm 1.0: rhythm
+# tests only a gap with no note between on either side, and `frame_edits`
+# tests every gap between consecutive KEPT notes, across an insertion, a
+# deletion or a pitch substitution too. So a page of rhythm 1.0 can still
+# cost position edits -- and every one of them is then beside that hearing
+# edit (`edit_position_beside`), never notation's alone: a gap rhythm skips
+# holds a hearing edit and has one beside each end, and among equal edit
+# sets `frame_edits` takes the fewest clean ones. A pitch substitution is
+# charged its pitch and nothing more: its own timing is not checked, as
+# rhythm does not check it.
+#
+# Position and value are NOT purely notation's, and the split below exists
+# because the first reading said they were. A matched note's written value
+# is inherited from the gap to the next onset (`without_overlap` truncates
+# there), so an extra note of ours or a missed note of theirs right after a
+# match turns into a value edit on the match; and an extra onset in a beat
+# changes the grid the quantizer picks for it, which moves its neighbours.
+# Over the twelve hand scores, 466 of 846 value edits (55%) touch an
+# insertion, deletion or pitch substitution in the alignment (2026-09-30
+# review). So each position and value edit is also counted BESIDE a hearing
+# edit when one touches it (`edit_position_beside`, `edit_value_beside`):
+# fixing the hearing may fix those too, and only the rest is notation's alone.
+
+
+def frame_edits(
+    differences: list[tuple[float, float]],
+    beside: list[bool] | None = None,
+    hearing_before: list[int] | None = None,
+    opens_off: list[bool] | None = None,
+) -> tuple[int, int, int]:
+    """(position edits, of them beside a hearing edit, bar edits): the fewest
+    edits that put every matched note on the page's rhythm and bar lines.
+
+    `differences` are (our position, their position) for the true matches in
+    order. Rhythm's test is on the gap between two matched notes: ours and
+    theirs agree within NOTATION_TOLERANCE. Rhythm applies it only where
+    neither side has a note between the two, because it measures rhythm;
+    here it is applied between CONSECUTIVE KEPT notes, because this measures
+    where the notes are and an insertion is charged on its own. (Consecutive,
+    not every pair: a frame that drifts under the tolerance at each step --
+    0.1 of a beat a note over twenty notes -- costs nothing, as it costs
+    rhythm nothing.) Counting the gaps that fail charges one misplaced note
+    TWICE -- the gap into it and the gap out of it both fail
+    (`test_a_note_written_on_the_wrong_beat_fails_rhythm`) -- where a reader
+    moves it once. So this counts edits instead: each matched note is either
+    KEPT or MOVED (one edit), and between two consecutive kept notes whose
+    gap fails the test, everything after is SHIFTED (one edit -- the beat a
+    tracker dropped is one inserted beat, not a hundred moved notes).
+
+    The first kept note sets the frame. `opens_off[m]` says a frame opened
+    at matched note m is off the reference's bar lines, and opening there
+    costs one BAR edit (moving bar 1). It is minimised with the rest, so a
+    page on its bar lines before a slipped beat and off them after is one
+    shift, never a shift and a bar edit for one slip; without it the frame
+    is free.
+
+    `beside[m]` says a hearing edit touches matched note m in the alignment;
+    `hearing_before[m]` counts the hearing edits before it, so a gap holds
+    one when the two counts differ. A move is beside when its note is; a
+    shift when either kept note is, or a hearing edit lies inside its gap.
+    The edit count is minimised exactly, O(n^2) over the matched notes;
+    among the sets of that size the one with the FEWEST clean position
+    edits is taken, so the notation-only remainder is a floor, never a guess
+    in its favour, and after that the one with the fewer bar edits. Without
+    flags every edit is clean.
+    """
+    n = len(differences)
+    if n == 0:
+        return 0, 0, 0
+    near = beside or [False] * n
+    before = hearing_before or [0] * n
+    opening = opens_off or [False] * n
+    # One scalar, edits * weight + clean * 2 + bar: the clean position edits
+    # (at most n - 1) and the bar edit (at most 1) can never reach the
+    # weight, so they only ever break a tie between equal edit counts, clean
+    # edits first.
+    weight = 2 * n + 1
+    moved = [0]  # moved[m]: the cost of moving notes 0..m-1
+    for m in range(n):
+        moved.append(moved[-1] + weight + (0 if near[m] else 2))
+    best: list[int] = []  # best[k]: the cheapest over notes 0..k with k kept
+    for k in range(n):
+        ours_k, theirs_k = differences[k]
+        # Every note before k moved, k the first kept -- and its frame on the
+        # bar or one bar edit.
+        cost = moved[k] + (weight + 1 if opening[k] else 0)
+        for j in range(k):
+            candidate = best[j] + moved[k] - moved[j + 1]  # j..k kept, between moved
+            # score_notation's arithmetic, operand for operand.
+            ours = ours_k - differences[j][0]
+            theirs = theirs_k - differences[j][1]
+            if abs(ours - theirs) > NOTATION_TOLERANCE:
+                touched = near[j] or near[k] or before[k] != before[j]
+                candidate += weight + (0 if touched else 2)
+            if candidate < cost:
+                cost = candidate
+        best.append(cost)
+    total = min(best[k] + moved[n] - moved[k + 1] for k in range(n))
+    edits, rest = divmod(total, weight)
+    clean, bar = divmod(rest, 2)
+    position = edits - bar
+    return position, position - clean, bar
+
+
+def position_edit_split(
+    differences: list[tuple[float, float]],
+    beside: list[bool] | None = None,
+    hearing_before: list[int] | None = None,
+) -> tuple[int, int]:
+    """(edits, of them beside a hearing edit) with the frame free
+    (`frame_edits` without the bar lines)."""
+    position, near, _bar = frame_edits(differences, beside, hearing_before)
+    return position, near
+
+
+def position_edits(differences: list[tuple[float, float]]) -> int:
+    """The fewest edits that put every matched note on the page's rhythm
+    (`frame_edits`, without the hearing split or the bar lines)."""
+    return frame_edits(differences)[0]
+
+
+def frame_off_the_bar(ours: float, theirs: float, bar: float) -> bool:
+    """Whether one matched note, ours at `ours` and theirs at `theirs`
+    (quarters from each side's bar 1), puts our bar lines off theirs: the
+    difference modulo the bar, to the nearest half beat, is not zero --
+    `score_bars.beat_agreement`'s test on one note."""
+    delta = round(((ours - theirs) % bar) * 2) / 2
+    return not (delta == 0.0 or delta >= bar)
+
+
+EDIT_FIELDS = ("insertions", "deletions", "pitch", "position", "value", "bar")
+# The two notation components also counted beside a hearing edit.
+EDIT_SPLIT = ("position", "value")
+
+
+def edit_cost(
+    reference: list[tuple[float, float, int]],
+    estimate: list[tuple[float, float, int]],
+    pairs: list[tuple[int | None, int | None]],
+    off_the_bar: bool = False,
+    bar: float = 0.0,
+) -> dict[str, float]:
+    """Edits per 100 reference notes that turn our page into theirs.
+
+    The same inputs as `score_notation` -- (position, duration, pitch) both
+    sides, ours already transposed, `pairs` from the time-free alignment --
+    plus whether the page sits off the reference's bar lines
+    (`score_bars.beat_agreement`'s `beat_offset`), which no gap-based count
+    can see, and the bar's length in quarters. Returns `edit_<component>`
+    per 100 reference notes for each of EDIT_FIELDS, `edit_cost` their sum,
+    and `edits` the raw count.
+
+    The bar edit is charged only on a page off the bar, and then only where
+    the cheapest set of edits OPENS off the bar (`frame_edits`): the verdict
+    is a mode over the page, so a page on its bar lines until a slipped
+    beat and off them after, with more notes after, is off the bar -- and
+    one fix, the shift, not a shift and a moved bar 1. Without the bar's
+    length the frame cannot be tested and an off page pays the bar edit
+    flat.
+
+    Also `edit_position_beside` and `edit_value_beside`, per 100: the
+    position and value edits a HEARING edit (an insertion, a deletion or a
+    pitch substitution) touches -- the pair right before or after the note
+    in the alignment, or for a shift anywhere inside the gap it crosses --
+    and `edit_beside_share`, the share of matched notes a hearing edit
+    touches. The first two are parts of `edit_position` and `edit_value`,
+    not additions to the cost.
+    """
+    counts = dict.fromkeys(EDIT_FIELDS, 0)
+    hearing = [ri is None or ei is None or reference[ri][2] != estimate[ei][2] for ri, ei in pairs]
+    matched: list[tuple[int, int]] = []
+    beside: list[bool] = []  # per matched note: a hearing edit next to it
+    hearing_before: list[int] = []  # per matched note: hearing edits before it
+    seen = 0
+    for index, (ri, ei) in enumerate(pairs):
+        if ri is None and ei is not None:
+            counts["insertions"] += 1
+        elif ei is None and ri is not None:
+            counts["deletions"] += 1
+        elif ri is not None and ei is not None:
+            if reference[ri][2] == estimate[ei][2]:
+                matched.append((ri, ei))
+                beside.append(
+                    (index > 0 and hearing[index - 1])
+                    or (index + 1 < len(pairs) and hearing[index + 1])
+                )
+                hearing_before.append(seen)
+            else:
+                counts["pitch"] += 1
+        seen += hearing[index]
+    differences = [(estimate[ei][0], reference[ri][0]) for ri, ei in matched]
+    opens_off = None
+    if off_the_bar and bar > 0:
+        opens_off = [frame_off_the_bar(ours, theirs, bar) for ours, theirs in differences]
+    position, position_beside, bar_edits = frame_edits(
+        differences, beside, hearing_before, opens_off
+    )
+    counts["position"] = position
+    wrong_value = [
+        abs(estimate[ei][1] - reference[ri][1]) > NOTATION_TOLERANCE for ri, ei in matched
+    ]
+    counts["value"] = sum(wrong_value)
+    # A frame the page opens in is tested only when it has a bar to be on.
+    counts["bar"] = bar_edits if opens_off is not None and matched else int(bool(off_the_bar))
+    per = 100.0 / len(reference) if reference else 0.0
+    out = {f"edit_{field}": counts[field] * per for field in EDIT_FIELDS}
+    out["edit_cost"] = sum(counts.values()) * per
+    out["edits"] = float(sum(counts.values()))
+    out["edit_position_beside"] = position_beside * per
+    out["edit_value_beside"] = sum(w and b for w, b in zip(wrong_value, beside, strict=True)) * per
+    out["edit_beside_share"] = sum(beside) / len(matched) if matched else 0.0
+    return out
+
+
 # Fraction of the reference's notes that must line up before the rhythm and
 # value numbers mean anything. MEASURED, not guessed: scoring every notation
 # we can build against every hand transcription on disk gives coverage
@@ -227,7 +459,7 @@ def notation_notes(notation) -> list[tuple[float, float, int]]:
     )
 
 
-def score_against_notation(notation, score) -> dict[str, float]:
+def score_against_notation(notation, score, off_the_bar: bool = False) -> dict[str, float]:
     """Our Notation against a parsed `mscz.Score`, as notation.
 
     This is the measure that answers "would this notate the way a human
@@ -244,6 +476,12 @@ def score_against_notation(notation, score) -> dict[str, float]:
     Scored against `score.melody`, the top note of each chord. Our line is
     monophonic, so scoring it against every chord tone would charge us for
     notes a single-line score cannot hold (`mscz.Score`).
+
+    The edit cost (`edit_cost`) comes off the same alignment, so it cannot
+    disagree with rhythm and value about which note is which. `off_the_bar`
+    is the caller's placement verdict (`score_bars.bar_line_agreement`): one
+    edit when set, unless the page opens on the bar and the slip is already
+    a shift (`edit_cost`).
     """
     from swingscribe.alignment import measured_transposition
 
@@ -266,6 +504,13 @@ def score_against_notation(notation, score) -> dict[str, float]:
         # enough for the rest of these numbers to be about the same music.
         "coverage": coverage,
         "trusted": coverage >= COVERAGE_FLOOR,
+        **edit_cost(
+            theirs,
+            shifted,
+            aligned.pairs,
+            off_the_bar,
+            float(getattr(score, "beats_per_bar", 0.0) or 0.0),
+        ),
     }
 
 

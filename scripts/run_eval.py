@@ -58,6 +58,34 @@ many tracks it held out; `--test` scores the test tracks alone, against pins
 of their own (`tests/regression/test-baselines.json`), and is for a release.
 Looking at a test number and then tuning is how a test set stops being one.
 
+## Three more questions the card asks (docs/roadmap.md E4-E6)
+
+- **What would the reader have to fix?** Every notation row carries its edit
+  cost per 100 reference notes -- insertions, deletions, pitch, position,
+  value and the bar -- off the alignment rhythm and value read
+  (`benchmark.edit_cost`). Set means over trusted pages. Position and value
+  are also counted BESIDE a hearing edit (an insertion, deletion or pitch
+  substitution touching them in the alignment): a note's written value is
+  the gap to the next onset, so an extra or missing note beside a match
+  shows up as a value edit, and only the rest is notation's alone.
+- **Does confidence point at the errors?** Every WJazzD solo ranks its notes
+  by confidence against mir_eval's false positives; every sidecar with the
+  listener's erasures ranks them against what was erased
+  (`evaluation.confidence_ranking`). An AUC and the share found in the
+  least-confident 10% and 20% of notes. The erasure rows are the
+  listener's live labels, so they are printed and never pinned.
+- **What is a mean made of?** The strata -- WJazzD by tempo class, style and
+  instrument, every notation set by tempo class -- are printed and written
+  with `--json`, each with its n, and never pinned.
+
+A PDF page's bar-line trace also names the page bars that do not fill their
+signature at a step, and counts the steps that are the page's rather than the
+grid's (`page_steps`): an OMR slip moves every later note by a bar's overrun,
+any fraction, where a grid moves whole beats. Each step is judged on the
+unrounded offsets of the matched notes either side, net of the page's
+overrun; one that is neither a whole beat nor the page's is named as
+undecided in the trace line and never counted.
+
 ## What "pinned" means here
 
 Real-audio baselines cannot run in CI -- they need the audio, which is never
@@ -516,6 +544,9 @@ def _wjazz_one(task: tuple) -> dict:
     out = {}
     for solo in found:
         result = score(solo, onsets, ordered)
+        tempoclass, style = db.execute(
+            "select tempoclass, style from solo_info where melid=?", (solo["melid"],)
+        ).fetchone() or (None, None)
         entry = {
             # The run these numbers came from: the notation scorer needs
             # its notes and grid, and cannot get the key back from a row
@@ -536,7 +567,19 @@ def _wjazz_one(task: tuple) -> dict:
             "note_precision": round(result["note_precision"], 4),
             "note_recall": round(result["note_recall"], 4),
             "onset_f1": round(result["onset_f1"], 4),
+            # Strings, so never pinned: they only group the strata (E6).
+            "tempoclass": tempoclass,
+            "style": style,
         }
+        # Does low confidence point at the false positives (E5)?
+        ranking = wjazz_confidence(solo, onsets, ordered, result["note_precision"])
+        if ranking.auc is not None:
+            entry["conf_auc"] = round(ranking.auc, 4)
+            entry["fp_low10"] = round(ranking.low_10, 4)
+            entry["fp_low20"] = round(ranking.low_20, 4)
+            # How many false positives the ranking is over: the weight of the
+            # pooled means (`wjazz_confidence_summary`).
+            entry["fp_n"] = float(ranking.flagged)
         if grid is not None:
             beats = score_beats(db, solo["melid"], grid["beats"], solo["offset"], solo["rate"])
             if beats:
@@ -544,6 +587,117 @@ def _wjazz_one(task: tuple) -> dict:
         # One audio file can hold several annotated solos, so the row is
         # keyed by the solo, not by the file.
         key = name if len(found) == 1 else f"{name} [{solo['performer']}]"
+        out[key] = entry
+    return out
+
+
+def wjazz_confidence(solo: dict, est_on, est_notes: list, note_precision: float):
+    """Our notes' confidence against mir_eval's verdict on each of them, over
+    exactly the notes `score_wjazz.score` scored (docs/roadmap.md E5).
+
+    The span below is `score`'s own, line for line -- it returns counts, not
+    the notes it kept -- and the flags come from `evaluation.note_hits`, the
+    match mir_eval's precision is computed from. The two are checked against
+    each other: a flag set that does not reproduce the note precision beside
+    it is not describing those false positives, and the run stops.
+    """
+    import numpy as np
+
+    from swingscribe.evaluation import confidence_ranking, note_hits
+    from swingscribe.model import NoteEvent
+
+    placed = solo["ref_on"] * solo["rate"] + solo["offset"]
+    lo, hi = float(placed[0]) - 0.25, float(placed[-1]) + 0.25
+    keep = (est_on >= lo) & (est_on <= hi)
+    ours = [est_notes[i] for i in np.nonzero(keep)[0]]
+    reference = [
+        NoteEvent(onset=float(t), duration=0.1, pitch=int(p), confidence=1.0, source="wjazzd")
+        for t, p in zip(placed, solo["ref_p"], strict=True)
+    ]
+    estimate = [
+        NoteEvent(
+            onset=n["onset"],
+            duration=n["duration"],
+            pitch=int(n["pitch"]),
+            confidence=n["confidence"],
+            source="crepe",
+        )
+        for n in ours
+    ]
+    hits = note_hits(reference, estimate)
+    if estimate and abs(sum(hits) / len(estimate) - note_precision) > 1e-9:
+        raise RuntimeError(
+            f"{solo['performer']}: {sum(hits)} hits of {len(estimate)} notes is not "
+            f"the note precision {note_precision:.6f} -- the flags are not score()'s match"
+        )
+    return confidence_ranking([n["confidence"] for n in ours], [not hit for hit in hits])
+
+
+def erasure_scores(runs: dict) -> dict:
+    """Confidence against the listener's erasures, per run (docs/roadmap.md E5).
+
+    An erasure is a note heard correctly and judged not the solo (CLAUDE.md,
+    gui/erasures.py). Matched onto the notes THIS run transcribed by content,
+    through `erasures.resolve` -- never by index, which a re-transcription
+    renumbers -- and only the line's own erasures (`split_by_texture`): one
+    made on the All-notes view is a judgement about a different page. Every
+    take is a row, so a pianist's erasures, made on whichever line was the
+    default when the listener made them, are read on both.
+
+    Each record names the separation it was made on (`model`, `stem`), and
+    `same_stems` / `same_matched` count the in-span records made on THIS
+    run's and how many of them match: whether a label still matches is
+    mostly a question of which stems it was made on (2026-09-30: 132 of 141
+    made on today's stems match the default take, 1 of 235 made on Demucs's).
+
+    Printed and in --json, NEVER pinned (`flatten` skips this section): the
+    inputs are the listener's live labels, not code, and the first erased
+    note in a GUI session would otherwise fail the run with no code change.
+    """
+    from swingscribe.evaluation import confidence_ranking
+    from swingscribe.gui import erasures
+
+    out = {}
+    for key, run in sorted(runs.items()):
+        path = BENCH / f"{track_of(key)}.swingscribe.json"
+        if not path.is_file() or not run["notes"]:
+            continue
+        records = json.loads(path.read_text(encoding="utf-8")).get("erasures") or []
+        line, _other_view = erasures.split_by_texture(records, texture=False)
+        if not line:
+            continue
+        resolved = erasures.resolve(line, run["notes"], span=tuple(run["region"]))
+        silenced = set(resolved["silenced"])
+        in_span = len(silenced) + len(resolved["unmatched"])
+        if not in_span:
+            continue
+        ranking = confidence_ranking(
+            [n["confidence"] for n in run["notes"]],
+            [i in silenced for i in range(len(run["notes"]))],
+        )
+        # The same rule resolve() applies, asked which RECORDS found a note.
+        found = erasures.match(line, run["notes"])
+        lo, hi = run["region"]
+        same = [
+            index
+            for index, record in enumerate(line)
+            if lo - erasures.TOLERANCE_S <= record.get("onset", -1.0) <= hi + erasures.TOLERANCE_S
+            and record.get("model") is not None
+            and record.get("model") == run.get("model")
+            and record.get("stem") == run.get("stem")
+        ]
+        entry = {
+            "erasures": float(in_span),
+            "matched": float(len(silenced)),
+            "moved": float(len(resolved["moved"])),
+            "notes": float(len(run["notes"])),
+            "same_stems": float(len(same)),
+            "same_matched": float(sum(1 for index in same if index in found)),
+        }
+        if ranking.auc is not None:
+            entry["conf_auc"] = round(ranking.auc, 4)
+            entry["erased_low10"] = round(ranking.low_10, 4)
+            entry["erased_low20"] = round(ranking.low_20, 4)
         out[key] = entry
     return out
 
@@ -616,6 +770,41 @@ def mscz_scores(runs: dict, jobs: int = 1) -> dict:
 SOLO_MARGIN_S = 1.0
 
 
+def page_grid(track: str, grid: dict, config=None) -> tuple[dict, list[float], float | None]:
+    """(sidecar, beats, anchor): the grid a track's page is built on.
+
+    The page the Score button scores is built on the REPAIRED grid, under
+    the sidecar's meter settings (gui/musicxml.bar_grid). Until D27 this
+    notated the raw tracked beats in 4/4, so every bar after a dropped or
+    doubled beat sat a beat off the listener's page. A grid cached before
+    then carries no length; its last beat stands in, which only forgoes the
+    extension past it.
+    """
+    from swingscribe.notation import bar_grid_for_settings
+
+    sidecar_path = BENCH / f"{track}.swingscribe.json"  # the track carries any subfolder
+    sidecar = {}
+    if sidecar_path.is_file():
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    raw = grid["beats"]
+    beats, anchor = bar_grid_for_settings(
+        raw,
+        grid.get("downbeats", []),
+        sidecar,
+        config or eval_config(),
+        grid.get("duration") or raw[-1],
+    )
+    return sidecar, beats, anchor
+
+
+def span_bpm(beats: list[float], region: tuple[float, float]) -> float | None:
+    """The page's tempo over a span: 60 over the median beat of the grid it is
+    built on. A median, so a stretch the repair missed does not move it."""
+    inside = [b for b in beats if region[0] <= b <= region[1]]
+    gaps = [b - a for a, b in zip(inside, inside[1:], strict=False) if b > a]
+    return 60.0 / statistics.median(gaps) if gaps else None
+
+
 def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | None = None):
     """Everything from cached notes to a Notation: swing, quantize, notate.
 
@@ -625,28 +814,12 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
     the GUI's Export button needs exactly the same thing and a second copy of
     it here is how the scoring harness has gone wrong before (CLAUDE.md).
     """
-    import json as _json
-
     from swingscribe.model import NoteEvent
-    from swingscribe.notation import bar_grid_for_settings, meter_from_settings, notation_for_span
+    from swingscribe.notation import meter_from_settings, notation_for_span
 
     track = track_of(name)  # the key may carry a take; the sidecar is the track's
-    sidecar_path = BENCH / f"{track}.swingscribe.json"  # name carries any subfolder
-    sidecar = {}
-    if sidecar_path.is_file():
-        sidecar = _json.loads(sidecar_path.read_text(encoding="utf-8"))
-
     config = eval_config()
-    # The page the Score button scores is built on the REPAIRED grid, under
-    # the sidecar's meter settings (gui/musicxml.bar_grid). Until D27 this
-    # notated the raw tracked beats in 4/4, so every bar after a dropped or
-    # doubled beat sat a beat off the listener's page. A grid cached before
-    # then carries no length; its last beat stands in, which only forgoes the
-    # extension past it.
-    raw = grid["beats"]
-    beats, anchor = bar_grid_for_settings(
-        raw, grid.get("downbeats", []), sidecar, config, grid.get("duration") or raw[-1]
-    )
+    sidecar, beats, anchor = page_grid(track, grid, config)
     signature, pulses = meter_from_settings(
         sidecar.get("time_signature"), sidecar.get("pulses_per_bar"), config
     )
@@ -699,20 +872,81 @@ def notation_scores(runs: dict, grids: dict, jobs: int = 1) -> dict:
     return {name: entry for name, entry in zip(names, results, strict=True) if entry}
 
 
+# A notation row's edit cost (benchmark.edit_cost), per 100 reference notes:
+# the total and each component, all pinned.
+EDIT_KEYS = (
+    "edit_cost",
+    "edit_insertions",
+    "edit_deletions",
+    "edit_pitch",
+    "edit_position",
+    "edit_value",
+    "edit_bar",
+)
+
+
+# Each is also counted BESIDE a hearing edit (benchmark.edit_cost): the part
+# a fix to the hearing may take with it. Pinned; parts of the components
+# above, never added to the cost. `edit_beside_share` is the share of
+# matched notes a hearing edit touches, the base rate to read them against.
+EDIT_SPLIT_KEYS = ("edit_position_beside", "edit_value_beside", "edit_beside_share")
+
+
+def read_page_bars(score_path: Path) -> list:
+    """An OMR page's measures, `filled` as far as the score reader's cursor
+    moves through each (`evaluation.reader_bars`) -- which is what places
+    every later note, and what the trace's reference positions came from."""
+    from swingscribe.evaluation import reader_bars
+
+    return reader_bars(Path(score_path))
+
+
+def page_differences(notation, reference) -> list[tuple[float, float]]:
+    """(our position, ours minus theirs) for every matched note: the pairs
+    `bar_line_trace` builds its runs from -- the same function on the same
+    notes, so the same pairs -- which the OMR step check reads UNROUNDED
+    (`evaluation.page_steps`). The trace keeps only their half-beat labels;
+    until `difference_trace` returns its pairs, this asks for them again."""
+    from swingscribe.score_bars import _matched_differences, _our_positions
+
+    theirs = [(n.position, n.pitch) for n in reference.melody]
+    return _matched_differences(_our_positions(notation), theirs)
+
+
+def score_notation_page(notation, reference) -> tuple[dict, dict]:
+    """(bar-line agreement, `score_against_notation`'s result) for one page.
+
+    Rhythm compares gaps and cannot see a page whose every bar line sits a
+    beat off the reference's; the agreement can (score_bars.py). It is read
+    FIRST because the edit cost needs its verdict: a page off the bar costs
+    the reader one edit, moving bar 1 -- unless the page opened on the bar
+    and one slipped beat took it off, which the shift already charges
+    (`benchmark.edit_cost`)."""
+    from swingscribe.benchmark import score_against_notation
+    from swingscribe.score_bars import bar_line_agreement
+
+    agreement = bar_line_agreement(notation, reference)
+    off_the_bar = bool(agreement["beat_n"]) and agreement["beat_offset"] != 0.0
+    return agreement, score_against_notation(notation, reference, off_the_bar=off_the_bar)
+
+
 def _notation_one(task: tuple) -> dict | None:
     name, run, grid, score_path, cache_dir = task
     _worker_setup(cache_dir)
     from swingscribe import mscz
-    from swingscribe.benchmark import readability, score_against_notation
-    from swingscribe.score_bars import bar_line_agreement, bar_line_trace
+    from swingscribe.benchmark import readability
+    from swingscribe.evaluation import tempo_class
+    from swingscribe.score_bars import bar_line_trace
 
     notation = notate_run(name, run, grid)
     if notation is None or not notation.bars:
         return None
     reference = mscz.parse_any(score_path)
-    result = score_against_notation(notation, reference)
+    agreement, result = score_notation_page(notation, reference)
     if not result["n_matched"]:
         return None
+    track = track_of(name)
+    bpm = span_bpm(page_grid(track, grid)[1], tuple(run["region"]))
     entry = {
         "rhythm": round(result["rhythm"], 4),
         "value": round(result["value"], 4),
@@ -723,10 +957,21 @@ def _notation_one(task: tuple) -> dict | None:
         # against a reference can see. Folded in here rather than measured
         # in a pass of its own because the notation is already built.
         **readability(notation),
-        # Rhythm compares gaps and cannot see a page whose every bar line
-        # sits a beat off the reference's; this can (score_bars.py).
-        **{k: round(v, 4) for k, v in bar_line_agreement(notation, reference).items()},
-        **traced(bar_line_trace(notation, reference), reference.beats_per_bar),
+        **{k: round(v, 4) for k, v in agreement.items()},
+        # What turning our page into theirs costs, per 100 of their notes
+        # (docs/roadmap.md E4), off the alignment rhythm and value read.
+        **{k: round(result[k], 3) for k in EDIT_KEYS},
+        # ...and how much of its position and value is beside a hearing edit.
+        **{k: round(result[k], 3 if k != "edit_beside_share" else 4) for k in EDIT_SPLIT_KEYS},
+        **traced(
+            bar_line_trace(notation, reference),
+            reference.beats_per_bar,
+            read_page_bars(Path(score_path)) if is_page(name) else None,
+            page_differences(notation, reference) if is_page(name) else None,
+        ),
+        # WJazzD's tempo class of the grid the page is built on: a string,
+        # so never pinned -- it only groups the strata (E6).
+        "tempo_class": tempo_class(bpm),
     }
     if is_located(name):
         # A located span can be the wrong take, so its rhythm is never
@@ -834,22 +1079,42 @@ def readable_pages(card: dict) -> dict:
     return pages
 
 
-def traced(trace: dict, bar: float) -> dict:
+def traced(
+    trace: dict, bar: float, page_bars: list | None = None, differences: list | None = None
+) -> dict:
     """What a page's bar-line trace adds to its row. `on_the_bar` says a page
     is off; the trace says WHERE and which kind: `beat_steps` counts the
     places the page leaves or rejoins its bar lines (a beat the grid dropped
     or doubled, a chorus the reference omits), `beat_slope` is our quarters
     per reference quarter (0.5 or 2.0 is a grid at the wrong pulse), and
-    `trace` is the sentence a person reads -- a string, so never pinned."""
+    `trace` is the sentence a person reads -- a string, so never pinned.
+
+    `page_bars` (an OMR page's measures, `read_page_bars`) and `differences`
+    (its matched notes, `page_differences`) add the OMR step check: each
+    step is judged on the unrounded offsets either side, net of the page's
+    overrun (`evaluation.page_steps`). `page_steps` counts the steps that
+    are the PAGE's slip, not the grid's; the sentence names the page bars
+    behind them, and every UNDECIDED step -- neither a whole beat nor the
+    page's -- separately, uncounted."""
+    from swingscribe.evaluation import describe_page_steps, page_steps
     from swingscribe.score_bars import describe_trace
 
     if not trace["matches"]:
         return {}
-    return {
+    out = {
         "beat_steps": float(len(trace["steps"])),
         "beat_slope": round(trace["slope"], 3),
         "trace": describe_trace(trace, bar),
     }
+    if page_bars is not None:
+        if differences is None:
+            raise ValueError("the OMR step check needs the page's matched notes")
+        found = page_steps(trace, page_bars, bar, differences)
+        out["page_steps"] = float(sum(1 for item in found if item["verdict"] == "page"))
+        note = describe_page_steps(found)
+        if note:
+            out["trace"] += f"  (OMR check: {note})"
+    return out
 
 
 # A page is traced on the scorecard when its bar lines are in doubt: off the
@@ -901,6 +1166,121 @@ def placement_summary(rows: dict, prefix: str) -> dict:
     }
 
 
+def edit_summary(rows: dict, prefix: str) -> dict:
+    """The set's mean edit cost per 100 reference notes, and each component's
+    mean -- default takes, trusted pairings only: a wrong take is all
+    insertions and deletions, and its edit cost is not a reader's effort."""
+    judged = [
+        e
+        for name, e in rows.items()
+        if "edit_cost" in e and e.get("trusted", 1.0) and take_of(name) is None
+    ]
+    if not judged:
+        return {}
+    out = {f"{prefix}_{k}": round(statistics.fmean(e[k] for e in judged), 3) for k in EDIT_KEYS}
+    for k in EDIT_SPLIT_KEYS:
+        if all(k in e for e in judged):
+            digits = 4 if k == "edit_beside_share" else 3
+            out[f"{prefix}_{k}"] = round(statistics.fmean(e[k] for e in judged), digits)
+    out[f"{prefix}_edit_n"] = float(len(judged))
+    return out
+
+
+def edit_blocks(summary: dict, prefix: str) -> dict | None:
+    """A set's mean edit cost in the three blocks a product decision needs:
+    HEARING (insertions, deletions, pitch), NOTATION BESIDE a hearing edit
+    (position and value edits a hearing edit touches -- fixing the hearing
+    may take them with it), and NOTATION ALONE (the rest of position and
+    value: quantize's and notate's to fix), plus the bar. None when the
+    summary predates the split."""
+    head = f"{prefix}_"
+    s = {k.removeprefix(head): v for k, v in summary.items() if k.startswith(head)}
+    if "edit_cost" not in s or "edit_value_beside" not in s:
+        return None
+    beside = s["edit_position_beside"] + s["edit_value_beside"]
+    return {
+        "hearing": s["edit_insertions"] + s["edit_deletions"] + s["edit_pitch"],
+        "beside": beside,
+        "notation": s["edit_position"] + s["edit_value"] - beside,
+        "bar": s["edit_bar"],
+    }
+
+
+def print_edits(summary: dict, prefix: str) -> None:
+    if f"{prefix}_edit_cost" not in summary:
+        return
+    parts = ", ".join(
+        f"{k.removeprefix('edit_')} {summary[f'{prefix}_{k}']:.1f}" for k in EDIT_KEYS[1:]
+    )
+    print(
+        f"  mean edit cost {summary[f'{prefix}_edit_cost']:.1f} per 100 notes ({parts})"
+        f" over {int(summary[f'{prefix}_edit_n'])}"
+    )
+    blocks = edit_blocks(summary, prefix)
+    if blocks:
+        print(
+            f"    = hearing {blocks['hearing']:.1f} + notation beside a hearing edit "
+            f"{blocks['beside']:.1f} + notation alone {blocks['notation']:.1f} + bar "
+            f"{blocks['bar']:.1f}  ({summary[f'{prefix}_edit_beside_share']:.0%} of matched "
+            "notes touch a hearing edit)"
+        )
+
+
+def confidence_summary(
+    rows: dict, prefix: str, shares: tuple[str, str], weight: str | None = None
+) -> dict:
+    """Means of a set's confidence ranking over the default take's rows that
+    have one (E5): the AUC, and the share of the flagged notes the least
+    confident 10% and 20% of notes hold.
+
+    `weight` names a row field to weight by. The erasures need it: a track
+    holds 1 to 120 matched erasures, and an unweighted mean let one erased
+    note on one track count as much as 120 on another. Weighted by the
+    erasures matched, the shares are exactly the pooled share of all of them
+    found among their own track's least-confident notes, and the AUC the
+    mean over every erasure of the share of its track's kept notes that are
+    more confident than it."""
+    judged = [e for name, e in rows.items() if "conf_auc" in e and take_of(name) is None]
+    if not judged:
+        return {}
+    weights = [float(e[weight]) if weight else 1.0 for e in judged]
+    total = sum(weights)
+
+    def mean(field: str) -> float:
+        return round(sum(w * e[field] for w, e in zip(weights, judged, strict=True)) / total, 4)
+
+    low10, low20 = shares
+    return {
+        f"{prefix}_conf_auc": mean("conf_auc"),
+        f"{prefix}_{low10}": mean(low10),
+        f"{prefix}_{low20}": mean(low20),
+        f"{prefix}_conf_n": float(len(judged)),
+    }
+
+
+def wjazz_confidence_summary(rows: dict) -> dict:
+    """WJazzD's confidence means, both ways, both pinned (E5).
+
+    `wjazz_conf_auc` / `wjazz_fp_low10` / `wjazz_fp_low20` are means over
+    SOLOS, each counted once: how well confidence ranks the errors on a
+    typical solo. `wjazz_pooled_*` weigh each solo by its false positives
+    (`fp_n`), so the shares are the pooled fact -- of all the false
+    positives, the share found among their own solo's least-confident
+    notes -- and `wjazz_pooled_fp_n` is how many that is. The two differ
+    (2026-09-30: 0.646 / 27% / 41% per solo, 0.637 / 25% / 39% pooled over
+    4,320): a solo with few false positives ranks them a little better. The
+    erasures use the pooled form alone, because one track holds 120 of them
+    and another one (`erasure_means`)."""
+    out = confidence_summary(rows, "wjazz", ("fp_low10", "fp_low20"))
+    counted = {k: e for k, e in rows.items() if "fp_n" in e}
+    pooled = confidence_summary(counted, "wjazz_pooled", ("fp_low10", "fp_low20"), weight="fp_n")
+    if pooled:
+        pooled["wjazz_pooled_fp_n"] = float(
+            sum(e["fp_n"] for k, e in counted.items() if "conf_auc" in e and take_of(k) is None)
+        )
+    return out | pooled
+
+
 def print_placement(summary: dict, prefix: str) -> None:
     if f"{prefix}_placement" in summary:
         print(
@@ -922,7 +1302,7 @@ def render_located(rows: dict, notation: dict) -> None:
     and bar line, never a rhythm without its coverage."""
     header = (
         f"  {'tune':<26s} {'pitch':>6s} {'note':>6s} {'bars':>5s} {'cover':>6s} "
-        f"{'rhythm':>7s} {'value':>6s} {'read':>7s} {'bar line':>9s}"
+        f"{'rhythm':>7s} {'value':>6s} {'read':>7s} {'bar line':>9s} {'edits':>6s}"
     )
     print(header)
     print("  " + "-" * (len(header) - 2))
@@ -939,8 +1319,8 @@ def render_located(rows: dict, notation: dict) -> None:
         print(
             f"  {Path(name).stem[:26]:<26s} {e['pitch_f1']:6.3f} {e['note_f1']:6.3f} "
             f"{cell('bars', 5, 0)} {cell('coverage', 6, 3)} {cell('rhythm', 7, 3)} "
-            f"{cell('value', 6, 3)} {cell('readability', 7, 4)} {bar_line:>9s}{flag}"
-            f"{trace_line(n)}"
+            f"{cell('value', 6, 3)} {cell('readability', 7, 4)} {bar_line:>9s} "
+            f"{cell('edit_cost', 6, 1)}{flag}{trace_line(n)}"
         )
 
 
@@ -956,6 +1336,7 @@ def print_located_summary(s: dict, prefix: str, unit: str) -> None:
             f"   over {int(s[f'{prefix}_rhythm_n'])} trusted"
         )
     print_placement(s, prefix)
+    print_edits(s, prefix)
     if f"{prefix}_readability" in s:
         print(
             f"  mean readability {s[f'{prefix}_readability']:.4f} over "
@@ -980,6 +1361,7 @@ def located_summary(rows: dict, notation: dict, prefix: str) -> dict:
         out[f"{prefix}_value"] = round(statistics.fmean(e["value"] for e in trusted), 4)
         out[f"{prefix}_rhythm_n"] = float(len(trusted))
     out.update(placement_summary(notation, prefix))
+    out.update(edit_summary(notation, prefix))
     readable = [e for e in pages.values() if "readability" in e]
     if readable:
         out[f"{prefix}_readability"] = round(
@@ -995,18 +1377,20 @@ def render(card: dict) -> None:
 
     print("\n== WJazzD: our timestamps against a human's, same recording ==")
     if wjazz:
+        # `conf`: the AUC of confidence against being a false positive (E5).
         header = (
             f"  {'tune':<26s} {'soloist':<20s} {'inst':>4s} {'bpm':>5s}  "
-            f"{'note':>6s} {'P':>6s} {'R':>6s} {'beat':>6s}"
+            f"{'note':>6s} {'P':>6s} {'R':>6s} {'beat':>6s} {'conf':>6s}"
         )
         print(header)
         print("  " + "-" * (len(header) - 2))
         for name, e in sorted(wjazz.items(), key=lambda kv: -kv[1]["note_f1"]):
             beat = f"{e['beat_f1']:.3f}" if "beat_f1" in e else "  -  "
+            conf = f"{e['conf_auc']:.3f}" if "conf_auc" in e else "  -  "
             print(
                 f"  {Path(name).stem[:26]:<26s} {e['performer'][:20]:<20s} {e['instrument']:>4s} "
                 f"{e['tempo'] or 0:5.0f}  {e['note_f1']:6.3f} {e['note_precision']:6.3f} "
-                f"{e['note_recall']:6.3f} {beat:>6s}"
+                f"{e['note_recall']:6.3f} {beat:>6s} {conf:>6s}"
             )
         # Each mean states its own n. They are not always the same n -- a solo
         # can be note-scored with no beat grid -- and printing one count for
@@ -1017,6 +1401,19 @@ def render(card: dict) -> None:
         beat_f1 = card["summary"]["wjazz_beat_f1"]
         print(f"\n  mean note F1 {note_f1:.3f} over {note_n} solos", end="")
         print(f"   mean beat F1 {beat_f1:.3f} over {beat_n} solos")
+        shares, s = ("fp_low10", "fp_low20"), card["summary"]
+        print_confidence(
+            s, "wjazz", shares, "false positives", "a mean over {n} solos, each counted once"
+        )
+        if "wjazz_pooled_fp_n" in s:
+            print_confidence(
+                s,
+                "wjazz_pooled",
+                shares,
+                "false positives",
+                f"pooled: each of the {int(s['wjazz_pooled_fp_n'])} false positives"
+                " counted once, over {n} solos",
+            )
     for name, e in sorted(skipped.items()):
         print(f"  (not scored) {Path(name).stem[:30]:<30s} {e['skipped']}")
 
@@ -1024,17 +1421,19 @@ def render(card: dict) -> None:
         print("\n== Notation: our score against the hand transcription, as notation ==")
         header = (
             f"  {'tune':<30s} {'bars':>5s} {'matched':>8s} {'rhythm':>8s} {'value':>7s} "
-            f"{'on bar':>7s}"
+            f"{'edits':>6s} {'on bar':>7s}"
         )
         print(header)
         print("  " + "-" * (len(header) - 2))
         for name, entry in sorted(card["notation"].items()):
+            edits = f"{entry['edit_cost']:6.1f}" if "edit_cost" in entry else f"{'-':>6s}"
             print(
                 f"  {Path(name).stem[:30]:<30s} {int(entry['bars']):5d} "
                 f"{int(entry['n_matched']):8d} {entry['rhythm']:8.3f} {entry['value']:7.3f} "
-                f"{bar_cell(entry)}{trace_line(entry)}"
+                f"{edits} {bar_cell(entry)}{trace_line(entry)}"
             )
         print_placement(card["summary"], "mscz")
+        print_edits(card["summary"], "mscz")
 
     if card.get("wjazz_notation"):
         print("\n== Flex-Q: our page against WJazzD's ALGORITHMIC quantisation of the onsets ==")
@@ -1118,6 +1517,17 @@ def render(card: dict) -> None:
             print(f"\n  -- {tier} --")
             render_located(rows, card.get("pages_notation", {}))
             print_located_summary(card["summary"], f"pages_{tier}", "pages")
+        traced_pages = [e for e in card.get("pages_notation", {}).values() if "page_steps" in e]
+        if traced_pages:
+            print(
+                f"\n  bar-line steps that are the page's, not the grid's: "
+                f"{int(sum(e['page_steps'] for e in traced_pages))} of "
+                f"{int(sum(e['beat_steps'] for e in traced_pages))} steps "
+                f"on {len(traced_pages)} pages"
+            )
+
+    if card.get("erasures"):
+        render_erasures(card["erasures"], card.get("erasure_means", {}))
 
     takes = sorted(k for k in card["mscz"] if take_of(k) is None and second_key(k) in card["mscz"])
     if takes:
@@ -1155,6 +1565,157 @@ def render(card: dict) -> None:
             print(
                 f"  WJazzD note F1 {s['wjazz_pianist_note_f1']:.3f} / "
                 f"{s['wjazz_pianist_note_f1_crepe']:.3f} over {int(s['wjazz_pianist_note_f1_n'])}"
+            )
+        if "pianist_edit_cost" in s:
+            print(
+                f"  edit cost {s['pianist_edit_cost']:.1f} / {s['pianist_edit_cost_crepe']:.1f}"
+                f" per 100 notes over {int(s['pianist_edit_cost_n'])}"
+            )
+
+    if card.get("strata"):
+        render_strata(card["strata"])
+
+
+def print_confidence(
+    summary: dict, prefix: str, shares: tuple[str, str], what: str, basis: str
+) -> None:
+    """One line per confidence mean, saying which mean it is (`basis`, which
+    may name `{n}`, the tracks): a mean over tracks and a pooled one differ,
+    and a share quoted as a pooled fact must be the pooled one."""
+    if f"{prefix}_conf_auc" not in summary:
+        return
+    low10, low20 = shares
+    print(
+        f"  confidence AUC {summary[f'{prefix}_conf_auc']:.3f} against the {what}; the "
+        f"least-confident 10% of notes hold {summary[f'{prefix}_{low10}']:.0%} of them, "
+        f"20% hold {summary[f'{prefix}_{low20}']:.0%} (chance: 10%, 20%)"
+        f" -- {basis.format(n=int(summary[f'{prefix}_conf_n']))}"
+    )
+
+
+def erasure_means(rows: dict) -> dict:
+    """The erasure table's means over the default take (E5): the confidence
+    ranking weighted by matched erasures (`confidence_summary`), and how many
+    erasures there are, match, were made on the run's stems, and of those
+    match. Kept OUT of the summary, so never pinned: the listener's labels
+    are live data (`erasure_scores`)."""
+    out = confidence_summary(rows, "erasure", ("erased_low10", "erased_low20"), weight="matched")
+    erased = [e for k, e in rows.items() if take_of(k) is None]
+    if erased:
+        for field in ("erasures", "matched", "same_stems", "same_matched"):
+            out[f"erasure_{field}"] = float(sum(e.get(field, 0.0) for e in erased))
+    return out
+
+
+def render_erasures(rows: dict, means: dict) -> None:
+    print("\n== Erasures: does low confidence point at what the listener erased? (E5) ==")
+    print(
+        "  (the line's own erasures, matched onto this run's notes by content; `stems`: of\n"
+        "   those made on this run's separation model and stem, how many match; not pinned)"
+    )
+    header = (
+        f"  {'tune':<34s} {'line':>7s} {'erased':>7s} {'matched':>8s} {'moved':>6s} "
+        f"{'stems':>8s} {'notes':>6s} {'AUC':>6s} {'low10':>6s} {'low20':>6s}"
+    )
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    for name, e in sorted(rows.items()):
+        ranked = "conf_auc" in e
+        auc = f"{e['conf_auc']:6.3f}" if ranked else f"{'-':>6s}"
+        low10 = f"{e['erased_low10']:6.0%}" if ranked else f"{'-':>6s}"
+        low20 = f"{e['erased_low20']:6.0%}" if ranked else f"{'-':>6s}"
+        stems = f"{int(e.get('same_matched', 0))}/{int(e.get('same_stems', 0))}"
+        print(
+            f"  {Path(track_of(name)).stem[:34]:<34s} {take_of(name) or 'default':>7s} "
+            f"{int(e['erasures']):7d} {int(e['matched']):8d} {int(e['moved']):6d} "
+            f"{stems:>8s} {int(e['notes']):6d} {auc} {low10} {low20}"
+        )
+    if "erasure_erasures" in means:
+        print(
+            f"\n  {int(means['erasure_matched'])} of {int(means['erasure_erasures'])} erasures"
+            " in span matched a note of the default take; of the "
+            f"{int(means['erasure_same_stems'])} made on its stems, "
+            f"{int(means['erasure_same_matched'])}. The means below weigh each matched"
+            " erasure once."
+        )
+    print_confidence(
+        means,
+        "erasure",
+        ("erased_low10", "erased_low20"),
+        "erased notes",
+        "pooled: each matched erasure counted once, over {n} tracks",
+    )
+
+
+STRATA_TITLES = {"tempoclass": "tempo class", "style": "style", "instrument": "instrument"}
+
+
+def build_strata(card: dict) -> dict:
+    """The means by stratum, each with its n (docs/roadmap.md E6). Printed and
+    written with --json, never pinned: they are the same numbers the pins
+    already hold, cut another way, and a stratum of two would pin noise."""
+    from swingscribe.evaluation import strata
+
+    out: dict = {}
+    solos = [e for k, e in card["wjazz"].items() if "skipped" not in e and take_of(k) is None]
+    if solos:
+        out["wjazz"] = {by: strata(solos, by, ("note_f1", "beat_f1")) for by in STRATA_TITLES}
+    sets = {
+        "hand scores": card.get("notation", {}),
+        "Omnibook": card.get("omnibook_notation", {}),
+    }
+    # The PDF pages per tier, as everywhere else (E3): a silver page and a
+    # scan are different kinds of reference, and one stratum would mix them.
+    for tier in TIERS:
+        sets[f"PDF pages, {tier}"] = {
+            k: e for k, e in card.get("pages_notation", {}).items() if tier_of(e) == tier
+        }
+    notation: dict = {}
+    for label, rows in sets.items():
+        kept = [e for k, e in rows.items() if take_of(k) is None and e.get("trusted", 1.0)]
+        if kept:
+            notation[label] = strata(kept, "tempo_class", ("rhythm", "value", "edit_cost"))
+    # Flex-Q is collateral, never a page measure (D36); cut by the solo's own
+    # tempo class so a slow-tempo collapse in dropped notes would show.
+    flexq = [
+        {**e, "tempo_class": card["wjazz"].get(k, {}).get("tempoclass")}
+        for k, e in card.get("wjazz_notation", {}).items()
+        if take_of(k) is None and e.get("trusted")
+    ]
+    if flexq:
+        notation["Flex-Q (collateral)"] = strata(flexq, "tempo_class", ("rhythm",))
+    if notation:
+        out["notation"] = notation
+    return out
+
+
+def render_strata(strata_card: dict) -> None:
+    from swingscribe.evaluation import TEMPO_CLASS_ORDER
+
+    def ordered(table: dict) -> list[str]:
+        known = [k for k in TEMPO_CLASS_ORDER if k in table]
+        return known + sorted(k for k in table if k not in TEMPO_CLASS_ORDER)
+
+    def cell(entry: dict, field: str, digits: int = 3) -> str:
+        if field not in entry:
+            return f"{'-':>13s}"
+        return f"{entry[field]:7.{digits}f} ({int(entry[field + '_n']):3d})"
+
+    print("\n== Strata: the means cut by kind of music, each with its n (printed, never pinned) ==")
+    for by, table in strata_card.get("wjazz", {}).items():
+        title = f"WJazzD by {STRATA_TITLES.get(by, by)}"
+        print(f"\n  {title:<36s} {'note F1':>13s} {'beat F1':>13s}")
+        for key in ordered(table):
+            entry = table[key]
+            print(f"    {key:<34s} {cell(entry, 'note_f1')} {cell(entry, 'beat_f1')}")
+    for label, table in strata_card.get("notation", {}).items():
+        title = f"{label} by tempo class"
+        print(f"\n  {title:<36s} {'rhythm':>13s} {'value':>13s} {'edits/100':>13s}")
+        for key in ordered(table):
+            entry = table[key]
+            print(
+                f"    {key:<34s} {cell(entry, 'rhythm')} {cell(entry, 'value')} "
+                f"{cell(entry, 'edit_cost', 1)}"
             )
 
 
@@ -1208,10 +1769,23 @@ def flatten(card: dict) -> dict[str, float]:
 
 # The per-track measures a set's headline means are made of, and so the ones
 # whose change is summarised paired (`paired_changes`).
-HEADLINE_FIELDS = ("note_f1", "pitch_f1", "beat_f1", "rhythm", "value", "readability", "on_the_bar")
+HEADLINE_FIELDS = (
+    "note_f1",
+    "pitch_f1",
+    "beat_f1",
+    "rhythm",
+    "value",
+    "readability",
+    "on_the_bar",
+    "edit_cost",
+)
+# Headline measures where LOWER is better. The paired table's up/down columns
+# count the number's direction, so on these "down" is the improvement.
+LOWER_IS_BETTER = ("edit_cost",)
 # Measures a pairing must be trusted for on BOTH sides: a located page below
-# the coverage floor has no rhythm worth comparing (CLAUDE.md).
-TRUSTED_FIELDS = ("rhythm", "value", "on_the_bar")
+# the coverage floor has no rhythm worth comparing (CLAUDE.md), and a wrong
+# take's edit cost is every note deleted and inserted.
+TRUSTED_FIELDS = ("rhythm", "value", "on_the_bar", "edit_cost")
 
 
 def recording_of(pinned_track: str) -> str:
@@ -1263,18 +1837,21 @@ def print_paired(changes: list[tuple]) -> None:
         "(95% interval resampled by recording; up/down/level and the sign test by recording) =="
     )
     header = (
-        f"  {'set / measure':<30s} {'n':>4s} {'rec':>4s} {'mean change':>12s} "
+        f"  {'set / measure':<34s} {'n':>4s} {'rec':>4s} {'mean change':>12s} "
         f"{'95% interval':>21s} {'up':>4s} {'down':>5s} {'level':>6s} {'sign p':>7s}"
     )
     print(header)
     print("  " + "-" * (len(header) - 2))
     for section, field, c in changes:
         mark = "  *" if c.decided else ""
+        label = section + " / " + field + (" (v)" if field in LOWER_IS_BETTER else "")
         print(
-            f"  {section + ' / ' + field:<30s} {c.n:4d} {c.recordings:4d} {c.mean:+12.4f} "
+            f"  {label:<34s} {c.n:4d} {c.recordings:4d} {c.mean:+12.4f} "
             f"   [{c.low:+.4f}, {c.high:+.4f}] {c.up:4d} {c.down:5d} {c.level:6d} {c.p:7.3f}{mark}"
         )
     print("  * the interval excludes zero")
+    if any(field in LOWER_IS_BETTER for _s, field, _c in changes):
+        print("  (v) lower is better: its 'down' column counts the improvements")
 
 
 def compare(card: dict, baselines: Path = BASELINES, pinned: dict | None = None) -> int:
@@ -1410,6 +1987,9 @@ def main() -> None:
             if args.db and grids
             else {}
         ),
+        # Confidence against the listener's erasures (E5), every take.
+        "erasures": erasure_scores(runs),
+        "erasure_means": {},
         "summary": {},
     }
     # Every mean below is over the DEFAULT take: it describes what ships. The
@@ -1454,6 +2034,14 @@ def main() -> None:
         )
     card["summary"].update(placement_summary(card["notation"], "mscz"))
     card["summary"].update(placement_summary(card["wjazz_notation"], "wjazz"))
+    # The listener's reader effort (E4); the located sets carry theirs in
+    # located_summary.
+    card["summary"].update(edit_summary(card["notation"], "mscz"))
+    # Does confidence point at the errors (E5): mir_eval's false positives on
+    # WJazzD (pinned), and the listener's erasures on the default take (the
+    # listener's live labels: printed and in --json, never pinned).
+    card["summary"].update(wjazz_confidence_summary(card["wjazz"]))
+    card["erasure_means"] = erasure_means(card["erasures"])
     # The pianists on both lines, PAIRED: the same tracks under each mean, so
     # the difference is the take's and not the population's.
     for section, field, label in (
@@ -1461,12 +2049,16 @@ def main() -> None:
         ("mscz", "note_f1", "pianist_note_f1"),
         ("notation", "rhythm", "pianist_rhythm"),
         ("wjazz", "note_f1", "wjazz_pianist_note_f1"),
+        ("notation", "edit_cost", "pianist_edit_cost"),
     ):
         default, second = paired_takes(card.get(section, {}), field)
         if default:
             card["summary"][label] = round(statistics.fmean(default), 4)
             card["summary"][f"{label}_{SECOND_LINE}"] = round(statistics.fmean(second), 4)
             card["summary"][f"{label}_n"] = float(len(default))
+    # The means cut by kind of music (E6): printed and in --json, never pinned
+    # (flatten does not read this section).
+    card["strata"] = build_strata(card)
 
     render(card)
     if args.json:

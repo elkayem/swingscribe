@@ -391,6 +391,327 @@ def test_coverage_counts_their_notes_not_ours():
     assert result["coverage"] == result["n_matched"] / result["reference"]
 
 
+# ── edit cost: what turning our page into theirs costs (docs/roadmap.md E4) ──
+
+LINE = [60, 62, 64, 65, 67, 69, 71, 72, 74, 72, 71, 69, 67, 65, 64, 62, 60, 59, 57, 55]
+
+
+def _eighths(pitches, start=0.0, duration=0.5):
+    """(position, duration, pitch) for a line of straight eighths."""
+    return [(start + i * 0.5, duration, p) for i, p in enumerate(pitches)]
+
+
+def _edits(reference, estimate, off_the_bar=False, bar=0.0):
+    from swingscribe.benchmark import edit_cost
+
+    return edit_cost(reference, estimate, aligned_pairs(reference, estimate), off_the_bar, bar)
+
+
+def test_the_same_page_costs_nothing():
+    """The check any measure has to pass before it is believed."""
+    result = _edits(_eighths(LINE), _eighths(LINE))
+    assert result["edit_cost"] == 0.0 and result["edits"] == 0.0
+
+
+def test_a_note_we_invented_and_a_note_we_missed_are_one_edit_each():
+    reference = _eighths(LINE)
+    extra = sorted(reference + [(4.25, 0.25, 50)])  # a note the page does not have
+    assert _edits(reference, extra)["edit_insertions"] == 100.0 / len(reference)
+    missing = reference[:7] + reference[8:]  # the page's eighth note we never wrote
+    result = _edits(reference, missing)
+    assert result["edit_deletions"] == 100.0 / len(reference)
+    assert result["edit_cost"] == result["edit_deletions"]
+
+
+def test_a_wrong_pitch_is_one_pitch_edit_and_nothing_else():
+    reference = _eighths(LINE)
+    estimate = list(reference)
+    estimate[5] = (estimate[5][0], estimate[5][1], estimate[5][2] + 1)
+    result = _edits(reference, estimate)
+    assert result["edits"] == 1.0
+    assert result["edit_pitch"] == 100.0 / len(reference)
+
+
+def test_one_misplaced_note_is_one_edit_where_rhythm_fails_two_gaps():
+    """Rhythm's gap test fails the gap into a misplaced note and the gap out
+    of it. A reader moves the note once, so the edit cost counts once --
+    with rhythm's own test and tolerance."""
+    from swingscribe.benchmark import score_notation
+
+    reference = _eighths(LINE)
+    estimate = list(reference)
+    estimate[6] = (estimate[6][0] + 0.25, estimate[6][1], estimate[6][2])  # on the "e"
+    pairs = aligned_pairs(reference, estimate)
+    rhythm = score_notation(reference, estimate, pairs)["rhythm"]
+    assert rhythm == (len(reference) - 3) / (len(reference) - 1)  # two gaps failed
+    result = _edits(reference, estimate)
+    assert result["edits"] == 1.0
+    assert result["edit_position"] == 100.0 / len(reference)
+
+
+def test_a_beat_the_grid_doubled_is_one_shift_not_every_note_after_it():
+    """A slipped beat moves every note after it (D33's kind). The reader
+    deletes one beat; charging each later note would make one tracker slip
+    cost more than a page of wrong pitches."""
+    reference = _eighths(LINE)
+    estimate = [(p + (1.0 if i >= 8 else 0.0), d, n) for i, (p, d, n) in enumerate(reference)]
+    assert _edits(reference, estimate)["edits"] == 1.0
+
+
+def test_a_page_a_beat_off_throughout_costs_the_bar_edit_alone():
+    """A constant offset is not a rhythm error -- every gap agrees -- and
+    rhythm cannot see it. The placement verdict can, and it is one edit."""
+    reference = _eighths(LINE)
+    estimate = [(p + 1.0, d, n) for p, d, n in reference]
+    assert _edits(reference, estimate)["edit_position"] == 0.0
+    result = _edits(reference, estimate, off_the_bar=True)
+    assert result["edits"] == 1.0
+    assert result["edit_bar"] == result["edit_cost"] == 100.0 / len(reference)
+    # With the bar's length the frame is tested, and it is off: the same.
+    tested = _edits(reference, estimate, off_the_bar=True, bar=4.0)
+    assert tested["edits"] == 1.0 and tested["edit_bar"] == 100.0 / len(reference)
+
+
+def test_one_slipped_beat_is_one_edit_even_when_it_puts_most_of_the_page_off_the_bar():
+    """The placement verdict is a MODE: a page on its bar lines for six notes
+    and a beat off for the fourteen after a slip reads off the bar. The
+    reader inserts one beat; the slip must not be charged as a shift AND a
+    moved bar 1 (the 2026-09-30 review's case)."""
+    reference = _eighths(LINE)
+    estimate = [(p + (1.0 if i >= 6 else 0.0), d, n) for i, (p, d, n) in enumerate(reference)]
+    per = 100.0 / len(reference)
+    result = _edits(reference, estimate, off_the_bar=True, bar=4.0)
+    assert result["edits"] == 1.0
+    assert result["edit_bar"] == 0.0 and result["edit_position"] == per
+
+
+def test_a_page_off_the_bar_from_the_start_that_slips_again_pays_both():
+    """Off from the first note and a slip later: bar 1 moved and one shift."""
+    reference = _eighths(LINE)
+    estimate = [(p + (2.0 if i >= 10 else 1.0), d, n) for i, (p, d, n) in enumerate(reference)]
+    per = 100.0 / len(reference)
+    result = _edits(reference, estimate, off_the_bar=True, bar=4.0)
+    assert result["edits"] == 2.0
+    assert result["edit_bar"] == per and result["edit_position"] == per
+
+
+def test_a_frame_is_off_the_bar_by_beat_agreements_own_test():
+    """The difference modulo the bar, to the nearest half beat: a whole bar
+    off is on the bar lines, a beat off is not, and a quarter of a beat of
+    lateness rounds onto the bar -- as `score_bars.beat_agreement` reads it."""
+    from swingscribe.benchmark import frame_off_the_bar
+
+    assert not frame_off_the_bar(5.0, 1.0, 4.0)  # a whole bar
+    assert frame_off_the_bar(5.0, 0.0, 4.0)  # a beat
+    assert not frame_off_the_bar(4.24, 0.0, 4.0)
+    assert not frame_off_the_bar(3.76, 0.0, 4.0)  # rounds up to the next bar line
+    assert frame_off_the_bar(0.0, 1.5, 3.0)  # 3/4, a beat and a half early
+
+
+def test_the_frame_and_the_bar_edit_agree_with_an_exhaustive_search():
+    """Every kept subset tried, (edits, clean position edits, bar edits)
+    minimised in that order, with a bar edit wherever the first kept note
+    opens off the bar."""
+    import itertools
+    import random
+
+    from swingscribe.benchmark import NOTATION_TOLERANCE, frame_edits
+
+    def exhaustive(diffs, near, before, off):
+        best = None
+        for size in range(1, len(diffs) + 1):
+            for kept in itertools.combinations(range(len(diffs)), size):
+                bar = int(off[kept[0]])
+                edits = len(diffs) - size + bar
+                clean = sum(1 for m in range(len(diffs)) if m not in kept and not near[m])
+                for a, b in itertools.pairwise(kept):
+                    gap = (diffs[b][0] - diffs[a][0]) - (diffs[b][1] - diffs[a][1])
+                    if abs(gap) > NOTATION_TOLERANCE:
+                        edits += 1
+                        clean += not (near[a] or near[b] or before[a] != before[b])
+                if best is None or (edits, clean, bar) < best:
+                    best = (edits, clean, bar)
+        edits, clean, bar = best
+        return edits - bar, edits - bar - clean, bar
+
+    rng = random.Random(11)
+    for _ in range(300):
+        n = rng.randint(1, 7)
+        theirs = sorted(rng.choice([0.0, 0.25, 0.5, 0.75]) + i for i in range(n))
+        shift, ours = 0.0, []
+        for t in theirs:
+            shift += rng.choice([0.0] * 6 + [-1.0, 0.5, 1.0])
+            ours.append(t + shift + rng.choice([0.0, 0.0, 0.0, 0.1, -0.25, 0.5]))
+        diffs = list(zip(ours, theirs, strict=True))
+        near = [rng.random() < 0.3 for _ in range(n)]
+        before = list(itertools.accumulate(rng.random() < 0.2 for _ in range(n)))
+        off = [rng.random() < 0.5 for _ in range(n)]
+        assert frame_edits(diffs, near, before, off) == exhaustive(diffs, near, before, off)
+
+
+def test_a_wrong_value_is_a_value_edit_under_values_own_test():
+    from swingscribe.benchmark import NOTATION_TOLERANCE
+
+    reference = _eighths(LINE)
+    estimate = list(reference)
+    estimate[3] = (estimate[3][0], 0.5 + NOTATION_TOLERANCE, estimate[3][2])  # within: fine
+    estimate[4] = (estimate[4][0], 0.75, estimate[4][2])  # a dotted eighth: an edit
+    result = _edits(reference, estimate)
+    assert result["edits"] == 1.0
+    assert result["edit_value"] == 100.0 / len(reference)
+
+
+def test_the_components_sum_to_the_cost_per_hundred_reference_notes():
+    reference = _eighths(LINE)
+    estimate = [(p, d, n) for p, d, n in reference[2:]]  # two missed
+    estimate[0] = (estimate[0][0], estimate[0][1], estimate[0][2] + 2)  # a wrong pitch
+    estimate.append((12.0, 0.5, 80))  # an invented note
+    result = _edits(reference, estimate, off_the_bar=True)
+    parts = sum(result[f"edit_{field}"] for field in ("insertions", "deletions", "pitch"))
+    parts += result["edit_position"] + result["edit_value"] + result["edit_bar"]
+    assert result["edit_cost"] == pytest.approx(parts)
+    assert result["edit_cost"] == pytest.approx(result["edits"] * 100.0 / len(reference))
+
+
+def test_position_edits_keeps_the_largest_consistent_frame():
+    """Displace two notes by different amounts and step once: three edits,
+    whichever order the arithmetic meets them in."""
+    from swingscribe.benchmark import position_edits
+
+    ours = [float(i) for i in range(12)]
+    theirs = list(ours)
+    ours[2] += 0.5
+    ours[5] -= 0.5
+    ours = [o + (1.0 if i >= 8 else 0.0) for i, o in enumerate(ours)]
+    assert position_edits(list(zip(ours, theirs, strict=True))) == 3
+    assert position_edits([]) == 0
+
+
+def test_a_frame_drifting_under_the_tolerance_note_by_note_costs_nothing():
+    """The test is between CONSECUTIVE kept notes, as rhythm's is between
+    consecutive matches: 0.1 of a beat per note over twenty notes is two
+    beats of drift and no edit. On the record so nobody reads it as a frame
+    test."""
+    from swingscribe.benchmark import position_edits
+
+    theirs = [float(i) for i in range(20)]
+    ours = [t + 0.1 * i for i, t in enumerate(theirs)]
+    assert position_edits(list(zip(ours, theirs, strict=True))) == 0
+
+
+def test_a_wrong_value_beside_a_note_we_invented_is_counted_beside_it():
+    """A matched note's written value is the gap to the next onset, so an
+    extra note of ours right after it shortens it: a value edit a fix to the
+    HEARING takes with it. A wrong value with no hearing edit near it is
+    notation's alone. Both stay in `edit_value`; the split is a part of it."""
+    reference = _eighths(LINE)
+    estimate = list(reference)
+    estimate[6] = (3.0, 0.25, LINE[6])  # cut short by...
+    estimate.insert(7, (3.25, 0.25, 50))  # ...a note the page does not have
+    estimate[13] = (estimate[13][0], 0.75, estimate[13][2])  # a dotted eighth, alone
+    result = _edits(reference, estimate)
+    per = 100.0 / len(reference)
+    assert result["edit_value"] == 2 * per and result["edit_insertions"] == per
+    assert result["edit_value_beside"] == per
+    assert result["edit_position_beside"] == 0.0
+    assert result["edit_beside_share"] == 2 / 20  # notes 6 and 7 touch the insertion
+    assert result["edit_cost"] == 3 * per  # the split adds nothing to the cost
+
+
+def test_a_shift_across_a_missed_note_is_beside_it_and_one_without_is_notation_alone():
+    """A beat's worth of shift where we also missed a note is a candidate for
+    the hearing's; the same shift with nothing missing is the grid's or the
+    quantizer's, and notation's alone."""
+    reference = _eighths(LINE)
+    slipped = [(p + (1.0 if i > 8 else 0.0), d, n) for i, (p, d, n) in enumerate(reference)]
+    missing = slipped[:8] + slipped[9:]  # and the page's note 8 never written
+    result = _edits(reference, missing)
+    per = 100.0 / len(reference)
+    assert result["edit_deletions"] == per and result["edit_position"] == per
+    assert result["edit_position_beside"] == per
+    clean = _edits(reference, slipped)
+    assert clean["edit_position"] == per and clean["edit_position_beside"] == 0.0
+
+
+def test_the_split_takes_the_most_hearing_a_minimal_edit_set_allows():
+    """Two notes a beat apart on our page and half a beat apart on theirs:
+    one shift, or one move of either note -- three sets of one edit. The
+    split takes whichever a hearing edit touches, so the notation-alone
+    remainder is a floor and never a tie broken in its favour."""
+    from swingscribe.benchmark import position_edit_split
+
+    pair = [(0.0, 0.0), (1.5, 1.0)]
+    assert position_edit_split(pair) == (1, 0)
+    assert position_edit_split(pair, [False, False], [0, 0]) == (1, 0)
+    assert position_edit_split(pair, [False, True], [0, 0]) == (1, 1)  # move the touched note
+    assert position_edit_split(pair, [False, False], [0, 1]) == (1, 1)  # shift across a gap
+
+
+def test_the_split_agrees_with_an_exhaustive_search():
+    """Every kept subset tried, (edits, clean edits) minimised: the edit count
+    is the shipped one and the beside count the most a minimal set allows."""
+    import itertools
+    import random
+
+    from swingscribe.benchmark import NOTATION_TOLERANCE, position_edit_split
+
+    def exhaustive(diffs, near, before):
+        best = None
+        for size in range(1, len(diffs) + 1):
+            for kept in itertools.combinations(range(len(diffs)), size):
+                edits = len(diffs) - size
+                clean = sum(1 for m in range(len(diffs)) if m not in kept and not near[m])
+                for a, b in itertools.pairwise(kept):
+                    gap = (diffs[b][0] - diffs[a][0]) - (diffs[b][1] - diffs[a][1])
+                    if abs(gap) > NOTATION_TOLERANCE:
+                        edits += 1
+                        clean += not (near[a] or near[b] or before[a] != before[b])
+                if best is None or (edits, clean) < best:
+                    best = (edits, clean)
+        return best[0], best[0] - best[1]
+
+    rng = random.Random(5)
+    for _ in range(300):
+        n = rng.randint(1, 7)
+        theirs = sorted(rng.choice([0.0, 0.25, 0.5, 0.75]) + i for i in range(n))
+        shift, ours = 0.0, []
+        for t in theirs:
+            shift += rng.choice([0.0] * 6 + [-1.0, 0.5, 1.0])
+            ours.append(t + shift + rng.choice([0.0, 0.0, 0.0, 0.1, -0.25, 0.5]))
+        diffs = list(zip(ours, theirs, strict=True))
+        near = [rng.random() < 0.3 for _ in range(n)]
+        before = list(itertools.accumulate(rng.random() < 0.2 for _ in range(n)))
+        assert position_edit_split(diffs, near, before) == exhaustive(diffs, near, before)
+
+
+def test_score_against_notation_carries_the_edit_cost_off_its_own_alignment():
+    """The edit cost rides on the alignment rhythm and value read, so the
+    three cannot disagree about which note is which."""
+    from swingscribe.benchmark import notation_notes, score_against_notation
+
+    notation = _notation(
+        [
+            _bar([_note(0.0, 1.0, 60), _note(1.0, 1.0, 62), _note(2.0, 2.0, 64)]),
+            _bar([_note(0.0, 1.0, 65), _note(1.0, 1.0, 67), _note(2.0, 2.0, 69)]),
+        ]
+    )
+    melody = [_ScoreNote(p, d, n) for p, d, n in notation_notes(notation)]
+    melody.append(_ScoreNote(8.0, 1.0, 71))  # a note of theirs we never wrote
+    result = score_against_notation(notation, _Score(melody, bars=3))
+    assert result["edit_deletions"] == pytest.approx(100.0 / 7)
+    assert result["edit_cost"] == pytest.approx(100.0 / 7)
+    # Their page a beat later throughout: every gap agrees, the bar lines do
+    # not, and the score's own bar length tests the frame.
+    late = [_ScoreNote(n.position + 1.0, n.duration, n.pitch) for n in melody]
+    off = score_against_notation(notation, _Score(late, bars=3), off_the_bar=True)
+    assert off["edit_bar"] == pytest.approx(100.0 / 7)
+    assert off["edit_cost"] == pytest.approx(2 * 100.0 / 7)
+    assert off["rhythm"] == result["rhythm"] and off["value"] == result["value"]
+    # A verdict the notes themselves do not bear out moves no bar line.
+    on = score_against_notation(notation, _Score(melody, bars=3), off_the_bar=True)
+    assert on["edit_bar"] == 0.0 and on["edit_cost"] == result["edit_cost"]
+
+
 def _notation_of(events, duration=0.5):
     """A 4/4 Notation holding notes at the given (quarter position, pitch)."""
     from swingscribe.model import NotatedBar, NotatedNote, Notation
