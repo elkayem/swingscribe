@@ -250,10 +250,31 @@ def choose_reading(
     next_occupied: bool = False,
     previous_pushed: bool = False,
     pushed_last: bool = False,
+    rerank=None,
+    rerank_grids: tuple[int, ...] | None = None,
 ) -> tuple[int, str]:
     """Pick the subdivision the notes in one beat actually fit, and under
     which timing reading: ("warped", the beat is swung) or ("raw", the beat
     is straight or ternary).
+
+    `rerank` (A6, QuantizeConfig.reranker, docs/reranker.md) is the one
+    opt-in hook: called with every ADMITTED reading -- each (grid,
+    reading) pair the gates allow that keeps the onsets apart, the
+    neighbour-line guards applied whether or not the prior is on -- as
+    dicts, the rule's own pick marked `baseline`, it returns the index of
+    the one to write, or None to keep the rule's. It is not asked when
+    nothing is admitted or the rule's pick is the only admitted reading.
+    So it can choose only what the guards already allow, and never loses a
+    note the rule keeps. Where the rule's own pick is NOT admitted (it
+    merges two onsets, or -- with the figure prior off -- pushes one onto a
+    neighbour's note) and the hook defers, the admitted reading of least
+    snap error is written: the note is kept. With the shipped gates and the
+    prior on that never happens, so a deferring hook writes the rule's page
+    (measured: identical on all 34 pages, 8 triples and 452 WJazzD solos).
+    None leaves every line below as it was. `rerank_grids` widens what it is
+    offered to every reading of those grids, the convention gates lifted
+    and the note-keeping guards kept (a model trained "open"), and there the
+    keep-the-note fallback does fire (+19 notes on the 22 Omnibook pages).
 
     `pushed_last` is R28's one exception (QuantizeConfig.tuplet_pushed_last,
     docs/writing-round2.md): with `inside`, a ternary grid may still be read
@@ -447,11 +468,66 @@ def choose_reading(
     fewest = min(lost.values())
     separating = separating or [d for d in allowed if lost[d] == fewest]
     # Coarsest first: a smaller number of divisions is a coarser grid.
+    pick = None
     for divisions in sorted(separating):
         if errors[divisions] <= best_error + slack + 1e-12:
-            return divisions, chosen[divisions]
-    divisions = min(separating, key=lambda d: (lost[d], errors[d]))
-    return divisions, chosen[divisions]
+            pick = divisions, chosen[divisions]
+            break
+    if pick is None:
+        divisions = min(separating, key=lambda d: (lost[d], errors[d]))
+        pick = divisions, chosen[divisions]
+    if rerank is None:
+        return pick
+
+    # A6's hook: the admitted readings, the rule's pick marked. With
+    # `rerank_grids` the CONVENTION gates are lifted for it (the tuplet and
+    # sixteenth gates, R28's inside rule, the straight reading's swing-point
+    # gate) and every reading of those grids is offered; the note-keeping
+    # guards below hold either way.
+    def offered(divisions: int) -> list[tuple[str, list[float]]]:
+        if rerank_grids is None or raw_offsets is None:
+            return readings(divisions)
+        if divisions % 3 == 0:
+            return [("raw", raw_offsets)]
+        return [("raw", raw_offsets), ("warped", offsets)]
+
+    admitted = []
+    for divisions in allowed if rerank_grids is None else rerank_grids:
+        for name, values in offered(divisions):
+            snapped = [snap(offset, divisions)[0] for offset in values]
+            if len({round(s, 9) for s in snapped}) < len(values):
+                continue
+            if next_occupied and any(s >= 1.0 - 1e-9 for s in snapped):
+                continue
+            if previous_pushed and any(s <= 1e-9 for s in snapped):
+                continue
+            # ...and whether the convention gates allow it too
+            gated = divisions in allowed and any(n == name for n, _ in readings(divisions))
+            admitted.append(
+                {
+                    "divisions": divisions,
+                    "reading": name,
+                    "values": values,
+                    "snapped": snapped,
+                    "error": sum(abs(snap(o, divisions)[1]) for o in values) / len(values),
+                    "figure": figure_of(values, divisions),
+                    "baseline": (divisions, name) == pick,
+                    "gated": gated,
+                }
+            )
+    baseline_admitted = any(c["baseline"] for c in admitted)
+    if not admitted or (baseline_admitted and len(admitted) < 2):
+        return pick
+    # With the prior on, the rule's own pick is always admitted when anything
+    # is (its merge test is this one). With it off the rule does not apply
+    # the neighbour-line guards, and an admitted reading beats one that loses
+    # a note across the beat line.
+    choice = rerank(admitted)
+    if choice is None:
+        if baseline_admitted:
+            return pick
+        choice = min(range(len(admitted)), key=lambda i: admitted[i]["error"])
+    return admitted[choice]["divisions"], admitted[choice]["reading"]
 
 
 def choose_grid(
@@ -592,6 +668,7 @@ def quantize_notes(
     late_downbeat_max_onsets: int = 0,
     isolated_lag_max_onsets: int = 0,
     tuplet_pushed_last: bool = False,
+    reranker="",
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -604,6 +681,11 @@ def quantize_notes(
     A literal `timing` bypasses all of it for `literal_notes`. `polyphonic`
     folds notes the grid puts on one position into a chord (`merge_chords`)
     rather than losing one of them.
+
+    `reranker` (A6, docs/reranker.md) is QuantizeConfig.reranker -- "" off,
+    or the path of a weights JSON -- or any object with a
+    `choose(context, candidates)` method (the training recorder); see
+    `choose_reading`'s `rerank`.
     """
     if len(beats) < 2:
         return [], []
@@ -705,6 +787,14 @@ def quantize_notes(
     grids: dict[int, int] = {}
     readings: dict[int, str] = {}
     prior = figure_prior() if figure_prior_weight > 0 else None
+    model = None
+    if reranker:
+        if isinstance(reranker, str):
+            from swingscribe.reranker import load_model
+
+            model = load_model(reranker)
+        else:
+            model = reranker
     pushed: set[int] = set()  # beats whose chosen reading sent a note to the next beat line
     # Ascending, so the beat before is decided when the prior asks whether it
     # pushed; each beat's choice is its own, so the order changes nothing
@@ -745,6 +835,7 @@ def quantize_notes(
         # of a laid-back downbeat (docs/wjazz-quantize.md). Never at the cost
         # of a note: the eighth grid must keep the onsets apart, and its
         # reading must not land an onset on the neighbouring beat's own note.
+        offered_grids = cands  # before the sparse-beat trim: an "open" reranker's grids
         if len(offsets) < min_onsets_for_sixteenth and _keeps_apart(offsets, 2):
             neighbours = (
                 per_beat.get(index - 1, []) + per_beat_raw.get(index - 1, []),
@@ -752,13 +843,28 @@ def quantize_notes(
             )
             if not _collides_on_eighths(offsets, *neighbours):
                 cands = tuple(d for d in cands if d <= 2 or d % 3 == 0) or cands
+        beat_star = max(STRAIGHT_PHASE, by_beat.get(index, STRAIGHT_PHASE) - lags.get(index, 0.0))
+        rerank = None
+        if model is not None:
+            context = {
+                "index": index,
+                "time": beats[index],
+                "offsets": offsets,
+                "raw": per_beat_raw[index],
+                "star": beat_star,
+                "track_phase": _track,
+                "lag": lags.get(index, 0.0),
+                "beat_s": _beat_length(beats, index),
+                "neighbours": {k: per_beat_raw.get(index + k, []) for k in (-2, -1, 1, 2)},
+            }
+            rerank = functools.partial(model.choose, context)
         grids[index], readings[index] = choose_reading(
             offsets,
             cands,
             min_onsets_for_tuplet,
             grid_slack_s / _beat_length(beats, index),
             raw_offsets=per_beat_raw[index],
-            star=max(STRAIGHT_PHASE, by_beat.get(index, STRAIGHT_PHASE) - lags.get(index, 0.0)),
+            star=beat_star,
             offbeat_pair_fit=offbeat_pair_tuplet_fit,
             inside=tuplet_needs_onsets_inside,
             prior_weight=figure_prior_weight,
@@ -768,8 +874,10 @@ def quantize_notes(
             ),
             previous_pushed=(index - 1) in pushed,
             pushed_last=tuplet_pushed_last,
+            rerank=rerank,
+            rerank_grids=offered_grids if getattr(model, "open", False) else None,
         )
-        if prior is not None:
+        if prior is not None or model is not None:
             grid = grids[index]
             values = per_beat_raw[index] if grid % 3 == 0 or readings[index] == "raw" else offsets
             if any(snap(o, grid)[0] >= 1.0 - 1e-9 for o in values):
@@ -1290,6 +1398,7 @@ def settings(qc: QuantizeConfig) -> dict:
         "late_downbeat_max_onsets": qc.late_downbeat_max_onsets,
         "isolated_lag_max_onsets": qc.isolated_lag_max_onsets,
         "tuplet_pushed_last": qc.tuplet_pushed_last,
+        "reranker": qc.reranker,
     }
 
 

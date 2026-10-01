@@ -674,6 +674,20 @@ class QuantizeConfig(BaseModel):
     # page writes thirds in 5 of 18 such beats), level on the pages.
     # False is off.
     tuplet_pushed_last: bool = False
+    # A6 (docs/reranker.md): a learned per-beat RE-RANKER over the readings
+    # the grid choice already admits -- every (grid, reading) pair that
+    # keeps the beat's onsets apart under every note-keeping guard -- in
+    # place of the coarsest-within-slack pick. Trained on synthetic
+    # performances of human transcription pages (the OMR corpus, dev split)
+    # rendered with a performance model fitted to WJazzD's onsets against
+    # its annotated beats. "" is off; anything else is the path of a weights
+    # JSON (scripts/reranker_train.py), for research. It can only choose
+    # among candidates the guards admit, so it never drops a heard note.
+    # Trained on synthetic performances it is level on every page when
+    # offered what the rule may write (an oracle there buys +0.002) and
+    # decided down on the Omnibook when offered more, so no weights ship;
+    # paired human data (onsets beside a human page) is what could change it.
+    reranker: str = ""
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
@@ -691,6 +705,7 @@ class QuantizeConfig(BaseModel):
             "late_downbeat_max_onsets",
             "isolated_lag_max_onsets",
             "tuplet_pushed_last",
+            "reranker",
         ):
             if not data.get(field):
                 data.pop(field, None)
