@@ -265,6 +265,45 @@ chorus count.
 Snap, the time signature, 2× time and chorus length stay disabled until the
 track has a beat grid.
 
+### Pinning a beat that slipped
+
+Sometimes the bar lines are right for most of a solo and then, from one
+bar on, sit a beat off. The beat tracker heard one beat too many there (two
+ticks crowded together on the Detail view) or one too few (a gap). Moving
+the downbeat cannot fix that: it puts the bars after the slip right and the
+bars before it wrong. Pin a beat instead.
+
+A pin says "a beat is exactly here". SwingScribe takes away any beat less
+than half a beat from it, then lays out the beats between the pin and the
+nearest steady beats either side again, as many as the time between them
+holds. The bars on both sides of the slip come out right. Zoom the Detail
+view in on the slip first, so you can see the ticks.
+
+- **Alt-click** the Detail waveform where the beat really is. There is one
+  pin per beat: a new pin less than half a beat from another one moves that
+  pin instead of adding a second.
+- **Alt-drag** a beat line to where the beat really is, and let go. Alt-drag
+  a pin to move it.
+- Press <kbd>T</kbd>, or click **Pin beat**, to pin a beat at the playhead.
+  Pause first: while the music plays, your reaction time puts the pin late.
+- **Alt-click a pin** to take it away. The **N pins ✕** chip removes them
+  all. It asks first, so click it twice.
+
+A plain click or drag never pins. Drag still pans and a click still seeks,
+so you cannot pin a beat by accident.
+
+Pins are drawn as a pale line with a flag at the top, on the Detail view
+and the piano roll. They are saved with the track like the downbeat. The
+page, **Export MusicXML**, the chord symbols, **Score** and Find the solos
+all use the pinned grid, so what you see on the roll is what you get on the
+page.
+
+Pin where the grid is wrong, not where it is already right. A pin on a beat
+the grid already has only moves that beat. A pin half a beat away from the
+tracker's beats moves the beats around it but never adds one. Either way, a
+pin where the grid was already right leaves the bar lines away from it where
+they were, numbers and all.
+
 ## Step 2: Isolate and audition
 
 This step is the gate. If the soloist is not clearly on top in the isolated
@@ -701,6 +740,8 @@ field, a menu or a slider.
 - <kbd>D</kbd>: set the downbeat at the nearest beat (needs the beat grid).
 - <kbd>F</kbd>: set the form start at the nearest bar line (needs the beat
   grid).
+- <kbd>T</kbd>: pin a beat at the playhead (needs the beat grid). Alt-click
+  the Detail view pins one where you click.
 - <kbd>C</kbd>: turn the click track on or off.
 - <kbd>E</kbd>: switch between the Inspect and Edit tools.
 - <kbd>H</kbd>: switch to the Hands tool and back (two-staff page only).
@@ -804,6 +845,12 @@ against the click. Click the right beat dot, or press <kbd>D</kbd> on it, to
 fix it. If the grid itself runs at half or double the right speed, pass
 `--tempo-hint` on the command line.
 
+**The bars are right until part-way through the solo, then a beat off.**
+The beat tracker gained or lost a beat there. Do not move the downbeat:
+zoom in on the bar where it goes wrong, find the two crowded ticks or the
+gap, and pin the beat where it really is (see "Pinning a beat that
+slipped").
+
 **A piano solo is not getting the piano model.** Check **Ensemble**. Unless
 it is set to **Trio (piano)** or **Solo piano**, the piano model is never
 consulted. On a track with no ensemble yet, separate the span with
@@ -865,6 +912,8 @@ The installation guide has the same steps with more detail.
 - **Downbeat:** the first beat of a bar. SwingScribe counts bar lines from
   it.
 - **Form start:** the bar that becomes bar 1, so an intro is not counted.
+- **Pin:** a beat you placed by hand. The bar grid passes through every
+  pin, and the beats around it are worked out again.
 - **Chorus:** one time through the tune's form, often 12 or 32 bars.
 - **f0:** the fundamental frequency, which is the pitch you hear.
 - **Periodicity:** how regular, and so how clearly pitched, the sound is at

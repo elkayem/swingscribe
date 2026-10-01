@@ -278,6 +278,16 @@ sixteenth runs 26%). The training data is the paired pages.
 
 ## 4. The first run
 
+**2026-10-01: negative on synthetic data** (docs/reranker.md, behind
+`QuantizeConfig.reranker`, off, no weights shipped). Trained on simulated
+performances of 177 dev-split PDF pages, it is level on every page when
+offered what the rule may write, and decided down on the Omnibook when
+offered more. The rule already writes 77% of labelled beats as the human
+does, and choosing the best admitted reading every time buys only +0.002
+rhythm. What remains is outside the candidate set: notes only one side
+has, and notes the page moves across a beat line. That needs paired human
+data (step 2 below) and a model that edits notes, not just ranks readings.
+
 ### O1. Show the page in the app -- DONE 2026-09-30
 
 A Page view renders exactly the MusicXML Export would write (one code path),
@@ -322,6 +332,13 @@ Cheese Cake's page and WJazzD's annotation both show our grid slipping a beat
 at bar 83-84; the downbeat is one click but a mid-solo slip is not. Let the
 listener pin a beat and have `repair_beats` re-derive the grid around it.
 
+**2026-10-01: done** (docs/beat-pins.md). A pin is a sidecar judgement
+(`beat_pins`) reached through `meter.bar_grid`, so the roll, the page,
+Export, the chord chart and the harness all see it, and no cache key moves.
+One pin at 160.55 s takes Cheese Cake from 0.707 to 0.893 on the bar
+against the page, and from 0.689 to 0.878 against WJazzD, with no step.
+None of 17,640 single pins on the cached grids breaks a grid.
+
 ## 5. Ruled out
 
 **Tuning.** Off-A440 recordings do not explain the semitone errors: over 175
@@ -345,13 +362,15 @@ beat), default off (docs/writing-round2.md).
    is more ground truth for everything above, every page WJazzD also
    annotated is a triple, and the paired pages ARE A6's training data. This
    is now the constraint on accuracy.
-3. **A6, the learned re-ranker** inside `choose_grid`, trained on the paired
-   pages and judged on the triples, the listener's pages and the Omnibook.
-   The largest remaining lever on the page.
+3. **A6 on paired pages**: the synthetic-data re-ranker is level (2026-10-01),
+   because the gap sits outside the readings `choose_grid` enumerates. With
+   the paired pages, A6 becomes a model that also moves notes across beat
+   lines and adds or drops them by convention, judged on the triples, the
+   listener's pages and the Omnibook. Still the largest lever on the page.
 4. **The head-to-head** once the listener has AnthemScore 6.3 exports.
-5. **O5 and the page view's next steps**: pin a beat and re-derive the grid;
-   link the page to the playhead; show the hand score's bars beside ours;
-   import a lead sheet's changes.
+5. **The page view's next steps** (O5 done 2026-10-01): link the page to
+   the playhead; show the hand score's bars beside ours; import a lead
+   sheet's changes.
 6. **A2 step 2** (fine-tune on our stems) once the missing WJazzD audio is
    in -- chiefly for a shippable model, the recall prize is modest.
 

@@ -81,7 +81,7 @@
   <section class="panel" id="panel-select">
     <div class="panel-head">
       <h2><span class="step">1</span> Select the span</h2>
-      <div class="panel-note">Drag on the overview to select, or press Find the solos and click a band. On the detail view, drag the <span class="handle-word">A</span>/<span class="handle-word">B</span> handles to move an edge, or tap <kbd>A</kbd> / <kbd>B</kbd> while it plays; clicking elsewhere only moves the playhead. <kbd>D</kbd> sets the downbeat at the playhead, <kbd>F</kbd> starts the form (bar 1) there. Or click a beat dot / shift-click for the form.</div>
+      <div class="panel-note">Drag on the overview to select, or press Find the solos and click a band. On the detail view, drag the <span class="handle-word">A</span>/<span class="handle-word">B</span> handles to move an edge, or tap <kbd>A</kbd> / <kbd>B</kbd> while it plays; clicking elsewhere only moves the playhead. <kbd>D</kbd> sets the downbeat at the playhead, <kbd>F</kbd> starts the form (bar 1) there. Or click a beat dot / shift-click for the form. Bars a beat off from the middle of a solo on? Alt-click the beat where it really is to pin it (<kbd>T</kbd> pins at the playhead).</div>
     </div>
 
     <div class="wave-block">
@@ -100,7 +100,7 @@
     <div class="wave-block">
       <div class="wave-label">
         Detail <span class="muted" id="detail-range"></span>
-        <span class="muted gesture-hint">scroll to zoom · shift-scroll or drag to pan</span>
+        <span class="muted gesture-hint">scroll to zoom · shift-scroll or drag to pan · Alt-click to pin a beat</span>
         <span class="spacer"></span>
         <span class="muted beats-info" id="beats-info" hidden></span>
         <button class="chip" id="beats-toggle" title="Show or hide the bar grid the transcription will quantize against: a tick per beat, a numbered dot per bar. The first time, this runs the beat tracker over the whole track, which takes a few seconds.">Beats</button>
@@ -119,6 +119,8 @@
                title="Bars per chorus, for a form the menu does not list — a 20-bar tune, a 64-bar AABA counted in halves. Enter applies it, Esc cancels.">
         <button class="chip" id="snap-toggle" disabled title="When placing A or B, snap to the nearest beat or bar line. The nudge buttons never snap, so you can still fine-tune afterwards. (S)">Snap: off</button>
         <button class="chip" id="form-reset" hidden title="Clear the form start. Bar 1 goes back to the first bar line of the track.">bar 1 set ✕</button>
+        <button class="chip" id="pin-beat" disabled title="Pin a beat at the playhead: a beat is exactly here. Where the beat tracker slipped a beat mid-solo, the bar lines after the slip sit a beat off; a pin at the slip re-derives the beats around it so the count is right on both sides. Alt-click the Detail waveform to pin where you click, Alt-drag a beat line to where the beat really is, Alt-click a pin to remove it. (T)">Pin beat</button>
+        <button class="chip" id="pins-clear" hidden title="Remove every pinned beat: the bar grid goes back to the beat tracker's. Click twice — the first click asks.">pins ✕</button>
         <button class="chip" data-focus="fit" title="Zoom the detail view to the whole selection, with a little room either side.">Fit selection</button>
         <button class="chip" data-focus="a" title="Zoom the detail view in tight around A, to place it by eye.">Edge A</button>
         <button class="chip" data-focus="b" title="Zoom the detail view in tight around B, to place it by eye.">Edge B</button>

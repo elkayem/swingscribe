@@ -5,6 +5,8 @@ reproductions of the two failure modes measured on real tracks: a tracker that
 drops to half rate for a passage, and a downbeat layer that is noise.
 """
 
+import random
+
 import pytest
 
 from swingscribe.config import Config, MeterConfig
@@ -581,3 +583,353 @@ def test_bar_grid_is_the_repaired_extended_grid_and_its_sections():
     assert [b.time for b in beats] == [b.time for b in repaired]
     assert sections == meter.derive_sections(repaired, downbeats, config)
     assert sections and sections[0].anchor == 1.5
+
+
+# ── beats the listener pinned (roadmap O5) ──────────────────────────────────
+
+# Cheese Cake's slip, as the tracker gave it (160.28, 160.48, 160.60, 160.84 s
+# on a 0.26 s pulse): a doubled beat whose pair is 0.32 s, a millisecond past
+# the one-pulse test, so the repair keeps both and every bar after it is a
+# beat off. The true beats are the two ends and one between them.
+SLIP_PULSE = 0.26
+
+
+def slipped(count_before: int = 40, count_after: int = 40) -> tuple[list[float], list[float]]:
+    """(the tracker's beats, the true beats) around one doubled beat."""
+    head = [round(i * SLIP_PULSE, 6) for i in range(count_before)]
+    t = head[-1]
+    tail = [round(t + 0.56 + i * SLIP_PULSE, 6) for i in range(count_after)]
+    tracked = head + [round(t + 0.20, 6), round(t + 0.32, 6)] + tail
+    return tracked, head + [round(t + 0.28, 6)] + tail
+
+
+def times(beats: list[meter.Beat]) -> list[float]:
+    return [b.time for b in beats]
+
+
+def test_no_pins_change_nothing():
+    tracked = steady(40)
+    repaired = meter.repair_beats(tracked, MeterConfig())
+    assert meter.apply_pins(repaired, [], MeterConfig()) == repaired
+    assert meter.apply_pins(repaired, None, MeterConfig()) == repaired
+    assert meter.bar_grid(tracked, [], MeterConfig(), 20.0, pins=[]) == meter.bar_grid(
+        tracked, [], MeterConfig(), 20.0
+    )
+
+
+def test_the_repair_misses_cheese_cakes_doubled_beat():
+    """The precondition the pin exists for: without one the grid is a beat long."""
+    tracked, truth = slipped()
+    repaired = meter.repair_beats(tracked, MeterConfig())
+    assert len(repaired) == len(truth) + 1
+
+
+def test_a_pin_at_a_doubled_beat_takes_the_extra_one_out():
+    tracked, truth = slipped()
+    t = truth[39]
+    repaired = meter.repair_beats(tracked, MeterConfig())
+    pinned = meter.apply_pins(repaired, [t + 0.27], MeterConfig())
+    assert len(pinned) == len(truth)
+    assert t + 0.27 in times(pinned)
+    assert [b for b in pinned if b.pinned] == [meter.Beat(t + 0.27, pinned=True)]
+    # Away from the slip nothing moved: the pin is a local fix.
+    assert times(pinned)[:39] == truth[:39]
+    assert times(pinned)[42:] == truth[42:]
+
+
+def test_a_pin_anywhere_on_the_slip_mends_it_whichever_beat_it_lands_on():
+    """The listener drags one of the two crowded beat lines onto the other,
+    or onto where the beat really is: all three are the same fix."""
+    tracked, truth = slipped()
+    t = truth[39]
+    repaired = meter.repair_beats(tracked, MeterConfig())
+    for pin in (t + 0.20, t + 0.27, t + 0.32):
+        assert len(meter.apply_pins(repaired, [pin], MeterConfig())) == len(truth), pin
+
+
+@pytest.mark.parametrize("form_start", [None, 2.0])
+def test_a_pin_anywhere_on_the_slip_keeps_one_bar_grid_numbered_like_the_truth(form_start):
+    """The review's finding: a pin on one of the crowded beats (t+0.20) or
+    beside the slip left an interval each side of it outside the tolerance,
+    the grid split there, a bar line went missing and every bar after it was
+    numbered one lower -- the beat COUNT was right all along. Every 20 ms
+    from 0.3 s before the slip to 0.68 s into it, the pinned grid is one
+    section, and its bar lines are the true grid's: the same numbers, and
+    after the slip the same times."""
+    tracked, truth = slipped()
+    t = truth[39]
+    config = MeterConfig(anchor=0.0, form_start=form_start)
+    true_beats, true_sections = meter.bar_grid(truth, [], config, 30.0)
+    true_lines = meter.bar_lines(true_beats, true_sections, form_start)
+    for k in range(-30, 70, 2):
+        pin = round(t + k / 100, 4)
+        beats, sections = meter.bar_grid(tracked, [], config, 30.0, pins=[pin])
+        lines = meter.bar_lines(beats, sections, form_start)
+        assert len(sections) == 1, pin
+        assert [n for _, n in lines] == [n for _, n in true_lines], pin
+        after = [(a, c) for (a, _), (c, _) in zip(lines, true_lines, strict=True) if c > t + 1.0]
+        assert after and all(a == pytest.approx(c) for a, c in after), pin
+
+
+def test_a_pinned_slip_puts_the_bar_lines_after_it_back_and_leaves_those_before():
+    """What the downbeat cannot do: right on BOTH sides of the slip."""
+    tracked, truth = slipped()
+    config = MeterConfig(anchor=0.0)
+    pin = truth[40]  # the true beat inside the slip
+    true_lines = meter.bar_lines(*meter.bar_grid(truth, [], config, 30.0))
+    off_lines = meter.bar_lines(*meter.bar_grid(tracked, [], config, 30.0))
+    pinned_lines = meter.bar_lines(*meter.bar_grid(tracked, [], config, 30.0, pins=[pin]))
+    after = [t for t, _ in true_lines if t > pin + 0.1]
+    assert [t for t, _ in off_lines if t > pin + 0.1][:5] != pytest.approx(after[:5])
+    assert [t for t, _ in pinned_lines if t > pin + 0.1] == pytest.approx(after)
+    assert [t for t, _ in pinned_lines if t < pin - 0.1] == pytest.approx(
+        [t for t, _ in true_lines if t < pin - 0.1]
+    )
+    assert [n for _, n in pinned_lines] == [n for _, n in true_lines]
+
+
+def test_a_pin_in_a_dropped_beat_puts_it_back():
+    """Three tracked intervals of 1.33 pulses over four: each rounds to one,
+    so the repair inserts nothing and the grid is a beat short. A pin on the
+    true beat in the middle re-derives the stretch from time."""
+    tracked = steady(9) + [4.667, 5.333] + steady(29, start=6.0)
+    repaired = meter.repair_beats(tracked, MeterConfig())
+    assert len(repaired) == 40  # the precondition: one short
+    pinned = meter.apply_pins(repaired, [5.0], MeterConfig())
+    assert times(pinned) == pytest.approx(steady(41))
+    assert [b.time for b in pinned if b.pinned] == [5.0]
+    # The beats re-derived beside the pin are the software's, and say so.
+    assert [b.time for b in pinned if b.implied] == pytest.approx([4.5, 5.5])
+
+
+def test_pins_at_both_ends_of_a_ragged_stretch_make_the_count_between_them_whole():
+    """Between two pins the count is theirs: as many beats as the time holds
+    at the local pulse, each the tracker's own where one is near its place."""
+    ragged = [4.3, 5.1, 5.6, 6.9, 7.3]
+    beats = [meter.Beat(t) for t in sorted(steady(9) + ragged + steady(25, start=8.0))]
+    pinned = meter.apply_pins(beats, [4.0, 8.0], MeterConfig())
+    inside = [t for t in times(pinned) if 4.0 <= t <= 8.0]
+    assert len(inside) == 9  # 4.0, eight half-second beats to 8.0
+    assert inside[0] == 4.0 and inside[-1] == 8.0
+    # 5.1, 5.6 and 6.9 sit within a quarter of a step of their places and
+    # keep their own times; 4.3 and 7.3 do not, and give way.
+    assert inside == pytest.approx([4.0, 4.5, 5.1, 5.6, 6.0, 6.5, 6.9, 7.5, 8.0])
+    assert times(pinned)[:8] == steady(8)
+    assert times(pinned)[-24:] == steady(24, start=8.5)
+
+
+@pytest.mark.parametrize("every", [1, 4, 24])
+@pytest.mark.parametrize("length", [8, 16, 24])
+def test_pins_in_a_long_ragged_stretch_keep_the_count(length, every):
+    """Pins at TRUE beats inside a jittered stretch (count kept, every beat
+    within a fifth of a pulse of its place) leave the count and the bar
+    numbers after it as a clean grid has them. The window's pulse used to be
+    read off the rolling reference, which drifts with the jitter (0.519 s on
+    0.5 s over 24 beats) and counted a 13.5 s window one beat short; and a
+    jittered beat that passes the steadiness test by chance ended a window
+    with no steady interval near it."""
+    truth = [1.0 + 0.5 * i for i in range(120)]
+    pattern = [0.2, -0.15, 0.1, -0.2, 0.18, -0.05, -0.2, 0.15]
+    tracked = list(truth)
+    for k, i in enumerate(range(40, 40 + length)):
+        tracked[i] = truth[i] + pattern[k % len(pattern)] * 0.5
+    stretch = list(range(40, 40 + length))
+    pins = [truth[i] for i in stretch[::every]] + [truth[stretch[-1]]]
+    config = MeterConfig(anchor=truth[4])
+    duration = truth[-1] + 1.0
+    clean, clean_sections = meter.bar_grid(truth, [], config, duration)
+    pinned, sections = meter.bar_grid(tracked, [], config, duration, pins=pins)
+    assert len(sections) == 1
+    assert len(times(pinned)) == len(times(clean))
+    for t in times(pinned):
+        assert min(abs(t - x) for x in truth) <= 0.2 * 0.5 + 1e-6 or not truth[0] <= t <= truth[-1]
+    assert meter.bar_lines(pinned, sections)[-5:] == pytest.approx(
+        meter.bar_lines(clean, clean_sections)[-5:]
+    )
+
+
+def test_a_pin_half_a_beat_off_the_tracker_moves_beats_and_adds_none():
+    """The listener and the tracker disagree about the phase. The grid goes
+    through the pin, nothing else sits within half a pulse of it, the count
+    across the window is the count its ends hold, and outside the window
+    every beat is the tracker's."""
+    beats = [meter.Beat(t) for t in steady(41)]
+    pinned = meter.apply_pins(beats, [5.25], MeterConfig())
+    assert len(pinned) == len(beats)
+    assert 5.25 in times(pinned)
+    assert all(abs(t - 5.25) > 0.25 for t in times(pinned) if t != 5.25)
+    assert [t for t in times(pinned) if t <= 4.5] == steady(10)
+    assert [t for t in times(pinned) if t >= 6.0] == steady(29, start=6.0)
+
+
+@pytest.mark.parametrize("form_start", [None, 2.0])
+@pytest.mark.parametrize("pin", [20.2, 20.25, 20.3])
+def test_a_pin_half_a_beat_off_keeps_one_bar_grid_and_its_numbers(pin, form_start):
+    """The window around a half-beat pin is uneven by construction (0.375,
+    0.375, 0.75 s at 20.25 on a 0.5 s pulse): judged on the tolerance it
+    split the grid at the pin and numbered every bar after it one lower.
+    The window is the listener's, so the grid is one section and every bar
+    line away from the pin keeps its time and its number."""
+    config = MeterConfig(anchor=0.0, form_start=form_start)
+    tracked = steady(80)
+    plain_beats, plain_sections = meter.bar_grid(tracked, [], config, 40.0)
+    beats, sections = meter.bar_grid(tracked, [], config, 40.0, pins=[pin])
+    assert len(sections) == 1 == len(plain_sections)
+    plain = meter.bar_lines(plain_beats, plain_sections, form_start)
+    lines = meter.bar_lines(beats, sections, form_start)
+    assert [n for _, n in lines] == [n for _, n in plain]
+    away = [(a, c) for (a, _), (c, _) in zip(lines, plain, strict=True) if abs(c - pin) > 1.5]
+    assert all(a == c for a, c in away)
+
+
+def jittered(seed: int, count: int = 120, pulse: float = 0.5, jitter: float = 0.02) -> list[float]:
+    rnd = random.Random(seed)
+    return [round(i * pulse + rnd.uniform(-jitter, jitter), 4) for i in range(count)]
+
+
+@pytest.mark.parametrize("form_start", [None, 2.0])
+def test_a_tap_off_a_beat_never_splits_the_grid_or_renumbers_a_bar(form_start):
+    """A pin 0.1-0.5 of a pulse off a beat the grid already has right -- a
+    tap error, or a listener who hears the beat elsewhere -- on a grid
+    jittered by 20 ms. Before the window vouched for itself, 38 of 130 such
+    pins split the grid and renumbered the bars after it; on Cheese Cake, 34
+    of 210 pins 50 ms off a steady beat did."""
+    config = MeterConfig(anchor=0.0, form_start=form_start)
+    for seed in range(5):
+        tracked = jittered(seed)
+        plain_beats, plain_sections = meter.bar_grid(tracked, [], config, 60.0)
+        plain = meter.bar_lines(plain_beats, plain_sections, form_start)
+        for frac in (-0.5, -0.4, -0.3, -0.2, -0.1, 0.1, 0.2, 0.3, 0.4, 0.5):
+            pin = tracked[40] + frac * 0.5
+            beats, sections = meter.bar_grid(tracked, [], config, 60.0, pins=[pin])
+            lines = meter.bar_lines(beats, sections, form_start)
+            assert len(sections) == len(plain_sections) == 1, (seed, frac)
+            assert [n for _, n in lines] == [n for _, n in plain], (seed, frac)
+            far = [
+                (a, c) for (a, _), (c, _) in zip(lines, plain, strict=True) if abs(c - pin) > 1.5
+            ]
+            assert all(a == c for a, c in far), (seed, frac)
+
+
+def test_a_pin_decides_nothing_outside_its_window():
+    """A pin is local. Its new intervals moved the rolling reference pulse a
+    few milliseconds, and a whole-gap test that FAILED on the unpinned grid
+    -- the free stretch at the head, 0.478 to 1.538 s -- passed: the grid
+    gained a bar at 0.0 s and every bar line after it, 20 s of them, was
+    renumbered. Outside the window the unpinned grid's answers stand
+    (`meter.Judgement`)."""
+    rnd = random.Random(22)
+    t, tracked = 0.0, []
+    for _ in range(48):
+        tracked.append(round(t, 3))
+        t += 0.5 * (2.0 if rnd.random() < 0.08 else 1.0) * rnd.uniform(0.94, 1.06)
+    config = MeterConfig(anchor=0.0)
+    duration = tracked[-1] + 0.5
+    plain_beats, plain_sections = meter.bar_grid(tracked, [], config, duration)
+    plain = meter.bar_lines(plain_beats, plain_sections)
+    pin = round(tracked[8] + 0.2 * (tracked[9] - tracked[8]), 3)
+    assert pin == 4.626
+    beats, sections = meter.bar_grid(tracked, [], config, duration, pins=[pin])
+    assert meter.bar_lines(beats, sections) == plain
+    assert [(s.start, s.first_bar) for s in sections] == [
+        (s.start, s.first_bar) for s in plain_sections
+    ]
+    # The precondition: judged afresh, the head is drawn and renumbers all.
+    afresh = meter.bar_lines(beats, meter.derive_sections(beats, [], config))
+    assert afresh[0][0] < plain[0][0]
+    assert [n for t, n in afresh if t > 10.0] != [n for t, n in plain if t > 10.0]
+
+
+def test_steady_intervals_vouches_for_a_window_and_keeps_the_unpinned_judgement():
+    beats = [meter.Beat(t) for t in steady(20)]
+    moved = beats[:10] + [meter.Beat(5.12, pinned=True)] + beats[11:]  # 0.24 of a pulse
+    plain = meter.steady_intervals(moved, MeterConfig())
+    assert all(plain)  # the two intervals beside the pin, 0.62 and 0.38 s, too
+    unpinned = [*beats[:10], meter.Beat(5.12), *beats[11:]]
+    assert not all(meter.steady_intervals(unpinned, MeterConfig()))
+    # A judgement on an interval the pin left alone is kept, even False.
+    judged = meter.Judgement(steady={(beats[2].time, beats[3].time): False}, bridge_pulse=0.5)
+    flags = meter.steady_intervals(moved, MeterConfig(), judged)
+    assert flags[2] is False and flags[9] and flags[10]
+
+
+def test_the_bridge_is_measured_against_the_unpinned_grids_pulse():
+    """On a tracker's 20 ms frame grid a hole of exactly two pulses sits ON
+    the bridge threshold, and a pin elsewhere moved the median interval by
+    2e-15 s -- enough to split Ko Ko in four places 47 s from the pin. The
+    pinned grid bridges against the unpinned grid's pulse."""
+    times_ = steady(20) + [9.62, 10.0] + steady(20, start=10.5)  # 0.12 + 0.38 s
+    beats = [meter.Beat(t) for t in times_]
+    assert len(meter.metrical_spans(beats, MeterConfig())) == 1  # bridged
+    judged = meter.judge(beats, MeterConfig())
+    assert meter.metrical_spans(beats, MeterConfig(), judged) == meter.metrical_spans(
+        beats, MeterConfig()
+    )
+    narrow = meter.Judgement(steady=judged.steady, bridge_pulse=0.2)
+    assert len(meter.metrical_spans(beats, MeterConfig(), narrow)) == 2
+
+
+def test_a_pin_near_the_end_does_not_stop_the_extension():
+    """Judged on the tracker's gaps, a pin's uneven pair near the last beat
+    made the edge look unsteady: on Cheese Cake a pin 50 ms off the beat at
+    380.88 s took the extension, and the last nine bar lines, away."""
+    tracked = steady(40)  # 0 .. 19.5
+    plain, _ = meter.bar_grid(tracked, [], MeterConfig(), 30.0)
+    pinned, _ = meter.bar_grid(tracked, [], MeterConfig(), 30.0, pins=[18.1])
+    assert plain[-1].time == pytest.approx(30.0)
+    assert pinned[-1].time == pytest.approx(30.0)
+    assert len(pinned) == len(plain)
+
+
+def test_two_pins_within_half_a_beat_are_one():
+    """Kept both, they made a beat of 50-200 ms and threw the count. The GUI
+    replaces the nearer pin; a hand-edited sidecar's later one is dropped."""
+    beats = [meter.Beat(t) for t in steady(41)]
+    pinned = meter.apply_pins(beats, [5.0, 5.2], MeterConfig())
+    assert [b.time for b in pinned if b.pinned] == [5.0]
+    assert len(pinned) == len(beats)
+    both = meter.apply_pins(beats, [5.0, 5.3], MeterConfig())
+    assert [b.time for b in both if b.pinned] == [5.0, 5.3]
+
+
+def test_a_pin_on_a_beat_moves_only_that_beat():
+    beats = [meter.Beat(t) for t in steady(41)]
+    pinned = meter.apply_pins(beats, [5.05], MeterConfig())
+    expected = steady(41)
+    expected[10] = 5.05
+    assert times(pinned) == pytest.approx(expected)
+
+
+def test_a_pin_beyond_the_tracked_beats_carries_the_grid_out_to_it():
+    """A tracker that starts late or stops early: a pin out there is a beat,
+    and the beats between it and the grid are filled at the pulse."""
+    beats = [meter.Beat(t) for t in steady(20, start=1.0)]  # 1.0 .. 10.5
+    pinned = meter.apply_pins(beats, [0.0, 12.0], MeterConfig())
+    assert times(pinned) == pytest.approx(steady(25))
+    assert pinned[0].pinned and pinned[-1].pinned
+    assert pinned[1].implied and pinned[-2].implied and pinned[-3].implied
+
+
+def test_a_pinned_grid_stays_one_metrical_span():
+    """Pinned beats are found beats: the pin must not cut the bar grid at
+    the slip it mends."""
+    tracked, truth = slipped()
+    pins = [truth[39] + 0.27]
+    beats, sections = meter.bar_grid(tracked, [], MeterConfig(anchor=0.0), 30.0, pins=pins)
+    assert len(sections) == 1
+    assert sections[0].start == 0.0 and sections[0].end == beats[-1].time
+
+
+def test_clean_pins_keeps_seconds_and_drops_everything_else():
+    """A hand-edited sidecar must not be able to break the grid."""
+    junk = [3.0, "4.0", None, float("nan"), float("inf"), -1.0, True, 1.0, 1.02, 2.0]
+    assert meter.clean_pins(junk) == [1.0, 2.0, 3.0]
+    assert meter.clean_pins(None) == []
+    assert meter.clean_pins([]) == []
+
+
+def test_bar_grid_ignores_a_pin_past_the_end_of_the_track():
+    tracked = steady(20)
+    assert meter.bar_grid(tracked, [], MeterConfig(), 10.0, pins=[25.0]) == meter.bar_grid(
+        tracked, [], MeterConfig(), 10.0
+    )

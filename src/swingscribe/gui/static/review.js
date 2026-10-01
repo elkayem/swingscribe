@@ -391,6 +391,22 @@ export class PianoRoll {
       ctx.fillRect(x - 0.5, 0, isChorus ? 1.5 : 1, h);
       ctx.globalAlpha = 1;
     }
+    // The beats the listener pinned (meter.apply_pins), as the Detail view
+    // draws them: their mark, at every zoom. Pinned there, shown here.
+    ctx.fillStyle = this._css('--pin', '#f4f1e8');
+    for (const t of this.beats.pins || []) {
+      if (t < this.view.a || t > this.view.b) continue;
+      const x = this.timeToX(t, w);
+      ctx.globalAlpha = 0.3;
+      ctx.fillRect(x - 0.5, 0, 1, h);
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.moveTo(x - 4, 0);
+      ctx.lineTo(x + 4, 0);
+      ctx.lineTo(x, 7);
+      ctx.closePath();
+      ctx.fill();
+    }
   }
 
   /* The beat strip along the roll's bottom edge, drawn the way the waveforms

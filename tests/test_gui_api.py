@@ -423,6 +423,50 @@ def test_beats_endpoint_marks_beats_it_had_to_invent(world, monkeypatch):
     assert len(payload["implied"]) == len(payload["beats"]) == 64
 
 
+# Four pulses (0.5 s) the tracker heard as three: each 0.667 s interval rounds
+# to one pulse, so the repair inserts nothing and every bar after it is a beat
+# off. The beat it lost was at 1.0 s.
+PIN_TRUTH = [round(i * 0.5, 6) for i in range(13)]
+PIN_SLIPPED = [0.0, 0.667, 1.333] + PIN_TRUTH[4:]
+
+
+def _seed_grid(monkeypatch, world, beats):
+    """A cached beat grid with exactly these beats (see `_seed_beats`)."""
+    from swingscribe.model import BeatGrid, Document
+
+    monkeypatch.setattr(
+        "swingscribe.pipeline.cached_document",
+        lambda path, config, stages: Document(
+            audio_path=str(path),
+            sample_rate=world["rate"],
+            beat_grid=BeatGrid(beats=list(beats), downbeats=[], beats_per_bar=4),
+        ),
+    )
+
+
+def test_beats_endpoint_honours_pinned_beats(world, monkeypatch):
+    """A pin is a redraw, like the downbeat: the grid passes through it, the
+    beats around it are re-derived (meter.apply_pins), and the payload says
+    where the pins are so the roll can draw them."""
+    track = open_track(world)
+    _seed_grid(monkeypatch, world, PIN_SLIPPED)
+    url = f"/api/tracks/{track['id']}/beats"
+    plain = world["client"].get(url, params={"anchor": 0.0}).json()
+    pinned = world["client"].get(url, params={"anchor": 0.0, "pins": "1.0"}).json()
+    assert plain["pins"] == []
+    assert len(plain["beats"]) == len(PIN_TRUTH) - 1
+    assert pinned["pins"] == [1.0]
+    assert pinned["beats"] == pytest.approx(PIN_TRUTH)
+    assert [t for t, _ in pinned["bars"]] == pytest.approx([0.0, 2.0, 4.0, 6.0])
+
+
+def test_beats_endpoint_refuses_pins_that_are_not_seconds(world, monkeypatch):
+    track = open_track(world)
+    _seed_grid(monkeypatch, world, PIN_TRUTH)
+    response = world["client"].get(f"/api/tracks/{track['id']}/beats", params={"pins": "1.0,x"})
+    assert response.status_code == 400
+
+
 def test_beats_endpoint_rejects_a_nonsense_time_signature(world, monkeypatch):
     from swingscribe import pipeline
     from swingscribe.model import BeatGrid
@@ -834,6 +878,31 @@ def test_export_counts_bars_from_the_downbeat_the_roll_draws(world, monkeypatch)
     # the bar numbers are what this test is about.
     assert placed[60] == (1, 1.0)
     assert placed[65] == (2, 4.0)
+
+
+def test_export_counts_bars_on_the_pinned_grid_the_roll_draws(world, monkeypatch):
+    """The sidecar's `beat_pins` reach the page through the same function
+    the roll draws from (meter.bar_grid): with the lost beat pinned, the page
+    is the page of the true grid, note for note; without it, it is not.
+    Score and the page view build the same Notation (musicxml.build_notation)."""
+    from swingscribe import mscz
+
+    track = _seed_review(world, monkeypatch, start=1.0, end=3.0, pitches=(60, 62, 64, 65))
+    params = {"model": "htdemucs_ft", "stem": "other", "start": 1.0, "end": 3.0}
+    state = f"/api/tracks/{track['id']}/state"
+    world["client"].post(state, json={"state": {"anchor": 0.0}})
+
+    def page(beats):
+        _seed_grid(monkeypatch, world, beats)
+        written = world["client"].post(f"/api/tracks/{track['id']}/export", params=params)
+        assert written.status_code == 200, written.text
+        return [(n.pitch, n.bar, n.position) for n in mscz.parse_any(written.json()["path"]).melody]
+
+    right = page(PIN_TRUTH)
+    off = page(PIN_SLIPPED)
+    world["client"].post(state, json={"state": {"beat_pins": [1.0]}})
+    assert page(PIN_SLIPPED) == right
+    assert off != right
 
 
 def test_the_span_is_in_the_filename(world, monkeypatch):

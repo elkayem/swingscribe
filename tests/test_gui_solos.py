@@ -582,3 +582,25 @@ def test_the_config_offers_the_levels_the_server_accepts(world):
     assert config["solo_levels"] == list(gui_solos.LEVELS)
     assert config["default_solo_level"] in config["solo_levels"]
     assert config["solo_separation_model"] == gui_solos.SEPARATION_MODEL
+
+
+def test_the_bands_sit_on_the_pinned_grid_like_the_roll():
+    """Find the solos counts bars on the grid the roll draws, pins and all
+    (meter.apply_pins): a slip the listener mended must not come back on the
+    Overview's bands."""
+    from swingscribe.model import BeatGrid
+
+    truth = [round(i * 0.5, 6) for i in range(64)]
+    slipped = [0.0, 0.667, 1.333] + truth[4:]  # four pulses tracked as three
+    config = Config()
+    lines = gui_solos.bar_line_times(
+        BeatGrid(beats=slipped, downbeats=[], beats_per_bar=4), config, 32.0, {"anchor": 0.0}, [1.0]
+    )
+    right = gui_solos.bar_line_times(
+        BeatGrid(beats=truth, downbeats=[], beats_per_bar=4), config, 32.0, {"anchor": 0.0}
+    )
+    unpinned = gui_solos.bar_line_times(
+        BeatGrid(beats=slipped, downbeats=[], beats_per_bar=4), config, 32.0, {"anchor": 0.0}
+    )
+    assert lines == pytest.approx(right)
+    assert unpinned != pytest.approx(right)

@@ -287,17 +287,21 @@ def level_penalty(level: str) -> float:
 
 
 def bar_line_times(
-    beat_grid, config: Config, duration: float, overrides: dict[str, Any] | None = None
+    beat_grid,
+    config: Config,
+    duration: float,
+    overrides: dict[str, Any] | None = None,
+    pins: Sequence[float] | None = None,
 ) -> list[float]:
     """The repaired grid's bar lines over the whole track, as `/beats` draws
-    them under the same meter, with the downbeat voted over the whole track
-    when the listener has not placed one."""
+    them under the same meter and the same pinned beats, with the downbeat
+    voted over the whole track when the listener has not placed one."""
     from swingscribe.stages import meter
 
     meter_config = config.meter.model_copy(update=overrides or {})
     meter.resolve_meter(meter_config)  # ValueError on a nonsense signature
     repaired, sections = meter.bar_grid(
-        beat_grid.beats, beat_grid.downbeats, meter_config, duration
+        beat_grid.beats, beat_grid.downbeats, meter_config, duration, pins=pins
     )
     return [t for t, _number in meter.bar_lines(repaired, sections)]
 

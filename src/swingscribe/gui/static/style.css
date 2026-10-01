@@ -31,6 +31,7 @@
   --beat: #5f6c8c;            /* beat ticks — quiet, part of the ruler */
   --downbeat: #9fb4ff;        /* bar lines — the grid's claim about the metre */
   --chorus: #ffd479;          /* chorus starts — a solo is N whole choruses */
+  --pin: #f4f1e8;             /* a beat the listener pinned — their mark, not the tracker's */
   --danger: #e8636a;
   --onset: #e2666b;
   /* The four ways a note comes out of the alignment against a hand
@@ -383,6 +384,7 @@ main { padding: 20px; display: flex; flex-direction: column; gap: 18px; max-widt
 
 /* Over a beat marker, where a click re-phases the bar grid rather than seeking. */
 .wave.over-beat { cursor: pointer; }
+.wave.pin-armed { cursor: copy; }
 
 /* The bpm/meter caption keeps normal casing inside the uppercase label row —
    it's data, not a label. */

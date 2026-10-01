@@ -23,8 +23,10 @@ No heavy imports at all — this module is stdlib-only and always importable.
 """
 
 import bisect
+import math
 import statistics
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
 
 from swingscribe.config import Config, MeterConfig
 from swingscribe.model import Document, MeterSection
@@ -82,6 +84,13 @@ class Beat:
     # Interpolation is bounded by evidence on both sides; extrapolation is not,
     # so the two are allowed to do different things (see metrical_spans).
     extrapolated: bool = False
+    # Placed by the listener (`apply_pins`). Found, not implied: a pin is
+    # evidence of a beat, like the tracker's, and better than it.
+    pinned: bool = False
+    # Laid out again in a pin's window (`apply_pins`), the tracker's own beat
+    # or an implied one. The intervals beside it follow from the listener's
+    # pin, not from the tracker, and `metrical_spans` takes them as steady.
+    relaid: bool = False
 
 
 def resolve_meter(config: MeterConfig) -> tuple[tuple[int, int], int]:
@@ -364,8 +373,358 @@ def repair_beats(
     return out
 
 
+# ── beats the listener pinned (roadmap O5, 2026-09-30) ──────────────────────
+#
+# The repair above mends what it can see, and some slips it cannot: on Dexter
+# Gordon's Cheese Cake a doubled beat at 160.48/160.60 s (0.20 + 0.12 s on a
+# 0.26 s pulse) misses the one-pulse test by a millisecond, and every bar
+# line after it -- 32 bars of the page -- sits a beat late. The downbeat is
+# one click, but it is a PHASE: moving it puts the bars after the slip right
+# and the bars before it wrong. A pin is the local fix: "a beat is HERE".
+#
+# The grid passes through every pin, and the beats around it are re-derived
+# so that the count is whole: every beat nearer a pin than half a pulse gives
+# way to it, and between the pin and the nearest STEADY tracked beat either
+# side (or the next pin) the beats are laid out again -- as many as the time
+# between them holds at the local pulse, each the tracker's own beat where
+# one sits near its place, an implied one where none does. The count across
+# that window is taken from TIME, which is what mends a slip: the repaired
+# grid had four beats between 160.02 and 160.84 s, the time holds three.
+# Between two pins the count is theirs; a pin half a beat off the tracker
+# moves beats and never adds one (the window keeps the count its ends hold,
+# and is widened a steady beat each side at a time when that time holds too
+# few intervals for the pins to stand in). Two pins within half a pulse of
+# each other are one (`_one_pin_per_beat`).
+#
+# The window's intervals are the LISTENER'S (`Beat.relaid`), and everything
+# that measures the tracker's steadiness treats them so (2026-09-30, the
+# review of O5): `steady_intervals` takes them as steady, the reference
+# pulse counts each run of them as its mean (`_window_votes`), and
+# `bar_grid` hands every interval the pins left alone the unpinned grid's
+# answers (`Judgement`) and extends the edges at the unpinned grid's pulses
+# (`extend_beats`). Judged on the tolerance like the tracker's,
+# a pin that moves a beat by a fifth of a pulse -- a tap 50 ms off at 220
+# bpm, or a pin on one of a slip's crowded beats rather than between them --
+# leaves the interval on each side outside it, two unsteady intervals in a
+# row split the bar grid at the pin, and the split loses a bar line and
+# numbers every bar after it one lower (on the roll and the chord chart,
+# not on the page, whose phase is an index): 34 of 210 such taps on Cheese
+# Cake did. A pin vouches for its window and decides nothing outside it.
+#
+# A pin is a sidecar judgement (`beat_pins`), like a downbeat but never in
+# MeterConfig: the pipeline's meter stage does not see it, no cache key
+# moves, and every consumer that does see it -- the roll, the page, Export,
+# the chord chart, Find the solos, the Score button, the harness -- reaches
+# it through `bar_grid`, the one function.
+
+# Tracked beats nearer a pin than this share of the local pulse give way to it.
+PIN_CLEAR = 0.5
+# A tracked beat within this share of a re-derived step of its place keeps its
+# own time: the tracker's micro-timing is evidence, the lattice only a guess.
+PIN_SNAP = 0.25
+# How far either side of a pin (in beats) to look for a steady beat to
+# re-derive from. A stretch longer than this with none is re-derived to here.
+PIN_REACH = 16
+# Two pins nearer than this are one: a double click, not two beats.
+PIN_MIN_GAP_S = 0.05
+# A pin window's pulse is the median of at least this many intervals between
+# two steady beats, sought up to this many beats beyond the window's ends.
+PIN_PULSE_MIN = 4
+PIN_PULSE_REACH = 4 * REFERENCE_WINDOW
+
+
+def clean_pins(values: Iterable | None) -> list[float]:
+    """What a sidecar or a query may hold as pins: sorted, finite,
+    non-negative seconds, one per beat (`PIN_MIN_GAP_S`). Anything else --
+    a string, a None, a hand-edited sidecar -- is dropped, not raised."""
+    out: list[float] = []
+    for value in sorted(
+        float(v)
+        for v in (values or [])
+        if isinstance(v, int | float) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
+    ):
+        if not out or value - out[-1] >= PIN_MIN_GAP_S:
+            out.append(value)
+    return out
+
+
+def _round_half_up(value: float) -> int:
+    """Deterministic rounding for a beat count: Python's round() sends 1.5
+    and 2.5 different ways."""
+    return math.floor(value + 0.5)
+
+
+def _steady_beats(times: list[float], beats: list[Beat], tolerance: float) -> list[bool]:
+    """Which beats a pin's window may end on: found by the tracker, and every
+    interval beside it within `tolerance` of the reference pulse."""
+    intervals = [b - a for a, b in zip(times, times[1:], strict=False)]
+    reference = reference_pulse(intervals)
+
+    def ok(k: int) -> bool:
+        return abs(intervals[k] - reference[k]) <= tolerance * reference[k]
+
+    steady = []
+    for i, beat in enumerate(beats):
+        sides = [k for k in (i - 1, i) if 0 <= k < len(intervals)]
+        steady.append(not beat.implied and bool(sides) and all(ok(k) for k in sides))
+    return steady
+
+
+def _relay(start: float, end: float, count: int, candidates: list[Beat]) -> list[Beat]:
+    """`count - 1` beats strictly between two fixed ones, evenly placed, each
+    the nearest candidate beat when one is within `PIN_SNAP` of a step of
+    its place. Every one is `relaid`."""
+    if count <= 1:
+        return []
+    step = (end - start) / count
+    out = []
+    for k in range(1, count):
+        ideal = start + k * step
+        near = min(candidates, key=lambda b: abs(b.time - ideal), default=None)
+        if near is not None and abs(near.time - ideal) <= PIN_SNAP * step:
+            out.append(replace(near, relaid=True))
+        else:
+            out.append(Beat(ideal, implied=True, relaid=True))
+    return out
+
+
+def _one_pin_per_beat(pins: list[float], pulse_at) -> list[float]:
+    """Pins nearer each other than `PIN_CLEAR` of the local pulse claim one
+    beat between them: keeping both makes a beat of 50-200 ms. The earlier
+    is kept. The GUI never sends two -- a new pin that near replaces the old
+    one there -- so this is for a hand-edited sidecar."""
+    kept: list[float] = []
+    for pin in pins:
+        if not kept or pin - kept[-1] > PIN_CLEAR * pulse_at(pin) + 1e-9:
+            kept.append(pin)
+    return kept
+
+
+def apply_pins(beats: list[Beat], pins: Iterable | None, config: MeterConfig) -> list[Beat]:
+    """The repaired grid made to pass through every pin, with the beats
+    around each re-derived so the count is whole (see the note above)."""
+    pins = clean_pins(pins)
+    if not pins:
+        return list(beats)
+    if len(beats) < 2:
+        merged = [b for b in beats if all(abs(b.time - p) >= PIN_MIN_GAP_S for p in pins)]
+        return sorted([*merged, *(Beat(p, pinned=True) for p in pins)], key=lambda b: b.time)
+
+    times = [b.time for b in beats]
+    intervals = [b - a for a, b in zip(times, times[1:], strict=False)]
+    reference = reference_pulse(intervals)
+    steady = _steady_beats(times, beats, config.stability_tolerance)
+
+    def pulse_at(when: float) -> float:
+        k = min(max(bisect.bisect_right(times, when) - 1, 0), len(intervals) - 1)
+        return reference[k]
+
+    pins = _one_pin_per_beat(pins, pulse_at)
+    cleared = set()
+    for pin in pins:
+        reach = PIN_CLEAR * pulse_at(pin) + 1e-9  # exactly half a beat gives way
+        lo = bisect.bisect_left(times, pin - reach)
+        hi = bisect.bisect_right(times, pin + reach)
+        cleared.update(range(lo, hi))
+
+    def bound(pin: float, side: int, stop: float | None) -> int | None:
+        """Index of the beat a pin's window ends on that side: the nearest
+        steady uncleared beat within reach, else the last uncleared one
+        reached; None if the next pin (`stop`) or the grid's edge comes
+        first."""
+        i = bisect.bisect_left(times, pin) - 1 if side < 0 else bisect.bisect_right(times, pin)
+        last = None
+        for _ in range(PIN_REACH):
+            if not 0 <= i < len(times):
+                break
+            if stop is not None and (times[i] <= stop if side < 0 else times[i] >= stop):
+                return None
+            if i not in cleared:
+                last = i
+                if steady[i]:
+                    return i
+            i += side
+        return last
+
+    # Clusters of pins whose windows meet: no steady beat between them.
+    clusters: list[list[float]] = [[pins[0]]]
+    for pin in pins[1:]:
+        if bound(clusters[-1][-1], +1, pin) is None:
+            clusters[-1].append(pin)
+        else:
+            clusters.append([pin])
+
+    def further(index: int, side: int, floor: int | None, ceiling: float | None) -> int | None:
+        """The next steady uncleared beat past `index` on that side, within
+        reach -- never below `floor` (an index) nor at or past `ceiling` (a
+        time) -- or None."""
+        i = index + side
+        for _ in range(PIN_REACH):
+            if not 0 <= i < len(times):
+                return None
+            if (floor is not None and i < floor) or (ceiling is not None and times[i] >= ceiling):
+                return None
+            if i not in cleared and steady[i]:
+                return i
+            i += side
+        return None
+
+    def layout(cluster: list[float], left: int | None, right: int | None):
+        """The window's two end times and how many intervals each stretch
+        between them holds: the pins' own, and either side of them."""
+        lo_time = times[left] if left is not None else cluster[0]
+        hi_time = times[right] if right is not None else cluster[-1]
+        # The pulse is MEASURED between pairs of steady beats around the
+        # window, never read off the reference inside it: the reference is a
+        # rolling median, and through a ragged stretch longer than its window
+        # it drifts with the jitter (0.519 s on a 0.5 s pulse over 24
+        # jittered beats), which over a 13.5 s window counts one interval
+        # short and moves every bar after it. Jittered intervals pass the
+        # steadiness test against that drifted reference by chance, so only
+        # an interval whose BOTH beats are steady is a measurement, and a
+        # window that ends on such a chance beat inside the stretch looks
+        # further out for them (`PIN_PULSE_MIN` of them, `PIN_PULSE_REACH`).
+        first = left if left is not None else bisect.bisect_left(times, cluster[0])
+        last = right if right is not None else bisect.bisect_right(times, cluster[-1]) - 1
+        window: list[float] = []
+        for margin in range(REFERENCE_WINDOW, PIN_PULSE_REACH + 1, REFERENCE_WINDOW):
+            span = range(max(first - margin, 0), min(last + margin, len(intervals)))
+            window = [intervals[k] for k in span if steady[k] and steady[k + 1]]
+            if len(window) >= PIN_PULSE_MIN:
+                break
+        if not window:
+            window = [reference[k] for k in range(len(intervals)) if lo_time <= times[k] < hi_time]
+        pulse = statistics.median(window) if window else pulse_at(cluster[0])
+
+        def count(a: float, b: float) -> int:
+            return max(1, _round_half_up((b - a) / pulse))
+
+        inner = [count(a, b) for a, b in zip(cluster, cluster[1:], strict=False)]
+        n_left = count(lo_time, cluster[0]) if left is not None else 0
+        n_right = count(cluster[-1], hi_time) if right is not None else 0
+        fits = True
+        if left is not None and right is not None:
+            # The window keeps the count its two ends hold, measured in TIME:
+            # whatever the pins do not claim between them goes either side.
+            outer = _round_half_up((hi_time - lo_time) / pulse) - sum(inner)
+            fits = outer >= 2
+            if fits:
+                n_left = min(max(1, n_left), outer - 1)
+                n_right = outer - n_left
+        return lo_time, hi_time, [n_left, *inner, n_right], fits
+
+    removed = set(cleared)
+    new: list[Beat] = []
+    previous_right: int | None = None
+    for number, cluster in enumerate(clusters):
+        left = bound(cluster[0], -1, None)
+        right = bound(cluster[-1], +1, None)
+        if previous_right is not None and (left is None or left < previous_right):
+            left = previous_right  # two windows share an end, never overlap
+        ceiling = clusters[number + 1][0] if number + 1 < len(clusters) else None
+        lo_time, hi_time, counts, fits = layout(cluster, left, right)
+        # A pin between two beats each just over half a pulse away (a jittered
+        # 1.07-pulse interval) clears neither, and the time between them holds
+        # ONE interval where the pin needs two: the count would gain a beat
+        # and every bar after it would move. Widen the window, a steady beat
+        # each side at a time, until the time holds the pins.
+        while not fits and left is not None and right is not None:
+            wider_left = further(left, -1, previous_right, None)
+            wider_right = further(right, +1, None, ceiling)
+            if wider_left is None and wider_right is None:
+                break
+            left = left if wider_left is None else wider_left
+            right = right if wider_right is None else wider_right
+            lo_time, hi_time, counts, fits = layout(cluster, left, right)
+        previous_right = right
+
+        # Everything strictly inside the window is laid out again; its two
+        # ends (steady tracked beats, or the pins themselves at an edge of
+        # the grid) stay where they are.
+        inside = [i for i in range(len(beats)) if lo_time < times[i] < hi_time]
+        removed.update(inside)
+        candidates = [beats[i] for i in inside if i not in cleared]
+        points = [lo_time, *cluster, hi_time]
+        for (a, b), n in zip(zip(points, points[1:], strict=False), counts, strict=True):
+            if b > a:
+                new.extend(_relay(a, b, n, [x for x in candidates if a < x.time < b]))
+        new.extend(Beat(pin, pinned=True) for pin in cluster)
+
+    kept = [beat for i, beat in enumerate(beats) if i not in removed]
+    return sorted([*kept, *new], key=lambda beat: beat.time)
+
+
+def _edge_pulse(window: list[Beat], config: MeterConfig) -> float | None:
+    """The pulse to continue outward, or None if this edge isn't steady.
+
+    The value comes from the repaired spacing (which is the true rate even
+    where the tracker was running at half of it), but steadiness is judged
+    on the *detected* beats alone. Judging the repaired ones would be
+    circular: repair makes a ragged head evenly spaced, so it would always
+    look steady enough to extrapolate from.
+    """
+    spacing = [b.time - a.time for a, b in zip(window, window[1:], strict=False)]
+    if len(spacing) < 3:
+        return None
+    pulse = statistics.median(spacing)
+    if pulse <= 0:
+        return None
+
+    detected = [b.time for b in window if not b.implied]
+    gaps = [b - a for a, b in zip(detected, detected[1:], strict=False)]
+    if len(gaps) < 3:
+        return None
+    seed = statistics.median(gaps)
+    if seed <= 0:
+        return None
+    # Divide out each gap's multiplier first, so a passage tracked at half
+    # rate still reads as steady rather than as an error.
+    implied = [gap / max(1, round(gap / seed)) for gap in gaps]
+    reference = statistics.median(implied)
+    if reference <= 0:
+        return None
+    spread = max(abs(value - reference) / reference for value in implied)
+    return pulse if spread <= config.stability_tolerance else None
+
+
+def _extend(
+    beats: list[Beat],
+    config: MeterConfig,
+    start_limit: float,
+    end_limit: float,
+    pulses: tuple[float | None, float | None] | None = None,
+) -> tuple[list[Beat], tuple[float | None, float | None]]:
+    """`extend_beats`, and the (head, tail) pulses it continued at."""
+    if not config.extend_to_edges or len(beats) < 4:
+        return beats, (None, None)
+    out = list(beats)
+
+    head = _edge_pulse(out[:12], config) if pulses is None else pulses[0]
+    if head is not None:
+        first = out[0].time
+        added = []
+        time = first - head
+        while time >= start_limit and first - time <= config.max_extend_seconds:
+            added.append(Beat(round(time, 6), implied=True, extrapolated=True))
+            time -= head
+        out = list(reversed(added)) + out
+
+    tail = _edge_pulse(out[-12:], config) if pulses is None else pulses[1]
+    if tail is not None:
+        last = out[-1].time
+        time = last + tail
+        while time <= end_limit and time - last <= config.max_extend_seconds:
+            out.append(Beat(round(time, 6), implied=True, extrapolated=True))
+            time += tail
+    return out, (head, tail)
+
+
 def extend_beats(
-    beats: list[Beat], config: MeterConfig, start_limit: float, end_limit: float
+    beats: list[Beat],
+    config: MeterConfig,
+    start_limit: float,
+    end_limit: float,
+    pulses: tuple[float | None, float | None] | None = None,
 ) -> list[Beat]:
     """Continue a steady edge pulse out to the ends of the track.
 
@@ -376,81 +735,111 @@ def extend_beats(
 
     Two guards keep this from papering over a genuinely free intro: the edge
     pulse must itself be steady, and the extension is capped in seconds.
+
+    `pulses` -- (head, tail), None for an edge not to extend -- takes the
+    place of the edge test. A pinned grid is extended at the UNPINNED grid's
+    pulses (`bar_grid`): steadiness is a fact about the tracker's edge beats,
+    and a pin among them is the listener's, not a measurement. Judged on the
+    pinned beats, a pin a fifth of a pulse off one of the last twelve took
+    the extension away (Cheese Cake's last nine bar lines, a ballad's last
+    two), or gave one to an edge the tracker had left ragged.
     """
-    if not config.extend_to_edges or len(beats) < 4:
-        return beats
-
-    def edge_pulse(window: list[Beat]) -> float | None:
-        """The pulse to continue outward, or None if this edge isn't steady.
-
-        The value comes from the repaired spacing (which is the true rate even
-        where the tracker was running at half of it), but steadiness is judged
-        on the *detected* beats alone. Judging the repaired ones would be
-        circular: repair makes a ragged head evenly spaced, so it would always
-        look steady enough to extrapolate from.
-        """
-        spacing = [b.time - a.time for a, b in zip(window, window[1:], strict=False)]
-        if len(spacing) < 3:
-            return None
-        pulse = statistics.median(spacing)
-        if pulse <= 0:
-            return None
-
-        detected = [b.time for b in window if not b.implied]
-        gaps = [b - a for a, b in zip(detected, detected[1:], strict=False)]
-        if len(gaps) < 3:
-            return None
-        seed = statistics.median(gaps)
-        if seed <= 0:
-            return None
-        # Divide out each gap's multiplier first, so a passage tracked at half
-        # rate still reads as steady rather than as an error.
-        implied = [gap / max(1, round(gap / seed)) for gap in gaps]
-        reference = statistics.median(implied)
-        if reference <= 0:
-            return None
-        spread = max(abs(value - reference) / reference for value in implied)
-        return pulse if spread <= config.stability_tolerance else None
-
-    out = list(beats)
-
-    pulse = edge_pulse(out[:12])
-    if pulse is not None:
-        first = out[0].time
-        added = []
-        time = first - pulse
-        while time >= start_limit and first - time <= config.max_extend_seconds:
-            added.append(Beat(round(time, 6), implied=True, extrapolated=True))
-            time -= pulse
-        out = list(reversed(added)) + out
-
-    pulse = edge_pulse(out[-12:])
-    if pulse is not None:
-        last = out[-1].time
-        time = last + pulse
-        while time <= end_limit and time - last <= config.max_extend_seconds:
-            out.append(Beat(round(time, 6), implied=True, extrapolated=True))
-            time += pulse
-    return out
+    return _extend(beats, config, start_limit, end_limit, pulses)[0]
 
 
-def metrical_spans(beats: list[Beat], config: MeterConfig) -> list[tuple[int, int]]:
-    """Maximal runs of beats with a steady pulse, as [start, end) index pairs.
+def _window_votes(intervals: list[float], vouched: list[bool]) -> list[float]:
+    """The intervals as they vote for the reference pulse: each run of a
+    pin's window (`vouched`) votes as its MEAN, the pulse it was laid out
+    at. A pin moves a beat between two others and leaves their sum alone,
+    so its uneven pair (0.709 + 0.436 s where the tracker had 0.581 +
+    0.564) votes as the tracker's did. It matters only where a pinned grid
+    is judged afresh -- an interval the unpinned grid does not have, such
+    as an extension continued from a moved edge beat (`Judgement`) -- but
+    there, voting as they stand, the outliers moved the rolling median a
+    few milliseconds, enough to flip a whole-gap test that sat on its
+    threshold."""
+    votes = list(intervals)
+    k = 0
+    while k < len(intervals):
+        if not vouched[k]:
+            k += 1
+            continue
+        end = k
+        while end < len(intervals) and vouched[end]:
+            end += 1
+        mean = sum(intervals[k:end]) / (end - k)
+        votes[k:end] = [mean] * (end - k)
+        k = end
+    return votes
 
-    Time outside every span gets no bar lines — that is how a rubato intro or a
-    free coda is represented, with no separate concept for it. Deliberately
-    conservative: wrongly hiding bars the user wants is worse than drawing them
-    through a slightly ragged passage.
+
+def _in_window(beat: Beat) -> bool:
+    """Pinned, or laid out again around a pin: the listener's word rather
+    than the tracker's (`apply_pins`)."""
+    return beat.pinned or beat.relaid
+
+
+def _vouched(beats: list[Beat]) -> list[bool]:
+    """Per interval: is it beside a beat of a pin's window?"""
+    return [_in_window(a) or _in_window(b) for a, b in zip(beats, beats[1:], strict=False)]
+
+
+@dataclass(frozen=True)
+class Judgement:
+    """The unpinned grid's answers, which every interval a pin leaves alone
+    keeps (`bar_grid`), so that a pin decides nothing outside its window.
+
+    Judged afresh, a pin's new intervals moved the rolling reference pulse
+    a few milliseconds, and a whole-gap test six seconds away that had
+    passed by a millisecond failed and split the grid there; and on a
+    tracker's 20 ms frame grid a gap of exactly two pulses sits ON the
+    bridge threshold, where a median moved by 2e-15 s split Ko Ko in four
+    places 47 s from the pin.
+    """
+
+    steady: dict[tuple[float, float], bool]  # per interval, by (start, end) time
+    bridge_pulse: float  # what `metrical_spans` bridges a short hole against
+
+
+def judge(beats: list[Beat], config: MeterConfig) -> Judgement:
+    """This grid's answers, to hand a pinned version of it (`Judgement`)."""
+    flags = steady_intervals(beats, config)
+    return Judgement(
+        steady={(a.time, b.time): ok for a, b, ok in zip(beats, beats[1:], flags, strict=False)},
+        bridge_pulse=_bridge_pulse(beats),
+    )
+
+
+def _bridge_pulse(beats: list[Beat]) -> float:
+    """The median interval, a pin's window voting as its mean."""
+    intervals = [b.time - a.time for a, b in zip(beats, beats[1:], strict=False)]
+    return statistics.median(_window_votes(intervals, _vouched(beats))) if intervals else 0.0
+
+
+def steady_intervals(
+    beats: list[Beat],
+    config: MeterConfig,
+    judged: Judgement | None = None,
+) -> list[bool]:
+    """Per interval: is the pulse steady across it? What `metrical_spans`
+    builds its spans from.
+
+    Every interval of a pin's window is steady, whatever the tolerance
+    says: a pin that moves a beat by a fifth of a pulse leaves the interval
+    on each side outside it, and two unsteady intervals in a row split the
+    grid at the very place the pin mends. `judged` is the unpinned grid's
+    answers: an interval the pins left alone keeps its own.
     """
     if len(beats) < 2:
         return []
     intervals = [b.time - a.time for a, b in zip(beats, beats[1:], strict=False)]
+    vouched = _vouched(beats)
     # Measured against the reference pulse, NOT a rolling median of these
     # intervals. Repair subdivides irregular gaps into plausible-looking beats,
     # so a local median computed after repair adapts to a rubato passage and
     # declares it steady. The reference is globally seeded and only follows
     # genuine drift, so a free passage still reads as free.
-    local = reference_pulse(intervals)
+    local = reference_pulse(_window_votes(intervals, vouched))
 
     steady = [
         reference > 0 and abs(gap - reference) / reference <= config.stability_tolerance
@@ -482,6 +871,31 @@ def metrical_spans(beats: list[Beat], config: MeterConfig) -> list[tuple[int, in
                     steady[k] = False
         index = end
 
+    if judged is not None:
+        steady = [
+            judged.steady.get((a.time, b.time), ok)
+            for (a, b), ok in zip(zip(beats, beats[1:], strict=False), steady, strict=True)
+        ]
+    return [ok or vouch for ok, vouch in zip(steady, vouched, strict=True)]
+
+
+def metrical_spans(
+    beats: list[Beat],
+    config: MeterConfig,
+    judged: Judgement | None = None,
+) -> list[tuple[int, int]]:
+    """Maximal runs of beats with a steady pulse, as [start, end) index pairs.
+
+    Time outside every span gets no bar lines — that is how a rubato intro or a
+    free coda is represented, with no separate concept for it. Deliberately
+    conservative: wrongly hiding bars the user wants is worse than drawing them
+    through a slightly ragged passage. `judged`: the unpinned grid's answers
+    (`Judgement`).
+    """
+    if len(beats) < 2:
+        return []
+    steady = steady_intervals(beats, config, judged)
+
     spans: list[tuple[int, int]] = []
     start: int | None = None
     for index, ok in enumerate(steady):
@@ -493,7 +907,7 @@ def metrical_spans(beats: list[Beat], config: MeterConfig) -> list[tuple[int, in
     if start is not None:
         spans.append((start, len(beats)))
 
-    pulse = statistics.median(intervals) if intervals else 0.0
+    pulse = judged.bridge_pulse if judged is not None else _bridge_pulse(beats)
     max_bridge_seconds = (BRIDGE_BEATS + 1) * pulse
 
     merged: list[tuple[int, int]] = []
@@ -591,15 +1005,17 @@ def derive_sections(
     downbeats: list[float],
     config: MeterConfig,
     near: tuple[float, float] | None = None,
+    judged: Judgement | None = None,
 ) -> list[MeterSection]:
     """Bar grid for each metrical span, sharing one phase and one meter.
 
     The phase is global: `index % pulses == anchor % pulses` decides a bar line
     everywhere, so a span that does not contain the anchor still counts in step
-    with it. Spans only gate *where* bars are drawn.
+    with it. Spans only gate *where* bars are drawn. `judged`: the unpinned
+    grid's answers (`Judgement`).
     """
     signature, pulses = resolve_meter(config)
-    spans = metrical_spans(beats, config)
+    spans = metrical_spans(beats, config, judged)
     if not beats or not spans:
         return []
 
@@ -644,20 +1060,31 @@ def bar_grid(
     config: MeterConfig,
     duration: float,
     near: tuple[float, float] | None = None,
+    pins: Iterable | None = None,
 ) -> tuple[list[Beat], list[MeterSection]]:
-    """The bar grid as the GUI draws it: tracked beats repaired and extended
-    to the track's ends, and sections counted from the anchor -- the user's
-    if they placed one, the downbeat layer's best phase if not.
+    """The bar grid as the GUI draws it: tracked beats repaired, made to pass
+    through the listener's `pins` (`apply_pins`) and extended to the track's
+    ends, and sections counted from the anchor -- the user's if they placed
+    one, the downbeat layer's best phase if not.
 
     One function, because two callers have to agree on it exactly. The roll
     (`/beats`) draws bar lines from this, and the Export button counts its
     bars with it; when export derived its own grid it anchored on the first
     beat of its margin instead, and every bar on the page sat one beat off
     the bar lines on screen.
+
+    A pin is LOCAL: every interval it leaves alone keeps the answers the
+    unpinned grid gives it (`Judgement`), and the edges are extended at the
+    unpinned grid's pulses (`extend_beats`).
     """
     repaired = repair_beats(beats, config, downbeats)
-    repaired = extend_beats(repaired, config, 0.0, duration)
-    return repaired, derive_sections(repaired, downbeats, config, near)
+    pins = [p for p in clean_pins(pins) if p <= duration]
+    if not pins:
+        repaired = extend_beats(repaired, config, 0.0, duration)
+        return repaired, derive_sections(repaired, downbeats, config, near)
+    unpinned, edges = _extend(repaired, config, 0.0, duration)
+    pinned = extend_beats(apply_pins(repaired, pins, config), config, 0.0, duration, edges)
+    return pinned, derive_sections(pinned, downbeats, config, near, judge(unpinned, config))
 
 
 def bar_lines(

@@ -13,8 +13,11 @@ from swingscribe.model import NoteEvent
 from swingscribe.notation import (
     MIN_BEATS,
     bar_grid_for_settings,
+    form_bar_of_page,
     meter_from_settings,
     notation_for_span,
+    page_downbeat,
+    pins_of,
     section_for,
     span_anchor,
     span_beats,
@@ -428,6 +431,60 @@ def test_without_a_downbeat_the_repaired_grid_anchors_where_the_roll_does():
     repaired, anchor = bar_grid_for_settings(beats, [], {}, Config(), 25.0)
     assert repaired == pytest.approx(grid(count=51, start=0.0))
     assert anchor == 0.0
+
+
+# ── beats the listener pinned (roadmap O5) ──────────────────────────────────
+
+
+def cheese_cake_slip() -> tuple[list[float], list[float]]:
+    """(tracked, true) beats around a doubled beat the repair keeps: Cheese
+    Cake's 0.20 + 0.12 s pair on a 0.26 s pulse (tests/test_meter.py)."""
+    head = [round(i * 0.26, 6) for i in range(60)]
+    t = head[-1]
+    tail = [round(t + 0.56 + i * 0.26, 6) for i in range(60)]
+    return head + [t + 0.20, t + 0.32] + tail, head + [round(t + 0.28, 6)] + tail
+
+
+def test_the_sidecars_pins_reach_the_grid_the_page_is_built_on():
+    """Export, the Score button and the harness all build their page on this
+    grid, so a pin in the sidecar has to reach it -- or the roll would show
+    one grid and the page count another."""
+    tracked, truth = cheese_cake_slip()
+    settings = {"anchor": 0.0}
+    unpinned, _ = bar_grid_for_settings(tracked, [], settings, Config(), 32.0)
+    pinned, anchor = bar_grid_for_settings(
+        tracked, [], {**settings, "beat_pins": [truth[60]]}, Config(), 32.0
+    )
+    assert len(unpinned) == len(pinned) + 1
+    assert [b for b in pinned if b <= 31.0] == pytest.approx([b for b in truth if b <= 31.0])
+    assert anchor == 0.0
+
+
+def test_a_hand_edited_pin_list_is_no_pins_not_an_error():
+    tracked, _truth = cheese_cake_slip()
+    plain, _ = bar_grid_for_settings(tracked, [], {}, Config(), 32.0)
+    for junk in ("15.9", [None, "x"], {"t": 1.0}, 7):
+        assert pins_of({"beat_pins": junk}) == []
+        assert bar_grid_for_settings(tracked, [], {"beat_pins": junk}, Config(), 32.0)[0] == plain
+    assert pins_of({"beat_pins": [2.0, 1.0, 1.01]}) == [1.0, 2.0]
+
+
+def test_the_chord_chart_and_the_pages_bar_one_follow_a_pin_too():
+    """`form_bar_of_page` counts the page's bar 1 on the same pinned grid.
+    After an unmended slip every bar line sits a beat early, so a span that
+    starts just past half a bar from the true bar line takes the NEXT bar as
+    its bar 1, and the chart lands a bar off."""
+    tracked, truth = cheese_cake_slip()
+    settings = {"anchor": 0.0, "form_start": 0.0}
+    pinned = {**settings, "beat_pins": [truth[60]]}
+    region = (25.5, 30.0)
+    assert form_bar_of_page(truth, [], settings, Config(), 32.0, region) == 25
+    assert form_bar_of_page(tracked, [], settings, Config(), 32.0, region) == 26
+    assert form_bar_of_page(tracked, [], pinned, Config(), 32.0, region) == 25
+    beats, anchor = bar_grid_for_settings(tracked, [], pinned, Config(), 32.0)
+    assert page_downbeat(beats, (25.0, 30.0), anchor, 4) == pytest.approx(25.0)
+    beats, anchor = bar_grid_for_settings(tracked, [], settings, Config(), 32.0)
+    assert page_downbeat(beats, (25.0, 30.0), anchor, 4) == pytest.approx(24.74)
 
 
 # ── chords from the listener's enabled candidates ───────────────────────────

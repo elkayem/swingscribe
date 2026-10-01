@@ -47,6 +47,8 @@ const state = {
   snapMode: 'off',          // off | beat | bar — what A/B placement snaps to
   timeSignature: null,      // null = server default (4/4)
   anchor: null,             // seconds; null = auto-detected downbeat
+  pins: [],                 // seconds, sorted: beats the listener pinned (meter.apply_pins)
+  pinsArmed: false,         // the clear-pins chip has been clicked once
   barsPerChorus: 0,
   review: null,             // cached review payload {notes, diagnostics}
   reviewMode: 'mix',        // mix | transcription | both
@@ -154,6 +156,9 @@ const detail = new WaveView($('wave-detail'), {
   snap: (t) => snapTime(t),
   onBeatClick: (t) => setDownbeat(t),
   onFormClick: (t) => setFormStart(t),
+  // Alt-click / Alt-drag: the beat is HERE (meter.apply_pins).
+  onPin: (t, replaces) => pinBeat(t, replaces),
+  onUnpin: (t) => unpinBeat(t),
 });
 
 const stemWave = new WaveView($('wave-stem'), {
@@ -460,6 +465,8 @@ async function loadTrack(track) {
   state.timeSignature = remembered.time_signature ?? null;
   state.doubleTime = Boolean(remembered.double_time);
   state.anchor = remembered.anchor ?? null;
+  state.pins = cleanPins(remembered.beat_pins);
+  state.pinsArmed = false;
   state.barsPerChorus = remembered.bars_per_chorus ?? 0;
   state.formStart = remembered.form_start ?? null;
   state.click = remembered.click ?? false;
@@ -759,6 +766,83 @@ async function setDownbeat(time) {
   toast(`Downbeat at ${clock(time)}`);
 }
 
+/* Pinned beats (roadmap O5). The downbeat is a PHASE: moving it fixes the
+   bars on one side of a slipped beat and breaks them on the other. A pin
+   says "a beat is here", and the server re-derives the beats around it so
+   the count is whole (meter.apply_pins) -- for the roll, the page, Export,
+   the chart, Find the solos and the Score button alike. Kept to the
+   millisecond, sorted, one per 50 ms, like the server's own clean_pins. */
+const PIN_MIN_GAP_S = 0.05;
+
+function cleanPins(values) {
+  if (!Array.isArray(values)) return [];
+  const sorted = values
+    .filter((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0)
+    .map((v) => Math.round(v * 1000) / 1000)
+    .sort((x, y) => x - y);
+  return sorted.filter((v, i) => i === 0 || v - sorted[i - 1] >= PIN_MIN_GAP_S);
+}
+
+const pinsParam = () => state.pins.map((p) => p.toFixed(3)).join(',');
+
+async function setPins(pins, message) {
+  state.pins = cleanPins(pins);
+  state.pinsArmed = false;
+  await maybeLoadBeats();
+  persist();
+  if (message) toast(message);
+}
+
+/* The beat length around `time`: the median of the grid's intervals within
+   four beats either side. */
+function localPulse(time) {
+  const beats = state.beats?.beats ?? [];
+  if (beats.length < 2) return 0;
+  let i = 0;
+  while (i < beats.length && beats[i] < time) i += 1;
+  const gaps = [];
+  for (let k = Math.max(1, i - 4); k <= Math.min(beats.length - 1, i + 4); k += 1) {
+    gaps.push(beats[k] - beats[k - 1]);
+  }
+  gaps.sort((x, y) => x - y);
+  return gaps[gaps.length >> 1];
+}
+
+/* A beat is HERE. One pin per beat: a new pin within half a beat of another
+   REPLACES it (the server keeps the earlier of two that near,
+   meter._one_pin_per_beat) -- two pins that close would make a beat a few
+   dozen milliseconds long. A dragged pin (`replaces`) leaves its old place. */
+function pinBeat(time, replaces = null) {
+  if (!state.beats || !Number.isFinite(time)) return;
+  const reach = Math.max(PIN_MIN_GAP_S, 0.5 * localPulse(time));
+  const dragged = (p) => replaces !== null && Math.abs(p - replaces) <= 0.002;
+  const displaced = state.pins.filter((p) => !dragged(p) && Math.abs(p - time) <= reach);
+  const kept = state.pins.filter((p) => !dragged(p) && Math.abs(p - time) > reach);
+  setPins(
+    [...kept, time],
+    displaced.length
+      ? `Pin moved to ${clock(time)} — one pin per beat`
+      : `Beat pinned at ${clock(time)} — the bar grid passes through it (Alt-click it to unpin)`,
+  );
+}
+
+function unpinBeat(time) {
+  const kept = state.pins.filter((p) => Math.abs(p - time) > 0.002);
+  if (kept.length === state.pins.length) return;
+  setPins(kept, `Pin at ${clock(time)} removed`);
+}
+
+function renderPins() {
+  const chip = $('pins-clear');
+  const count = state.pins.length;
+  chip.hidden = !count;
+  chip.classList.toggle('armed', state.pinsArmed);
+  chip.textContent = state.pinsArmed
+    ? `clear ${count} pin${count === 1 ? '' : 's'}?`
+    : `${count} pin${count === 1 ? '' : 's'} ✕`;
+  $('pin-beat').disabled = !state.beats;
+}
+
 /* The free path: fetch the grid if it's cached, silently accept that it isn't.
    Computing is only ever started by an explicit click on the Beats chip. */
 async function maybeLoadBeats() {
@@ -766,6 +850,7 @@ async function maybeLoadBeats() {
   const params = new URLSearchParams({ model: state.model });
   if (state.timeSignature) params.set('time_signature', state.timeSignature);
   if (state.anchor !== null) params.set('anchor', state.anchor.toFixed(3));
+  if (state.pins.length) params.set('pins', pinsParam());
   if (state.barsPerChorus) params.set('bars_per_chorus', String(state.barsPerChorus));
   if (state.formStart !== null) params.set('form_start', state.formStart.toFixed(3));
   /* With no downbeat placed, the automatic one is voted AROUND THE SELECTION
@@ -815,6 +900,7 @@ function applyBeats() {
     timeSignature: state.beats?.time_signature ?? state.timeSignature,
     barsPerChorus: state.barsPerChorus,
   });
+  renderPins();
   const reset = $('form-reset');
   reset.hidden = state.formStart === null;
   if (state.formStart !== null) {
@@ -1545,6 +1631,7 @@ function soloParams() {
   const params = new URLSearchParams({ level: solos.level });
   if (state.timeSignature) params.set('time_signature', state.timeSignature);
   if (state.anchor !== null) params.set('anchor', state.anchor.toFixed(3));
+  if (state.pins.length) params.set('pins', pinsParam());
   return params;
 }
 
@@ -2838,6 +2925,8 @@ function settingsPayload() {
     time_signature: state.timeSignature,
     double_time: state.doubleTime,
     anchor: state.anchor,
+    // Human judgements, beside the audio like the downbeat: never the cache.
+    beat_pins: state.pins,
     bars_per_chorus: state.barsPerChorus,
     form_start: state.formStart,
     click: state.click,
@@ -3242,6 +3331,7 @@ function exportSignature() {
     added: [...state.added].sort((x, y) => x - y),
     timeSignature: state.timeSignature,
     anchor: state.anchor,
+    pins: state.pins,
     timing: state.timing,
     key: state.key,
     texture: textureOn(),
@@ -3893,6 +3983,23 @@ $('form-reset').addEventListener('click', async () => {
   persist();
 });
 
+$('pin-beat').addEventListener('click', () => pinBeat(currentTime()));
+
+/* Pins are the listener's judgements, so clearing them all arms first: the
+   first click asks, the second clears, and the question lapses by itself. */
+let pinsArmTimer = null;
+$('pins-clear').addEventListener('click', () => {
+  if (!state.pinsArmed) {
+    state.pinsArmed = true;
+    renderPins();
+    clearTimeout(pinsArmTimer);
+    pinsArmTimer = setTimeout(() => { state.pinsArmed = false; renderPins(); }, 3000);
+    return;
+  }
+  clearTimeout(pinsArmTimer);
+  setPins([], 'Pins cleared — the bar grid is the tracker’s again');
+});
+
 $('time-signature').addEventListener('change', async (event) => {
   state.timeSignature = event.target.value;
   await maybeLoadBeats();
@@ -4080,6 +4187,11 @@ document.addEventListener('keydown', (event) => {
         const beat = nearestBeat(currentTime());
         if (beat !== null) setDownbeat(beat);
       }
+      break;
+    case 't':
+      // Tack a pin at the playhead: a beat is exactly here. Unlike D it does
+      // not snap -- the point is a place the grid does not have a beat yet.
+      if (state.beats) pinBeat(currentTime());
       break;
     case 'enter':
       event.preventDefault();

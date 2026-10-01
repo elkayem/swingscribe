@@ -26,6 +26,11 @@ export class WaveView {
    *   snap(t) => t          – applied to pointer-placed edge times (beat snap)
    *   onBeatClick(t)        – a beat marker was clicked: make it the downbeat
    *   onFormClick(t)        – shift-click on a marker: the form starts here
+   *   onPin(t, replaces)    – Alt-click or Alt-drag: a beat is HERE. `replaces`
+   *                           is the pin the drag picked up, or null. An
+   *                           explicit modifier, never a plain drag: a drag
+   *                           pans (the one gesture rule, CLAUDE.md).
+   *   onUnpin(t)            – Alt-click on a pin marker: take it away
    *   onWindowDrag(start,w) – the overview's window box was slid
    *   dragPans              – a drag that is not on an A/B handle pans the
    *                           window instead of drawing or moving the
@@ -52,6 +57,7 @@ export class WaveView {
     this.barSet = null;
     this.chorusSet = null;
     this.bands = null;                    // proposed solo spans, [{start, end, kind}]
+    this.pinDrag = null;                  // {to} while an Alt-drag is placing a pin
 
     this._buildOverlays();
     this._bindPointer();
@@ -319,6 +325,53 @@ export class WaveView {
         }
       }
     }
+
+    this._drawPins(width, height, style);
+  }
+
+  /* The beats the listener pinned: a line the full height with a flag at the
+     top, at every zoom -- a pin is a deliberate mark, so it is never thinned
+     away like a tick. An Alt-drag in progress shows where its pin will land. */
+  _drawPins(width, height, style) {
+    const ctx = this.ctx;
+    const pinColor = style.getPropertyValue('--pin').trim() || '#f4f1e8';
+    const flag = (x) => {
+      ctx.beginPath();
+      ctx.moveTo(x - 4, 0);
+      ctx.lineTo(x + 4, 0);
+      ctx.lineTo(x, 7);
+      ctx.closePath();
+      ctx.fill();
+    };
+    ctx.fillStyle = pinColor;
+    for (const t of this.beatsData?.pins ?? []) {
+      if (t < this.win.start || t > this.win.end) continue;
+      const x = this.timeToX(t);
+      ctx.globalAlpha = 0.45;
+      ctx.fillRect(x - 0.5, 0, 1, height);
+      ctx.globalAlpha = 1;
+      flag(x);
+    }
+    if (this.pinDrag) {
+      const x = this.timeToX(this.pinDrag.to);
+      ctx.globalAlpha = 0.8;
+      for (let y = 0; y < height; y += 6) ctx.fillRect(x - 0.5, y, 1, 3);
+      flag(x);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /* Track time of the pin nearest clientX, within reach, or null. */
+  pinNear(clientX, maxPx = 8) {
+    const pins = this.beatsData?.pins ?? [];
+    const x = clientX - this.el.getBoundingClientRect().left;
+    let best = null;
+    let bestPx = maxPx;
+    for (const t of pins) {
+      const distance = Math.abs(this.timeToX(t) - x);
+      if (distance <= bestPx) { bestPx = distance; best = t; }
+    }
+    return best;
   }
 
   /* Stretches between metrical sections — free time, drawn without bars. */
@@ -447,6 +500,14 @@ export class WaveView {
       });
       this.el.addEventListener('pointerleave', () => this.el.classList.remove('over-beat'));
     }
+    if (this.opts.onPin) {
+      // Holding Alt arms the pin gesture; the cursor says so before the click.
+      this.el.addEventListener('pointermove', (event) => {
+        if (event.buttons) return;
+        this.el.classList.toggle('pin-armed', event.altKey && Boolean(this.beatsData));
+      });
+      this.el.addEventListener('pointerleave', () => this.el.classList.remove('pin-armed'));
+    }
     if (this.opts.onWindow) {
       this.el.addEventListener('wheel', (event) => this._onWheel(event), { passive: false });
     }
@@ -475,6 +536,10 @@ export class WaveView {
 
   _onPointerDown(event) {
     if (event.button !== 0) return;
+    if (event.altKey && this.opts.onPin && this.beatsData) {
+      this._pinGesture(event);
+      return;
+    }
     const rect = this.el.getBoundingClientRect();
     const startX = event.clientX - rect.left;
     const startTime = this.xToTime(startX);
@@ -576,6 +641,51 @@ export class WaveView {
     this.el.addEventListener('pointermove', onMove);
     this.el.addEventListener('pointerup', onUp);
     this.el.addEventListener('pointercancel', onUp);
+  }
+
+  /* Alt held: pin a beat. A click pins one where it lands -- or, on a pin's
+     marker, takes that pin away; a drag carries a line to where the beat
+     really is and pins it there on release (and, started on a pin, moves
+     that pin). Neither pans, seeks nor touches the selection. */
+  _pinGesture(event) {
+    event.preventDefault();
+    const rect = this.el.getBoundingClientRect();
+    const startX = event.clientX - rect.left;
+    const grabbed = this.pinNear(event.clientX);
+    const clamp = (t) => Math.max(this.bounds.start, Math.min(t, this.bounds.end));
+    let moved = false;
+    this.el.setPointerCapture(event.pointerId);
+
+    const onMove = (moveEvent) => {
+      const x = moveEvent.clientX - rect.left;
+      if (!moved && Math.abs(x - startX) < DRAG_THRESHOLD_PX) return;
+      moved = true;
+      this.pinDrag = { to: clamp(this.xToTime(x)) };
+      this.draw();
+    };
+    const finish = () => {
+      if (this.el.hasPointerCapture(event.pointerId)) this.el.releasePointerCapture(event.pointerId);
+      this.el.removeEventListener('pointermove', onMove);
+      this.el.removeEventListener('pointerup', onUp);
+      this.el.removeEventListener('pointercancel', onCancel);
+      const drag = this.pinDrag;
+      this.pinDrag = null;
+      this.draw();
+      return drag;
+    };
+    const onUp = () => {
+      const drag = finish();
+      if (moved && drag) this.opts.onPin(drag.to, grabbed);
+      else if (grabbed !== null) this.opts.onUnpin?.(grabbed);
+      else this.opts.onPin(clamp(this.xToTime(startX)), null);
+    };
+    // A cancelled gesture (the browser took the pointer: a system gesture,
+    // a lost capture) is neither a click nor a drop: it pins and unpins
+    // nothing.
+    const onCancel = () => { finish(); };
+    this.el.addEventListener('pointermove', onMove);
+    this.el.addEventListener('pointerup', onUp);
+    this.el.addEventListener('pointercancel', onCancel);
   }
 
   _emitSelect(a, b, done) {

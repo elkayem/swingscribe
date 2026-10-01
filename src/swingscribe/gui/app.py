@@ -126,6 +126,22 @@ def separation_audio_seconds(document, config: Config) -> float:
     return max(0.0, min(duration, span[1] + margin) - max(0.0, span[0] - margin))
 
 
+def parse_pins(text: str | None) -> list[float]:
+    """The `pins` query parameter -- comma-separated seconds -- as the grid
+    takes them (`meter.clean_pins`). A token that is not a number is a 400:
+    the page builds this string, and a malformed one is a bug to see, not a
+    pin to drop quietly."""
+    from swingscribe.stages import meter
+
+    if not text:
+        return []
+    try:
+        values = [float(token) for token in text.split(",") if token.strip()]
+    except ValueError as exc:
+        raise HTTPException(400, f"pins must be comma-separated seconds, not {text!r}") from exc
+    return meter.clean_pins(values)
+
+
 def allowed_origins(config: Config) -> frozenset[str]:
     """The origins a state-changing request may come from: this server, by
     any of the names a browser might reach it under."""
@@ -534,10 +550,12 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         time_signature: str | None = None,
         pulses_per_bar: int | None = None,
         anchor: float | None = None,
+        pins: str | None = None,
     ) -> dict[str, Any]:
         """Where the solos might be: proposed spans for the Overview's bands
         (roadmap O3, `gui/solos.py` over `solo_spans`), or ready:false with
-        what is missing.
+        what is missing. `pins` are the pinned beats, as `/beats` takes them:
+        the bands sit on the same bar lines as the roll.
 
         Never computes anything slow, like `/beats`: it needs the beat grid,
         a whole-file stem set and that set's envelopes, all cached, and when
@@ -590,7 +608,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             if value is not None
         }
         try:
-            lines = gui_solos.bar_line_times(grid, config, duration, overrides)
+            lines = gui_solos.bar_line_times(grid, config, duration, overrides, parse_pins(pins))
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         payload = gui_solos.propose(env, lines, model, level)
@@ -699,6 +717,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         form_start: float | None = None,
         start: float | None = None,
         end: float | None = None,
+        pins: str | None = None,
     ) -> dict[str, Any]:
         """The bar grid for this track+model, or ready:false.
 
@@ -706,6 +725,10 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         voted around them rather than over the whole track, exactly as Export
         does for the same span (meter._auto_anchor, D32) -- so the roll's bar
         lines stay the page's.
+
+        `pins` is the beats the listener pinned, comma-separated seconds --
+        the sidecar's `beat_pins` as the page holds them now, so a pin
+        redraws before it is saved, like a downbeat (meter.apply_pins).
 
         Never computes the beat grid: even at seconds rather than the minutes
         it cost when it chained from a separation, "draw the bars if they're
@@ -763,7 +786,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         duration = entry["document"].audio.duration
         near = (start, end) if start is not None and end is not None and end > start else None
         repaired, sections = meter.bar_grid(
-            grid.beats, grid.downbeats, meter_config, duration, near=near
+            grid.beats, grid.downbeats, meter_config, duration, near=near, pins=parse_pins(pins)
         )
         lines = meter.bar_lines(repaired, sections, meter_config.form_start)
 
@@ -788,6 +811,9 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             "ready": True,
             "beats": [round(b.time, 3) for b in repaired],
             "implied": [b.implied for b in repaired],
+            # The pins as the grid took them: cleaned, and only those inside
+            # the track. The roll draws a marker at each.
+            "pins": [round(b.time, 3) for b in repaired if b.pinned],
             "bars": [[round(t, 3), number] for t, number in lines],
             "free": free,
             "chorus_bars": (
