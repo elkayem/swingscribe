@@ -546,8 +546,49 @@ read that bar's pitches (A6 A6 G6 printed; homr G6 G6 G6, Audiveris B6 B6
 A6) and pairing goes through notes aligned to the page -- the phantom
 scoop had given it an anchor. A bar with no key between two paired bars
 could pair with the one bar between their partners; not done, and it
-would move every merged file. The other files in the folder keep their
-0.3.22 readings until they are converted again.
+would move every merged file.
+
+### The whole folder, and the merge's order (0.3.25, the same day)
+
+Converted again, all of it (engine readings reused), the corpus showed what
+the eleven had: 881 more phantom heads gone, nine more tuplets from the
+page, fourteen fewer refused -- and bars off the signature 10 mended, 27
+newly off, 18 of those 27 OVERFULL. The merge ranked the page's note count
+above filling the signature; with phantom-inflated counts that rank rarely
+decided, and with honest ones it kept the reading that held the page's
+count and overran the bar. An overfull bar is the one misreading that moves
+every note after it (Shade of Jade's bar 84 did, until the triplet was
+read): a reader pads a short bar, and a missing note costs one note. So an
+overfull bar now loses first -- but only to a reading that holds all but at
+most one of the page's notes: without that proviso (0.3.24) it took 43
+bars missing 2-14 of the page's notes and lost 193 matched notes. Over the
+whole corpus, the final files measured against the page's own noteheads
+(219 vector transcriptions):
+
+- 0.3.22 (the morning): 531 overfull bars, 484 short, 104,785 printed
+  notes matched, 496 read notes unprinted;
+- 0.3.23 (ledger rule only): 543 overfull, 489 short, 104,824, 504;
+- 0.3.24 (overfull first, no proviso): 381, 590, 104,631, 529;
+- 0.3.25 (shipped): 425, 568, 104,765, 522.
+
+Against the morning: overfull bars down 106 (a fifth), bars off the
+signature 1,015 to 993, 20 fewer matched notes in 104,785. All 90 outputs
+that differ from the morning's open in MuseScore (`render`'s test), and
+SwingScribe's scorecard -- three of these pages are in it -- did not move.
+
+One mishap on the way, now guarded: a survey of the merge's decisions ran
+conversions into a scratch folder with the real manifests copied in, and
+`remove_stale_outputs`, which deletes the outputs a previous manifest
+recorded and this run did not write, read their ABSOLUTE paths and deleted
+all 275 real outputs. They were regenerated from the cached readings (and
+one duplicate PDF's old output, which the converter skips, restored from a
+backup). It now deletes nothing outside the folder it writes.
+
+Six PDFs in the folder were never converted and still are not: the page
+analysis finds no staves on them (Buster Bailey's Stealin' Apples, Charlie
+Parker's Ballade, Home Cooking I and Lullaby in Rhythm part 2, Don Byas's
+Slammin' Around, Norris Turney's Portrait of Mahalia Jackson) -- skewed or
+unusual scans, a limit of `find_staves` on rasters, not of this change.
 
 ## What is left to a human
 

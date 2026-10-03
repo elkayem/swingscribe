@@ -1297,11 +1297,12 @@ def merge_readings(
     """Take from the other reading each bar it reads better, bar for bar.
 
     Two engines read one page; where their bar counts agree, each bar is
-    judged the way a proofreader judges it: when the page prints its
-    noteheads, does it hold as many notes as the page's bar; and how far
-    is it from filling its time signature. The other reading's bar
-    replaces this one's where it does better (the note count outranks
-    the fill, nearer the signature wins); ties stay with this reading. Both readings are brought to
+    judged the way a proofreader judges it: does it overrun its time
+    signature; when the page prints its noteheads, does it hold as many
+    notes as the page's bar; and how far is it from filling its
+    signature. The other reading's bar replaces this one's where it does
+    better (not overrunning outranks the note count, which outranks the
+    fill; nearer the signature wins); ties stay with this reading. Both readings are brought to
     one `divisions` first, and this reading's attributes (clef, key,
     time, the divisions) stay on a replaced bar. Readings whose bar
     counts differ are left alone: nothing pairs their bars.
@@ -1322,17 +1323,39 @@ def merge_readings(
     for k, j in pairs:
         mine, theirs = measures[k], others[j]
         expected = this_bars[k].expected
-        # The page's note count first, then how far the bar is from its
-        # signature (nearer wins: a reading a third of a beat short beats
-        # one a beat long); ties stay with this reading.
-        score_mine: tuple = (0, 0)
-        score_theirs: tuple = (0, 0)
+        # An OVERFULL bar loses first: it is the one misreading that moves
+        # every note after it (a reader pads a short bar, and a missing note
+        # costs one note) -- unless the other reading has dropped more than
+        # one of the page's notes, when its bar adding up says little about
+        # its rhythm. Then the page's note count, then how far the bar is
+        # from its signature (nearer wins: a reading a third of a beat
+        # short beats one a beat long); ties stay with this reading.
+        # Measured 2026-10-02 (docs/pdf2musicxml.md): with the page counts
+        # honest (`vector.drop_unledgered`), count-first kept the overfull
+        # bar of the reading that held the page's count against one that
+        # filled it; overfull-first without the one-note proviso mended
+        # them but took 43 bars missing 2-14 of the page's notes.
+        within_one = (
+            counts is None
+            or counts[k] is None
+            or min(this_bars[k].notes, other_bars[j].notes) >= counts[k] - 1
+        )
+        score_mine: tuple = (True, False, 0)
+        score_theirs: tuple = (True, False, 0)
         if counts is not None and counts[k] is not None:
-            score_mine = (this_bars[k].notes == counts[k], 0)
-            score_theirs = (other_bars[j].notes == counts[k], 0)
+            score_mine = (True, this_bars[k].notes == counts[k], 0)
+            score_theirs = (True, other_bars[j].notes == counts[k], 0)
         if expected is not None:
-            score_mine = (score_mine[0], -abs(this_bars[k].length - expected))
-            score_theirs = (score_theirs[0], -abs(other_bars[j].length - expected))
+            score_mine = (
+                this_bars[k].length <= expected or not within_one,
+                score_mine[1],
+                -abs(this_bars[k].length - expected),
+            )
+            score_theirs = (
+                other_bars[j].length <= expected or not within_one,
+                score_theirs[1],
+                -abs(other_bars[j].length - expected),
+            )
         if score_theirs <= score_mine:
             continue
         replacement = copy.deepcopy(theirs)

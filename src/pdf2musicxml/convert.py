@@ -685,28 +685,39 @@ def convert_pdf(pdf: Path, options: Options, log: Log = print) -> list[Result]:
         results.append(
             convert_group(pdf, pages, group, number, len(groups), options, out_dir, work, log)
         )
-    remove_stale_outputs(manifest, results, log)
+    remove_stale_outputs(manifest, results, log, out_dir)
     write_manifest(pdf, out_dir, pages, options, results)
     return results
 
 
-def remove_stale_outputs(manifest: dict | None, results: list[Result], log: Log) -> None:
+def remove_stale_outputs(
+    manifest: dict | None, results: list[Result], log: Log, out_dir: Path
+) -> None:
     """Delete the files an earlier run wrote for this PDF that this run did not rewrite.
 
     A better title or a new page grouping renames a transcription's files;
-    only files the previous manifest itself recorded are touched.
+    only files the previous manifest itself recorded are touched, and only
+    inside `out_dir`, the folder this run writes. A manifest records its
+    outputs by absolute path, so a manifest copied beside a conversion into
+    another folder named the ORIGINAL outputs as superseded, and this
+    deleted all 275 of Transcriptions_Other's (2026-10-02; regenerated from
+    the engines' cached readings).
     """
     if not manifest:
         return
+    root = Path(out_dir).resolve()
     current = set()
     for result in results:
         current.update(p for p in (result.output, result.check_output) if p)
     for entry in manifest.get("transcriptions", []):
         for key in ("output", "check_output"):
             old = entry.get(key)
-            if old and old not in current and Path(old).is_file():
-                Path(old).unlink()
-                log(f"  removed {Path(old).name} (superseded)")
+            if not old or old in current or not Path(old).is_file():
+                continue
+            if not Path(old).resolve().is_relative_to(root):
+                continue
+            Path(old).unlink()
+            log(f"  removed {Path(old).name} (superseded)")
 
 
 def write_manifest(

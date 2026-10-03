@@ -877,8 +877,21 @@ def test_superseded_outputs_are_removed(tmp_path):
         manifest,
         [result(tmp_path / "book - 01 BLUEBERRY HILL.musicxml"), result(kept)],
         lambda _m: None,
+        tmp_path,
     )
     assert not old.exists() and kept.exists() and unrelated.exists()
+
+    # A manifest copied beside a conversion into ANOTHER folder names the
+    # originals by absolute path: they are not this run's to remove.
+    elsewhere = tmp_path / "scratch"
+    elsewhere.mkdir()
+    remove_stale_outputs(
+        {"transcriptions": [{"output": str(kept)}]},
+        [result(elsewhere / kept.name)],
+        lambda _m: None,
+        elsewhere,
+    )
+    assert kept.exists()
 
 
 def test_render_command_and_detection(tmp_path, monkeypatch):
@@ -1716,6 +1729,28 @@ def test_the_pages_note_count_outranks_the_fill_when_choosing_between_readings()
     part = musicxml.first_part(score(quarters(2)).getroot())
     other = musicxml.first_part(score(quarters(3)).getroot())
     assert musicxml.merge_readings(part, other).compared == 0
+
+
+def test_an_overfull_bar_loses_first_to_a_reading_one_note_short_at_most():
+    """0.3.25: the page prints 4 notes; this reading holds all 4 but overruns
+    the bar (a quarter read as a half). An overrun moves every later note,
+    a missing note costs one: a reading with 3 that fills the bar wins. One
+    with only 2 of the page's 4 filling the bar says little about rhythm,
+    and the count decides again."""
+    overfull = note("C", 4, 12) * 3 + note("D", 4, 24)  # 4 notes, 5 beats
+    mine = score([overfull], divisions=12)
+    three = score([note("C", 4, 12) * 2 + note("D", 4, 24)], divisions=12)  # 3 notes, 4 beats
+    part, other = musicxml.first_part(mine.getroot()), musicxml.first_part(three.getroot())
+    assert musicxml.merge_readings(part, other, [4]).taken == 1
+    assert [b.length for b in musicxml.bars(part)] == [4]
+
+    mine = score([overfull], divisions=12)
+    two = score([note("C", 4, 24) * 2], divisions=12)  # 2 notes, 4 beats
+    part, other = musicxml.first_part(mine.getroot()), musicxml.first_part(two.getroot())
+    assert musicxml.merge_readings(part, other, [4]).taken == 0
+    # A scan has no page count: the overrun loses outright.
+    part, other = musicxml.first_part(mine.getroot()), musicxml.first_part(two.getroot())
+    assert musicxml.merge_readings(part, other).taken == 1
 
 
 def test_a_taken_bar_brings_notes_and_chords_only_and_the_file_is_left_to_musescore_to_beam():

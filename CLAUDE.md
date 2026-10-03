@@ -1273,7 +1273,13 @@ docs/pdf2musicxml.md has the measurements. Things not to re-derive:
   the two readings' bar counts agree, each bar goes to the reading that
   holds the page's note count for it (vector files), else the one NEARER
   to filling its signature; ties stay with homr, differing bar counts pair
-  nothing. A taken bar brings notes and chord symbols only (Audiveris's
+  nothing. Since 0.3.25 (2026-10-02) an OVERFULL bar loses first, to a
+  reading holding all but at most one of the page's notes: an overrun
+  moves every note after it, and honest page counts had made count-first
+  keep 18 more of them (corpus: overfull 531 -> 425, matched notes
+  104,785 -> 104,765). `remove_stale_outputs` deletes only inside its
+  `out_dir`: a manifest names outputs by ABSOLUTE path, and a scratch
+  conversion with copied manifests once deleted all 275 real ones. A taken bar brings notes and chord symbols only (Audiveris's
   OCR'd `<direction>` words, `<print>` and `<barline>` stay behind; the
   primary's attributes and tempo stay), and EVERY `<beam>` in the file
   goes afterwards: MuseScore beams by hand once a file holds any, and the
