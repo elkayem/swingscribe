@@ -1564,7 +1564,7 @@ in the reference, not ours. Not the PDF's: it prints a quarter-note triplet
 (rest, F6, F#6) that pdf2musicxml missed. This write-up first called it
 the PDF's own bar, and the listener corrected it: an 8va mark at the start
 of bar 85 was read as a notehead, which slid the note alignment by one and
-left the triplet's first note "unread" (see the pdf2musicxml entry).
+left the triplet's first note "unread" (docs/pdf2musicxml.md, "Open: an 8va mark is read as a notehead").
 
 One sidecar rewritten, and why it had to be: Coltrane's Oleo went 0.688 ->
 0.003 on the first run, every bar two beats off. Its `anchor` (86.64 s) was

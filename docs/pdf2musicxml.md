@@ -485,6 +485,32 @@ about 50 of 70: with 0% agreement between the readings, a system pairs
 only where both engines counted its bars alike, and the taken bars are
 nearer the signature rather than right.
 
+## Open: an 8va mark is read as a notehead (2026-10-02)
+
+The listener caught it on A Shade of Jade, bar 84: the page prints four
+eighths and a quarter-note triplet (rest, F6, F#6) under a bracketed "3";
+the output has the rest and two plain quarters, a five-beat bar, and the
+two high notes' accidentals the wrong way round (F#6, F6). The tuplet pass
+found the "3" and refused it -- the manifest says `page 3 staff 2 x 539:
+3 printed, a head of the group was not read`. The page reader had taken the
+"8" of the 8va at the start of bar 85 (Finale's OpusSpecialStd, U+201C,
+6.3 x 7.6 pt on a 5 pt staff space) for a notehead: `is_notehead_box`
+admits any music-font glyph about a space tall and a little wider than
+tall, "whatever its code", and this one sits where an F6 would. With an
+extra F6 in the printed sequence, `align_notes`' SequenceMatcher took its
+longest equal block one head late: the read F#6 paired with the printed
+F#6 at x 556, the read F6 with the phantom, and the triplet's first note at
+x 539 was left "unread" -- so the group was skipped whole, and
+`correct_pitches` never set the pair's accidentals from the page. Measured
+over every vector PDF in `benchmark/Transcriptions_Other/`: 25 ottava "8"
+glyphs, 23 kept as noteheads, in 11 files (Shade of Jade, Birdlike, Bop
+Drop, Cryin' Blues, Easy To Love, Isotope, Mean Greens, No Room For
+Squares, The Break Through, What Is This Thing Called Love, Work Song).
+Each can slide the alignment the same way around one bar. Not fixed yet:
+the general test is that a notehead a space or more outside the staff has
+ledger lines under it (an ottava mark, a fingering or a text glyph does
+not), which wants its own measurement over the corpus first.
+
 ## What is left to a human
 
 An OMR reading is a draft. Per page expect a handful of wrong durations,
