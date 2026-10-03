@@ -391,6 +391,16 @@ export class PianoRoll {
       ctx.fillRect(x - 0.5, 0, isChorus ? 1.5 : 1, h);
       ctx.globalAlpha = 1;
     }
+    // Where the grid doubts its own count (meter.grid_doubts), as the Detail
+    // view marks it: the bars after it may sit a beat off.
+    ctx.fillStyle = this._css('--doubt', '#ff7a59');
+    for (const d of this.beats.doubts || []) {
+      if (d.end < this.view.a || d.start > this.view.b) continue;
+      const x0 = this.timeToX(d.start, w);
+      ctx.globalAlpha = 0.12;
+      ctx.fillRect(x0, 0, Math.max(3, this.timeToX(d.end, w) - x0), h);
+    }
+    ctx.globalAlpha = 1;
     // The beats the listener pinned (meter.apply_pins), as the Detail view
     // draws them: their mark, at every zoom. Pinned there, shown here.
     ctx.fillStyle = this._css('--pin', '#f4f1e8');

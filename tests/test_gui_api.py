@@ -460,6 +460,25 @@ def test_beats_endpoint_honours_pinned_beats(world, monkeypatch):
     assert [t for t, _ in pinned["bars"]] == pytest.approx([0.0, 2.0, 4.0, 6.0])
 
 
+def test_beats_endpoint_marks_where_the_count_is_in_doubt_and_a_pin_settles_it(world, monkeypatch):
+    """R34: four beats tracked as three intervals of 1.33 pulses is a slip
+    no repair can see, so the payload says where the count is unsupported
+    and the views mark it; the listener's pin there is a judgement, and the
+    doubt goes."""
+    track = open_track(world)
+    _seed_grid(monkeypatch, world, PIN_SLIPPED)
+    url = f"/api/tracks/{track['id']}/beats"
+    plain = world["client"].get(url, params={"anchor": 0.0}).json()
+    [doubt] = plain["doubts"]
+    assert doubt["start"] == 0.0 and doubt["end"] >= 2.0  # the slip's three intervals
+    assert doubt["held"] - doubt["kept"] == pytest.approx(1.0, abs=0.05)  # a beat too few
+    pinned = world["client"].get(url, params={"anchor": 0.0, "pins": "1.0"}).json()
+    assert pinned["doubts"] == []
+    _seed_grid(monkeypatch, world, PIN_TRUTH)
+    steady = world["client"].get(url, params={"anchor": 0.0}).json()
+    assert steady["doubts"] == []
+
+
 def test_beats_endpoint_refuses_pins_that_are_not_seconds(world, monkeypatch):
     track = open_track(world)
     _seed_grid(monkeypatch, world, PIN_TRUTH)

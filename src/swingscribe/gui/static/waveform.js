@@ -326,7 +326,33 @@ export class WaveView {
       }
     }
 
+    this._drawDoubts(width, height, style);
     this._drawPins(width, height, style);
+  }
+
+  /* Where the grid's own beat count is in doubt (meter.grid_doubts): a
+     crowded or stretched spot the repair could not settle, so a bar line
+     after it may sit a beat off. A faint band over the stretch and a "?" at
+     its top, at every zoom -- the place to listen, and to pin a beat if the
+     bar lines slip there. A pin settles it and the mark goes. */
+  _drawDoubts(width, height, style) {
+    const doubts = this.beatsData?.doubts ?? [];
+    if (!doubts.length) return;
+    const ctx = this.ctx;
+    ctx.fillStyle = style.getPropertyValue('--doubt').trim() || '#ff7a59';
+    ctx.font = 'bold 10px ui-monospace, Menlo, Consolas, monospace';
+    ctx.textAlign = 'center';
+    for (const d of doubts) {
+      if (d.end < this.win.start || d.start > this.win.end) continue;
+      const x0 = this.timeToX(d.start);
+      const w = Math.max(3, this.timeToX(d.end) - x0);
+      ctx.globalAlpha = 0.16;
+      ctx.fillRect(x0, 0, w, height);
+      ctx.globalAlpha = 0.95;
+      ctx.fillText('?', x0 + w / 2, 19);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'left';
   }
 
   /* The beats the listener pinned: a line the full height with a flag at the

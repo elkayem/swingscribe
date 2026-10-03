@@ -273,6 +273,16 @@ ticks crowded together on the Detail view) or one too few (a gap). Moving
 the downbeat cannot fix that: it puts the bars after the slip right and the
 bars before it wrong. Pin a beat instead.
 
+SwingScribe mends most of these itself. Where two ticks crowd together, it
+counts the beats across two bars on either side, like a metronome, and
+takes the extra one out if the time holds a beat fewer. Where it cannot tell,
+because the beats around the spot are too uneven to count, it marks the
+spot with a faint orange band and a **?** on the Detail view, the stem
+view and the piano roll. The beats readout says how many such spots are in
+your selection, and hovering over it lists their times. A **?** is the place
+to listen: if the bar lines after it sit a beat off, pin a beat there and
+the mark goes away. If they sound right, leave it.
+
 A pin says "a beat is exactly here". SwingScribe takes away any beat less
 than half a beat from it, then lays out the beats between the pin and the
 nearest steady beats either side again, as many as the time between them

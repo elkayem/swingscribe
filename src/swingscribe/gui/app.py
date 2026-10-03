@@ -814,6 +814,23 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             # The pins as the grid took them: cleaned, and only those inside
             # the track. The roll draws a marker at each.
             "pins": [round(b.time, 3) for b in repaired if b.pinned],
+            # Where the grid's own beat count is unsupported by the time
+            # (meter.grid_doubts, R34): a crowded or stretched spot the
+            # repair could not settle. The views mark each one, so a slip
+            # like Shade of Jade's is found by looking, not by reading the
+            # page bar by bar; a pin there settles it and the mark goes.
+            "doubts": [
+                {
+                    "start": round(d.start, 3),
+                    "end": round(d.end, 3),
+                    "held": d.held,
+                    "kept": d.kept,
+                    "jump": None if d.jump is None else round(d.jump, 2),
+                }
+                for d in meter.grid_doubts(
+                    repaired, meter_config.stability_tolerance, grid.downbeats, pulses
+                )
+            ],
             "bars": [[round(t, 3), number] for t, number in lines],
             "free": free,
             "chorus_bars": (

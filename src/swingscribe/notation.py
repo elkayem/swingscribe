@@ -310,6 +310,34 @@ def bar_grid_for_settings(
     return [beat.time for beat in repaired], anchor
 
 
+def grid_doubts_for_settings(
+    beats: list[float],
+    downbeats: list[float],
+    settings: dict,
+    config: Config,
+    duration: float,
+    span: tuple[float, float | None] | None = None,
+    near: tuple[float, float] | None = None,
+) -> list[meter.Doubt]:
+    """Where the count of the grid `bar_grid_for_settings` builds is in doubt
+    (`meter.grid_doubts`, R34) -- inside `span` when one is given. The same
+    grid the roll draws and the page counts, pins and all, so a doubt the
+    listener mends with a pin goes away and the harness's count of them is
+    the Export button's."""
+    near = _near_of(settings, duration, near)
+    meter_config = _meter_config(settings, config)
+    repaired, _sections = meter.bar_grid(
+        beats, downbeats, meter_config, duration, near=near, pins=pins_of(settings)
+    )
+    _signature, pulses = meter.resolve_meter(meter_config)
+    doubts = meter.grid_doubts(repaired, meter_config.stability_tolerance, downbeats, pulses)
+    if span is None:
+        return doubts
+    lo = span[0] or 0.0
+    hi = duration if span[1] is None else span[1]
+    return [d for d in doubts if d.end >= lo and d.start <= hi]
+
+
 # The sidecar key for the beats the listener pinned (meter.apply_pins).
 PINS_KEY = "beat_pins"
 

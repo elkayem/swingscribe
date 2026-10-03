@@ -570,6 +570,7 @@ function updateSelection(a, b, done) {
     scheduleAuditionReload();
     refreshModelStatus();  // a span-scoped separation may or may not cover the new span
     if (state.anchor === null && state.beats) maybeLoadBeats();  // the automatic downbeat follows the span
+    else if (state.beats) applyBeats();  // the doubt count is the selection's
   }
 }
 
@@ -890,10 +891,23 @@ function applyBeats() {
     const seconds = free.reduce((total, [a, b]) => total + (b - a), 0);
     const where = free.length === 1 ? ` at ${clock(free[0][0], false)}` : '';
     const note = seconds >= 1 ? ` · ${Math.round(seconds)}s unmetered${where}` : '';
-    info.textContent = `≈${Math.round(state.beats.bpm)} bpm · ${state.beats.time_signature}${note}`;
-    info.title = free.length
+    // Where the grid doubts its own beat count (meter.grid_doubts): inside
+    // the selection when there is one, since that is the page. Each is
+    // marked with a "?" on the views; a bar line after one may sit a beat off.
+    const sel = state.selection;
+    const doubts = (state.beats.doubts || []).filter(
+      (d) => !sel || (d.end >= sel.a && d.start <= sel.b));
+    const doubted = doubts.length
+      ? ` · ${doubts.length} doubtful count${doubts.length === 1 ? '' : 's'}`
+      : '';
+    info.textContent = `≈${Math.round(state.beats.bpm)} bpm · ${state.beats.time_signature}${note}${doubted}`;
+    const pulse = free.length
       ? `No steady pulse: ${free.map(([a, b]) => `${clock(a, false)}–${clock(b, false)}`).join(', ')}`
       : 'A steady pulse throughout';
+    info.title = doubts.length
+      ? `${pulse}\nThe beat count is in doubt at ${doubts.map((d) => clock(d.start, false)).join(', ')}` +
+        ' (marked "?"). If the bar lines slip after one, pin a beat there (Alt-click).'
+      : pulse;
   }
   // The chart is read against the meter it will be laid over.
   changesField.setContext({

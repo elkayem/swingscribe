@@ -32,6 +32,7 @@
   --downbeat: #9fb4ff;        /* bar lines — the grid's claim about the metre */
   --chorus: #ffd479;          /* chorus starts — a solo is N whole choruses */
   --pin: #f4f1e8;             /* a beat the listener pinned — their mark, not the tracker's */
+  --doubt: #ff7a59;           /* a stretch whose beat count the grid itself doubts */
   --danger: #e8636a;
   --onset: #e2666b;
   /* The four ways a note comes out of the alignment against a hand

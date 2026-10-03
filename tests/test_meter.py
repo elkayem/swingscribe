@@ -203,6 +203,159 @@ def test_a_short_pair_in_a_ragged_passage_is_left_alone():
     assert 2.15 in [b.time for b in beats]
 
 
+def shade_of_jade(head: list[float] | None = None) -> tuple[list[float], float]:
+    """The measured shape, R34 (113.76-114.72 s on A Shade of Jade): a
+    0.227 s pulse, and one bar run 6% slow whose third beat the tracker found
+    twice, 80 ms apart -- 0.20, 0.22, 0.08, 0.24, 0.22 s, no pair of which
+    reads as one pulse. (times, the ghost)"""
+    head = head or steady(24, ibi=0.227)
+    t = head[-1]
+    bar = [round(t + x, 6) for x in (0.20, 0.42, 0.50, 0.74, 0.96)]
+    tail = steady(24, ibi=0.227, start=round(bar[-1] + 0.227, 6))
+    return head + bar + tail, bar[1]
+
+
+def test_a_ghost_the_pair_test_cannot_see_is_dropped_by_the_metronome():
+    """Twice in five bars on A Shade of Jade, and the page sat half a bar off
+    for the rest of the solo. The pair test keeps both crowded beats (either
+    one dropped leaves 1.4 pulses); the count across two bars either side
+    says the bar holds four beats, not five. Of the pair, the one farther
+    from an even beat between its neighbours goes."""
+    times, ghost = shade_of_jade()
+    assert meter.drop_doubled_beats(times, 0.15) == times  # the hole this closes
+    beats = meter.repair_beats(times, MeterConfig())
+    assert [b.time for b in beats] == [t for t in times if t != ghost]
+    assert not any(b.implied for b in beats)
+
+
+def test_the_metronome_reads_a_ghost_as_one_beat_too_many():
+    times = steady(40, ibi=0.25)
+    assert meter.metronome_jump(times, 19, 20) == pytest.approx(0.0, abs=1e-9)
+    ghosted = times[:21] + [round(times[20] + 0.08, 6)] + times[21:]
+    assert meter.metronome_jump(ghosted, 19, 22) == pytest.approx(1.0, abs=0.05)
+    dropped = times[:20] + times[21:]
+    assert meter.metronome_jump(dropped, 19, 20) == pytest.approx(-1.0, abs=0.05)
+
+
+def test_two_real_beats_tracked_close_together_are_both_kept():
+    """0.69 + 0.12 + 0.69 s on a 0.5 s pulse: the time holds three intervals
+    and the grid has three, so the pair is two displaced beats, not a ghost.
+    Dropping one would lose a beat."""
+    times = [*steady(20), 10.19, 10.31, *steady(20, start=11.0)]
+    beats = meter.repair_beats(times, MeterConfig())
+    assert len(beats) == len(times)
+
+
+def test_a_ghost_in_a_ragged_passage_is_left_alone():
+    """No metronome to read: a side whose own intervals wander past a third of
+    its pulse is not steady, and a rubato passage must not be counted."""
+    rng = random.Random(7)
+    ragged = [0.0]
+    for _ in range(24):
+        ragged.append(round(ragged[-1] + 0.227 * rng.choice((0.6, 1.0, 1.45)), 6))
+    times, ghost = shade_of_jade(head=ragged)
+    k = times.index(ghost)
+    assert meter.metronome_jump(times, k - 1, k + 2) is None
+    beats = meter.repair_beats(times, MeterConfig())
+    assert ghost in [b.time for b in beats]
+
+
+def test_a_ghost_at_a_change_of_tempo_is_left_alone():
+    """Two sides at different tempi are not one metronome."""
+    left = steady(20, ibi=0.5)
+    right = steady(20, ibi=0.35, start=11.0)
+    times = [*left, 10.42, 10.5, *right]
+    assert meter.metronome_jump(times, 19, 22) is None
+    assert 10.42 in [b.time for b in meter.repair_beats(times, MeterConfig())]
+
+
+def test_a_steady_grid_and_a_mended_ghost_raise_no_doubt():
+    assert meter.grid_doubts(meter.repair_beats(steady(60), MeterConfig())) == []
+    times, _ghost = shade_of_jade()
+    assert meter.grid_doubts(meter.repair_beats(times, MeterConfig())) == []
+
+
+def test_a_ghost_the_metronome_cannot_read_is_a_doubt():
+    """R34's tracking half: a slip the repair leaves is reported where it is,
+    with the metronome's silence (None) rather than a guess."""
+    rng = random.Random(7)
+    ragged = [0.0]
+    for _ in range(24):
+        ragged.append(round(ragged[-1] + 0.227 * rng.choice((0.6, 1.0, 1.45)), 6))
+    times, ghost = shade_of_jade(head=ragged)
+    doubts = meter.grid_doubts(meter.repair_beats(times, MeterConfig()))
+    assert any(d.start <= ghost <= d.end and d.jump is None for d in doubts)
+
+
+def test_jitter_is_not_a_doubt():
+    """0.18 + 0.28 s pairs on a 0.227 s pulse: the tracker's 20 ms frames,
+    not a count."""
+    times = [0.0]
+    for k in range(60):
+        step = (0.18 if k % 2 else 0.28) if 20 <= k < 30 else 0.23
+        times.append(round(times[-1] + step, 6))
+    assert meter.grid_doubts(meter.repair_beats(times, MeterConfig())) == []
+
+
+def test_a_stretch_tracked_one_beat_long_is_a_doubt_the_metronome_sizes():
+    """Four beats heard as five over a bar, with steady bars either side: the
+    metronome reads one beat too many."""
+    head = steady(20, ibi=0.5)
+    bar = [round(head[-1] + 0.4 * k, 6) for k in range(1, 6)]  # 5 intervals in 2.0 s
+    tail = steady(20, ibi=0.5, start=round(bar[-1] + 0.5, 6))
+    beats = [meter.Beat(t) for t in head + bar + tail]  # as the repair would leave it
+    doubts = meter.grid_doubts(beats)
+    assert len(doubts) == 1
+    assert doubts[0].kept - doubts[0].held == pytest.approx(1.0, abs=0.35)
+    assert doubts[0].jump == pytest.approx(1.0, abs=0.1)
+
+
+def test_downbeat_marks_that_keep_their_phase_settle_a_doubt():
+    """The tracker's marks every four beats on both sides of a doubted stretch
+    whose count is right: settled. The same marks a beat apart on the far
+    side -- the grid slipped -- leave it reported. Nothing moves either way."""
+    head = steady(24)
+    t = head[-1]
+    times = [*head, round(t + 0.667, 6), round(t + 1.333, 6), *steady(24, start=round(t + 2.0, 6))]
+    beats = [meter.Beat(x) for x in times]  # three intervals where four belong
+    assert meter.grid_doubts(beats)
+    on_count = [beats[i].time for i in range(0, len(beats), 4)]
+    slipped = [b for b in on_count if b < t] + [beats[i].time for i in range(26, len(beats), 4)]
+    kept = [b for b in on_count if b < t] + [beats[i].time for i in range(28, len(beats), 4)]
+    assert meter.grid_doubts(beats, downbeats=kept) == []
+    assert meter.grid_doubts(beats, downbeats=slipped)
+    assert meter.grid_doubts(beats, downbeats=kept[:2]) == meter.grid_doubts(beats)
+
+
+def test_a_ragged_stretch_two_beats_long_is_thinned_by_the_metronome():
+    """Totem Pole's shape (R34): seven pulses tracked as nine ragged
+    intervals between steady bars, no pair of which reads as one pulse or as
+    a ghost. Two bars either side say the stretch holds two beats too many,
+    so it is re-laid at seven, keeping the tracker's beats that sit on the
+    new subdivision."""
+    head = steady(24, ibi=0.44)
+    t = head[-1]
+    ragged = [round(t + x, 6) for x in (0.30, 0.62, 1.00, 1.30, 1.66, 2.00, 2.40, 2.72)]
+    end = round(t + 7 * 0.44, 6)
+    tail = steady(24, ibi=0.44, start=end)
+    beats = meter.repair_beats(head + ragged + tail, MeterConfig())
+    inside = [b.time for b in beats if t < b.time < end]
+    assert len(inside) == 6  # seven intervals
+    assert meter.grid_doubts(beats) == []
+    assert not any(b.relaid for b in beats)
+
+
+def test_thinning_never_adds_a_beat():
+    """A stretch one beat SHORT (four pulses tracked as three intervals) is
+    left to the doubt list: the metronome only ever takes beats out."""
+    head = steady(24, ibi=0.5)
+    t = head[-1]
+    times = [*head, round(t + 0.667, 6), round(t + 1.333, 6), *steady(24, start=round(t + 2.0, 6))]
+    beats = meter.repair_beats(times, MeterConfig())
+    assert len(beats) == len(times)
+    assert any(d.jump is not None and d.jump < -0.5 for d in meter.grid_doubts(beats))
+
+
 def test_reference_pulse_holds_through_a_double_rate_stretch():
     """The reference the pair test needs: a rolling median that followed the
     halves called every one of them a beat."""
@@ -617,13 +770,37 @@ def test_no_pins_change_nothing():
     )
 
 
-def test_the_repair_misses_cheese_cakes_doubled_beat():
+@pytest.fixture
+def metronome_off(monkeypatch):
+    """The repair as it was before the metronome test (R34), which mends
+    Cheese Cake's slip on its own now. A pin is for the slip the metronome
+    cannot read -- in a ragged stretch, beside a change of tempo -- and its
+    arithmetic is the same whichever slip it mends, so the pin tests keep
+    this one steady fixture and switch the metronome off rather than build a
+    ragged neighbourhood the pin's own steadiness tests would then refuse."""
+    monkeypatch.setattr(meter, "drop_ghost_beats", lambda beats, tolerance, seed=None: list(beats))
+    monkeypatch.setattr(meter, "thin_by_metronome", lambda beats, tolerance: list(beats))
+
+
+def test_the_metronome_mends_cheese_cakes_doubled_beat_without_a_pin():
+    """R34: the pair is 0.32 s, a millisecond past the one-pulse test, and two
+    bars either side say the time holds one beat between the pair's
+    neighbours, not two."""
+    tracked, truth = slipped()
+    assert meter.drop_doubled_beats(tracked, 0.15) == tracked
+    assert times(meter.repair_beats(tracked, MeterConfig())) == pytest.approx(
+        [t for t in tracked if t != round(truth[39] + 0.20, 6)]
+    )
+
+
+def test_the_repair_without_the_metronome_misses_cheese_cakes_doubled_beat(metronome_off):
     """The precondition the pin exists for: without one the grid is a beat long."""
     tracked, truth = slipped()
     repaired = meter.repair_beats(tracked, MeterConfig())
     assert len(repaired) == len(truth) + 1
 
 
+@pytest.mark.usefixtures("metronome_off")
 def test_a_pin_at_a_doubled_beat_takes_the_extra_one_out():
     tracked, truth = slipped()
     t = truth[39]
@@ -637,6 +814,7 @@ def test_a_pin_at_a_doubled_beat_takes_the_extra_one_out():
     assert times(pinned)[42:] == truth[42:]
 
 
+@pytest.mark.usefixtures("metronome_off")
 def test_a_pin_anywhere_on_the_slip_mends_it_whichever_beat_it_lands_on():
     """The listener drags one of the two crowded beat lines onto the other,
     or onto where the beat really is: all three are the same fix."""
@@ -647,6 +825,7 @@ def test_a_pin_anywhere_on_the_slip_mends_it_whichever_beat_it_lands_on():
         assert len(meter.apply_pins(repaired, [pin], MeterConfig())) == len(truth), pin
 
 
+@pytest.mark.usefixtures("metronome_off")
 @pytest.mark.parametrize("form_start", [None, 2.0])
 def test_a_pin_anywhere_on_the_slip_keeps_one_bar_grid_numbered_like_the_truth(form_start):
     """The review's finding: a pin on one of the crowded beats (t+0.20) or
@@ -671,6 +850,7 @@ def test_a_pin_anywhere_on_the_slip_keeps_one_bar_grid_numbered_like_the_truth(f
         assert after and all(a == pytest.approx(c) for a, c in after), pin
 
 
+@pytest.mark.usefixtures("metronome_off")
 def test_a_pinned_slip_puts_the_bar_lines_after_it_back_and_leaves_those_before():
     """What the downbeat cannot do: right on BOTH sides of the slip."""
     tracked, truth = slipped()
@@ -910,6 +1090,7 @@ def test_a_pin_beyond_the_tracked_beats_carries_the_grid_out_to_it():
     assert pinned[1].implied and pinned[-2].implied and pinned[-3].implied
 
 
+@pytest.mark.usefixtures("metronome_off")
 def test_a_pinned_grid_stays_one_metrical_span():
     """Pinned beats are found beats: the pin must not cut the bar grid at
     the slip it mends."""

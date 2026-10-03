@@ -436,15 +436,27 @@ def test_without_a_downbeat_the_repaired_grid_anchors_where_the_roll_does():
 # ── beats the listener pinned (roadmap O5) ──────────────────────────────────
 
 
+@pytest.fixture
+def metronome_off(monkeypatch):
+    """The repair before its metronome test (R34), which mends this slip on
+    its own now; the pins are for the slips it cannot read, and their path
+    to the page is the same (tests/test_meter.py's fixture of this name)."""
+    from swingscribe.stages import meter
+
+    monkeypatch.setattr(meter, "drop_ghost_beats", lambda beats, tolerance, seed=None: list(beats))
+    monkeypatch.setattr(meter, "thin_by_metronome", lambda beats, tolerance: list(beats))
+
+
 def cheese_cake_slip() -> tuple[list[float], list[float]]:
-    """(tracked, true) beats around a doubled beat the repair keeps: Cheese
-    Cake's 0.20 + 0.12 s pair on a 0.26 s pulse (tests/test_meter.py)."""
+    """(tracked, true) beats around a doubled beat the pair test keeps:
+    Cheese Cake's 0.20 + 0.12 s pair on a 0.26 s pulse (tests/test_meter.py)."""
     head = [round(i * 0.26, 6) for i in range(60)]
     t = head[-1]
     tail = [round(t + 0.56 + i * 0.26, 6) for i in range(60)]
     return head + [t + 0.20, t + 0.32] + tail, head + [round(t + 0.28, 6)] + tail
 
 
+@pytest.mark.usefixtures("metronome_off")
 def test_the_sidecars_pins_reach_the_grid_the_page_is_built_on():
     """Export, the Score button and the harness all build their page on this
     grid, so a pin in the sidecar has to reach it -- or the roll would show
@@ -469,6 +481,7 @@ def test_a_hand_edited_pin_list_is_no_pins_not_an_error():
     assert pins_of({"beat_pins": [2.0, 1.0, 1.01]}) == [1.0, 2.0]
 
 
+@pytest.mark.usefixtures("metronome_off")
 def test_the_chord_chart_and_the_pages_bar_one_follow_a_pin_too():
     """`form_bar_of_page` counts the page's bar 1 on the same pinned grid.
     After an unmended slip every bar line sits a beat early, so a span that

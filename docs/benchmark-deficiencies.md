@@ -1268,7 +1268,11 @@ Blue Train and every tune over 280 bpm, where the eighth notes are. That
 decision needs the audio or the listener; a tempo hint through
 `beats` re-runs the whole chain below it, so the control belongs in
 `meter`, after transcribe, where doubling or halving a grid costs nothing
-cached. (Resolved 2026-09-21, R32: it needed neither the audio nor the
+cached. (2026-10-02, R34: count-by-time came back with the guard (a)
+lacked -- a metronome across steady, agreeing sides either side of the
+spot, not the stretch's own duration -- and moved In 'n Out +11.5 -> +8.5,
+Totem Pole +5.9 -> -0.1, Cherokee II +0.6 -> -0.4, nothing the wrong way.
+What it cannot read is on the doubt list, `meter.grid_doubts`.) (Resolved 2026-09-21, R32: it needed neither the audio nor the
 listener -- the tracker's own DOWNBEAT layer, already on the cached
 grid, marks every second beat where the grid is at half rate, and the
 control went into `meter` exactly as this paragraph asked.)
@@ -1467,6 +1471,118 @@ per-note table over the twelve hand scores, the way D22 was measured,
 would say.
 
 ## Resolved
+
+### R34 - A ghost beat 80 ms from a real one put a page half a bar off, and nothing counted the grid's slips
+
+2026-10-02, the listener on Joe Henderson's A Shade of Jade (a recording
+under `Transcriptions_Other/`, beside its PDF): right to bar 68, two beats
+off by bar 73, half a bar off after. Cause: beat_this found two beats twice,
+80 ms apart (113.96 / **114.18, 114.26** / 114.50 s and 116.68 / **116.92,
+117.00** / 117.22 s, a third at 185.70 / 185.80 s), on a 0.227 s pulse.
+Its peak picker suppresses a second peak only within 60 ms (a 7-frame max
+pool), and the DBN that would hold a tempo is off by design (plan §2). The
+pair test (R21) asks whether the two intervals beside a beat make one pulse
+-- here 0.22 + 0.08 = 0.30 and 0.08 + 0.24 = 0.32 s, 1.4 pulses -- so both
+stayed; `steady_intervals` flagged the 0.08 s interval and `metrical_spans`
+bridged it as a wobble, counting the ghost. The tracker's own downbeat marks
+said so all along: on the page's grid they sat on beat 1 to bar 71, beat 2
+for bars 72-74, beat 3 after. **Shade of Jade's page title is in the locked
+TEST split**: it motivated the rule and was never used to set a threshold.
+
+Why no tempo check caught it, which the listener asked: the tempo never
+changed. Every interval but the 0.08 s one sits at the pulse; the slip is a
+bar that holds four beats in the time of three (0.70-0.74 s against 0.90 s
+either side). A bar-level count catches it. A beat-level one cannot.
+
+What ships (`meter.py`, `CACHE_VERSION` 5):
+
+1. **The metronome test** (`metronome_jump`): eight intervals each side of a
+   spot laid on ONE metronome at their SPAN pulse -- time over count; the
+   median of the tracker's 20 ms-frame intervals reads 0.22 s for 0.227 s,
+   half a beat over sixteen -- each side's phase the median of its beats
+   against it; the jump between the phases is the number of beats the spot
+   holds too many. Sides must be steady (every interval within 35% of the
+   side's pulse) and agree within the stability tolerance. A single-width
+   count was tried first and is not enough: from the beat before the pair to
+   the beat after is 2.4 pulses there, because that bar ran 6-9% slow.
+   A free-slope line fit either side absorbed the step in its slope (it read
+   the ghost as 0.49 of a beat).
+2. **`drop_ghost_beats`**: an interval under 0.6 of the pulse whose pair the
+   metronome reads within 0.4 of one beat too many loses the beat farther
+   from an even beat between its neighbours. WJazzD, 73 solos
+   (`grid_drift.py`'s measure): five grids move, none the wrong way --
+   Cheese Cake +1.1 -> +0.1 beats over the solo (the slip O5's pins were
+   built for), Coltrane's Oleo +1.9 -> -0.1, In 'n Out +11.5 -> +9.5 and
+   +2.9 -> +1.9, Cherokee II +0.6 -> -0.4; 63 -> 65 solos within a beat,
+   mean |drift| 0.63 -> 0.55. Short threshold 0.5 changed two solos, 0.6
+   five; the band 0.35 left Oleo's second ghost (0.63) at +0.9.
+3. **`thin_by_metronome`**: a doubted stretch (below) the metronome reads
+   within 0.3 of 1-3 WHOLE beats too many is re-laid with that many fewer,
+   exactly as a pin's window is (`_relay`). Totem Pole +5.9 -> -0.1 (its
+   three stretches read +2.10, +2.00, +1.99), In 'n Out +9.5 -> +8.5;
+   65 -> 66 within a beat, mean |drift| 0.55 -> 0.45. Only ever thins.
+4. **NOT shipped, measured**: the mirror -- the metronome deciding a gap the
+   insertion rounds. Over the 147 cached grids rounding agrees with the
+   metronome on 411 of the 415 gaps it can read, and the four are ratios of
+   1.50 read at the edge of the band. A version of the stretch rule that
+   could ADD a beat put one back on Limehouse Blues where the ghost rule had
+   just taken one out.
+
+Tracking -- the listener's second ask, "it isn't the first time I've seen
+them". **`meter.grid_doubts`**: every run of up to three found-to-found
+stretches whose time does not hold its count within 0.35 of a pulse, unless
+the metronome confirms the count, or the tracker's downbeat marks keep one
+phase across it (three marks each side within 8 s). That last test was
+measured before it went in: across 26 judged doubts in WJazzD solos, the
+eight where the grid really slips changed phase 8 of 8, the sixteen whose
+count was right kept it 15 of 16 -- Shade of Jade's two mended ghosts among
+them, which the metronome alone read as half a beat out either way. The
+layer only SETTLES a doubt; no beat moves by it and no bar is counted from
+it. Result: doubts sit on 6 of the 7 WJazzD solos still a beat or more off
+(Orbits +3.2, Yesterdays -4.7 -- a 14-pulse hole -- In 'n Out +8.5 and
++1.9, Dorham's +4.3, Maiden Voyage +1.1; Crazy Rhythm +1.0 is unflagged)
+and on none of the 66 that are not. Shown: `/beats` returns them, the
+Detail, stem and roll views draw a "?" band, the beats readout counts them
+in the selection and lists them on hover (user guide, "Pinning a beat that
+slipped"). Pinned: `grid_doubts` per page, and per set
+`{mscz,wjazz,omnibook,pages_<tier>}_grid_steps` (the trace's bar-line steps,
+trusted pairings, net of a PDF page's own, `page_steps`) and `_grid_doubts`,
+`_grid_doubted`. Today: WJazzD 56 -> 47 steps, 11 doubts on 6 pages; the
+twelve hand scores 0 and 0; the Omnibook 6 steps, 1 doubt; silver pages 0.
+
+Card (all against the pins of 2026-09-30): WJazzD placement 0.8582 ->
+0.8729, six pages up and none down, the paired interval [+0.003, +0.030]
+and sign p 0.031 -- Totem Pole 0.521 -> 0.943, Cheese Cake 0.689 -> 0.878,
+Coltrane's Oleo 0.688 -> 0.872, Cherokee II 0.612 -> 0.777, In 'n Out
+0.410 -> 0.494 and 0.488 -> 0.521; Flex-Q rhythm level (+0.0001, Totem
+Pole -0.006). Cheese Cake's silver page 0.707 -> 0.893 on the bar, edit
+cost 51.96 -> 51.45, silver placement 0.713 -> 0.775. The twelve hand
+scores and the Omnibook did not move: no ghost in any of their spans.
+Shade of Jade, unpinned, now sits on the PDF's bar lines to bar 89 and one
+beat off after it -- the CONVERTED page's bar 84 holds five beats, a step
+in the reference, not ours. Not the PDF's: it prints a quarter-note triplet
+(rest, F6, F#6) that pdf2musicxml missed. This write-up first called it
+the PDF's own bar, and the listener corrected it: an 8va mark at the start
+of bar 85 was read as a notehead, which slid the note alignment by one and
+left the triplet's first note "unread" (see the pdf2musicxml entry).
+
+One sidecar rewritten, and why it had to be: Coltrane's Oleo went 0.688 ->
+0.003 on the first run, every bar two beats off. Its `anchor` (86.64 s) was
+written by `wjazz_batch.voted_anchor` on the OLD grid, where two ghosts at
+97.26 and 110.56 s put the longer side of the solo two beats over; the vote
+picked that side's phase and so compensated the slip. On the mended grid the
+tracker's marks keep ONE phase from 68 to 221 s, and the same vote reads
+86.20 s at share 0.99. Re-voted on every WJazzD sidecar behind a scored
+solo; that was the only one whose phase changed (Totem Pole's and Dorham's votes
+are not trusted and were left). The old file is kept outside the repo.
+Rule for next time: a grid change can expose a batch anchor that was
+compensating for it. Re-vote before believing a page that went off the bar.
+
+Still open, and on the doubt list now: the 300 bpm ragged stretches (D33),
+Orbits' unreadable stretch at 170 s, Yesterdays' hole. A lead for D33: on
+seven of the eight real slips the downbeat marks' phase change, mod 4, IS
+the true step (Dorham's In 'n Out +2, Orbits +3). Using it would count from
+the layer, which nothing here does.
 
 ### R33 - A per-beat figure prior from 245 human transcription pages, shipped at 0.015 beats per nat
 

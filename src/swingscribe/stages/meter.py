@@ -25,6 +25,7 @@ No heavy imports at all — this module is stdlib-only and always importable.
 import bisect
 import math
 import statistics
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
@@ -71,7 +72,10 @@ BRIDGE_BEATS = 1
 # 4: the pulse's OCTAVE is judged from the downbeat layer before the repair
 # (`pulse_octave`, R32): a grid at half rate with the true pulse surfacing
 # is subdivided to it instead of thinned to the half.
-CACHE_VERSION = 4
+# 5: a ghost beat crowding a real one is thinned by the metronome test
+# (`drop_ghost_beats`, R34), and so is a ragged stretch it reads as whole
+# beats too many (`thin_by_metronome`).
+CACHE_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -329,6 +333,218 @@ def drop_doubled_beats(
     return kept
 
 
+# ── a ghost beat, and the metronome test (2026-10-02, R34) ──────────────────
+#
+# The pair test above asks whether the two intervals beside a beat make ONE
+# pulse. A ghost the tracker put 80 ms from a real beat fails it whenever the
+# real beats either side sit a frame or two from where a metronome would put
+# them: on Joe Henderson's A Shade of Jade, 0.22 + 0.08 + 0.24 s on a 0.227 s
+# pulse, dropping either crowded beat leaves 1.4 pulses, so both stayed and
+# the page gained a beat -- twice in five bars, half a bar off until the end.
+# beat_this's peak picker suppresses a second peak only within 60 ms (a
+# 7-frame max pool), and the DBN that would hold a tempo is off (plan §2).
+# Nothing downstream counted it either: the steadiness test flagged the
+# 0.08 s interval, and `metrical_spans` bridged it as it bridges any single
+# wobble, counting the ghost.
+#
+# A bar line is a COUNT, so the question is a count: how many beats does the
+# time across the suspect pair hold? Locally it cannot say -- from the beat
+# before the pair to the beat after was 2.4 pulses there, because the bar
+# around it ran 9% slow -- so it is asked of a metronome laid across two bars
+# either side (`metronome_jump`): the pulse measured from each side's SPAN
+# (time over count -- a median of intervals on the tracker's 20 ms frames
+# reads 0.22 s for a 0.227 s pulse, half a beat over sixteen), each side's
+# phase the median of its beats against that pulse, and the jump between the
+# two phases, in beats, is how many beats the pair holds too many. A ghost
+# reads 1; two real beats displaced read 0. A pair is thinned only within
+# GHOST_JUMP_FIT of 1, where both sides are steady and agree on the pulse --
+# which is what D33's count-by-duration (a ragged stretch's own length over
+# the reference) lacked, and why at 340 bpm it was a coin toss.
+#
+# Measured against WJazzD's annotated beats (`scripts/grid_drift.py`'s
+# measure, 73 solos): five grids move and none the wrong way -- Cheese Cake
+# +1.1 -> +0.1 beats over the solo (the slip the beat pins were built for,
+# O5), Coltrane's Oleo +1.9 -> -0.1, In 'n Out +11.5 -> +9.5 and +2.9 ->
+# +1.9, Cherokee +0.6 -> -0.4; 63 -> 65 solos within a beat. The mirror rule
+# -- the same test deciding an ambiguous gap the insertion rounds -- was
+# measured and is NOT here: over 147 cached grids rounding agrees with the
+# metronome on 411 of the 415 gaps it can read, and the four it does not
+# are ratios of 1.50 read at the edge of the band.
+GHOST_SHORT = 0.6  # an interval under this share of the pulse is a candidate
+GHOST_SIDE = 8  # intervals either side the metronome is laid across
+GHOST_JUMP_FIT = 0.4  # |jump - 1| at most, in beats, to thin the pair
+# A side is steady when every interval in it is within this share of the
+# side's own pulse (a 0.18 + 0.28 jitter pair on 0.227 s passes, a ghost or
+# a dropped beat does not), and the two sides' pulses must agree within the
+# stability tolerance: a change of tempo is not a metronome.
+GHOST_SIDE_CLEAN = 0.35
+
+
+def metronome_jump(
+    times: list[float], last_left: int, first_right: int, agree: float = 0.15
+) -> float | None:
+    """How many beats the numbering on the right of a spot runs AHEAD of the
+    left's, read off one metronome laid across `GHOST_SIDE` intervals either
+    side: `times[..last_left]` against `times[first_right..]`, numbered by
+    index. 0.0 is a spot whose count is right, +1 a beat too many between
+    the two sides (a ghost), -1 a beat too few. None when a side runs off the
+    grid, is not steady, or the sides disagree on the pulse by more than
+    `agree` -- where a metronome has nothing to say."""
+    a, b = last_left - GHOST_SIDE, first_right + GHOST_SIDE
+    if a < 0 or b >= len(times) or first_right <= last_left:
+        return None
+    left = times[a : last_left + 1]
+    right = times[first_right : b + 1]
+    pulses = []
+    for run in (left, right):
+        pulse = (run[-1] - run[0]) / GHOST_SIDE
+        if pulse <= 0 or any(
+            abs((y - x) - pulse) > GHOST_SIDE_CLEAN * pulse
+            for x, y in zip(run, run[1:], strict=False)
+        ):
+            return None
+        pulses.append(pulse)
+    pulse = (pulses[0] + pulses[1]) / 2
+    if abs(pulses[0] - pulses[1]) > agree * pulse:
+        return None
+    phase_left = statistics.median(t - pulse * (i - last_left) for i, t in enumerate(left, a))
+    phase_right = statistics.median(
+        t - pulse * (i - last_left) for i, t in enumerate(right, first_right)
+    )
+    return (phase_left - phase_right) / pulse
+
+
+def drop_ghost_beats(
+    beats: list[float], tolerance: float, seed: float | None = None
+) -> list[float]:
+    """Remove one beat of every pair far closer than a pulse that the
+    metronome test says holds a beat too many (see the note above). The one
+    removed is the farther from where an even beat between the pair's
+    neighbours would be. Shortest pairs first, and the grid is judged again
+    after each removal, so a ghost beside another never reads its side as
+    ragged twice."""
+    beats = list(beats)
+    while len(beats) >= 4:
+        intervals = [b - a for a, b in zip(beats, beats[1:], strict=False)]
+        reference = reference_pulse(intervals, seed)
+        short = [
+            k
+            for k in range(1, len(intervals) - 1)
+            if reference[k] > 0 and intervals[k] < GHOST_SHORT * reference[k]
+        ]
+        for k in sorted(short, key=lambda k: intervals[k] / reference[k]):
+            jump = metronome_jump(beats, k - 1, k + 2, tolerance)
+            if jump is not None and abs(jump - 1.0) <= GHOST_JUMP_FIT:
+                middle = (beats[k - 1] + beats[k + 2]) / 2
+                del beats[k if abs(beats[k] - middle) > abs(beats[k + 1] - middle) else k + 1]
+                break
+        else:
+            return beats
+    return beats
+
+
+# ── where the count is in doubt (2026-10-02, R34) ───────────────────────────
+#
+# A slip the repair cannot see is invisible until a page is laid beside a
+# reference, and most tracks have none -- the listener found Shade of Jade's
+# by reading the page. So the grid says where its own count is unsupported:
+# every run of up to DOUBT_REACH stretches between found beats whose time
+# does not hold the number of intervals the grid gives it (within
+# DOUBT_RESIDUAL of a whole pulse -- a ghost 0.36 of a pulse from a beat, a
+# gap of 1.45 pulses the insertion rounded down, four beats tracked as three
+# intervals of 1.33), unless the metronome either side confirms the count.
+# Jitter does not qualify: 0.18 + 0.28 s on a 0.227 s pulse is 0.79 and
+# 1.23, and 2.03 together.
+DOUBT_RESIDUAL = 0.35
+DOUBT_REACH = 3
+# A doubt is SETTLED, and not reported, when the tracker's own downbeat marks
+# within DOUBT_MARK_REACH_S either side keep one phase across it (at least
+# DOUBT_MIN_MARKS each side). Measured on WJazzD's annotated solos: where the
+# grid really slipped, the marks changed phase across the doubt 8 times in 8;
+# where the count was right, they kept it 15 times in 16 -- Shade of Jade's
+# two mended ghosts among them, whose bars ran 9% slow, so the metronome
+# alone read them as half a beat out either way. The marks only ever SETTLE
+# a doubt: no beat is moved by them, and bars are never counted from them.
+DOUBT_MARK_REACH_S = 8.0
+DOUBT_MIN_MARKS = 3
+
+
+@dataclass(frozen=True)
+class Doubt:
+    """A stretch of the grid whose beat count the time does not support."""
+
+    start: float  # the found beat the stretch starts on
+    end: float  # the found beat it ends on
+    held: float  # pulses its time holds
+    kept: int  # intervals the grid gives it
+    # The metronome's reading across it: + a beat too many, - too few, 0 the
+    # count is right; None where the stretch's sides are too ragged to read.
+    jump: float | None
+
+
+def _mark_phase(times: list[float], downbeats: list[float], lo: float, hi: float, pulses: int):
+    """The commonest grid phase of the tracker's downbeat marks in [lo, hi],
+    or None with fewer than DOUBT_MIN_MARKS of them on the grid."""
+    votes: Counter[int] = Counter()
+    for mark in downbeats:
+        if lo <= mark <= hi:
+            k = nearest_index(times, mark)
+            if abs(times[k] - mark) <= 0.05:
+                votes[k % pulses] += 1
+    if sum(votes.values()) < DOUBT_MIN_MARKS:
+        return None
+    return votes.most_common(1)[0][0]
+
+
+def grid_doubts(
+    beats: list[Beat],
+    tolerance: float = 0.15,
+    downbeats: list[float] | None = None,
+    pulses: int = 4,
+) -> list[Doubt]:
+    """The stretches of a repaired grid whose count is in doubt (see the note
+    above). A stretch runs between consecutive FOUND beats, any implied ones
+    between them its count, and overlapping doubted runs are one doubt; the
+    listener's pins and the window laid out around them, and beats
+    extrapolated past the tracker's range, are never in doubt -- the first
+    are a judgement, the second hold no count. With the tracker's
+    `downbeats`, a doubt they keep one phase across (`pulses` to the bar) is
+    settled."""
+    if len(beats) < 4:
+        return []
+    times = [b.time for b in beats]
+    intervals = [b - a for a, b in zip(times, times[1:], strict=False)]
+    reference = reference_pulse(intervals)
+    found = [i for i, b in enumerate(beats) if not b.implied and not b.extrapolated]
+
+    def held(a: int, b: int) -> float:
+        pulse = statistics.median(reference[a:b])
+        return (times[b] - times[a]) / pulse if pulse > 0 else float(b - a)
+
+    runs: list[list[int]] = []
+    for n, a in enumerate(found):
+        for b in found[n + 1 : n + 1 + DOUBT_REACH]:
+            if any(_in_window(beats[i]) for i in range(a, b + 1)):
+                break
+            if abs(held(a, b) - (b - a)) > DOUBT_RESIDUAL:
+                if runs and a <= runs[-1][1]:
+                    runs[-1][1] = max(runs[-1][1], b)
+                else:
+                    runs.append([a, b])
+    doubts = []
+    for a, b in runs:
+        jump = metronome_jump(times, a, b, tolerance)
+        if jump is not None and abs(jump) <= GHOST_JUMP_FIT:
+            continue
+        if downbeats:
+            before = _mark_phase(times, downbeats, times[a] - DOUBT_MARK_REACH_S, times[a], pulses)
+            after = _mark_phase(times, downbeats, times[b], times[b] + DOUBT_MARK_REACH_S, pulses)
+            if before is not None and before == after:
+                continue
+        doubts.append(Doubt(times[a], times[b], round(held(a, b), 2), b - a, jump))
+    return doubts
+
+
 def repair_beats(
     beats: list[float], config: MeterConfig, downbeats: list[float] | None = None
 ) -> list[Beat]:
@@ -356,6 +572,7 @@ def repair_beats(
 
     seed = pulse_octave(beats, downbeats or [])
     beats = drop_doubled_beats(beats, config.stability_tolerance, seed)
+    beats = drop_ghost_beats(beats, config.stability_tolerance, seed)
     intervals = [b - a for a, b in zip(beats, beats[1:], strict=False)]
     reference = reference_pulse(intervals, seed)
 
@@ -370,7 +587,46 @@ def repair_beats(
             for k in range(1, count):
                 out.append(Beat(beats[index] + k * step, implied=True))
         out.append(Beat(beats[index + 1]))
-    return out
+    return thin_by_metronome(out, config.stability_tolerance)
+
+
+# A stretch the metronome reads as WHOLE beats too many (2026-10-02, R34):
+# not one ghost but a ragged stretch -- Totem Pole's three, each read +2.0
+# on steady bars either side, where the grid gained a beat or two against
+# the annotation every time. It is re-laid exactly as a pin's window is
+# (`_relay`, the tracker's own beats kept where they sit on the new
+# subdivision) with the count the time holds. Only ever THINNED: rounding
+# already agrees with the metronome where a beat is missing (the mirror
+# measurement above), and a rule that could add a beat put one back where
+# the ghost rule had just taken one out, on Limehouse Blues. Measured with
+# the ghost rule in: Totem Pole +5.9 -> -0.1 beats over the solo, In 'n Out
+# +9.5 -> +8.5, nothing else in a solo moved; 65 -> 66 within a beat.
+THIN_JUMP_FIT = 0.3
+THIN_MAX_EXTRA = 3
+
+
+def thin_by_metronome(beats: list[Beat], tolerance: float) -> list[Beat]:
+    """Re-lay every doubted stretch (`grid_doubts`) whose metronome reading
+    is within THIN_JUMP_FIT of a whole number of beats too many, with that
+    many fewer. The new beats are the repair's own, never `relaid`: that
+    flag is the listener's (`apply_pins`)."""
+    for _ in range(len(beats)):
+        for doubt in grid_doubts(beats, tolerance):
+            if doubt.jump is None:
+                continue
+            extra = round(doubt.jump)
+            if not 1 <= extra <= THIN_MAX_EXTRA or abs(doubt.jump - extra) > THIN_JUMP_FIT:
+                continue
+            times = [b.time for b in beats]
+            a, b = times.index(doubt.start), times.index(doubt.end)
+            if b - a - extra < 1:
+                continue
+            laid = _relay(doubt.start, doubt.end, b - a - extra, beats[a + 1 : b])
+            beats = [*beats[: a + 1], *(replace(x, relaid=False) for x in laid), *beats[b:]]
+            break
+        else:
+            return beats
+    return beats
 
 
 # ── beats the listener pinned (roadmap O5, 2026-09-30) ──────────────────────

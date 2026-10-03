@@ -529,6 +529,31 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   the same sidecar meter the Export button uses, and its rhythm is within
   0.05 of the Score button's row on every hand-scored track -- the
   remainder is the notes (the review's, with erasures), not the grid.
+- **A ghost beat is counted out by a metronome, and the grid says where it
+  doubts its own count** (2026-10-02, R34). The listener found it on A
+  Shade of Jade (a TEST-split tune, never tuned on): two ghosts 80 ms from
+  real beats, 0.22 + 0.08 + 0.24 s on a 0.227 s pulse, which the pair test
+  reads as 1.4 pulses either way and `metrical_spans` bridged as a wobble --
+  half a bar off for the rest of the solo. `drop_ghost_beats` asks
+  `metronome_jump`: eight intervals each side laid on ONE metronome at their
+  SPAN pulse (a median of the tracker's 20 ms-frame intervals reads 3% fast,
+  half a beat over sixteen), and the jump between the sides' phases is the
+  beats too many; within 0.4 of one, the crowded pair loses a beat.
+  `thin_by_metronome` re-lays a doubted stretch reading 1-3 whole beats too
+  many (Totem Pole +5.9 -> -0.1). It only ever THINS: insertion by metronome
+  was measured and not shipped (rounding agrees on 411 of 415 gaps), and a
+  rule that could add put a beat back where a ghost was just removed.
+  `grid_doubts` lists every stretch whose time does not hold its count that
+  the metronome cannot confirm, SETTLED when the tracker's downbeat marks
+  keep one phase across it (real slips changed phase 8 of 8, right counts
+  kept it 15 of 16) -- the layer settles a doubt, never counts a bar. `/beats`
+  returns them, the views draw a "?" band, the beats readout counts them in
+  the selection; `run_eval` pins `grid_doubts` per page and
+  `{set}_grid_steps` / `_grid_doubts` totals, so a slip is on the card the
+  day it appears. A batch-written WJazzD sidecar anchor voted on a broken
+  grid can be COMPENSATING a slip the repair now mends: re-vote it on the
+  new grid before believing a page that went off the bar (Coltrane's Oleo,
+  86.64 -> 86.20).
 - Bar lines are derived by counting beats from an anchor. The beat tracker's
   detected downbeat layer is noise (open-issue #5) and must not be drawn or
   trusted; only its pulse layer is reliable. Its individual marks, that is:

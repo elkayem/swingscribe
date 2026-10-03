@@ -797,6 +797,29 @@ def page_grid(track: str, grid: dict, config=None) -> tuple[dict, list[float], f
     return sidecar, beats, anchor
 
 
+def page_doubts(track: str, grid: dict, region: tuple[float, float], config=None) -> float:
+    """How many places in `region` the page's grid holds a beat count its
+    time does not support (`meter.grid_doubts`, R34). Needs no reference, so
+    every page carries it: where a reference exists `beat_steps` says which
+    of them slipped."""
+    from swingscribe.notation import grid_doubts_for_settings
+
+    sidecar_path = BENCH / f"{track}.swingscribe.json"
+    sidecar = {}
+    if sidecar_path.is_file():
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    raw = grid["beats"]
+    doubts = grid_doubts_for_settings(
+        raw,
+        grid.get("downbeats", []),
+        sidecar,
+        config or eval_config(),
+        grid.get("duration") or raw[-1],
+        span=region,
+    )
+    return float(len(doubts))
+
+
 def span_bpm(beats: list[float], region: tuple[float, float]) -> float | None:
     """The page's tempo over a span: 60 over the median beat of the grid it is
     built on. A median, so a stretch the repair missed does not move it."""
@@ -969,6 +992,9 @@ def _notation_one(task: tuple) -> dict | None:
             read_page_bars(Path(score_path)) if is_page(name) else None,
             page_differences(notation, reference) if is_page(name) else None,
         ),
+        # Where the page's grid doubts its own count (R34): no reference
+        # needed, so it is the warning every page carries.
+        "grid_doubts": page_doubts(track, grid, tuple(run["region"])),
         # WJazzD's tempo class of the grid the page is built on: a string,
         # so never pinned -- it only groups the strata (E6).
         "tempo_class": tempo_class(bpm),
@@ -1035,6 +1061,7 @@ def _wjazz_notation_one(task: tuple) -> dict | None:
     # the point of having it: it is the one number every notation the
     # harness can build contributes to.
     out = dict(readability(notation))
+    out["grid_doubts"] = page_doubts(track_of(name), grid, window)
     result = score_against_wjazz_notation(notation, notated_positions(db, entry["melid"]))
     if not result["n_matched"]:
         return out
@@ -1166,6 +1193,48 @@ def placement_summary(rows: dict, prefix: str) -> dict:
     }
 
 
+def grid_summary(rows: dict, prefix: str) -> dict:
+    """The set's beat-count slips, counted two ways over the default takes
+    (R34), both pinned so a slip shows on the card the day it appears:
+    `grid_steps`, the places a page leaves or rejoins the reference's bar
+    lines (`beat_steps`, trusted pairings, net of the steps a PDF page's own
+    overfull bars explain, `page_steps`) -- the truth where a reference
+    exists; and `grid_doubts`, the places the grid itself says its count is
+    unsupported (`meter.grid_doubts`) -- the warning every page gets,
+    reference or not. A slip of the Shade of Jade kind used to be visible
+    only in a page's own trace line, one page at a time."""
+    pages = {k: e for k, e in rows.items() if take_of(k) is None}
+    out: dict[str, float] = {}
+    stepped = [e for e in pages.values() if "beat_steps" in e and e.get("trusted", 1.0)]
+    if stepped:
+        out[f"{prefix}_grid_steps"] = float(
+            sum(e["beat_steps"] - e.get("page_steps", 0.0) for e in stepped)
+        )
+        out[f"{prefix}_grid_steps_n"] = float(len(stepped))
+    doubted = [e for e in pages.values() if "grid_doubts" in e]
+    if doubted:
+        out[f"{prefix}_grid_doubts"] = float(sum(e["grid_doubts"] for e in doubted))
+        out[f"{prefix}_grid_doubted"] = float(sum(1 for e in doubted if e["grid_doubts"]))
+        out[f"{prefix}_grid_doubts_n"] = float(len(doubted))
+    return out
+
+
+def print_grid(summary: dict, prefix: str) -> None:
+    if f"{prefix}_grid_doubts" not in summary:
+        return
+    steps = (
+        f"{int(summary[f'{prefix}_grid_steps'])} bar-line steps against the reference "
+        f"over {int(summary[f'{prefix}_grid_steps_n'])} pages; "
+        if f"{prefix}_grid_steps" in summary
+        else ""
+    )
+    print(
+        f"  grid: {steps}{int(summary[f'{prefix}_grid_doubts'])} doubted counts on "
+        f"{int(summary[f'{prefix}_grid_doubted'])} of {int(summary[f'{prefix}_grid_doubts_n'])} "
+        "pages (meter.grid_doubts, no reference)"
+    )
+
+
 def edit_summary(rows: dict, prefix: str) -> dict:
     """The set's mean edit cost per 100 reference notes, and each component's
     mean -- default takes, trusted pairings only: a wrong take is all
@@ -1282,6 +1351,7 @@ def wjazz_confidence_summary(rows: dict) -> dict:
 
 
 def print_placement(summary: dict, prefix: str) -> None:
+    print_grid(summary, prefix)
     if f"{prefix}_placement" in summary:
         print(
             f"\n  mean on-the-bar {summary[f'{prefix}_placement']:.3f}; "
@@ -1361,6 +1431,7 @@ def located_summary(rows: dict, notation: dict, prefix: str) -> dict:
         out[f"{prefix}_value"] = round(statistics.fmean(e["value"] for e in trusted), 4)
         out[f"{prefix}_rhythm_n"] = float(len(trusted))
     out.update(placement_summary(notation, prefix))
+    out.update(grid_summary(notation, prefix))
     out.update(edit_summary(notation, prefix))
     readable = [e for e in pages.values() if "readability" in e]
     if readable:
@@ -2034,6 +2105,8 @@ def main() -> None:
         )
     card["summary"].update(placement_summary(card["notation"], "mscz"))
     card["summary"].update(placement_summary(card["wjazz_notation"], "wjazz"))
+    card["summary"].update(grid_summary(card["notation"], "mscz"))
+    card["summary"].update(grid_summary(card["wjazz_notation"], "wjazz"))
     # The listener's reader effort (E4); the located sets carry theirs in
     # located_summary.
     card["summary"].update(edit_summary(card["notation"], "mscz"))
