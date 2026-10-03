@@ -495,13 +495,13 @@ def read_page(pdf: Path, index: int) -> PagePrint | None:
                         value=value,
                     )
                 )
-    heads = drop_articulations(heads, staves)
-    rests.sort(key=lambda r: (r.staff, r.x))
     paths = [
         tuple(float(v) for v in obj.get_bounds())
         for obj in page.get_objects(max_depth=4)
         if obj.type == FPDF_PAGEOBJ_PATH
     ]
+    heads = drop_unledgered(drop_articulations(heads, staves), staves, paths)
+    rests.sort(key=lambda r: (r.staff, r.x))
 
     heads.sort(key=lambda h: (h.staff, round(h.x, 1), -h.y))
     # Each accidental belongs to the nearest notehead to its right on the same
@@ -844,6 +844,53 @@ def drop_articulations(heads: list[Printed], staves: list[Staff]) -> list[Printe
                 continue
         kept.append(head)
     return kept
+
+
+# A notehead a ledger line or more outside its staff -- the line at A5, or
+# at C4, and beyond -- has a ledger stroke through it or within a space of
+# it, at its x. A glyph of a notehead's size and shape out there with none is
+# something else (2026-10-02, the listener's bar 84 of A Shade of Jade): the
+# "8" of an 8va (OpusSpecialStd U+201C), a jazz scoop or fall drawn into a
+# note (U+00F9, U+F0DE, U+00FB), a wavy line built from "~" glyphs, an
+# accent the stacked test missed. An 8va's phantom F6 slid `align_notes` one
+# head late and the quarter-note triplet beside it went unread. Measured
+# over every vector PDF in Transcriptions_Other: 27,067 heads out there have
+# a stroke near them; of the 1,039 that do not, none is a black, half or
+# whole notehead (U+0153, U+02D9, U+0077), and all 23 kept 8va "8"s are
+# among them. "Near" is deliberately not "at its own staff's ledger lines":
+# a high note of the staff below filed under the staff above (or a low one
+# the other way) has its ledgers on the far side, and must stay. Strokes are
+# 0.9-4 spaces wide and under 0.9 tall: Finale draws a ledger as a
+# hairline, Inkpen2 and Broadway Copyist as a 0.7-space hand-drawn stroke.
+LEDGER_REACH = 1.2  # spaces from the head's centre to a ledger stroke's
+LEDGER_WIDTH = (0.9, 4.0)  # spaces
+LEDGER_MAX_HEIGHT = 0.9  # spaces
+
+
+def has_ledger(head: Printed, spacing: float, paths) -> bool:
+    """Whether a ledger-like stroke crosses the head's x within LEDGER_REACH of it."""
+    low, high = LEDGER_WIDTH
+    for left, bottom, right, top in paths:
+        if not left - 0.2 * spacing <= head.x <= right + 0.2 * spacing:
+            continue
+        if not low * spacing <= right - left <= high * spacing:
+            continue
+        if top - bottom >= LEDGER_MAX_HEIGHT * spacing:
+            continue
+        if abs((top + bottom) / 2 - head.y) <= LEDGER_REACH * spacing:
+            return True
+    return False
+
+
+def drop_unledgered(heads: list[Printed], staves: list[Staff], paths) -> list[Printed]:
+    """Drop the head-shaped glyphs a ledger line or more outside the staff
+    with no ledger stroke near them (see the note above): they are marks,
+    not notes. Heads on the staff, or a step off it, are never judged."""
+    return [
+        head
+        for head in heads
+        if -1 <= head.step <= 9 or has_ledger(head, staves[head.staff].spacing, paths)
+    ]
 
 
 def printed_noteheads(pdf: Path, index: int) -> int:

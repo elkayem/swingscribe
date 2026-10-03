@@ -924,6 +924,57 @@ def test_accent_stacked_on_a_head_is_not_a_note():
     assert [h.char for h in kept] == ["\u0153", "\u02d9"]
 
 
+def _head(x: float, step: int, char: str = "œ", staff: vector.Staff | None = None):
+    staff = staff or vector.Staff(bottom=100.0, spacing=5.0, left=0.0, right=600.0)
+    y = staff.bottom + step * staff.spacing / 2
+    return vector.Printed(x=x, y=y, staff=0, step=step, kind="head", grace=False, char=char)
+
+
+def _ledger(x: float, step: int, thick: float = 0.3, spacing: float = 5.0, bottom: float = 100.0):
+    """A ledger stroke's box at that staff step, 2.4 spaces wide, centred on x."""
+    y = bottom + step * spacing / 2
+    return (x - 1.2 * spacing, y - thick / 2, x + 1.2 * spacing, y + thick / 2)
+
+
+def test_an_8va_mark_out_of_the_staff_is_not_a_note():
+    """Shade of Jade, bar 85: the 8va's "8" is a notehead's size and shape
+    where an F6 would sit, with no ledger near it. Read as a note, it slid
+    the note alignment one head late and bar 84's quarter-note triplet went
+    unread."""
+    staff = vector.Staff(bottom=100.0, spacing=5.0, left=0.0, right=600.0)
+    eight = _head(72.0, 15, char="“")
+    real = _head(140.0, 15)
+    paths = [_ledger(140.0, 10), _ledger(140.0, 12), _ledger(140.0, 14)]
+    kept = vector.drop_unledgered([eight, real], [staff], paths)
+    assert kept == [real]
+
+
+def test_a_hand_drawn_ledger_counts_and_notes_on_the_staff_are_never_judged():
+    """Inkpen2 and Broadway Copyist draw a ledger 0.7 of a space thick."""
+    staff = vector.Staff(bottom=100.0, spacing=5.0, left=0.0, right=600.0)
+    high = _head(200.0, 11)
+    low = _head(250.0, -3)
+    inside = [_head(300.0, step) for step in (-1, 0, 4, 9)]
+    paths = [_ledger(200.0, 10, thick=3.5), _ledger(250.0, -2, thick=3.5)]
+    heads = [high, low, *inside]
+    assert vector.drop_unledgered(heads, [staff], paths) == heads
+    assert vector.drop_unledgered(heads, [staff], []) == inside
+
+
+def test_a_note_filed_under_the_wrong_staff_keeps_its_ledgers_on_the_far_side():
+    """A high note of the staff below, nearer the staff above's centre: its
+    ledgers lie between it and its own staff, not the one it was filed
+    under. Near is near, whichever side."""
+    staff = vector.Staff(bottom=100.0, spacing=5.0, left=0.0, right=600.0)
+    head = _head(150.0, -9)  # 4.5 spaces under the staff it was filed under
+    own_ledger = (150.0 - 6.0, head.y - 0.15, 150.0 + 6.0, head.y + 0.15)  # through it
+    assert vector.drop_unledgered([head], [staff], [own_ledger]) == [head]
+    # A stem or a beam is not a ledger: too narrow, too thick.
+    stem = (149.5, head.y - 20.0, 150.5, head.y + 2.0)
+    beam = (140.0, head.y - 3.0, 160.0, head.y + 3.0)
+    assert vector.drop_unledgered([head], [staff], [stem, beam]) == []
+
+
 def test_audiveris_book_is_rebuilt_when_the_pages_change(tmp_path, monkeypatch):
     pytest.importorskip("PIL")  # _read_with opens the pages and writes the book with it
     from PIL import Image

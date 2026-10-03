@@ -1197,7 +1197,15 @@ docs/pdf2musicxml.md has the measurements. Things not to re-derive:
   tall (`vector.is_notehead_box`), whatever its code -- a Finale PDF puts
   the half head at U+02D9 and Sibelius its quarter REST at U+0152, so
   code lists were wrong twice. An accent has the same shape and sits
-  straight above or below its note (`drop_articulations`). The report
+  straight above or below its note (`drop_articulations`). So do an 8va's
+  "8", a scoop drawn into a note and the "~"s of a wavy line; a head a
+  ledger line or more outside the staff is kept only with a ledger stroke
+  within 1.2 spaces of it (`drop_unledgered`, 0.3.23, 2026-10-02: the
+  listener's Shade of Jade bar 84, a quarter-note triplet lost when an
+  8va's phantom F6 slid `align_notes` by one). Of 28,106 heads that far out
+  none of the 1,039 without one is a real head; "near" because a note can
+  be filed under the wrong staff, and up to 0.9 tall because Inkpen2 and
+  Broadway Copyist draw a ledger 0.7 of a space thick. The report
   gives notes read per notehead printed -- 115 of 115 on Big Chief, 971
   of 1014 on Minority -- so a page that lost or invented notes shows as a
   number, without a human. Scans have no count; there the two engines'

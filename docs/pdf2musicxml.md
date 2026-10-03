@@ -485,7 +485,7 @@ about 50 of 70: with 0% agreement between the readings, a system pairs
 only where both engines counted its bars alike, and the taken bars are
 nearer the signature rather than right.
 
-## Open: an 8va mark is read as a notehead (2026-10-02)
+## An 8va mark was read as a notehead, and a ledger line now decides (2026-10-02)
 
 The listener caught it on A Shade of Jade, bar 84: the page prints four
 eighths and a quarter-note triplet (rest, F6, F#6) under a bracketed "3";
@@ -506,10 +506,48 @@ over every vector PDF in `benchmark/Transcriptions_Other/`: 25 ottava "8"
 glyphs, 23 kept as noteheads, in 11 files (Shade of Jade, Birdlike, Bop
 Drop, Cryin' Blues, Easy To Love, Isotope, Mean Greens, No Room For
 Squares, The Break Through, What Is This Thing Called Love, Work Song).
-Each can slide the alignment the same way around one bar. Not fixed yet:
-the general test is that a notehead a space or more outside the staff has
-ledger lines under it (an ottava mark, a fingering or a text glyph does
-not), which wants its own measurement over the corpus first.
+Each can slide the alignment the same way around one bar.
+
+The fix (`vector.drop_unledgered`, tool 0.3.23): a head-shaped glyph a
+ledger line or more outside its staff (step 10 and up, -2 and down) is a
+notehead only if a ledger-like stroke -- 0.9-4 spaces wide, under 0.9 tall
+-- crosses its x within 1.2 spaces of it. Measured first, over every head
+the reader kept that far out on the vector pages (28,106):
+
+- 27,067 have such a stroke; of the 1,039 that do not, NONE is a black,
+  half or whole notehead (U+0153, U+02D9, U+0077). They are scoops drawn
+  into a note (OpusSpecial U+00F9, 299, the commonest), the "~" glyphs of a
+  wavy line (Maestro, Opus, Broadway Copyist, Inkpen2 U+007E, 279), falls
+  and doits (U+F0DE, U+00FB, U+00CD), accents the stacked test missed, and
+  the 23 8va "8"s.
+- "Near", not "at its own staff's ledger lines", and both on purpose. A
+  first version asked for a stroke at the staff's first ledger line and
+  found none under 26 real heads: high notes of the staff below filed
+  under the staff above (and low notes the other way, in piano scores),
+  whose ledgers lie on the far side.
+- And "under 0.9 tall", not hairline: Finale draws a ledger 0.3 of a space
+  thick, Inkpen2 and Broadway Copyist a 0.7-space hand-drawn stroke. At
+  0.35 the first survey "lost" 2,900 real heads in those two fonts.
+
+The eleven files re-converted (their engine readings reused): 158 phantom
+heads gone, printed notes unread 167 fewer, read notes unprinted 9
+fewer, two more tuplets taken from the page and three fewer refused.
+Shade of Jade's bar 84 is the quarter-note triplet the page prints, rest,
+F6, F#6 -- the accidentals the right way round now, too -- and SwingScribe's
+page of that solo sits on the transcription's bar lines from bar 1 to 157.
+Bars off the signature: Shade of Jade 84, Work Song 51 and Birdlike 129
+mended; Birdlike 127 and The Break Through 34 and 50 newly off, none
+from a dropped note. Each is the merge (`merge_readings`) choosing again
+on a page count that is now right: Break Through 34 now takes the reading
+that holds the page's two grace notes (and reads a quarter as an eighth),
+50 the one without homr's invented chord tone (and a value a sixteenth
+long); Birdlike 127 lost its pairing altogether, because neither engine
+read that bar's pitches (A6 A6 G6 printed; homr G6 G6 G6, Audiveris B6 B6
+A6) and pairing goes through notes aligned to the page -- the phantom
+scoop had given it an anchor. A bar with no key between two paired bars
+could pair with the one bar between their partners; not done, and it
+would move every merged file. The other files in the folder keep their
+0.3.22 readings until they are converted again.
 
 ## What is left to a human
 
