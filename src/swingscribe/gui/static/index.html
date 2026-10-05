@@ -106,6 +106,7 @@
         <button class="chip" id="beats-toggle" title="Show or hide the bar grid the transcription will quantize against: a tick per beat, a numbered dot per bar. The first time, this runs the beat tracker over the whole track, which takes a few seconds.">Beats</button>
         <select class="chip-select" id="time-signature" disabled title="Beats per bar, for the whole tune. Bars are counted from the downbeat using this."></select>
         <button class="chip" id="double-time" disabled title="Notate at twice the tracked pulse. On a ballad the tracker often hears the slow pulse, so fast runs come out as 32nd notes; doubling writes them as sixteenths, and the page says 'Notated in double time'.">2× time: off</button>
+        <button class="chip" id="fast-tempo" disabled title="For a tune faster than the beat tracker can follow (about 250 bpm and up): re-track the beat with the audio played at half speed. Turn it on when the beat ticks fall once a bar, or the page is mostly 32nd notes. Takes a few seconds the first time; the transcription is kept.">Fast tune: off</button>
         <select class="chip-select" id="chorus-bars" disabled title="Draw a heavier bar line every N bars, so a solo that is a whole number of choruses lines up with them. Purely visual; it changes nothing in the transcription.">
           <option value="0">no chorus</option>
           <option value="8">8-bar</option>
@@ -386,6 +387,7 @@
           <button class="chip" data-page-zoom="in" title="Zoom in. Scrolling over the page does the same; drag or shift-scroll to pan.">+</button>
           <button class="chip" data-page-zoom="out" title="Zoom out. Scrolling over the page does the same.">−</button>
         </div>
+        <div class="page-hint" id="page-hint" hidden></div>
         <div class="page-view" id="page-view">
           <div class="page-message" id="page-message">The page appears here once the span is transcribed.</div>
         </div>

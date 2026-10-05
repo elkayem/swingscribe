@@ -90,3 +90,11 @@ def test_the_horn_hole_filler_is_on_by_default_and_can_be_switched_off(monkeypat
     assert "horn_fill_gaps" not in Config(transcribe={"ensemble": "trio"}).stage_config(
         "transcribe"
     )
+
+
+def test_the_beats_speed_keys_only_away_from_its_default():
+    """`speed` is dropped from the beats dump at 1.0, so no beats key -- nor
+    any key chained below it, every separation and transcription -- moved
+    when it arrived; the half-speed grid keys on its own."""
+    assert "speed" not in Config().stage_config("beats")
+    assert Config(beats={"speed": 0.5}).stage_config("beats")["speed"] == 0.5

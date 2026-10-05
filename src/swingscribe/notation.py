@@ -272,6 +272,32 @@ def meter_from_settings(
     return meter.resolve_meter(config.meter.model_copy(update=overrides))
 
 
+# The listener's Fast tune: the speed the beat tracker hears the audio at.
+FAST_TEMPO_SPEED = 0.5
+
+
+def grid_config(config: Config, settings: dict) -> Config:
+    """The config a track's beat grid is TRACKED and READ under.
+
+    With the sidecar's `fast_tempo` on, the tracker hears the audio at half
+    speed (`BeatsConfig.speed`): a tune past its range -- Bud Powell's
+    Oblivion at quarter = 280, tracked one beat per BAR -- is heard where
+    the tracker is at home, and its grid is cached under its own beats key.
+    Only the grid's readers take this config: the review, the separation
+    and the transcription keep the default chain, so switching it on costs
+    a few seconds of tracking and moves no transcription.
+
+    Every reader -- the roll, Export and the page view, Score, the chord
+    chart, Find the solos, the Beats job, the harness -- comes through here,
+    so no two can read different grids.
+    """
+    if not settings.get("fast_tempo"):
+        return config
+    return config.model_copy(
+        update={"beats": config.beats.model_copy(update={"speed": FAST_TEMPO_SPEED})}
+    )
+
+
 def bar_grid_for_settings(
     beats: list[float],
     downbeats: list[float],

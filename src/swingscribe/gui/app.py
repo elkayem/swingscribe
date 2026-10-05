@@ -37,7 +37,7 @@ from swingscribe.gui import page as gui_page
 from swingscribe.gui import solos as gui_solos
 from swingscribe.gui import suggestion as gui_suggestion
 from swingscribe.model import NoteEvent
-from swingscribe.notation import HAND_SPLIT
+from swingscribe.notation import HAND_SPLIT, grid_config
 
 STATIC_DIR = Path(__file__).parent / "static"
 # The user guide: a Markdown file and the page that renders it, opened in a
@@ -578,8 +578,11 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         entry = resolve(track_id)
         document = entry["document"]
         duration = float(document.audio.duration)
+        settings = library.load_settings(entry["path"], config, track_id)
         cached = pipeline.cached_document(
-            entry["path"], config, stages=[("ingest", ingest.run), ("beats", beats.run)]
+            entry["path"],
+            grid_config(config, settings),
+            stages=[("ingest", ingest.run), ("beats", beats.run)],
         )
         grid = cached.beat_grid if cached else None
         found = gui_solos.whole_file_set(document, config)
@@ -757,9 +760,12 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         # switching separation models keeps the beats and the downbeat anchor
         # you already set. The parameter stays because the client sends it for
         # every track call and the rest of them still need it.
+        # The listener's Fast tune reads the grid tracked at half speed
+        # (notation.grid_config), like every other reader of the grid.
+        settings = library.load_settings(entry["path"], config, track_id)
         document = pipeline.cached_document(
             entry["path"],
-            run_config,
+            grid_config(run_config, settings),
             stages=[("ingest", ingest.run), ("beats", beats.run)],
         )
         grid = document.beat_grid if document else None
@@ -1285,6 +1291,12 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         if request.kind not in gui_jobs.JOB_STAGES:
             raise HTTPException(400, f"unknown job kind {request.kind!r}")
         entry = open_track(request.path)  # decode errors surface now, not in the worker
+        # Beats and Find the solos track the grid this track READS: with the
+        # listener's Fast tune on, at half speed, under its own key and its
+        # own job variant, so it never dedupes onto an ordinary Beats job.
+        settings = library.load_settings(entry["path"], config, library.file_digest(entry["path"]))
+        tracked = grid_config(config, settings)
+        fast = "fast" if tracked is not config else ""
         if request.kind == "solos":
             # Separate the whole track only when no whole-file set is on
             # disk; then the job is minutes and takes the heavy lane like
@@ -1295,9 +1307,10 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             duration = float(entry["document"].audio.duration)
             job = app.state.runner.submit(
                 request.path,
-                config,
+                tracked,
                 model,
                 "solos",
+                fast,
                 estimate_s=None if found else timings.estimate(config.cache_dir, model, duration),
                 audio_seconds=None if found else duration,
                 stages=gui_jobs.SOLOS_CACHED_STAGES if found else None,
@@ -1346,6 +1359,8 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
                 estimate_s=timings.estimate(config.cache_dir, request.model, audio_seconds),
                 audio_seconds=audio_seconds,
             )
+        elif request.kind == "beats":
+            job = app.state.runner.submit(request.path, tracked, request.model, "beats", fast)
         else:
             job = app.state.runner.submit(request.path, config, request.model, request.kind)
         return job.snapshot()

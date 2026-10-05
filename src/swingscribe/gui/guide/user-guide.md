@@ -256,6 +256,13 @@ chorus count.
 - **2× time** notates the solo at twice the tracked pulse. Use it for a
   ballad played in double time, so a run of 32nd notes becomes ordinary
   sixteenths.
+- **Fast tune** is for a tune faster than the beat tracker can follow,
+  about 250 bpm and up. The tracker can lock onto one beat per bar instead
+  of four: the beat ticks fall once a bar and the page comes out as 32nd
+  notes. Fast tune tracks the beat again with the audio played at half
+  speed, which takes a few seconds the first time. Your transcription is
+  kept. Bud Powell's *Oblivion*, at 280, needs it. Unlike 2× time it
+  changes the beat grid itself, so the roll's bar lines move too.
 - **Chorus length** (8, 12, 16, 24 or 32 bars, or none) draws a heavier line
   every N bars. Choose **custom…** for a form the menu does not list, such
   as a 20-bar tune. Type the number and press <kbd>Enter</kbd>, or
@@ -263,7 +270,7 @@ chorus count.
   with the track.
 
 Snap, the time signature, 2× time and chorus length stay disabled until the
-track has a beat grid.
+track has a beat grid. Fast tune is available as soon as a track is open.
 
 ### Pinning a beat that slipped
 
@@ -726,6 +733,11 @@ transcription and a beat grid, and says so while either is missing.
   on white, the way the page will print.
 - The **Page** chip in the export bar, or <kbd>P</kbd>, hides the page and
   shows it again. This browser remembers the choice.
+- When most of the page is 32nd notes, a line above it says so. The beat
+  the page was written against is then probably slower than the music's,
+  and the line offers whichever fix is still off: **Fast tune**, for a fast
+  tune the tracker heard once a bar, or **2× time**, for double-time runs
+  over a slow tune. You can tell which by listening. The page cannot.
 
 The page is laid out for the width of the panel, so a line holds more bars
 than a printed page does. MuseScore lays out the exported file its own way,

@@ -626,6 +626,31 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   `files("verovio") / "data"` on every call. Ink colour comes from CSS
   (Verovio strokes in `currentColor`); Paper/Page toggles are per-viewer
   localStorage, never the sidecar.
+- **Export writes `<beam>`s** (2026-10-04, `export.beam_marks`): within
+  the beat (a dotted quarter in compound time), two beats of plain eighths
+  joined in 4/4 and 2/4, rests and quarters break a beam, secondary beams
+  and hooks for 16ths and 32nds. Without them Verovio flagged every note
+  (MuseScore beams a beamless file itself, which hid it), and MuseScore
+  stops auto-beaming once a file holds any -- so they must stay good.
+  Five harness pages open in MuseScore 4 with them (exit 0).
+- **Fast tune re-tracks the beat at half speed** (2026-10-04, sidecar
+  `fast_tempo`, `BeatsConfig.speed` 0.5, `notation.grid_config`). Bud
+  Powell's Oblivion at 280 was tracked one beat per BAR (beat_this's
+  activation repeats every 0.86 s, no peak at 0.214 s); half speed reads
+  273 bpm and the page against Powell's: rhythm 0.061 -> 0.853, value
+  0.112 -> 0.826, on the bar 0.112 -> 0.806. Splitting the bar-rate grid
+  4x is NOT the fix (rhythm 0.224: it multiplies the grid's errors).
+  `speed` dumps nothing at 1.0 and only the GRID'S READERS take
+  `grid_config` -- the roll, page/Export, Score, the chord chart, Find the
+  solos, the Beats job (variant "fast"), run_eval's grid cache (an entry
+  carries its `speed`) -- so the review, separation and transcription keys
+  never move. Never make it a default: on a tune the tracker reads, half
+  speed can double the pulse, and of four PDF pages with audio and a
+  printed tempo only Oblivion is off. The page view HINTS when 40% of a
+  page's notes are 32nds of the tracked beat (`musicxml.short_share`;
+  harness median 0.008, 90th percentile 0.10) and offers Fast tune and 2x
+  time: three Parker ballads also pass 0.4, where 2x is the right fix, and
+  only the ear can tell.
 - **The Ensemble menu carries a SUGGESTION from the stems, never a setting**
   (2026-09-30, O2, `routing.py`, `gui/suggestion.py`, docs/routing.md).
   Trio needs the piano loudest melodic stem in >= 0.9 of the span's active

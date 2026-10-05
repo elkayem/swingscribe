@@ -1938,3 +1938,86 @@ def test_the_score_button_never_sees_the_changes(world, monkeypatch, tmp_path):
     _state(world, track, changes="| Em7 | A7 |")
     after = world["client"].get(f"/api/tracks/{track['id']}/notation-score", params=params).json()
     assert after == before
+
+
+def test_a_fast_tune_reads_and_tracks_its_own_grid(world, monkeypatch):
+    """With the sidecar's fast_tempo on, the roll asks for the grid tracked at
+    half speed, and a Beats job tracks that one under its own variant -- so
+    it never dedupes onto an ordinary Beats job for the same track."""
+    from swingscribe import pipeline
+
+    track = open_track(world)
+    world["client"].post(f"/api/tracks/{track['id']}/state", json={"state": {"fast_tempo": True}})
+    seen = {}
+
+    def fake_cached(path, config, stages):
+        seen["speed"] = config.beats.speed
+        return None
+
+    monkeypatch.setattr(pipeline, "cached_document", fake_cached)
+    payload = world["client"].get(f"/api/tracks/{track['id']}/beats").json()
+    assert payload == {"ready": False}
+    assert seen["speed"] == 0.5
+
+    runner = world["client"].app.state.runner
+    submitted = {}
+
+    def fake_submit(path, config, model, kind="separate", variant="", **kw):
+        submitted.update(speed=config.beats.speed, kind=kind, variant=variant)
+        return _FakeJob()
+
+    monkeypatch.setattr(runner, "submit", fake_submit)
+    response = world["client"].post(
+        "/api/jobs", json={"path": str(world["source"]), "model": "htdemucs_ft", "kind": "beats"}
+    )
+    assert response.status_code == 200, response.text
+    assert submitted == {"speed": 0.5, "kind": "beats", "variant": "fast"}
+
+
+class _FakeJob:
+    def snapshot(self):
+        return {"id": "fake", "state": "queued"}
+
+
+def test_an_ordinary_track_tracks_the_ordinary_grid(world, monkeypatch):
+    runner = world["client"].app.state.runner
+    submitted = {}
+
+    def fake_submit(path, config, model, kind="separate", variant="", **kw):
+        submitted.update(speed=config.beats.speed, variant=variant)
+        return _FakeJob()
+
+    monkeypatch.setattr(runner, "submit", fake_submit)
+    open_track(world)
+    world["client"].post(
+        "/api/jobs", json={"path": str(world["source"]), "model": "htdemucs_ft", "kind": "beats"}
+    )
+    assert submitted == {"speed": 1.0, "variant": ""}
+
+
+def test_a_page_of_32nds_is_described_with_a_hint():
+    """describe() -- the export line's words and the page view's -- says when
+    most of a page is 32nds, and which of the two remedies are still off."""
+    from swingscribe.gui.musicxml import SHORT_PAGE_SHARE, describe, short_share
+    from swingscribe.model import NotatedBar, NotatedNote, Notation
+
+    thirty_seconds = [NotatedNote(beat=k * 0.125, duration=0.125, pitch=60) for k in range(8)]
+    rest_of_bar = [NotatedNote(beat=1.0, duration=3.0, pitch=62)]
+    notation = Notation(
+        bars=[NotatedBar(number=1, time_signature=(4, 4), notes=thirty_seconds + rest_of_bar)]
+    )
+    assert short_share(notation) == pytest.approx(8 / 9)
+    words = describe(notation, Config(), {"double_time": True})
+    assert words["short_hint"] is True and words["short_share"] >= SHORT_PAGE_SHARE
+    assert words["double_time"] is True and words["fast_tempo"] is False
+
+    eighths = [NotatedNote(beat=k * 0.5, duration=0.5, pitch=60) for k in range(8)]
+    plain = Notation(bars=[NotatedBar(number=1, time_signature=(4, 4), notes=eighths)])
+    assert describe(plain, Config(), {})["short_hint"] is False
+
+    # A page notated in double time halves the tracked beat, so its 16ths are
+    # 32nds of the beat that was tracked: 2x time cannot hide the hint.
+    sixteenths = [NotatedNote(beat=k * 0.25, duration=0.25, pitch=60) for k in range(16)]
+    doubled = Notation(bars=[NotatedBar(number=1, time_signature=(4, 4), notes=sixteenths)])
+    assert describe(doubled, Config(), {})["short_hint"] is False
+    assert describe(doubled, Config(), {"double_time": True})["short_hint"] is True

@@ -47,6 +47,7 @@ from swingscribe.notation import (
     bar_grid_for_settings,
     fold_texture,
     form_bar_of_page,
+    grid_config,
     meter_from_settings,
     notation_for_span,
     with_chords,
@@ -120,19 +121,25 @@ def page_tags(config: Config, settings: dict[str, Any], texture: bool) -> list[s
     return tags
 
 
-def cached_grid(audio_path: str | Path, config: Config) -> BeatGrid:
+def cached_grid(
+    audio_path: str | Path, config: Config, settings: dict[str, Any] | None = None
+) -> BeatGrid:
     """The tracked beat grid, from the cache only; NotReady if the Beats
-    button has not been pressed. See `bar_grid` for why it never tracks."""
+    button has not been pressed. See `bar_grid` for why it never tracks.
+    `settings` choose WHICH grid: the listener's Fast tune reads the one
+    tracked at half speed (`notation.grid_config`)."""
     from swingscribe import pipeline
     from swingscribe.stages import beats, ingest
 
     cached = pipeline.cached_document(
         audio_path,
-        config,
+        grid_config(config, settings or {}),
         stages=[("ingest", ingest.run), ("beats", beats.run)],
     )
     grid = cached.beat_grid if cached else None
     if grid is None or not grid.beats:
+        if (settings or {}).get("fast_tempo"):
+            raise NotReady("no fast-tune beat grid yet - press Beats first")
         raise NotReady("no beat grid yet - press Beats first")
     return grid
 
@@ -169,7 +176,7 @@ def bar_grid(
     whole audio file, so it is read once.
     """
     if grid is None:
-        grid = cached_grid(audio_path, config)
+        grid = cached_grid(audio_path, config, settings)
     # One derivation, shared with the eval harness (notation.py): the
     # listener's meter settings over the repaired grid, and with no downbeat
     # set, the automatic one voted around `near` -- the span on the page.
@@ -324,7 +331,7 @@ def page_of(
     # span with every note silenced still says so before asking for Beats.
     grid = None
     if chart is not None and counts_from_form(settings) and (notes or added or left):
-        grid = cached_grid(audio_path, config)
+        grid = cached_grid(audio_path, config, settings)
     notation = build_notation(
         document,
         config,
@@ -483,6 +490,31 @@ def page_path(
     )
 
 
+# A page with this share of its notes written as 32nds or shorter is not one
+# a person would write at its tempo. Over 112 harness pages the median share
+# is 0.008 and the 90th percentile 0.10; past 0.4 are three Parker ballads
+# at 64-71 bpm whose double-time runs the tracker heard at the slow pulse
+# (0.42-0.58; 2x time writes them as sixteenths) and Bud Powell's Oblivion
+# at 280, tracked one beat per bar (0.67; Fast tune re-tracks it). Nothing
+# on the page tells those two apart -- the listener's ear does -- so the hint
+# names both.
+SHORT_PAGE_SHARE = 0.4
+
+
+def short_share(notation, double_time: bool = False) -> float:
+    """The share of struck notes as short as a 32nd of the TRACKED beat:
+    a 32nd on the page, or a 16th on a page notated in double time, whose
+    values are twice what the tracked beat would make them. Measured
+    against the tracked beat, 2x time cannot hide a grid four times too
+    slow (Oblivion at 2x is all sixteenths, where Powell's page is
+    eighths)."""
+    struck = [n for bar in notation.bars for n in bar.notes if not n.is_rest and not n.tie_stop]
+    if not struck:
+        return 0.0
+    limit = 0.125 * (2 if double_time else 1) + 1e-6
+    return sum(1 for n in struck if n.duration <= limit) / len(struck)
+
+
 def describe(
     notation,
     config: Config,
@@ -493,8 +525,16 @@ def describe(
     Export and the page view so the two lines cannot disagree. `changes` is
     `page_of`'s report on the chord chart, None when there is none."""
     signature = notation.bars[0].time_signature
+    share = short_share(notation, bool(settings.get("double_time")))
     return {
         "changes": changes,
+        # Mostly 32nds: the beat the page was written against is probably a
+        # fraction of the music's (SHORT_PAGE_SHARE). The page offers 2x time
+        # and Fast tune, whichever is still off.
+        "short_share": round(share, 3),
+        "short_hint": share >= SHORT_PAGE_SHARE,
+        "double_time": bool(settings.get("double_time")),
+        "fast_tempo": bool(settings.get("fast_tempo")),
         "bars": len(notation.bars),
         "notes": sum(1 for bar in notation.bars for n in bar.notes if not n.is_rest),
         "key_fifths": notation.key_fifths,

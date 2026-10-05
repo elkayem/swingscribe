@@ -394,9 +394,34 @@ def _rms(path: str) -> float:
     return float((data**2).mean() ** 0.5)
 
 
-def _track(file2beats, source: str) -> tuple[list[float], list[float]]:
-    raw_beats, raw_downbeats = file2beats(source)
-    return [float(b) for b in raw_beats], [float(d) for d in raw_downbeats]
+def slowed(track_signal, signal, sample_rate: int, speed: float) -> tuple[list[float], list[float]]:
+    """Beats and downbeats of `signal` heard at `speed`, in the audio's own
+    seconds. The tracker is told the samples run at `speed` times their rate
+    -- the music slowed, and an octave down at 0.5, which a beat tracker
+    does not mind -- and its times are scaled back by the same ratio,
+    rounded to a whole sample rate (`BeatsConfig.speed`)."""
+    rate = max(1, int(round(sample_rate * speed)))
+    scale = rate / sample_rate
+    raw_beats, raw_downbeats = track_signal(signal, rate)
+    return [float(b) * scale for b in raw_beats], [float(d) * scale for d in raw_downbeats]
+
+
+def _track(file2beats, source: str, speed: float = 1.0) -> tuple[list[float], list[float]]:
+    if speed == 1.0:
+        raw_beats, raw_downbeats = file2beats(source)
+        return [float(b) for b in raw_beats], [float(d) for d in raw_downbeats]
+    from beat_this.inference import Audio2Beats
+    from beat_this.preprocessing import load_audio
+
+    signal, sample_rate = load_audio(source)
+    # File2Beats is an Audio2Beats that reads the file first: call the
+    # signal-taking parent on the same model, at the slowed rate.
+    return slowed(
+        lambda samples, rate: Audio2Beats.__call__(file2beats, samples, rate),
+        signal,
+        sample_rate,
+        speed,
+    )
 
 
 def _other_source(source: str, document: Document) -> str | None:
@@ -422,7 +447,10 @@ def run(document: Document, config: Config) -> Document:
         _rms,
     )
     device = resolve_device(config.beats.device, torch.cuda.is_available())
+    speed = config.beats.speed
     print(f"beats: source={reason} device={device} dbn={config.beats.dbn}")
+    if speed != 1.0:
+        print(f"beats: tracking the audio at {speed:g}x speed (the listener's Fast tune)")
 
     # beat_this fetches its checkpoint (~80 MB) through torch hub on first
     # use, silently as far as the GUI is concerned; say so where the job's
@@ -431,7 +459,7 @@ def run(document: Document, config: Config) -> Document:
     file2beats = File2Beats(
         checkpoint_path=config.beats.checkpoint, device=device, dbn=config.beats.dbn
     )
-    beats, downbeats = _track(file2beats, source)
+    beats, downbeats = _track(file2beats, source, speed)
 
     # Two independent reasons to try the other source: the grid is unsteady
     # (v2), or it has holes where the music is playing (v3, open-issue #9).
@@ -448,7 +476,7 @@ def run(document: Document, config: Config) -> Document:
         other_label = "full mix" if other == document.audio.path else "drum stem"
         why = "suspect grid" if grid_is_suspect(quality) else f"{len(gaps)} coverage gap(s)"
         print(f"beats: {why} from {reason} — also trying {other_label}")
-        other_beats, other_downbeats = _track(file2beats, other)
+        other_beats, other_downbeats = _track(file2beats, other, speed)
 
         # Swap wholesale ONLY when the whole grid is bad (v2's job). A grid
         # whose only fault is a hole gets a local repair, because that is the

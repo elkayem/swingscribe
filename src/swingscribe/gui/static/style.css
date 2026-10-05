@@ -615,6 +615,8 @@ input.rate-value[type=text] {
    carries color="black" as a presentation attribute, which any author rule
    outranks -- hence the rule on every svg, not only the outer one. */
 .page-wrap { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); }
+.page-hint { margin: 6px 0 8px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.page-hint .chip { font-size: 12px; }
 .page-view {
   --ink: var(--text);
   --sheet: #121319;

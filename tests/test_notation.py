@@ -759,3 +759,19 @@ def test_no_chosen_key_leaves_the_notate_key_alone():
     assert config.notate.key is None
     assert "key" not in config.stage_config("notate")
     assert with_key(-1).notate.model_dump(mode="json")["key"] == -1
+
+
+def test_grid_config_is_the_default_unless_the_listener_asks_for_fast_tune():
+    """Only the grid's readers take the Fast tune config: its beats key is
+    its own, and every other stage keys exactly as the default, so the
+    review, the separation and the transcription never move."""
+    from swingscribe.notation import FAST_TEMPO_SPEED, grid_config
+
+    config = Config()
+    assert grid_config(config, {}) is config
+    assert grid_config(config, {"fast_tempo": False}) is config
+    fast = grid_config(config, {"fast_tempo": True})
+    assert fast.beats.speed == FAST_TEMPO_SPEED == 0.5
+    assert fast.stage_config("beats") != config.stage_config("beats")
+    for stage in ("ingest", "separate", "transcribe", "meter", "quantize", "notate"):
+        assert fast.stage_config(stage) == config.stage_config(stage)

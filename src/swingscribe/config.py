@@ -121,6 +121,28 @@ class BeatsConfig(BaseModel):
     min_drum_mix_ratio: float = 0.05
     # Known tempo in BPM; corrects half/double-octave tracking errors.
     tempo_hint: float | None = None
+    # Track the audio played at this speed and scale the beats back. At 0.5
+    # a tune beyond the tracker's range is heard at half its tempo, where
+    # the tracker is at home: Bud Powell's Oblivion at quarter = 280 is
+    # tracked at 79 bpm, one beat per BAR (its activation repeats every
+    # 0.86 s and has no peak at the 0.214 s beat), and at half speed at 273
+    # -- page rhythm 0.061 -> 0.853 against Powell's PDF page. Never a
+    # default: on a tune the tracker already reads, half speed can double
+    # the pulse. The listener asks for it per track (sidecar `fast_tempo`,
+    # `gui.musicxml.grid_config`), and the grid it makes is cached under its
+    # own key, so the default chain -- and every separation and
+    # transcription keyed below it -- never moves.
+    speed: float = 1.0
+
+    @model_serializer(mode="wrap")
+    def _key_stable_dump(self, handler):
+        """Leave `speed` out of the dump at 1.0, so every beats key -- and
+        every key chained below it -- reads exactly as it did before the
+        field existed."""
+        data = handler(self)
+        if data.get("speed") == 1.0:
+            data.pop("speed", None)
+        return data
 
 
 class TranscribeConfig(BaseModel):

@@ -443,3 +443,144 @@ def test_the_swing_marking_sits_over_the_treble_staff():
     direction = document(notation).find("part/measure/direction")
     assert direction.findtext("direction-type/words") == "Swing"
     assert direction.findtext("staff") == "1"
+
+
+def _beams(notes, time_signature=(4, 4)):
+    """Each note's beams as 'number:value' strings, from the written file."""
+    bar = NotatedBar(number=1, time_signature=time_signature, notes=notes)
+    measure = document(Notation(bars=[bar])).find(".//measure")
+    return [
+        [f"{b.get('number')}:{b.text}" for b in n.findall("beam")]
+        for n in measure.findall("note")
+        if n.find("chord") is None
+    ]
+
+
+def test_two_beats_of_eighths_are_one_beam_of_four():
+    """What MuseScore writes for 4/4 by default, and what a jazz page looks
+    like: beats one-two and three-four beamed, never across the middle."""
+    eighths = [note(k * 0.5, 0.5) for k in range(8)]
+    assert _beams(eighths) == [
+        ["1:begin"],
+        ["1:continue"],
+        ["1:continue"],
+        ["1:end"],
+        ["1:begin"],
+        ["1:continue"],
+        ["1:continue"],
+        ["1:end"],
+    ]
+
+
+def test_sixteenths_are_beamed_within_their_beat_with_a_second_beam():
+    notes = [note(k * 0.25, 0.25) for k in range(8)] + [note(2.0, 2.0)]
+    beams = _beams(notes)
+    assert beams[:4] == [
+        ["1:begin", "2:begin"],
+        ["1:continue", "2:continue"],
+        ["1:continue", "2:continue"],
+        ["1:end", "2:end"],
+    ]
+    assert beams[4][0] == "1:begin" and beams[7][0] == "1:end"
+    assert beams[8] == []  # the half note
+
+
+def test_a_dotted_eighth_and_sixteenth_share_a_beam_and_the_sixteenth_hooks_back():
+    notes = [note(0.0, 0.75), note(0.75, 0.25), note(1.0, 3.0)]
+    assert _beams(notes)[:2] == [["1:begin"], ["1:end", "2:backward hook"]]
+
+
+def test_a_sixteenth_before_a_dotted_eighth_hooks_forward():
+    notes = [note(0.0, 0.25), note(0.25, 0.75), note(1.0, 3.0)]
+    assert _beams(notes)[:2] == [["1:begin", "2:forward hook"], ["1:end"]]
+
+
+def test_a_rest_breaks_the_beam_and_a_lone_eighth_keeps_its_flag():
+    notes = [
+        note(0.0, 0.5),
+        note(0.5, 0.5, is_rest=True),
+        note(1.0, 0.5),
+        note(1.5, 0.5),
+        note(2.0, 2.0),
+    ]
+    assert _beams(notes) == [[], [], ["1:begin"], ["1:end"], []]
+
+
+def test_a_triplet_is_beamed_within_its_beat_and_not_joined_to_the_next():
+    triplet = [note(k / 3, 1 / 3, tuplet=(3, 2)) for k in range(3)]
+    notes = [*triplet, note(1.0, 0.5), note(1.5, 0.5), note(2.0, 2.0)]
+    assert _beams(notes) == [
+        ["1:begin"],
+        ["1:continue"],
+        ["1:end"],
+        ["1:begin"],
+        ["1:end"],
+        [],
+    ]
+
+
+def test_compound_time_beams_eighths_in_threes():
+    eighths = [note(k * 0.5, 0.5) for k in range(6)]
+    assert _beams(eighths, (6, 8)) == [
+        ["1:begin"],
+        ["1:continue"],
+        ["1:end"],
+        ["1:begin"],
+        ["1:continue"],
+        ["1:end"],
+    ]
+
+
+def test_a_chord_beams_once_on_its_head():
+    notes = [note(0.0, 0.5, 72, chord=[76]), note(0.5, 0.5, 74), note(1.0, 3.0)]
+    measure = document(Notation(bars=[bar_of(notes)])).find(".//measure")
+    written = measure.findall("note")
+    assert [len(n.findall("beam")) for n in written] == [1, 0, 1, 0]
+
+
+def test_beam_sits_after_staff_and_before_notations():
+    first = NotatedNote(beat=0.0, duration=0.5, pitch=72, tie_start=True)
+    notation = Notation(
+        staves=2,
+        bars=[
+            NotatedBar(
+                number=1,
+                time_signature=(4, 4),
+                notes=[
+                    first,
+                    NotatedNote(beat=0.5, duration=0.5, pitch=72, tie_stop=True),
+                    NotatedNote(beat=1.0, duration=3.0, pitch=74),
+                    NotatedNote(beat=0.0, duration=4.0, pitch=48, staff=2),
+                ],
+            )
+        ],
+    )
+    element = next(document(notation).iter("note"))
+    order = [child.tag for child in element]
+    assert order.index("staff") < order.index("beam") < order.index("notations")
+
+
+def test_each_voice_is_beamed_on_its_own():
+    """Two staves: the bass staff's eighths are beamed among themselves, never
+    joined to the treble's."""
+    treble = [NotatedNote(beat=k * 0.5, duration=0.5, pitch=72) for k in range(2)]
+    bass = [NotatedNote(beat=k * 0.5, duration=0.5, pitch=48, staff=2) for k in range(2)]
+    rest = [
+        NotatedNote(beat=1.0, duration=3.0, pitch=74),
+        NotatedNote(beat=1.0, duration=3.0, pitch=50, staff=2),
+    ]
+    notation = Notation(
+        staves=2,
+        bars=[
+            NotatedBar(number=1, time_signature=(4, 4), notes=[*treble, rest[0], *bass, rest[1]])
+        ],
+    )
+    notes = list(document(notation).iter("note"))
+    assert [[b.text for b in n.findall("beam")] for n in notes] == [
+        ["begin"],
+        ["end"],
+        [],
+        ["begin"],
+        ["end"],
+        [],
+    ]

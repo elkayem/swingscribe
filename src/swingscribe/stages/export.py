@@ -202,6 +202,111 @@ def tuplet_groups(notes: list[NotatedNote]) -> dict[int, str]:
     return marks
 
 
+# Beams per written value: an eighth hangs from one, a 32nd from three.
+_BEAM_LEVELS = {"eighth": 1, "16th": 2, "32nd": 3}
+
+
+def beam_group_length(time_signature: tuple[int, int]) -> float:
+    """Quarter notes per beam group: the beat -- a dotted quarter in 6/8,
+    9/8 and 12/8, a half in cut time."""
+    numerator, denominator = time_signature
+    if denominator == 8 and numerator % 3 == 0:
+        return 1.5
+    return 4.0 / denominator
+
+
+def _written(note: NotatedNote) -> float:
+    if note.tuplet:
+        actual, normal = note.tuplet
+        return note.duration * actual / normal
+    return note.duration
+
+
+def beam_marks(
+    notes: list[NotatedNote], time_signature: tuple[int, int]
+) -> dict[int, list[tuple[int, str]]]:
+    """Index -> [(beam number, begin/continue/end/forward hook/backward hook)]
+    for one voice of one bar.
+
+    Without `<beam>` a reader draws every eighth and shorter with its own
+    flag. MuseScore beams such a file itself on import, so an exported page
+    looked right there; Verovio does not, so the page view was a wall of
+    flagged 32nds (2026-10-04, Bud Powell's Oblivion). And MuseScore stops
+    beaming once a file holds any beam, so these have to be good ones.
+
+    Notes are beamed within a beat (`beam_group_length`); in 4/4 and 2/4 two
+    beats of plain eighths join into one group of four, which is what
+    MuseScore writes by default and what a jazz page looks like. A rest, or
+    anything a quarter or longer, breaks a beam. Secondary beams join the
+    16ths and 32nds next to each other; one alone gets a hook, forward at
+    the start of its group and backward elsewhere (a dotted eighth and a
+    sixteenth). A lone beamable note keeps its flag.
+    """
+    group_length = beam_group_length(time_signature)
+
+    def level(note: NotatedNote) -> int:
+        if note.is_rest:
+            return 0
+        return _BEAM_LEVELS.get(note_type(_written(note))[0], 0)
+
+    runs: list[tuple[int, list[int]]] = []  # (beat group, note indices)
+    for index, note in enumerate(notes):
+        group = int((note.beat + 1e-6) // group_length)
+        if not level(note):
+            runs.append((-1, []))  # a break
+            continue
+        if runs and runs[-1][0] == group and runs[-1][1]:
+            runs[-1][1].append(index)
+        else:
+            runs.append((group, [index]))
+
+    def plain_eighths(indices: list[int]) -> bool:
+        return len(indices) == 2 and all(
+            notes[i].tuplet is None and abs(notes[i].duration - 0.5) < 1e-6 for i in indices
+        )
+
+    if time_signature in ((4, 4), (2, 4)):
+        joined: list[tuple[int, list[int]]] = []
+        for group, indices in runs:
+            if (
+                joined
+                and group % 2 == 1
+                and joined[-1][0] == group - 1
+                and plain_eighths(joined[-1][1])
+                and plain_eighths(indices)
+                and joined[-1][1][-1] + 1 == indices[0]
+            ):
+                joined[-1] = (group, joined[-1][1] + indices)
+            else:
+                joined.append((group, indices))
+        runs = joined
+
+    marks: dict[int, list[tuple[int, str]]] = {}
+    for _group, indices in runs:
+        if len(indices) < 2:
+            continue
+        levels = [level(notes[i]) for i in indices]
+        for number in range(1, 4):
+            k = 0
+            while k < len(indices):
+                if levels[k] < number:
+                    k += 1
+                    continue
+                end = k
+                while end + 1 < len(indices) and levels[end + 1] >= number:
+                    end += 1
+                if end > k:
+                    marks.setdefault(indices[k], []).append((number, "begin"))
+                    for j in range(k + 1, end):
+                        marks.setdefault(indices[j], []).append((number, "continue"))
+                    marks.setdefault(indices[end], []).append((number, "end"))
+                elif number > 1:
+                    hook = "forward hook" if k == 0 else "backward hook"
+                    marks.setdefault(indices[k], []).append((number, hook))
+                k = end + 1
+    return marks
+
+
 def xml_voice(note: NotatedNote) -> int:
     """The MusicXML voice number: 1-4 on the first staff, 5-8 on the second.
 
@@ -220,18 +325,28 @@ def _append_note(
     written_key: int,
     tuplet_mark: str | None = None,
     staves: int = 1,
+    beams: list[tuple[int, str]] | None = None,
 ) -> None:
     """One notated note, plus a <chord/> note for every other pitch it heads.
 
     A MusicXML chord is the head note followed by notes marked <chord/>, each
     repeating the duration, type, dots, ties and tuplet ratio, and advancing
-    the time cursor by nothing. The tuplet bracket mark goes on the head only:
-    a reader draws one bracket per group, not one per chord member.
+    the time cursor by nothing. The tuplet bracket mark and the beams go on
+    the head only: a reader draws one bracket per group and one beam per
+    stem, not one per chord member.
     """
     pitches = [note.pitch] if note.is_rest else [note.pitch, *sorted(set(note.chord))]
     for index, pitch in enumerate(pitches):
         _append_pitch(
-            parent, note, pitch, transpose, written_key, tuplet_mark, chord=index > 0, staves=staves
+            parent,
+            note,
+            pitch,
+            transpose,
+            written_key,
+            tuplet_mark,
+            chord=index > 0,
+            staves=staves,
+            beams=None if index else beams,
         )
 
 
@@ -244,6 +359,7 @@ def _append_pitch(
     tuplet_mark: str | None,
     chord: bool,
     staves: int = 1,
+    beams: list[tuple[int, str]] | None = None,
 ) -> None:
     element = ElementTree.SubElement(parent, "note")
     if chord:
@@ -291,6 +407,9 @@ def _append_pitch(
         # After <time-modification> and before <notations>: MusicXML's note
         # children are ordered, and a reader that validates refuses the file.
         ElementTree.SubElement(element, "staff").text = str(note.staff)
+    # After <staff>, before <notations>: the schema's order again.
+    for number, value in beams or ():
+        ElementTree.SubElement(element, "beam", {"number": str(number)}).text = value
     tied = (note.tie_start or note.tie_stop) and not note.is_rest
     if tied or tuplet_mark:
         notations = ElementTree.SubElement(element, "notations")
@@ -386,6 +505,7 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
                 backup = ElementTree.SubElement(measure, "backup")
                 ElementTree.SubElement(backup, "duration").text = str(written)
             marks = tuplet_groups(voice_notes)
+            beams = beam_marks(voice_notes, bar.time_signature)
             cursor = 0
             for position, note in enumerate(voice_notes):
                 if not offset:
@@ -407,6 +527,7 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
                     written_key,
                     marks.get(position),
                     staves=notation.staves,
+                    beams=beams.get(position),
                 )
             written = sum(_duration_ticks(n) for n in voice_notes)
         # A symbol past the first voice's last note (a bar that does not fill

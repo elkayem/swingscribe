@@ -10,6 +10,7 @@ from swingscribe.stages.beats import (
     local_bpm_curve,
     octave_outliers,
     select_source,
+    slowed,
 )
 
 
@@ -435,3 +436,27 @@ def test_repair_local_rate_degenerate():
 
     assert repair_local_rate([]) == ([], [])
     assert repair_local_rate([1.0, 2.0]) == ([1.0, 2.0], [])
+
+
+def test_slowed_tells_the_tracker_the_slowed_rate_and_scales_its_times_back():
+    """The listener's Fast tune: the tracker hears the samples at half their
+    rate -- the music at half speed -- and its times come back in the
+    audio's own seconds."""
+    seen = {}
+
+    def track(signal, rate):
+        seen["signal"], seen["rate"] = signal, rate
+        return [1.0, 2.0, 3.0], [1.0]
+
+    beats, downbeats = slowed(track, "samples", 44100, 0.5)
+    assert seen == {"signal": "samples", "rate": 22050}
+    assert beats == pytest.approx([0.5, 1.0, 1.5])
+    assert downbeats == pytest.approx([0.5])
+
+
+def test_slowed_scales_by_the_rate_it_actually_asked_for():
+    """A sample rate that does not halve evenly is rounded, and the times are
+    scaled by the rounded ratio, not the requested one."""
+    _beats, _ = slowed(lambda s, r: ([r / 1000.0], []), None, 44101, 0.5)
+    rate = round(44101 * 0.5)
+    assert _beats == pytest.approx([rate / 1000.0 * rate / 44101])

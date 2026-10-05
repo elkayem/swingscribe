@@ -447,6 +447,7 @@ def beat_grids(cache: Path = GRIDS_CACHE, log=print) -> dict:
     separation (stages/beats.py) and costs seconds.
     """
     from swingscribe.gui import library
+    from swingscribe.notation import grid_config
     from swingscribe.stages import beats
 
     grids = json.loads(cache.read_text(encoding="utf-8")) if cache.is_file() else {}
@@ -456,8 +457,16 @@ def beat_grids(cache: Path = GRIDS_CACHE, log=print) -> dict:
         # wjazzd/, which cost them their beat score AND their notation score --
         # the exact "scores a subset without saying so" failure this docstring
         # is about, reintroduced by making two of three globs recursive.
-        name = sidecar_name(sidecar_path, json.loads(sidecar_path.read_text(encoding="utf-8")))
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        name = sidecar_name(sidecar_path, sidecar)
         cached = grids.get(name)
+        # The listener's Fast tune tracks this track's grid at half speed
+        # (notation.grid_config), as the Score button reads it; an entry
+        # tracked at another speed is stale.
+        config = grid_config(eval_config(), sidecar)
+        speed = config.beats.speed
+        if cached is not None and cached.get("speed", 1.0) != speed:
+            cached = None
         # A grid cached before D27 holds the beats alone. The repaired bar
         # grid the harness notates on now also wants the downbeat layer (the
         # auto anchor's phase, when the sidecar has no downbeat) and the
@@ -465,7 +474,6 @@ def beat_grids(cache: Path = GRIDS_CACHE, log=print) -> dict:
         # entry is tracked once more and keeps its beats.
         if (cached is not None and "duration" in cached) or not (BENCH / name).is_file():
             continue
-        config = eval_config()
         document = library.ingested_document(BENCH / name, config)
         started = time.time()
         # No stems on the document: the mix is the source, and handing this
@@ -477,6 +485,8 @@ def beat_grids(cache: Path = GRIDS_CACHE, log=print) -> dict:
             "duration": round(float(document.audio.duration), 3),
             "source": grid.source,
         }
+        if speed != 1.0:
+            entry["speed"] = speed
         if cached is not None and cached["beats"] != entry["beats"]:
             # The pinned numbers stand on the cached beats; a tracker that no
             # longer reproduces them is a finding to report, not a reason to

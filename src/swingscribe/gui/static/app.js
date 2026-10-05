@@ -464,6 +464,7 @@ async function loadTrack(track) {
   state.snapMode = remembered.snap_mode ?? 'off';
   state.timeSignature = remembered.time_signature ?? null;
   state.doubleTime = Boolean(remembered.double_time);
+  state.fastTempo = Boolean(remembered.fast_tempo);
   state.anchor = remembered.anchor ?? null;
   state.pins = cleanPins(remembered.beat_pins);
   state.pinsArmed = false;
@@ -489,6 +490,7 @@ async function loadTrack(track) {
   invalidatePage();
   page.width = 0;
   pageView.say(PAGE_OWED);
+  renderPageHint(null);
   $('page-info').textContent = '';
   // The last track's suggestion describes the last track's stems.
   suggestion.token += 1;
@@ -957,6 +959,7 @@ function applyBeats() {
   doubleTime.disabled = !state.beats;
   doubleTime.textContent = `2× time: ${state.doubleTime ? 'on' : 'off'}`;
   doubleTime.classList.toggle('active', Boolean(state.doubleTime));
+  renderFastTempo();
   updateBars();
 }
 
@@ -2938,6 +2941,7 @@ function settingsPayload() {
     snap_mode: state.snapMode,
     time_signature: state.timeSignature,
     double_time: state.doubleTime,
+    fast_tempo: state.fastTempo,
     anchor: state.anchor,
     // Human judgements, beside the audio like the downbeat: never the cache.
     beat_pins: state.pins,
@@ -3559,6 +3563,7 @@ function pageSignature() {
   return JSON.stringify({
     page: exportSignature(),
     doubleTime: state.doubleTime,
+    fastTempo: state.fastTempo,
     line: state.line,
     ensemble: state.ensemble,
     beats: Boolean(state.beats),
@@ -3586,6 +3591,7 @@ async function refreshPage({ force = false } = {}) {
   if (!state.review || !state.selection || !state.leadStem) {
     invalidatePage();  // an answer still on its way is for notes no longer here
     pageView.say(PAGE_OWED);
+    renderPageHint(null);
     $('page-info').textContent = '';
     return;
   }
@@ -3610,6 +3616,7 @@ async function refreshPage({ force = false } = {}) {
     const count = result.page_count;
     $('page-info').textContent =
       `${pageSummary(result)} · ${count} page${count === 1 ? '' : 's'}`;
+    renderPageHint(result);
     $('page-info').title =
       `What Export would write, as ${result.name}. Nothing is written until you press it.`;
   } catch (error) {
@@ -3625,7 +3632,55 @@ async function refreshPage({ force = false } = {}) {
     // anything else is a fault, and says so in red.
     pageView.say(error.message, { error: error.status !== 409 });
     $('page-info').textContent = '';
+    renderPageHint(null);
   }
+}
+
+/* A page that is mostly 32nd notes was written against a beat slower than
+   the music's (gui/musicxml.SHORT_PAGE_SHARE). Two causes look identical on
+   the page and the listener can tell them apart by ear: a fast tune the
+   tracker heard one beat per bar (Fast tune re-tracks it), or a ballad's
+   double-time runs (2x time halves every value). Each is offered while it
+   is still off. */
+function renderPageHint(result) {
+  const hint = $('page-hint');
+  const offers = [];
+  if (result && result.short_hint) {
+    if (!result.fast_tempo) {
+      // 2x time was standing in for the same fix: on a re-tracked grid it
+      // would halve every value again, so the hint's button turns it off.
+      offers.push(['Fast tune', 'a fast tune the beat tracker heard once a bar', async () => {
+        if (state.doubleTime) $('double-time').click();
+        await setFastTempo(true);
+      }]);
+    }
+    if (!result.double_time) {
+      offers.push(['2× time', 'double-time runs over a slow tune', () => $('double-time').click()]);
+    }
+  }
+  if (!offers.length) {
+    hint.hidden = true;
+    hint.replaceChildren();
+    return;
+  }
+  const share = Math.round(result.short_share * 100);
+  const text = document.createElement('span');
+  text.textContent = result.double_time
+    ? `Even at 2× time, ${share}% of this page is 16th notes or shorter: its beat is probably slower than the music's. Try`
+    : `${share}% of this page is 32nd notes: its beat is probably slower than the music's. Try`;
+  const parts = [text];
+  offers.forEach(([label, why, act], index) => {
+    const button = document.createElement('button');
+    button.className = 'chip';
+    button.textContent = label;
+    button.title = `For ${why}.`;
+    button.addEventListener('click', act);
+    const note = document.createElement('span');
+    note.textContent = `for ${why}${index < offers.length - 1 ? ', or' : '.'}`;
+    parts.push(button, note);
+  });
+  hint.replaceChildren(...parts);
+  hint.hidden = false;
 }
 
 function setPageShown(shown) {
@@ -4030,6 +4085,46 @@ $('double-time').addEventListener('click', () => {
   chip.classList.toggle('active', state.doubleTime);
   persist();
 });
+
+/* Fast tune: a GRID choice, unlike 2x time. The beat tracker hears the
+   audio at half speed (notation.grid_config), for a tune past its range --
+   Bud Powell's Oblivion at 280 was tracked one beat per bar. The server
+   picks the grid off the sidecar, so the choice is written before the grid
+   is asked for; a grid not tracked yet is tracked now, like the first press
+   of Beats. The transcription is untouched. */
+function renderFastTempo() {
+  const chip = $('fast-tempo');
+  chip.disabled = !state.track || state.fastTempoBusy;
+  if (!state.fastTempoBusy) chip.textContent = `Fast tune: ${state.fastTempo ? 'on' : 'off'}`;
+  chip.classList.toggle('active', Boolean(state.fastTempo));
+}
+
+async function setFastTempo(on) {
+  if (!state.track || state.fastTempoBusy) return;
+  state.fastTempo = on;
+  state.fastTempoBusy = true;
+  const chip = $('fast-tempo');
+  renderFastTempo();
+  try {
+    await persistNow();
+    await maybeLoadBeats();
+    if (!state.beats) {
+      state.showBeats = true;
+      chip.textContent = 'Fast tune…';
+      const job = await post('/api/jobs', {
+        path: state.track.path, model: state.model, kind: 'beats',
+      });
+      await pollBeatsJob(job.id, chip);
+    }
+  } catch (error) {
+    toast(error.message, true);
+  }
+  state.fastTempoBusy = false;
+  renderFastTempo();
+  persist();
+}
+
+$('fast-tempo').addEventListener('click', () => setFastTempo(!state.fastTempo));
 
 $('chorus-bars').addEventListener('change', async (event) => {
   if (event.target.value === 'custom') {
