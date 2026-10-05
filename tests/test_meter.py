@@ -345,6 +345,49 @@ def test_a_ragged_stretch_two_beats_long_is_thinned_by_the_metronome():
     assert not any(b.relaid for b in beats)
 
 
+def oblivion() -> tuple[list[float], float, float]:
+    """Bud Powell's Oblivion at half speed (R35): steady at 0.215 s, then
+    four seconds the tracker heard as two streams 0.08 s apart -- 70.71,
+    71.14, 71.56 on the pulse, 70.63, 71.05, 71.47 beside it -- with gaps
+    the insertion fills, so the repaired grid held 24 beats where the time
+    holds 20. The tracker's own times; the steady bars either side are
+    regularised."""
+    left, right = 69.84, 74.18
+    head = steady(24, ibi=0.215, start=round(left - 23 * 0.215, 6))
+    stretch = [70.26, 70.63, 70.71, 71.05, 71.14, 71.47, 71.56, 71.88]
+    stretch += [72.31, 72.73, 72.88, 73.32, 73.75, 74.08]
+    tail = steady(24, ibi=0.215, start=right)
+    return head + stretch + tail, left, right
+
+
+def test_a_whole_bar_too_many_across_two_doubts_is_thinned():
+    """Two doubted stretches a beat apart: neither can be read alone, as
+    each one's metronome side runs through the other, so they are read as
+    one -- four beats too many, a bar of 4/4, which the downbeat marks
+    cannot see because it keeps their phase. Re-laid at the count the time
+    holds, the stretch is metrical again: the roll draws its bars and the
+    page writes five there, not six."""
+    times, left, right = oblivion()
+    beats = meter.repair_beats(times, MeterConfig())
+    grid = [b.time for b in beats]
+    assert grid.index(right) - grid.index(left) == 20
+    for found in (70.26, 70.71, 71.14, 71.56, 72.88, 73.32, 73.75):
+        assert found in grid
+    assert meter.grid_doubts(beats) == []
+    assert meter.metrical_spans(beats, MeterConfig()) == [(0, len(beats))]
+
+
+def test_a_relaid_stretch_keeps_no_beat_the_insertion_guessed():
+    """The insertion first split the stream's 0.37-0.43 s gaps in two at the
+    WRONG count (70.445, 70.88, 71.305 ...). Kept by the re-lay as if the
+    tracker had found them, they left intervals of 0.17 and 0.26 s and the
+    stretch barless; only found beats may keep their place."""
+    times, left, right = oblivion()
+    grid = [b.time for b in meter.repair_beats(times, MeterConfig())]
+    intervals = [b - a for a, b in zip(grid, grid[1:], strict=False) if left <= a < right]
+    assert max(intervals) - min(intervals) < 0.15 * 0.215
+
+
 def test_thinning_never_adds_a_beat():
     """A stretch one beat SHORT (four pulses tracked as three intervals) is
     left to the doubt list: the metronome only ever takes beats out."""

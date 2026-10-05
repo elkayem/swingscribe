@@ -1472,6 +1472,67 @@ would say.
 
 ## Resolved
 
+### R35 - Four seconds tracked as two streams left five bars of Oblivion barless, and a whole bar too many hid from every check
+
+2026-10-05, the listener on Bud Powell's Oblivion (Fast tune, so tracked
+at half speed; dev split): "why does the transcriber leave this huge gap
+between bar 49 and 50 ... it would be so easy to guess where those 4 bars
+should be". From 70.26 to 74.18 s the tracker heard two streams 0.08 s
+apart -- 70.71, 71.14, 71.56 on the pulse, 70.63, 71.05, 71.47 beside it --
+and the insertion split the streams' gaps in two, so the repaired grid held
+24 beats between 69.84 and 74.18 s where the time holds 20 (0.2155 s either
+side). The roll found the intervals unsteady, drew no bar lines there and
+counted none, so bar 50 sat where bar 54 belongs; the page counts by index
+and wrote six bars in the time of five.
+
+Three things let it through, each closed:
+
+1. **Two doubts, one metronome side apart.** `grid_doubts` found
+   69.84-72.73 and 72.88-74.82; each one's eight-interval metronome side ran
+   through the other, so both read None and `thin_by_metronome` passed.
+   `_metronome_readings` now reads a None doubt again across the doubts
+   within `GHOST_SIDE` intervals of its right edge, as one stretch: +3.92.
+2. **The cap was three beats.** Four too many is a WHOLE BAR in 4/4, the one
+   slip the tracker's downbeat marks cannot see (it keeps their phase), so
+   the doubt list called it settled and drew no "?". `THIN_MAX_EXTRA` is 4.
+3. **The re-lay snapped to the insertion's guesses.** `_relay` keeps the
+   nearest candidate within a quarter step of each place, and the
+   candidates included the IMPLIED beats the insertion had laid at the wrong
+   count (70.445, 70.88, 71.305, 73.915): the count came out right and the
+   intervals 0.17/0.26 s, so the stretch stayed barless. Only found beats
+   may keep their place now.
+
+Oblivion's roll: bars 50-54 at 70.71, 71.56, 72.44, 73.32, 74.18 s, no free
+time in 70-74 s. Over every cached grid (149, run_eval's plus Oblivion's
+half-speed one) eight recordings change count; in a scored WJazzD solo two
+(`grid_drift.py`, 73 solos): Hancock's Orbits +3.2 -> +0.2 beats, Henderson's
+In 'n Out +1.9 -> -0.1; mean |drift| 0.45 -> 0.39, within a beat 66 -> 68,
+nothing the wrong way. The found-only snap moves beats by up to 0.11 s
+inside earlier R34 re-lays (counts unchanged). No hand score or Omnibook
+span is touched.
+
+One sidecar re-voted, as R34's Oleo was: Hancock's Orbits (solo 188)
+anchor 164.5 -> 163.82 s. Voted by `wjazz_batch` on the broken grid, it
+compensated the three-beat slip six seconds into the solo, and the mended
+page went 0.838 -> 0.000 on the bar, every note one beat off; re-voted on
+the new grid the matched notes agree at 0.99. The other 72 WJazzD anchors
+behind a scored solo keep their phase (Dorham's In 'n Out votes untrusted,
+as before).
+
+Card (against the pins of 2026-10-02, `meter.CACHE_VERSION` 6): WJazzD
+placement 0.8729 -> 0.8766, grid steps 47 -> 45, doubts 11 -> 7 on 6 -> 5
+pages; Orbits 0.838 -> 0.912 on the bar (rhythm 0.675 -> 0.689), In 'n Out
+0.494 -> 0.690 (rhythm 0.574 -> 0.585); nothing down. The twelve hand
+scores and the Omnibook did not move. Oblivion was not yet pinned and
+joins the silver pages with this run (n 3 -> 4, which is all the
+`pages_silver_*` moves are): on the bar 0.836, rhythm 0.868, value 0.824,
+against 0.806 / 0.853 / 0.826 when Fast tune landed.
+
+Not this rule's: Oblivion's last ten bars (89.4-96.3 s) are tracked at
+0.33-0.35 s -- a cross-rhythm or the solo's end -- and stay so past the
+span, so there is no metronome to bridge with; the page steps +2 and +3
+beats there and the roll marks it "?". A pin is the tool.
+
 ### R34 - A ghost beat 80 ms from a real one put a page half a bar off, and nothing counted the grid's slips
 
 2026-10-02, the listener on Joe Henderson's A Shade of Jade (a recording

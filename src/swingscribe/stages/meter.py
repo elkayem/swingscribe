@@ -75,7 +75,9 @@ BRIDGE_BEATS = 1
 # 5: a ghost beat crowding a real one is thinned by the metronome test
 # (`drop_ghost_beats`, R34), and so is a ragged stretch it reads as whole
 # beats too many (`thin_by_metronome`).
-CACHE_VERSION = 5
+# 6: doubts too close for the metronome to read alone are read as one, a
+# whole bar too many is thinned, and a re-lay keeps only FOUND beats (R35).
+CACHE_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -601,27 +603,63 @@ def repair_beats(
 # the ghost rule had just taken one out, on Limehouse Blues. Measured with
 # the ghost rule in: Totem Pole +5.9 -> -0.1 beats over the solo, In 'n Out
 # +9.5 -> +8.5, nothing else in a solo moved; 65 -> 66 within a beat.
+#
+# A WHOLE BAR too many is thinned too (2026-10-04, R35): Bud Powell's
+# Oblivion, tracked at half speed, came out of 70.3-74.2 s as two streams
+# 0.08 s apart, 24 beats where the time holds 20. Two doubts lay within one
+# metronome side of each other, so neither could be read alone (each one's
+# side ran through the other), and four beats too many in 4/4 keeps the
+# tracker's downbeat marks in phase, so the doubt list called it settled and
+# drew no "?". The roll left the stretch barless (bar 49 to bar 50 across
+# five bars of time) and the page, which counts by index, wrote six bars
+# there. Now a doubt the metronome cannot read is read again across the
+# doubts crowding its right side, and the cap is four beats, a bar of 4/4.
 THIN_JUMP_FIT = 0.3
-THIN_MAX_EXTRA = 3
+THIN_MAX_EXTRA = 4
+
+
+def _metronome_readings(beats: list[Beat], tolerance: float):
+    """(start, end, jump) for every doubted stretch (`grid_doubts`), and,
+    where a doubt reads None because the next one lies within `GHOST_SIDE`
+    intervals of it, the run of them read across as one stretch."""
+    doubts = grid_doubts(beats, tolerance)
+    times = [b.time for b in beats]
+    index = {t: i for i, t in enumerate(times)}
+    for n, doubt in enumerate(doubts):
+        yield doubt.start, doubt.end, doubt.jump
+        if doubt.jump is not None:
+            continue
+        end = index[doubt.end]
+        for later in doubts[n + 1 :]:
+            if index[later.start] - end > GHOST_SIDE:
+                break
+            end = index[later.end]
+            jump = metronome_jump(times, index[doubt.start], end, tolerance)
+            if jump is not None:
+                yield doubt.start, later.end, jump
+                break
 
 
 def thin_by_metronome(beats: list[Beat], tolerance: float) -> list[Beat]:
-    """Re-lay every doubted stretch (`grid_doubts`) whose metronome reading
-    is within THIN_JUMP_FIT of a whole number of beats too many, with that
-    many fewer. The new beats are the repair's own, never `relaid`: that
-    flag is the listener's (`apply_pins`)."""
+    """Re-lay every doubted stretch (`_metronome_readings`) whose metronome
+    reading is within THIN_JUMP_FIT of a whole number of beats too many,
+    with that many fewer. The new beats are the repair's own, never
+    `relaid`: that flag is the listener's (`apply_pins`)."""
     for _ in range(len(beats)):
-        for doubt in grid_doubts(beats, tolerance):
-            if doubt.jump is None:
+        for start, end, jump in _metronome_readings(beats, tolerance):
+            if jump is None:
                 continue
-            extra = round(doubt.jump)
-            if not 1 <= extra <= THIN_MAX_EXTRA or abs(doubt.jump - extra) > THIN_JUMP_FIT:
+            extra = round(jump)
+            if not 1 <= extra <= THIN_MAX_EXTRA or abs(jump - extra) > THIN_JUMP_FIT:
                 continue
             times = [b.time for b in beats]
-            a, b = times.index(doubt.start), times.index(doubt.end)
+            a, b = times.index(start), times.index(end)
             if b - a - extra < 1:
                 continue
-            laid = _relay(doubt.start, doubt.end, b - a - extra, beats[a + 1 : b])
+            # Only FOUND beats may keep their place: an implied one is the
+            # insertion's guess at the count this re-lay just corrected.
+            found = [x for x in beats[a + 1 : b] if not x.implied]
+            laid = _relay(start, end, b - a - extra, found)
             beats = [*beats[: a + 1], *(replace(x, relaid=False) for x in laid), *beats[b:]]
             break
         else:

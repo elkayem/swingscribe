@@ -539,8 +539,13 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   SPAN pulse (a median of the tracker's 20 ms-frame intervals reads 3% fast,
   half a beat over sixteen), and the jump between the sides' phases is the
   beats too many; within 0.4 of one, the crowded pair loses a beat.
-  `thin_by_metronome` re-lays a doubted stretch reading 1-3 whole beats too
-  many (Totem Pole +5.9 -> -0.1). It only ever THINS: insertion by metronome
+  `thin_by_metronome` re-lays a doubted stretch reading 1-4 whole beats too
+  many (Totem Pole +5.9 -> -0.1); two doubts within one metronome side of
+  each other are read as ONE stretch, and the re-lay keeps only FOUND beats,
+  never the insertion's guesses (R35, 2026-10-05: Oblivion's 70-74 s, two
+  streams 0.08 s apart, 24 beats in the time of 20 -- a whole bar, which
+  keeps the downbeat marks in phase, so no "?" either; the roll went bar 49
+  to bar 50 across five bars). It only ever THINS: insertion by metronome
   was measured and not shipped (rounding agrees on 411 of 415 gaps), and a
   rule that could add put a beat back where a ghost was just removed.
   `grid_doubts` lists every stretch whose time does not hold its count that
