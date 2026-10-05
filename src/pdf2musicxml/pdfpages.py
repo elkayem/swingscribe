@@ -195,6 +195,69 @@ def page_text(pdf: Path, index: int) -> list[TextLine]:
     return lines
 
 
+def otsu_threshold(gray) -> int:
+    """The grey level at or below which a pixel is ink: the best split of an 8-bit image (Otsu)."""
+    import numpy as np
+
+    histogram = np.bincount(np.asarray(gray, dtype=np.uint8).ravel(), minlength=256).astype(float)
+    total = histogram.sum()
+    levels = np.arange(256)
+    weight = np.cumsum(histogram)
+    mean = np.cumsum(histogram * levels)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        between = (mean[-1] * weight - mean * total) ** 2 / (weight * (total - weight))
+    return int(np.nanargmax(between))
+
+
+def staff_line_thickness(gray) -> int:
+    """The median thickness in pixels of the page's staff lines (0 when none are found).
+
+    A staff line is a run of rows that are ink across most of the page's
+    middle; its thickness is how many rows the run holds.
+    """
+    import numpy as np
+
+    ink = np.asarray(gray) <= otsu_threshold(gray)
+    width = ink.shape[1]
+    rows = ink[:, int(width * 0.2) : int(width * 0.8)].mean(axis=1) > 0.45
+    runs: list[int] = []
+    run = 0
+    for row in rows:
+        if row:
+            run += 1
+        elif run:
+            runs.append(run)
+            run = 0
+    return int(np.median(runs)) if runs else 0
+
+
+def thin_ink(gray):
+    """The page with every stroke thinned from above and below, or None if it cannot take it.
+
+    homr reads a page shrunk to 1,920 px wide and a staff shrunk again to at
+    most 1,280, and on a heavy handwritten font two beams drawn almost
+    touching arrive as one black block about three beams deep: Coleman
+    Hawkins's Body and Soul read 78 of 280 notes as 32nds or shorter where
+    the page has 16ths (2026-10-05). Eroding the ink by one pixel at the
+    top and bottom of every stroke opens the gap between the beams; it
+    takes the same from a staff line, so a page whose lines are 3 px thick
+    loses one pixel and a page of thinner lines is not thinned at all.
+    """
+    import numpy as np
+    from PIL import Image
+
+    array = np.asarray(gray, dtype=np.uint8)
+    lines = staff_line_thickness(array)
+    if lines < 3:
+        return None
+    ink = array <= otsu_threshold(array)
+    thinned = ink.copy()
+    thinned[1:] &= ink[:-1]  # ink must be ink in the row above
+    if lines >= 4:
+        thinned[:-1] &= ink[1:]  # and in the row below
+    return Image.fromarray(np.where(thinned, 0, 255).astype(np.uint8), mode="L")
+
+
 def write_gray_pdf(images, path: Path, dpi: int = 300) -> None:
     """Wrap 8-bit grayscale images as a Flate-compressed PDF, one page each.
 

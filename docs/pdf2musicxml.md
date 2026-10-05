@@ -590,6 +590,79 @@ Parker's Ballade, Home Cooking I and Lullaby in Rhythm part 2, Don Byas's
 Slammin' Around, Norris Turney's Portrait of Mahalia Jackson) -- skewed or
 unusual scans, a limit of `find_staves` on rasters, not of this change.
 
+### A scan read twice, its ink thinned (2026-10-05, 0.3.26-0.3.31)
+
+The listener's next round was the scans' 32nd notes where the page has
+16ths (bar 4 of Coleman Hawkins's Body and Soul). It is homr's reading,
+not anything the tool does: homr shrinks a page to 1,920 px wide and a
+staff again to at most 1,280, and on the heavy handwritten font of the
+Anderson scans two beams drawn almost touching are separated by under a
+pixel there, one black block about three beams deep. Measured on four
+scan pages, homr read 78 of 280 notes as 32nds or shorter on Hawkins's
+page 1. Tried and rejected on the same pages: Audiveris with its jazz
+music family (5 of 70 bars filling 4/4 either way; Alone Together 95 to
+92), stretching the page taller (worse), thinning by two pixels a side
+(it erases the staff lines), and taking Audiveris's values where both
+engines read the same pitches (7 of the scans' 417 off bars).
+
+What works is a second homr reading of each scan page with its ink
+eroded one pixel from above and below (`pdfpages.thin_ink`, Otsu's
+threshold, ink at or below it), which opens the gap between the beams;
+a page whose staff lines are 3 px thick loses only one row, and one of
+2 px is not thinned (3 of the 94 scan pages). The thinned reading also
+takes the odd stem for a bar line and splits a bar, so it is never the
+primary: it is merged into the plain reading bar by bar like the
+cross-check, after two repairs to the thinned reading -- two adjacent
+short bars that add up to one are joined (`join_short_pairs`), and
+consecutive bars that together hold one plain bar's notes, three in
+four matched both ways, are joined (`join_to_match`) even where a
+misread value stops them adding up.
+
+That exposed a limit of the merge itself: it paired bars only by system
+of equal bar count, and on Hawkins's first two pages 12 of the 21 bars
+still off after the merge sat in a system the two readings counted
+differently. `musicxml.note_pairs` now pairs any two bars that hold the
+same notes, three in four matched both ways, and outranks the index and
+the system pairing (`pair_measures`); it serves the Audiveris merge
+too. Hawkins's pages 1-2: 39 of 54 bars off as the file stood in the
+morning, 18 after. A missed bar line in the thinned reading (one bar
+holding two plain bars) is not split.
+
+The same day, on a vector file: Joy Spring's only three mistakes were a
+quarter rest at a bar's end read as an eighth (bars 16, 17, 31). The
+page prints every rest as a glyph with its value, and it had been read
+only to place tuplets. `vector.correct_rests` now gives each read rest
+the value of the printed rest between the same two aligned notes
+(`_pair_rests`, as many each side), its augmentation dot included
+(`mark_rest_dots`: a small round music glyph a space or so right of
+the rest with no notehead between; Inkpen2 draws it at U+2122 in its
+Special face). Left alone: tuplet members, whole and whole-measure
+rests, bars of several voices. Over the corpus 382 rests on 51 files
+took the page's value; of the bars they sit in 114 went from off to
+filling, 4 the other way, 22 stayed off. Before the dot reader the
+largest wrong class was a dotted rest given its value without its dot;
+and a bar that only filled because two errors cancelled (Friend Like
+Me's bar 1: a quarter rest read as an eighth beside an unread triplet)
+went off until the triplet was read too, below.
+
+And a tuplet number over a line-opening rest: Friend Like Me's bar 1
+has its "3" over the eighth rest that opens the group, directly above
+a G notehead above the staff. The number was dropped twice: the
+loneness test (a digit with a neighbour on its baseline is a chord
+symbol's) counted the notehead as a neighbour, and the number's window
+began at the first notehead, not the first rest. Noteheads and rests
+are no longer neighbours, and the window opens at the first onset of
+either kind (`tuplet_marks`).
+
+Bars not filling the signature over the corpus, against the morning's
+0.3.25: vector 593 to 491, scans 400 to 289; Hawkins's Body and Soul 49
+to 23, Alone Together 36 to 20. 249 bars came from the thinned
+readings, 516 from Audiveris. The extra homr pass costs about 35 s a
+scan page, an hour for the 94 once; its readings are cached beside the
+page images as `pNNN_thin.musicxml`. Two of the folder's PDFs are
+byte-identical copies of Whisper Not: the batch converts one and skips
+the other, whose outputs then age; convert it by name.
+
 ## What is left to a human
 
 An OMR reading is a draft. Per page expect a handful of wrong durations,

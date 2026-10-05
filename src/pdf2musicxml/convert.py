@@ -56,6 +56,7 @@ class Options:
     title: str | None = None
     redetect: bool = False
     printed_pitch: bool = True  # correct pitches to the text layer's noteheads
+    thin_scans: bool = True  # a second homr reading of a scan with its ink thinned
 
 
 @dataclass
@@ -101,6 +102,10 @@ class Result:
     alters_from_engine_bars: int = 0  # sounding alters decided by the reading's bar ends
     bars_from_check: int = 0  # bars taken from the other engine's reading, bar for bar
     bars_from_check_list: list[str] = field(default_factory=list)
+    rests_from_page: int = 0  # read rests given the printed rest's value
+    rest_value_notes: list[str] = field(default_factory=list)
+    bars_from_thin: int = 0  # bars taken from homr's reading of the thinned scan
+    bars_from_thin_list: list[str] = field(default_factory=list)
     time_changes: int = 0  # changes of signature carried from the page
     time_notes: list[str] = field(default_factory=list)
     rest_bars_from_page: int = 0  # bars of multi-bar rest the page prints, given their bars
@@ -151,6 +156,10 @@ class Result:
                 f"{self.bars_merged} read bars joined and {self.bars_split} divided "
                 "by the page's bar lines"
             )
+        if self.rests_from_page:
+            parts.append(f"{self.rests_from_page} rest values set from the page")
+        if self.bars_from_thin:
+            parts.append(f"{self.bars_from_thin} bars taken from the thinned scan's reading")
         if self.bars_from_check:
             parts.append(f"{self.bars_from_check} bars taken from the {self.check_engine} reading")
         if self.time_changes:
@@ -358,6 +367,27 @@ def guess_instrument(
 # ---------------------------------------------------------------- one transcription
 
 
+def _thinned_images(images: list[Path], force: bool = False) -> list[Path]:
+    """Each page image with its ink thinned (`pdfpages.thin_ink`), written beside it.
+
+    A page too faint to thin keeps its own image, whose homr reading is
+    already on disk, so it costs nothing and changes nothing in the merge.
+    """
+    from PIL import Image
+
+    out = []
+    for image in images:
+        target = image.with_name(f"{image.stem}_thin.png")
+        if force or not target.is_file() or target.stat().st_mtime < image.stat().st_mtime:
+            thinned = pdfpages.thin_ink(Image.open(image).convert("L"))
+            if thinned is None:
+                out.append(image)
+                continue
+            thinned.save(target)
+        out.append(target)
+    return out
+
+
 def _read_with(engine: str, images: list[Path], tdir: Path, font: str, force: bool = False):
     """The engine's readings of these page images, joined into one tree, plus its warnings.
 
@@ -503,6 +533,19 @@ def convert_group(
             other, _ = _read_with(secondary, images, tdir, font, options.force)
         except EngineError as error:
             log(f"    cross-check skipped: {error}")
+    # A scan is read a second time with its ink thinned: on a heavy
+    # handwritten font homr counts one beam too many (16ths as 32nds), and
+    # the thinned page's bars are merged in where they fill the signature.
+    thin = None
+    scan = all(pages[i].printed_noteheads == 0 for i in indices)
+    if options.thin_scans and scan and primary == "homr":
+        try:
+            log("    reading the thinned scan with homr...")
+            thin, _ = _read_with(
+                "homr", _thinned_images(images, options.force), tdir, font, options.force
+            )
+        except EngineError as error:
+            log(f"    thinned reading skipped: {error}")
     credits = musicxml.credit_lines(tree.getroot())
     if other is not None:
         credits += musicxml.credit_lines(other.getroot())
@@ -528,6 +571,7 @@ def convert_group(
         bar_fix = vector.align_bars(part, printed) if printed else None
         rest_fix = vector.expand_multirests(part, printed) if printed else None
         tuplet_fix = vector.apply_printed_tuplets(part, printed) if printed else None
+        rest_values = vector.correct_rests(part, printed) if printed else None
         filled = musicxml.fill_rest_bars(part)
         musicxml.drop_redundant_times(part)
         if time_change is not None:
@@ -535,8 +579,15 @@ def convert_group(
             time_change.changes = [
                 c for c in time_change.changes if not c.startswith("bar ")
             ] + musicxml.time_changes(part)
-        other_part = agreement = merge = None
+        other_part = agreement = merge = thin_merge = None
         repeats_dropped = 0
+        thin_part = None
+        if thin is not None:
+            thin_part, _, _, _ = _mend(thin, options, instrument, title, None)
+            musicxml.fill_rest_bars(thin_part)
+            musicxml.drop_redundant_times(thin_part)
+            musicxml.join_short_pairs(thin_part)
+            musicxml.join_to_match(thin_part, part)
         if other is not None:
             other_part, _, _, _ = _mend(other, options, instrument, title, printed)
             if printed:
@@ -545,6 +596,7 @@ def convert_group(
                 vector.align_bars(other_part, printed)
                 vector.expand_multirests(other_part, printed)
                 vector.apply_printed_tuplets(other_part, printed)
+                vector.correct_rests(other_part, printed)
             musicxml.fill_rest_bars(other_part)
             musicxml.drop_redundant_times(other_part)
             repeats_dropped = musicxml.strip_repeats(part, musicxml.repeat_directions(other_part))
@@ -552,6 +604,8 @@ def convert_group(
             agreement = musicxml.agreement(
                 musicxml.bar_signatures(part), musicxml.bar_signatures(other_part)
             )
+            if thin_part is not None:
+                thin_merge = musicxml.merge_readings(part, thin_part)
             merge = musicxml.merge_readings(
                 part,
                 other_part,
@@ -562,6 +616,8 @@ def convert_group(
             filled += musicxml.fill_rest_bars(part)
         else:
             repeats_dropped = musicxml.strip_repeats(part)
+            if thin_part is not None:
+                thin_merge = musicxml.merge_readings(part, thin_part)
         validation = musicxml.validate(part)
     except Exception as error:  # one bad reading must not end the batch
         base.error = f"{type(error).__name__}: {error}"
@@ -614,6 +670,10 @@ def convert_group(
         tuplet_notes=tuplet_fix.changes if tuplet_fix else [],
         barlines_printed=printed.barline_count if printed else 0,
         alters_from_engine_bars=correction.alters_from_engine_bars if correction else 0,
+        rests_from_page=rest_values.changed if rest_values else 0,
+        rest_value_notes=rest_values.changes if rest_values else [],
+        bars_from_thin=thin_merge.taken if thin_merge else 0,
+        bars_from_thin_list=thin_merge.bars if thin_merge else [],
         bars_from_check=merge.taken if merge else 0,
         bars_from_check_list=merge.bars if merge else [],
         time_changes=time_change.placed if time_change else 0,

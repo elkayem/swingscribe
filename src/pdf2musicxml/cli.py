@@ -30,6 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="primary reading (default homr; Audiveris needs `setup` once)",
     )
     convert.add_argument(
+        "--no-thin",
+        action="store_true",
+        help="do not read a scan a second time with its ink thinned",
+    )
+    convert.add_argument(
         "--no-check",
         action="store_true",
         help="do not run the other engine and list the bars the two disagree on",
@@ -138,7 +143,10 @@ def main(argv: list[str] | None = None) -> int:
         from pdf2musicxml.render import render_folder
 
         folder = args.path
-        if folder.is_dir() and not list(folder.glob("*.musicxml")):
+        # The converter's own output folder first: SwingScribe's Export writes
+        # its pages beside the audio, so a transcription folder can hold
+        # MusicXML of its own that is not the corpus (2026-10-05).
+        if (folder / "musicxml").is_dir():
             folder = folder / "musicxml"
         try:
             outcome = render_folder(folder, limit=args.limit)
@@ -151,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if outcome.failed else 0
     if args.command == "summary":
         folder = args.path
-        if folder.is_dir() and not list(folder.glob("*.pdf2musicxml.json")):
+        if (folder / "musicxml").is_dir():
             folder = folder / "musicxml"
         rows = summary_rows(folder)
         if not rows:
@@ -180,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
         title=args.title,
         redetect=args.redetect,
         printed_pitch=not args.no_printed_pitch,
+        thin_scans=not args.no_thin,
     )
     results = []
     for target in args.paths:

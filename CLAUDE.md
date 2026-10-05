@@ -1382,6 +1382,28 @@ docs/pdf2musicxml.md has the measurements. Things not to re-derive:
   817 on 171 files; off bars 1,240 -> 1,015 (vector 613, scans 402).
   Do not align systems with SequenceMatcher on bar counts: it matches
   equal counts out of position.
+- **A SCAN is read twice, the second time with its ink thinned**
+  (2026-10-05, `pdfpages.thin_ink`, 0.3.26): homr reads at 1,920 px a
+  page and 1,280 a staff, where two hand-drawn beams almost touching
+  are one block three beams deep -- the scans' 32nds for 16ths. Eroding
+  the ink a pixel above and below (one only on 3 px staff lines, none on
+  2 px) opens the gap; that reading splits bars at stems, so it is
+  MERGED in, never primary, after joining split bars back
+  (`join_short_pairs`, `join_to_match`). Audiveris's jazz font, a taller
+  page and heavier thinning were measured and do nothing or worse.
+- **Bars holding the same notes pair** (`musicxml.note_pairs`, three in
+  four matched both ways), over the index and the system: half the bars
+  left off on Hawkins's Body and Soul sat in systems the readings
+  counted differently.
+- **The page's RESTS set the reading's rest values, dots included**
+  (`vector.correct_rests`, `mark_rest_dots`, 2026-10-05): Joy Spring's
+  only mistakes were quarter rests read as eighths. 382 rests on 51
+  files; 114 bars mended, 4 broken, 22 still off. A tuplet number over a
+  line-opening rest is read now (the window opens at the first rest, and
+  a notehead under the digit is not its "baseline neighbour"). Corpus
+  off bars vector 593 -> 491, scans 400 -> 289. `render` and `summary`
+  prefer the `musicxml/` subfolder: SwingScribe's Export writes pages
+  beside the audio in the transcription folder.
 - **pdfium's text layer drops the second of two identical characters whose
   boxes touch**: a printed 4/4 arrives as one "4", a 2/2 as one "2", while
   3/4 and 6/8 arrive whole. The page's text OBJECTS still hold both, so a

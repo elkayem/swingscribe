@@ -15,7 +15,7 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
-from pdf2musicxml import layout, musicxml, vector
+from pdf2musicxml import convert, layout, musicxml, pdfpages, vector
 from pdf2musicxml.instruments import Instrument, find_instrument, parse_instrument
 from pdf2musicxml.pdfpages import TextLine, is_music_font
 
@@ -1725,9 +1725,9 @@ def test_the_pages_note_count_outranks_the_fill_when_choosing_between_readings()
     part, other = musicxml.first_part(mine.getroot()), musicxml.first_part(theirs.getroot())
     assert musicxml.merge_readings(part, other, [3]).taken == 1
     assert len(part.findall("measure/note")) == 3
-    # Bar counts that differ pair nothing.
-    part = musicxml.first_part(score(quarters(2)).getroot())
-    other = musicxml.first_part(score(quarters(3)).getroot())
+    # Bar counts that differ, with no system breaks and no notes in common, pair nothing.
+    part = musicxml.first_part(score([note("C", 4, 4) * 4] * 2).getroot())
+    other = musicxml.first_part(score([note("D", 4, 4) * 4] * 3).getroot())
     assert musicxml.merge_readings(part, other).compared == 0
 
 
@@ -2117,3 +2117,225 @@ def test_a_merge_takes_a_paired_bar_the_other_reading_fills_across_a_split():
     assert [n.findtext("pitch/step") for n in mine.findall("measure")[2].findall("note")] == [
         "D"
     ] * 4
+
+
+# ---------------------------------------------------------------- a scan read again, thinned
+
+
+def _staff_page(line_px, beam_gap=1, beam_px=6, width=400, height=200):
+    """Paper with five staff lines `line_px` thick and two beams `beam_gap` apart below."""
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("PIL")  # thin_ink hands back a PIL image
+    page = np.full((height, width), 255, dtype=np.uint8)
+    for k in range(5):
+        top = 40 + 12 * k
+        page[top : top + line_px, 20 : width - 20] = 0
+    beam_top = 120
+    page[beam_top : beam_top + beam_px, 100:200] = 0
+    second = beam_top + beam_px + beam_gap
+    page[second : second + beam_px, 100:200] = 0
+    return page
+
+
+def test_otsu_threshold_splits_ink_from_paper():
+    np = pytest.importorskip("numpy")
+    gray = np.array([[10] * 50 + [240] * 150], dtype=np.uint8)
+    assert 10 <= pdfpages.otsu_threshold(gray) < 240
+
+
+def test_staff_line_thickness_is_the_median_run_of_inked_rows():
+    assert pdfpages.staff_line_thickness(_staff_page(4)) == 4
+    assert pdfpages.staff_line_thickness(_staff_page(3)) == 3
+
+
+def test_thinning_opens_the_gap_between_two_beams_and_keeps_the_staff_lines():
+    np = pytest.importorskip("numpy")
+    thinned = np.asarray(pdfpages.thin_ink(_staff_page(5)))
+    column = thinned[:, 150] < 128
+    # the beams were 6 rows with 1 row of paper between: now 4, 3, 4
+    beams = column[110:140]
+    runs = [len(r) for r in "".join("1" if x else "0" for x in beams).split("0") if r]
+    assert runs == [4, 4]
+    assert "000" in "".join("1" if x else "0" for x in beams).strip("0")
+    assert pdfpages.staff_line_thickness(thinned) == 3  # 5 rows less one at each edge
+
+
+def test_lines_three_pixels_thick_lose_one_row_and_thinner_pages_are_not_thinned():
+    thinned = pdfpages.thin_ink(_staff_page(3))
+    assert pdfpages.staff_line_thickness(thinned) == 2
+    assert pdfpages.thin_ink(_staff_page(2)) is None
+
+
+def test_thinned_images_are_written_beside_the_page_and_a_faint_page_keeps_its_own(tmp_path):
+    pytest.importorskip("numpy")
+    Image = pytest.importorskip("PIL.Image")
+
+    bold, faint = tmp_path / "p001.png", tmp_path / "p002.png"
+    Image.fromarray(_staff_page(5)).save(bold)
+    Image.fromarray(_staff_page(2)).save(faint)
+    out = convert._thinned_images([bold, faint])
+    assert out == [tmp_path / "p001_thin.png", faint]
+    stamp = out[0].stat().st_mtime
+    assert convert._thinned_images([bold, faint]) == out  # reused, not rewritten
+    assert out[0].stat().st_mtime == stamp
+
+
+def test_two_short_bars_that_make_one_are_joined_unless_a_system_breaks_between():
+    halves = [note("C", 4, 4) * 2, note("D", 4, 4) * 2, note("E", 4, 4) * 4]
+    part = musicxml.first_part(score(halves, divisions=4).getroot())
+    assert musicxml.join_short_pairs(part) == 1
+    assert [len(m.findall("note")) for m in part.findall("measure")] == [4, 4]
+    assert [m.get("number") for m in part.findall("measure")] == ["1", "2"]
+
+    across = [note("C", 4, 4) * 2, '<print new-system="yes"/>' + note("D", 4, 4) * 2]
+    part = musicxml.first_part(score(across, divisions=4).getroot())
+    assert musicxml.join_short_pairs(part) == 0
+
+    uneven = [note("C", 4, 4) * 3, note("D", 4, 4) * 2]
+    part = musicxml.first_part(score(uneven, divisions=4).getroot())
+    assert musicxml.join_short_pairs(part) == 0
+
+
+def _run(steps, duration=4):
+    return "".join(note(step, 4, duration) for step in steps)
+
+
+def test_bars_holding_the_same_notes_pair_whatever_their_neighbours_did():
+    # The other reading split bar 2 (D E F G) in two; bars 1 and 3 still pair by their notes.
+    mine = musicxml.first_part(score([_run("CDEF"), _run("DEFG"), _run("GFED")]).getroot())
+    other = musicxml.first_part(
+        score([_run("CDEF"), _run("DE"), _run("FG"), _run("GFED")]).getroot()
+    )
+    assert musicxml.note_pairs(mine, other) == [(0, 0), (2, 3)]
+
+
+def test_one_misread_pitch_in_four_still_pairs_two_do_not():
+    # A match needs three agreeing notes in a row, so the misread is the bar's last.
+    mine = musicxml.first_part(score([_run("CDEF"), _run("GABC")]).getroot())
+    one = musicxml.first_part(score([_run("CDEF"), _run("GABD")]).getroot())
+    assert (1, 1) in musicxml.note_pairs(mine, one)
+    two = musicxml.first_part(score([_run("CDEF"), _run("GAED")]).getroot())
+    assert (1, 1) not in musicxml.note_pairs(mine, two)
+
+
+def test_a_split_bar_is_joined_back_to_the_bar_whose_notes_it_holds():
+    # The halves are 2 and 1 beats (one value misread): they do not add up, the notes do.
+    mine = musicxml.first_part(score([_run("CDEF"), _run("DEFG"), _run("GFED")]).getroot())
+    other = musicxml.first_part(
+        score([_run("CDEF"), _run("DE"), note("F", 4, 4) + note("G", 4, 2), _run("GFED")]).getroot()
+    )
+    assert musicxml.join_to_match(other, mine) == 1
+    measures = other.findall("measure")
+    assert [m.get("number") for m in measures] == ["1", "2", "3"]
+    assert [n.findtext("pitch/step") for n in measures[1].findall("note")] == ["D", "E", "F", "G"]
+
+
+def test_a_system_of_unequal_bar_counts_pairs_where_the_notes_agree():
+    # System 2 has three bars here and four there (bar 5 split): bars 4 and 6 pair by notes.
+    bars_mine = [_run("CDEF")] * 3 + [
+        '<print new-system="yes"/>' + _run("EFGA"),
+        _run("GABC"),
+        _run("BCDE"),
+    ]
+    bars_other = [_run("CDEF")] * 3 + [
+        '<print new-system="yes"/>' + _run("EFGA"),
+        _run("GA"),
+        _run("BC"),
+        _run("BCDE"),
+    ]
+    mine = musicxml.first_part(score(bars_mine).getroot())
+    other = musicxml.first_part(score(bars_other).getroot())
+    pairs = musicxml.pair_measures(mine, other)
+    assert (3, 3) in pairs and (5, 6) in pairs
+    assert all(k != 4 for k, _ in pairs)  # the split bar pairs with neither half
+
+
+# ---------------------------------------------------------------- rest values from the page
+
+
+def _eighth_rest(duration=6):
+    return f"<note><rest/><duration>{duration}</duration><voice>1</voice><type>eighth</type></note>"
+
+
+def test_a_rest_read_as_an_eighth_takes_the_printed_quarter_and_fills_the_bar():
+    # Joy Spring bar 16: six eighths, then the page's quarter rest read as an eighth.
+    bars_ = [plain("C", 5, 6, "eighth") * 6 + _eighth_rest(), plain("D", 5, 12, "quarter") * 4]
+    part = musicxml.first_part(score(bars_, divisions=12).getroot())
+    heads = [head(100 + 10 * i, "C", 5) for i in range(6)] + [
+        head(200 + 10 * i, "D", 5) for i in range(4)
+    ]
+    for h in heads[6:]:
+        h.bar = 1
+    pages = vector.PrintedPages(
+        heads, [], {(0, 0): [190.0]}, None, None, [printed_rest(165, "quarter")]
+    )
+    result = vector.correct_rests(part, pages)
+    assert (result.paired, result.changed) == (1, 1)
+    rest_note = part.findall("measure")[0].findall("note")[-1]
+    assert rest_note.findtext("duration") == "12" and rest_note.findtext("type") == "quarter"
+    assert [b.length for b in musicxml.bars(part)] == [4, 4]
+    assert result.changes == ["bar 1: eighth rest printed as a quarter"]
+
+
+def test_rests_are_left_alone_when_the_counts_differ_or_the_rest_is_in_a_tuplet():
+    # Two read rests where the page prints one: no pairing, nothing changed.
+    bar = plain("C", 5, 6, "eighth") * 6 + _eighth_rest() * 2
+    part = musicxml.first_part(score([bar, plain("D", 5, 48, "whole")], divisions=12).getroot())
+    heads = [head(100 + 10 * i, "C", 5) for i in range(6)] + [head(200, "D", 5)]
+    pages = vector.PrintedPages(heads, [], {(0, 0): []}, None, None, [printed_rest(165, "quarter")])
+    assert vector.correct_rests(part, pages).changed == 0
+    # A rest marked as a triplet member keeps the tuplet rule's value.
+    triplet_rest = (
+        "<note><rest/><duration>4</duration><voice>1</voice><type>eighth</type>"
+        "<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes>"
+        "</time-modification></note>"
+    )
+    bar = triplet_rest + plain("C", 5, 4, "eighth") * 2 + plain("C", 5, 12, "quarter") * 3
+    part = musicxml.first_part(score([bar], divisions=12).getroot())
+    heads = [head(112, "C", 5), head(124, "C", 5)] + [head(140 + 12 * i, "C", 5) for i in range(3)]
+    pages = vector.PrintedPages(heads, [], {(0, 0): []}, None, None, [printed_rest(100, "quarter")])
+    assert vector.correct_rests(part, pages).changed == 0
+
+
+def test_a_triplet_number_over_a_line_opening_rest_and_its_own_notehead_is_read():
+    # Friend Like Me bar 1: the "3" sits over the eighth rest that opens the
+    # group, right above a G notehead, left of the line's first head.
+    staff = vector.Staff(bottom=100.0, spacing=5.0, left=0.0, right=600.0)
+    g = vector.Printed(x=133.0, y=121.5, staff=0, step=9, kind="head", grace=False)
+    heads = [g] + [printed(x, 4) for x in (144, 160)]
+    rests = [printed_rest(105, "quarter"), printed_rest(122, "eighth")]
+    glyphs = [
+        glyph("3", "Inkpen2TextStd", 130, 125, 4, 8),
+        glyph("œ", "Inkpen2Std", 130, 119, 6, 5),  # the G's notehead, under the "3"
+    ]
+    marks = vector.tuplet_marks(glyphs, [staff], heads, rests)
+    assert [(m.count, round(m.x)) for m in marks] == [(3, 132)]
+
+
+def test_a_small_round_glyph_just_right_of_a_rest_is_its_dot():
+    staff = vector.Staff(bottom=100.0, spacing=5.0, left=0.0, right=600.0)
+    rests = [printed_rest(100, "quarter"), printed_rest(200, "quarter")]
+    for r in rests:
+        r.y = 110.0
+    dot = glyph("™", "Inkpen2SpecialStd", 104.5, 111.0, 2.0, 2.2)  # 1.1 spaces right
+    far = glyph("™", "Inkpen2SpecialStd", 214.0, 111.0, 2.0, 2.2)  # 3 spaces right
+    head_between = vector.Printed(x=205.0, y=110.0, staff=0, step=4, kind="head", grace=False)
+    vector.mark_rest_dots(rests, [dot, far], [staff], [head_between])
+    assert [r.dots for r in rests] == [1, 0]
+
+
+def test_a_printed_dotted_rest_gives_the_read_rest_its_dot():
+    # 12/8: a dotted quarter rest read as a dotted half, then three dotted quarters' worth.
+    rest_read = "<note><rest/><duration>36</duration><voice>1</voice><type>half</type><dot/></note>"
+    bar = rest_read + plain("C", 5, 6, "eighth") * 9
+    part = musicxml.first_part(score([bar], divisions=12, time="12/8").getroot())
+    heads = [head(120 + 10 * i, "C", 5) for i in range(9)]
+    printed_dotted = printed_rest(100, "quarter")
+    printed_dotted.dots = 1
+    pages = vector.PrintedPages(heads, [], {(0, 0): []}, None, None, [printed_dotted])
+    result = vector.correct_rests(part, pages)
+    assert result.changes == ["bar 1: half dotted rest printed as a dotted quarter"]
+    rest_note = part.find("measure/note")
+    assert rest_note.findtext("duration") == "18" and rest_note.findtext("type") == "quarter"
+    assert len(rest_note.findall("dot")) == 1
+    assert musicxml.bars(part)[0].length == 6

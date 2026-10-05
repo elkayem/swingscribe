@@ -138,6 +138,7 @@ class Printed:
     bar: int = 0  # bar lines passed on its staff, by the page's paths
     key_alter: int = 0  # the key signature's alter for its letter
     value: str = ""  # a rest's written value ("eighth"); heads carry none
+    dots: int = 0  # a rest's augmentation dot, when printed beside it
 
 
 @dataclass(frozen=True)
@@ -502,6 +503,7 @@ def read_page(pdf: Path, index: int) -> PagePrint | None:
     ]
     heads = drop_unledgered(drop_articulations(heads, staves), staves, paths)
     rests.sort(key=lambda r: (r.staff, r.x))
+    mark_rest_dots(rests, glyphs, staves, heads)
 
     heads.sort(key=lambda h: (h.staff, round(h.x, 1), -h.y))
     # Each accidental belongs to the nearest notehead to its right on the same
@@ -552,7 +554,7 @@ def read_page(pdf: Path, index: int) -> PagePrint | None:
         clefs,
         keys,
         barlines,
-        tuplets=tuplet_marks(glyphs, staves, heads),
+        tuplets=tuplet_marks(glyphs, staves, heads, rests),
         times=time_signatures(glyphs, staves, _object_boxes(page)),
         tempo=tempo_mark(glyphs),
         rests=rests,
@@ -596,7 +598,10 @@ def _staff_of(staves: list[Staff], y: float, ledger_spaces: float) -> int | None
 
 
 def tuplet_marks(
-    glyphs: list[Glyph], staves: list[Staff], heads: list[Printed]
+    glyphs: list[Glyph],
+    staves: list[Staff],
+    heads: list[Printed],
+    rests: list[Printed] = (),
 ) -> list[TupletMark]:
     """The tuplet numbers on the page: lone digits in a staff's band, among its notes.
 
@@ -604,14 +609,20 @@ def tuplet_marks(
     Italic; either way a digit about a space and a half tall, on its own
     (a chord symbol's "7" or "13" and a bar number's digits have a
     neighbour on their baseline), below the staff or above it within the
-    reach of a beam, and between the staff's first and last notehead (bar
-    numbers sit at the left edge, before the first note).
+    reach of a beam, and between the staff's first and last onset, a
+    notehead or a rest (bar numbers sit at the left edge, before both).
+    A rest counts because a triplet can open a line with one: Friend
+    Like Me's bar 1 has its "3" over the eighth rest before the first
+    note, and was read without it (2026-10-05).
     """
     first_x: dict[int, float] = {}
     last_x: dict[int, float] = {}
-    for head in heads:
+    for head in [*heads, *rests]:
         first_x[head.staff] = min(first_x.get(head.staff, float("inf")), head.x)
         last_x[head.staff] = max(last_x.get(head.staff, float("-inf")), head.x)
+    # A notehead or rest beside a digit is not a neighbour on its baseline:
+    # Friend Like Me's bar-1 "3" sits right over its G above the staff.
+    onsets = {(round(p.x, 2), round(p.y, 2)) for p in [*heads, *rests]}
     marks: list[TupletMark] = []
     for glyph in glyphs:
         if not glyph.char.isdigit() or int(glyph.char) not in TUPLET_NORMAL:
@@ -635,6 +646,7 @@ def tuplet_marks(
         reach = 0.8 * glyph.width
         lone = not any(
             other is not glyph
+            and (round(other.x, 2), round(other.y, 2)) not in onsets
             and abs(other.y - glyph.y) < glyph.height
             and other.left < glyph.right + reach
             and other.right > glyph.left - reach
@@ -819,6 +831,38 @@ def key_signature(marks: list[tuple[float, str, int]]) -> tuple[dict[str, int], 
 
 
 BLACK_HEAD = "\u0153"
+
+
+def mark_rest_dots(
+    rests: list[Printed], glyphs: list[Glyph], staves: list[Staff], heads: list[Printed]
+) -> None:
+    """Set `dots` on every printed rest with an augmentation dot beside it.
+
+    A dot is a small round music glyph -- a quarter to two thirds of a
+    space each way -- one space or so right of the rest, near its height,
+    with no notehead between (Inkpen2 draws it as U+2122 in its Special
+    face, 1.0-1.2 spaces right of the rest; found by shape so other
+    families need no code list). The First Circle's 12/8 bars are full of
+    dotted quarter rests, and without the dot a corrected rest came out an
+    eighth short (2026-10-05).
+    """
+    for rest in rests:
+        spacing = staves[rest.staff].spacing
+        for glyph in glyphs:
+            if not is_music_font(glyph.font) or "text" in glyph.font.lower():
+                continue
+            if not (
+                0.25 <= glyph.height / spacing <= 0.65 and 0.25 <= glyph.width / spacing <= 0.7
+            ):
+                continue
+            if not 0.5 * spacing < glyph.x - rest.x <= 1.8 * spacing:
+                continue
+            if abs(glyph.y - rest.y) > 1.5 * spacing:
+                continue
+            if any(h.staff == rest.staff and rest.x < h.x < glyph.x for h in heads):
+                continue
+            rest.dots = 1
+            break
 
 
 def drop_articulations(heads: list[Printed], staves: list[Staff]) -> list[Printed]:
@@ -1263,6 +1307,98 @@ def _pair_rests(
             for index, element in zip(indices, read_rests, strict=True):
                 paired[index] = element
     return paired
+
+
+REST_QUARTERS = {
+    "half": Fraction(2),
+    "quarter": Fraction(1),
+    "eighth": Fraction(1, 2),
+    "16th": Fraction(1, 4),
+}
+
+
+@dataclass
+class RestCorrection:
+    paired: int = 0  # printed rests matched to a read rest
+    changed: int = 0  # read rests given the printed value
+    changes: list[str] = field(default_factory=list)
+
+
+def correct_rests(part: ET.Element, printed: PrintedPages) -> RestCorrection:
+    """Give every read rest the value of the printed rest it stands for.
+
+    A rest is a music glyph with one code per value (`REST_CODES`), so the
+    page says what it is as surely as a notehead says its pitch. Each
+    printed rest is matched to the reading's rest between the same two
+    aligned notes, in order, when there are as many (`_pair_rests`). The
+    listener's Joy Spring had a quarter rest read as an eighth at the end
+    of bars 16, 17 and 31, the file's only three mistakes (2026-10-05).
+    Left alone: a rest inside a tuplet (the tuplet rule values it), a
+    whole or whole-measure rest (`fill_rest_bars` writes those) and a bar
+    of several voices. A printed dot (`mark_rest_dots`) is the rest's.
+    """
+    from pdf2musicxml.musicxml import divisions_of
+
+    result = RestCorrection()
+    if not printed.rests or not printed.heads:
+        return result
+    notes = [n for n in part.iter("note") if n.find("rest") is None and n.find("pitch") is not None]
+    aligned = align_notes(notes, printed.heads) if notes else None
+    if aligned is None:
+        return result
+    note_of_head = {j: i for i, j in aligned[0]}
+    paired = _pair_rests(part, printed, notes, note_of_head)
+    result.paired = len(paired)
+    home: dict[int, tuple[ET.Element, int]] = {}
+    divisions = 1
+    for measure in part.findall("measure"):
+        divisions = divisions_of(measure, divisions)
+        for note in measure.findall("note"):
+            home[id(note)] = (measure, divisions)
+    for index, element in sorted(paired.items()):
+        value = printed.rests[index].value
+        if value not in REST_QUARTERS or id(element) not in home:
+            continue
+        rest = element.find("rest")
+        if (
+            rest is None
+            or rest.get("measure") == "yes"
+            or element.find("time-modification") is not None
+        ):
+            continue
+        measure, divisions = home[id(element)]
+        if measure.find("backup") is not None or measure.find("forward") is not None:
+            continue
+        dots = printed.rests[index].dots
+        if element.findtext("type") == value and len(element.findall("dot")) == dots:
+            continue
+        duration = REST_QUARTERS[value] * divisions * (Fraction(3, 2) if dots else 1)
+        if duration.denominator != 1:
+            continue
+        before = element.findtext("type") or "?"
+        if element.find("dot") is not None:
+            before += " dotted"
+        for dot in element.findall("dot"):
+            element.remove(dot)
+        element.find("duration").text = str(int(duration))
+        kind = element.find("type")
+        if kind is None:
+            kind = ET.Element("type")
+            children = list(element)
+            after = max(
+                (i for i, c in enumerate(children) if c.tag in ("rest", "duration", "voice")),
+                default=0,
+            )
+            element.insert(after + 1, kind)
+        kind.text = value
+        if dots:
+            element.insert(list(element).index(kind) + 1, ET.Element("dot"))
+        result.changed += 1
+        printed_as = f"dotted {value}" if dots else value
+        result.changes.append(
+            f"bar {measure.get('number')}: {before} rest printed as a {printed_as}"
+        )
+    return result
 
 
 def _scale_divisions(part: ET.Element, factor: int) -> None:

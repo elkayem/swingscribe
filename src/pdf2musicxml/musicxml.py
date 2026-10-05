@@ -1210,6 +1210,51 @@ class Merge:
     bars: list[str] = field(default_factory=list)  # their numbers
 
 
+def join_short_pairs(part: ET.Element) -> int:
+    """Join two adjacent measures that are each short and together fill exactly one bar.
+
+    homr reading a page whose ink was thinned (`pdfpages.thin_ink`) takes
+    the odd stem left standing across the staff for a bar line and splits
+    a bar in two; the halves add up. A pair across a system break is
+    left alone: that is two bars, one at each end of a line. Returns how
+    many pairs were joined.
+    """
+    joined = 0
+    k = 0
+    while True:
+        measures = part.findall("measure")
+        if k + 1 >= len(measures):
+            break
+        all_bars = bars(part)
+        first, second = measures[k], measures[k + 1]
+        a, b = all_bars[k], all_bars[k + 1]
+        mark = second.find("print")
+        breaks = mark is not None and (
+            mark.get("new-system") == "yes" or mark.get("new-page") == "yes"
+        )
+        if (
+            a.expected is not None
+            and not breaks
+            and 0 < a.length < a.expected
+            and 0 < b.length < a.expected
+            and a.length + b.length == a.expected
+            and first.find("backup") is None
+            and second.find("backup") is None
+        ):
+            for barline in first.findall("barline"):
+                first.remove(barline)
+            for child in list(second):
+                if child.tag in ("note", "forward", "harmony", "direction"):
+                    first.append(child)
+            part.remove(second)
+            joined += 1
+        k += 1
+    if joined:
+        for number, measure in enumerate(part.findall("measure"), start=1):
+            measure.set("number", str(number))
+    return joined
+
+
 def systems_of(part: ET.Element) -> list[list[ET.Element]]:
     """The measures grouped by system, at each `<print new-system>` or `<print new-page>`."""
     out: list[list[ET.Element]] = [[]]
@@ -1222,6 +1267,140 @@ def systems_of(part: ET.Element) -> list[list[ET.Element]]:
             out.append([])
         out[-1].append(measure)
     return out
+
+
+def _pitched_by_measure(part: ET.Element) -> list[tuple[int, int]]:
+    """(measure index, MIDI number) of every sounding note, chord tones and graces left out."""
+    out = []
+    for k, measure in enumerate(part.findall("measure")):
+        for note in measure.findall("note"):
+            if note.find("rest") is not None or note.find("chord") is not None:
+                continue
+            if note.find("grace") is not None:
+                continue
+            midi = pitch_midi(note)
+            if midi is not None:
+                out.append((k, midi))
+    return out
+
+
+def note_links(part: ET.Element, other: ET.Element):
+    """Which measures of each reading hold the same notes, by aligning their pitches.
+
+    Returns (forward, back, totals, other_totals): forward[k] counts, per
+    measure of the other reading, this reading's measure k's notes matched
+    there; back[j] the same the other way; the totals are each measure's
+    sounding notes. A match must sit in a run of three or more notes
+    agreeing in a row, so a lone repeated pitch does not link two bars.
+    """
+    mine, theirs = _pitched_by_measure(part), _pitched_by_measure(other)
+    matcher = difflib.SequenceMatcher(
+        None, [m for _, m in mine], [m for _, m in theirs], autojunk=False
+    )
+    forward: dict[int, dict[int, int]] = {}
+    back: dict[int, dict[int, int]] = {}
+    for a, b, size in matcher.get_matching_blocks():
+        if size < 3:
+            continue
+        for offset in range(size):
+            k, j = mine[a + offset][0], theirs[b + offset][0]
+            forward.setdefault(k, {}).setdefault(j, 0)
+            forward[k][j] += 1
+            back.setdefault(j, {}).setdefault(k, 0)
+            back[j][k] += 1
+    totals: dict[int, int] = {}
+    for k, _ in mine:
+        totals[k] = totals.get(k, 0) + 1
+    other_totals: dict[int, int] = {}
+    for j, _ in theirs:
+        other_totals[j] = other_totals.get(j, 0) + 1
+    return forward, back, totals, other_totals
+
+
+def _most(matched: int, *totals: int) -> bool:
+    """Three notes in four or more of the larger count: one misread pitch does not unpair a bar."""
+    return matched >= math.ceil(0.75 * max(totals))
+
+
+def note_pairs(part: ET.Element, other: ET.Element) -> list[tuple[int, int]]:
+    """Measures of the two readings that hold the same notes: three in four matched, both ways.
+
+    Two bars holding the same run of pitches are the same bar, whatever
+    their neighbours did: a reading that split one bar elsewhere in the
+    system no longer stops the rest of the system from pairing.
+    """
+    forward, back, totals, other_totals = note_links(part, other)
+    pairs = []
+    for k, targets in forward.items():
+        if len(targets) != 1:
+            continue
+        (j,) = targets
+        if set(back.get(j, {})) != {k} or totals.get(k, 0) < 2:
+            continue
+        if _most(targets[j], totals[k], other_totals.get(j, 0)):
+            pairs.append((k, j))
+    return sorted(pairs)
+
+
+def join_to_match(other: ET.Element, part: ET.Element) -> int:
+    """Join consecutive measures of `other` that together hold exactly one measure of `part`.
+
+    The thinned scan's reading takes a stem for a bar line and splits a bar
+    in two; when the halves' notes are exactly the notes of one bar of the
+    plain reading, three in four matched both ways, they are joined back, even
+    where they do not add up to a bar (one half read a value wrong). Bars of
+    several voices are left alone. Returns how many joins were made.
+    """
+    forward, back, totals, other_totals = note_links(part, other)
+    measures = other.findall("measure")
+    groups = []
+    for k, targets in forward.items():
+        js = sorted(targets)
+        if len(js) < 2 or js != list(range(js[0], js[-1] + 1)):
+            continue
+        if sum(targets.values()) < 2 or not _most(sum(targets.values()), totals.get(k, 0)):
+            continue
+        if any(
+            set(back.get(j, {})) != {k} or not _most(back[j][k], other_totals.get(j, 0)) for j in js
+        ):
+            continue
+        if any(measures[j].find("backup") is not None for j in js):
+            continue
+        groups.append(js)
+    for js in sorted(groups, reverse=True):
+        first = measures[js[0]]
+        for barline in first.findall("barline"):
+            first.remove(barline)
+        for j in js[1:]:
+            for child in list(measures[j]):
+                if child.tag in ("note", "forward", "harmony", "direction"):
+                    first.append(child)
+            other.remove(measures[j])
+    if groups:
+        for number, measure in enumerate(other.findall("measure"), start=1):
+            measure.set("number", str(number))
+    return len(groups)
+
+
+def _with_note_pairs(
+    pairs: list[tuple[int, int]], part: ET.Element, other: ET.Element
+) -> list[tuple[int, int]]:
+    """Add the pairs the notes prove; drop any pair out of order with them. Notes win a conflict."""
+    proven = note_pairs(part, other)
+    if not proven:
+        return pairs
+    proven_k = {k for k, _ in proven}
+    proven_j = {j for _, j in proven}
+    kept = []
+    for k, j in pairs:
+        if k in proven_k or j in proven_j:
+            continue
+        before = [pj for pk, pj in proven if pk < k]
+        after = [pj for pk, pj in proven if pk > k]
+        if (before and max(before) >= j) or (after and min(after) <= j):
+            continue
+        kept.append((k, j))
+    return sorted(kept + proven)
 
 
 def pair_measures(
@@ -1240,7 +1419,12 @@ def pair_measures(
     begin within two bars of each other pair, and their bars by index.
     Two readings that differ by a bar (a scan whose double bar line one
     engine took for two) used to pair nothing at all: 100 of the
-    corpus's 275 transcriptions.
+    corpus's 275 transcriptions. Without the page, two bars that hold
+    exactly the same notes are paired too, and outrank the index and the
+    system (`note_pairs`): a system whose bar counts differ still pairs
+    bar by bar where the notes agree (2026-10-05, Hawkins's Body and Soul:
+    12 of the 21 bars left off after the thinned reading's merge sat in
+    such systems).
     """
     measures = part.findall("measure")
     others = other.findall("measure")
@@ -1258,10 +1442,10 @@ def pair_measures(
                 last = j
         return pairs
     if len(measures) == len(others):
-        return [(k, k) for k in range(len(measures))]
+        return _with_note_pairs([(k, k) for k in range(len(measures))], part, other)
     mine, theirs = systems_of(part), systems_of(other)
     if len(mine) < 2 or len(theirs) < 2:
-        return []
+        return _with_note_pairs([], part, other)
     index_mine = {id(m): i for i, m in enumerate(measures)}
     index_theirs = {id(m): j for j, m in enumerate(others)}
     # Two systems pair when they hold the same number of bars and begin
@@ -1284,7 +1468,7 @@ def pair_measures(
         else:
             i += 1
             j += 1
-    return pairs
+    return _with_note_pairs(pairs, part, other)
 
 
 def merge_readings(
