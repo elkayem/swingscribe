@@ -312,7 +312,9 @@ def bar_grid_for_settings(
     inserted, a doubled one removed) and extended to the track's ends --
     under the listener's per-track settings: their time signature, pulse
     count and downbeat if they set them, the downbeat layer's best phase if
-    not, and the beats they pinned (`beat_pins`, meter.apply_pins). The
+    not, the stretches they marked steady (`steady_spans`,
+    meter.apply_steady) and the beats they pinned (`beat_pins`,
+    meter.apply_pins). The
     Export button and the eval harness both build their page from
     this. The harness used to notate the raw tracked beats, so every bar
     after an unrepaired drop or double sat a beat off the listener's page and
@@ -330,7 +332,13 @@ def bar_grid_for_settings(
     near = _near_of(settings, duration, near)
     meter_config = _meter_config(settings, config)
     repaired, sections = meter.bar_grid(
-        beats, downbeats, meter_config, duration, near=near, pins=pins_of(settings)
+        beats,
+        downbeats,
+        meter_config,
+        duration,
+        near=near,
+        pins=pins_of(settings),
+        steady=steady_of(settings),
     )
     anchor = sections[0].anchor if sections else settings.get("anchor")
     return [beat.time for beat in repaired], anchor
@@ -353,7 +361,13 @@ def grid_doubts_for_settings(
     near = _near_of(settings, duration, near)
     meter_config = _meter_config(settings, config)
     repaired, _sections = meter.bar_grid(
-        beats, downbeats, meter_config, duration, near=near, pins=pins_of(settings)
+        beats,
+        downbeats,
+        meter_config,
+        duration,
+        near=near,
+        pins=pins_of(settings),
+        steady=steady_of(settings),
     )
     _signature, pulses = meter.resolve_meter(meter_config)
     doubts = meter.grid_doubts(repaired, meter_config.stability_tolerance, downbeats, pulses)
@@ -373,6 +387,19 @@ def pins_of(settings: dict) -> list[float]:
     a hand-edited or missing list is no pins, never an error."""
     stored = settings.get(PINS_KEY)
     return meter.clean_pins(stored if isinstance(stored, list) else None)
+
+
+# The sidecar key for the stretches the listener marked steady
+# (meter.apply_steady): [[start, end], ...] in seconds.
+STEADY_KEY = "steady_spans"
+
+
+def steady_of(settings: dict) -> list[tuple[float, float]]:
+    """The listener's steady stretches from a sidecar, cleaned
+    (`meter.clean_steady`): a hand-edited or missing list is none, never an
+    error."""
+    stored = settings.get(STEADY_KEY)
+    return meter.clean_steady(stored if isinstance(stored, list) else None)
 
 
 def _near_of(
@@ -449,7 +476,13 @@ def form_bar_of_page(
     near = _near_of(settings, duration, near)
     meter_config = _meter_config(settings, config, "form_start", "bars_per_chorus")
     repaired, sections = meter.bar_grid(
-        beats, downbeats, meter_config, duration, near=near, pins=pins_of(settings)
+        beats,
+        downbeats,
+        meter_config,
+        duration,
+        near=near,
+        pins=pins_of(settings),
+        steady=steady_of(settings),
     )
     times = [beat.time for beat in repaired]
     anchor = sections[0].anchor if sections else settings.get("anchor")

@@ -670,6 +670,136 @@ def test_the_bars_in_a_hole_are_counted_the_way_the_page_counts_them():
     assert [n for _t, n in shifted] == [n - 2 for _t, n in lines]
 
 
+# ── stretches the listener marked steady ────────────────────────────────────
+
+LOCK_PULSE = 0.2175
+
+
+def dotted_lock(head_pulse: float = LOCK_PULSE) -> tuple[list[float], list[float], float]:
+    """(tracked, true, start of the lock): Oblivion's bars 75-84 (R35's
+    follow-up). Steady bars, then forty beats the tracker heard as Powell's
+    three-note groupings -- a mark every one and a half beats, 0.06 s late,
+    half of them on an "and" -- then a tail it kept hearing that way at
+    0.35 s, so no steady bars follow."""
+    head = [round(i * head_pulse, 6) for i in range(48)]
+    t0 = head[-1]
+    true = [round(t0 + k * LOCK_PULSE, 6) for k in range(1, 41)]
+    lock = [round(t0 + 1.5 * k * LOCK_PULSE + 0.06, 6) for k in range(1, 26)]
+    lock = [t for t in lock if t < true[-1] - 0.1]
+    tail = [round(true[-1] + 0.35 * k, 6) for k in range(1, 30)]
+    return head + lock + tail, true, t0
+
+
+def test_the_lock_is_counted_wrong_without_a_steady_stretch():
+    tracked, true, t0 = dotted_lock()
+    grid = [b.time for b in meter.repair_beats(tracked, MeterConfig())]
+    assert grid.index(t0) + 40 != meter.nearest_index(grid, true[-1])
+
+
+def test_a_steady_stretch_is_laid_at_the_tempo_of_the_bars_before():
+    """The listener marks the lock steady: its beats are laid on the head's
+    metronome, the tracker's marks inside it ignored (they sit off the beat,
+    and following them lost a beat over forty), and nothing after it -- the
+    tail's beats are the repair's halves of 0.35 s, not a measurement."""
+    tracked, true, t0 = dotted_lock()
+    beats, sections = meter.bar_grid(
+        tracked, [], MeterConfig(anchor=0.0), tracked[-1], steady=[[t0 + 0.1, true[-1] + 0.05]]
+    )
+    grid = [b.time for b in beats]
+    start = grid.index(t0)
+    assert grid[start + 1 : start + 41] == pytest.approx(true, abs=0.002)
+    assert all(b.relaid for b in beats[start + 1 : start + 41])
+    assert not [d for d in meter.grid_doubts(beats) if t0 <= d.start < true[-1]]
+    assert sections[0].start <= t0 and sections[0].end >= true[-1]
+
+
+def test_a_stretch_marked_from_inside_the_trouble_is_laid_from_the_bars_before():
+    """A selection that starts a few beats into the lock is laid from the
+    last steady beats before it, the beats between included."""
+    tracked, true, t0 = dotted_lock()
+    beats, _ = meter.bar_grid(
+        tracked, [], MeterConfig(anchor=0.0), tracked[-1], steady=[[t0 + 1.0, true[-1] + 0.05]]
+    )
+    grid = [b.time for b in beats]
+    assert grid[grid.index(t0) + 1 : grid.index(t0) + 41] == pytest.approx(true, abs=0.002)
+
+
+def test_a_pin_inside_a_steady_stretch_is_a_fixed_point_of_it():
+    """The bars before ran 1% slow (0.22 s against the stretch's 0.2175),
+    which over forty beats is most of a beat. A pin by ear at the stretch's
+    last beat fixes the count and the pulse between them."""
+    tracked, true, t0 = dotted_lock(head_pulse=0.22)
+    stretch = [[t0 + 0.1, true[-1] + 0.05]]
+    drifted, _ = meter.bar_grid(tracked, [], MeterConfig(anchor=0.0), tracked[-1], steady=stretch)
+    pinned, _ = meter.bar_grid(
+        tracked, [], MeterConfig(anchor=0.0), tracked[-1], steady=stretch, pins=[true[-1]]
+    )
+    late = [b.time for b in drifted]
+    grid = [b.time for b in pinned]
+    assert max(abs(late[late.index(t0) + 1 + k] - t) for k, t in enumerate(true)) > 0.08
+    assert grid[grid.index(t0) + 1 : grid.index(t0) + 41] == pytest.approx(true, abs=0.002)
+    assert [b.time for b in pinned if b.pinned] == [true[-1]]
+
+
+def test_a_steady_stretch_between_steady_bars_is_counted_by_time():
+    """With steady bars after it too, the count between the two sides is
+    the time over their pulse, evenly laid: a mark every 1.5 beats for nine
+    seconds, which the repair makes 23 beats, comes out as the 17."""
+    head = steady(40)
+    t = head[-1]
+    lock = [round(t + 0.1 + 0.75 * k, 6) for k in range(12)]
+    tail = steady(40, start=t + 9.0)
+    plain, _ = meter.bar_grid(head + lock + tail, [], MeterConfig(anchor=0.0), 50.0)
+    beats, _ = meter.bar_grid(
+        head + lock + tail, [], MeterConfig(anchor=0.0), 50.0, steady=[[t + 0.2, t + 8.8]]
+    )
+    assert len([b for b in plain if t < b.time < t + 9.0]) == 23
+    inside = [b.time for b in beats if t < b.time < t + 9.0]
+    assert inside == pytest.approx([t + 0.5 * k for k in range(1, 18)])
+
+
+def test_bars_after_that_disagree_do_not_count_as_a_side():
+    """A side must be the same metronome: steady bars after the stretch at
+    another tempo are not, and the bars before decide alone."""
+    head = steady(40)
+    t = head[-1]
+    tail = steady(40, ibi=0.4, start=t + 4.1)
+    beats, _ = meter.bar_grid(
+        head + tail, [], MeterConfig(anchor=0.0), 45.0, steady=[[t + 0.2, t + 3.9]]
+    )
+    inside = [b.time for b in beats if t < b.time < t + 3.9]
+    assert inside == pytest.approx([t + 0.5 * k for k in range(1, 8)])
+
+
+def test_a_side_the_insertion_made_is_not_a_measurement():
+    """Every other beat implied: the run is evenly spaced because the repair
+    laid it that way, so it gives no pulse."""
+    found = [meter.Beat(round(i * 0.35, 6)) for i in range(20)]
+    halved = sorted(
+        [*found, *(meter.Beat(round(i * 0.35 + 0.175, 6), implied=True) for i in range(19))],
+        key=lambda b: b.time,
+    )
+    assert meter._side_fit(found, -1, 0.15) is not None
+    assert meter._side_fit(halved, -1, 0.15) is None
+
+
+def test_a_stretch_with_no_steady_side_is_left_as_it_is():
+    rng = random.Random(3)
+    ragged = [0.0]
+    for _ in range(80):
+        ragged.append(round(ragged[-1] + 0.5 * rng.choice((0.6, 1.0, 1.45)), 6))
+    plain, _ = meter.bar_grid(ragged, [], MeterConfig(anchor=0.0), ragged[-1])
+    marked, _ = meter.bar_grid(ragged, [], MeterConfig(anchor=0.0), ragged[-1], steady=[[10, 15]])
+    assert [b.time for b in marked] == [b.time for b in plain]
+
+
+def test_clean_steady_keeps_seconds_pairs_and_merges_overlaps():
+    assert meter.clean_steady([[5.0, 9.0], [1.0, 2.0], [8.0, 12.0]]) == [(1.0, 2.0), (5.0, 12.0)]
+    for junk in ([[1.0]], [[2.0, 1.0]], [[1.0, 1.2]], [["a", 3]], [[-1.0, 2.0]], [[True, 3]], [7]):
+        assert meter.clean_steady(junk) == []
+    assert meter.clean_steady(None) == []
+
+
 def test_moving_the_anchor_shifts_every_bar_line():
     """The whole point of the design: the downbeat is one parameter, so a click
     re-phases the entire tune rather than triggering re-analysis."""

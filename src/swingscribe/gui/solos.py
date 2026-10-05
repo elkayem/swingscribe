@@ -292,16 +292,17 @@ def bar_line_times(
     duration: float,
     overrides: dict[str, Any] | None = None,
     pins: Sequence[float] | None = None,
+    steady: Sequence[tuple[float, float]] | None = None,
 ) -> list[float]:
     """The repaired grid's bar lines over the whole track, as `/beats` draws
-    them under the same meter and the same pinned beats, with the downbeat
+    them under the same meter, steady stretches and pinned beats, with the downbeat
     voted over the whole track when the listener has not placed one."""
     from swingscribe.stages import meter
 
     meter_config = config.meter.model_copy(update=overrides or {})
     meter.resolve_meter(meter_config)  # ValueError on a nonsense signature
     repaired, sections = meter.bar_grid(
-        beat_grid.beats, beat_grid.downbeats, meter_config, duration, pins=pins
+        beat_grid.beats, beat_grid.downbeats, meter_config, duration, pins=pins, steady=steady
     )
     return [t for t, _number in meter.bar_lines(repaired, sections)]
 

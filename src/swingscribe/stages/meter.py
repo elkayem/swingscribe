@@ -949,6 +949,197 @@ def apply_pins(beats: list[Beat], pins: Iterable | None, config: MeterConfig) ->
     return sorted([*kept, *new], key=lambda beat: beat.time)
 
 
+# ── stretches the listener marked steady (2026-10-05) ───────────────────────
+#
+# Where the tracker follows something other than the beat for a while, the
+# repair has nothing to mend it with. Bud Powell's Oblivion, bars 75-84:
+# the tracker (at half speed) locked onto Powell's three-note groupings, a
+# pulse every one and a half beats, half of whose marks fall on an "and";
+# the insertion read each 1.5-beat gap as two and the ten bars gained five
+# beats. The tempo never moved -- a constant 0.2175 s from page bar 73 puts
+# bar 84 where Powell's page has it -- and the tracker kept the lock past
+# the solo's end, so there were no steady bars after it for the metronome
+# (`thin_by_metronome`) to bridge to. A pin cannot mend it either: with one
+# on every bar, the stretch still held 46 beats where the music has 44.
+#
+# Over every cached grid that shape (three or more gaps at 1.3-1.75 pulses)
+# falls inside a scored span twice, both on Oblivion, so it is no rule's to
+# guess: the listener marks the stretch, and says by doing so that the
+# tempo held. Its beats are laid on one metronome, and the tracker's beats
+# inside it are NOT evidence -- the stretch is where the listener says the
+# tracker went wrong. Following them was tried first: in Oblivion's lock
+# they sit 0.05-0.1 s off the beat (Powell's swung accents), each one taken
+# dragged the line later, and forty beats on it had lost one.
+#
+# The metronome is fitted to the steady beats either side (`_side_fit`:
+# STEADY_LONG intervals where they are steady, else STEADY_SIDE, sought up
+# to STEADY_SIDE beats outward so a stretch marked from inside the trouble
+# is laid from the last steady bars before it). With both sides, the count
+# between them is the time over their pulse, evenly laid -- exact, as a
+# re-laid ghost stretch is. With one, the side's pulse is continued to the
+# stretch's far end; four bars read Oblivion's tempo 2% fast (the band
+# eased from 0.220 to 0.2175 s over the solo), so eight are preferred. A
+# pin inside the stretch is a fixed point on it: the count to it is taken
+# from time, and past the last one the pulse is the one the pins measured.
+# Everything laid is the listener's (`relaid`), as a pin's window is:
+# steady, and never in doubt.
+STEADY_SIDE = 16  # intervals a side's metronome is fitted to, at least
+STEADY_LONG = 32  # ... and preferred, where that many are steady
+STEADY_SIDE_FIT = 0.25  # a side's beats must all sit within this of its line
+STEADY_IMPLIED = 1 / 3  # ... and the tracker must have found most of them
+STEADY_WHOLE = 0.35  # both sides on one metronome: the time between is whole
+STEADY_MIN_S = 0.5  # a shorter stretch is a slip of the mouse
+
+
+def clean_steady(values: Iterable | None) -> list[tuple[float, float]]:
+    """What a sidecar or a query may hold as steady stretches: [start, end]
+    pairs of finite, non-negative seconds at least STEADY_MIN_S long, sorted,
+    with overlapping ones merged. Anything else is dropped, not raised."""
+    pairs = []
+    for value in values or []:
+        if not isinstance(value, list | tuple) or len(value) != 2:
+            continue
+        a, b = value
+        if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in (a, b)):
+            continue
+        a, b = float(a), float(b)
+        if not (math.isfinite(a) and math.isfinite(b)) or a < 0 or b - a < STEADY_MIN_S:
+            continue
+        pairs.append((round(a, 3), round(b, 3)))
+    merged: list[tuple[float, float]] = []
+    for a, b in sorted(pairs):
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    return merged
+
+
+def _side_pulse(times: list[float], found: list[bool], tolerance: float) -> float | None:
+    """The pulse of a run of beats on one metronome, least squares of time
+    on beat number, or None when they are not steady enough to lay one
+    from: every beat within STEADY_SIDE_FIT of the line, and every step
+    between neighbouring FOUND beats within `tolerance` of the pulses it
+    holds. The repair's halves of a gap say nothing: a lock's 1.78-beat gap
+    split in two is two 0.89-beat steps, inside the tolerance, while the
+    gap itself is not whole (as `steady_intervals` judges an implied run).
+    Numbered by time over the median interval rather than by index, so a
+    stray beat in the run does not stretch the pulse it gives."""
+    if len(times) < 4:
+        return None
+    seed = statistics.median(b - a for a, b in zip(times, times[1:], strict=False))
+    if seed <= 0:
+        return None
+    numbered = {round((t - times[0]) / seed): (t, ok) for t, ok in zip(times, found, strict=True)}
+    points = sorted((k, t) for k, (t, _ok) in numbered.items())
+    n = len(points)
+    if n < 4:
+        return None
+    mean_k = sum(k for k, _ in points) / n
+    mean_t = sum(t for _, t in points) / n
+    pulse = sum((k - mean_k) * (t - mean_t) for k, t in points) / sum(
+        (k - mean_k) ** 2 for k, _ in points
+    )
+    if pulse <= 0:
+        return None
+    offset = mean_t - pulse * mean_k
+    if any(abs(t - offset - pulse * k) > STEADY_SIDE_FIT * pulse for k, t in points):
+        return None
+    heard = [(k, t) for k, (t, ok) in sorted(numbered.items()) if ok]
+    steps = zip(heard, heard[1:], strict=False)
+    if any(abs(t2 - t1 - (k2 - k1) * pulse) > tolerance * pulse for (k1, t1), (k2, t2) in steps):
+        return None
+    return pulse
+
+
+def _side_fit(beats: list[Beat], side: int, tolerance: float) -> tuple[float, float] | None:
+    """(the edge beat, its pulse) for the steady run nearest a stretch on
+    one side: `beats` are the grid's on that side in time order, `side` -1
+    for the beats before the stretch and +1 for those after. A run the
+    insertion made more than STEADY_IMPLIED of is not a measurement: it is
+    evenly spaced because it was laid that way (Oblivion's tail after the
+    solo, the tracker's 0.35 s split in two, read as a 0.176 s pulse)."""
+    ordered = beats if side < 0 else list(reversed(beats))
+    for shift in range(STEADY_SIDE + 1):
+        stop = len(ordered) - shift
+        for length in (STEADY_LONG, STEADY_SIDE):
+            run = ordered[max(0, stop - length - 1) : stop]
+            if len(run) < length + 1 or sum(b.implied for b in run) > STEADY_IMPLIED * len(run):
+                continue
+            if run[-1].implied:  # the edge the stretch is laid from was heard
+                continue
+            if side > 0:
+                run = list(reversed(run))
+            times = [b.time for b in run]
+            pulse = _side_pulse(times, [not b.implied for b in run], tolerance)
+            if pulse is not None:
+                return (times[-1] if side < 0 else times[0]), pulse
+    return None
+
+
+def _counted(a: float, b: float, pulse: float) -> tuple[int, float]:
+    """How many beats the time from `a` to `b` holds at `pulse`, and the
+    pulse that count lays them at."""
+    count = max(1, _round_half_up((b - a) / pulse))
+    return count, (b - a) / count
+
+
+def apply_steady(
+    beats: list[Beat],
+    stretches: Iterable | None,
+    config: MeterConfig,
+    pins: Iterable | None = None,
+) -> list[Beat]:
+    """The grid with every stretch the listener marked steady laid on one
+    metronome (see the note above), through the `pins` inside it. A stretch
+    with no steady beats on either side to take the tempo from is left as
+    it is."""
+    out = list(beats)
+    pins = clean_pins(pins)
+    for start, end in clean_steady(stretches):
+        tolerance = config.stability_tolerance
+        left = _side_fit([b for b in out if b.time <= start], -1, tolerance)
+        right = _side_fit([b for b in out if b.time >= end], +1, tolerance)
+        if left and right:
+            # The listener asked for the tempo of the bars BEFORE; the bars
+            # after count only as the same metronome -- the same pulse, and
+            # a whole number of beats from the left edge.
+            mean = (left[1] + right[1]) / 2
+            held = (right[0] - left[0]) / mean
+            if abs(left[1] - right[1]) > tolerance * mean or abs(held - round(held)) > STEADY_WHOLE:
+                right = None
+        if left is None and right is None:
+            continue
+        lo = left[0] if left else start
+        hi = right[0] if right else end
+        # The pins in the listener's own stretch; one between it and a side
+        # sought further out is an ordinary pin (`bar_grid` applies it).
+        fixed = [p for p in pins if lo < p < hi and start <= p <= end]
+        anchors = [*([lo] if left else []), *fixed, *([hi] if right else [])]
+        pulse = (left[1] + right[1]) / 2 if left and right else (left or right)[1]
+        laid = [Beat(p, pinned=True) for p in fixed]
+        for a, b in zip(anchors, anchors[1:], strict=False):
+            count, _step = _counted(a, b, pulse)
+            laid.extend(replace(x, relaid=True) for x in _relay(a, b, count, []))
+        if not right:  # continue past the last fixed point to the far end
+            step = _counted(*anchors[-2:], pulse)[1] if len(anchors) > 1 else pulse
+            tick = anchors[-1] + step
+            while tick <= end:
+                laid.append(Beat(tick, implied=True, relaid=True))
+                tick += step
+            hi = max(b.time for b in laid) + PIN_CLEAR * step if laid else anchors[-1]
+        if not left:  # and back before the first, from the right side
+            step = _counted(*anchors[:2], pulse)[1] if len(anchors) > 1 else pulse
+            tick = anchors[0] - step
+            while tick >= start:
+                laid.append(Beat(tick, implied=True, relaid=True))
+                tick -= step
+            lo = min(b.time for b in laid) - PIN_CLEAR * step if laid else anchors[0]
+        kept = [b for b in out if not lo < b.time < hi]
+        out = sorted([*kept, *laid], key=lambda b: b.time)
+    return out
+
+
 def _edge_pulse(window: list[Beat], config: MeterConfig) -> float | None:
     """The pulse to continue outward, or None if this edge isn't steady.
 
@@ -1364,11 +1555,13 @@ def bar_grid(
     duration: float,
     near: tuple[float, float] | None = None,
     pins: Iterable | None = None,
+    steady: Iterable | None = None,
 ) -> tuple[list[Beat], list[MeterSection]]:
-    """The bar grid as the GUI draws it: tracked beats repaired, made to pass
-    through the listener's `pins` (`apply_pins`) and extended to the track's
-    ends, and sections counted from the anchor -- the user's if they placed
-    one, the downbeat layer's best phase if not.
+    """The bar grid as the GUI draws it: tracked beats repaired, the
+    stretches the listener marked `steady` laid on one metronome
+    (`apply_steady`), made to pass through their `pins` (`apply_pins`) and
+    extended to the track's ends, and sections counted from the anchor --
+    the user's if they placed one, the downbeat layer's best phase if not.
 
     One function, because two callers have to agree on it exactly. The roll
     (`/beats`) draws bar lines from this, and the Export button counts its
@@ -1378,15 +1571,21 @@ def bar_grid(
 
     A pin is LOCAL: every interval it leaves alone keeps the answers the
     unpinned grid gives it (`Judgement`), and the edges are extended at the
-    unpinned grid's pulses (`extend_beats`).
+    unpinned grid's pulses (`extend_beats`). So is a steady stretch, and a
+    pin inside one has the last word.
     """
     repaired = repair_beats(beats, config, downbeats)
     pins = [p for p in clean_pins(pins) if p <= duration]
-    if not pins:
+    stretches = clean_steady(steady)
+    if not pins and not stretches:
         repaired = extend_beats(repaired, config, 0.0, duration)
         return repaired, derive_sections(repaired, downbeats, config, near)
     unpinned, edges = _extend(repaired, config, 0.0, duration)
-    pinned = extend_beats(apply_pins(repaired, pins, config), config, 0.0, duration, edges)
+    # A pin inside a steady stretch is a fixed point of its metronome; the
+    # rest re-derive the beats around them as always.
+    steadied = apply_steady(repaired, stretches, config, pins)
+    loose = [p for p in pins if not any(a <= p <= b for a, b in stretches)]
+    pinned = extend_beats(apply_pins(steadied, loose, config), config, 0.0, duration, edges)
     return pinned, derive_sections(pinned, downbeats, config, near, judge(unpinned, config))
 
 

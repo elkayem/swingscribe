@@ -400,6 +400,18 @@ export class PianoRoll {
       ctx.globalAlpha = 0.12;
       ctx.fillRect(x0, 0, Math.max(3, this.timeToX(d.end, w) - x0), h);
     }
+    // The stretches the listener marked steady (meter.apply_steady), as the
+    // Detail view draws them: the bars there are laid on one metronome.
+    ctx.fillStyle = this._css('--steady', '#8fd18f');
+    for (const s of this.beats.steady || []) {
+      if (s.end < this.view.a || s.start > this.view.b) continue;
+      const x0 = this.timeToX(s.start, w);
+      const width = Math.max(3, this.timeToX(s.end, w) - x0);
+      ctx.globalAlpha = 0.08;
+      ctx.fillRect(x0, 0, width, h);
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(x0, 0, width, 2);
+    }
     ctx.globalAlpha = 1;
     // The beats the listener pinned (meter.apply_pins), as the Detail view
     // draws them: their mark, at every zoom. Pinned there, shown here.

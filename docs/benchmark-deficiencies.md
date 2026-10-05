@@ -1529,9 +1529,39 @@ joins the silver pages with this run (n 3 -> 4, which is all the
 against 0.806 / 0.853 / 0.826 when Fast tune landed.
 
 Not this rule's: Oblivion's last ten bars (89.4-96.3 s) are tracked at
-0.33-0.35 s -- a cross-rhythm or the solo's end -- and stay so past the
-span, so there is no metronome to bridge with; the page steps +2 and +3
-beats there and the roll marks it "?". A pin is the tool.
+0.33-0.35 s and stay so past the span, so there is no metronome to bridge
+with; the page steps +2 and +3 beats there and the roll marks it "?".
+
+**Those ten bars, the same day: a listener's STEADY STRETCH**
+(`meter.apply_steady`, sidecar `steady_spans`, the Detail view's Steady
+tempo tool, <kbd>Y</kbd>). Powell's page says the tempo never moved: a
+constant 0.2175 s from his bar 73 puts bar 84 where his notes put it, bars
+78-83 within 0.07 s. The tracker had locked onto his three-note groupings,
+a mark every 1.5 beats, 0.05-0.1 s off the beat and half of them on an
+"and"; the insertion read each 1.5-beat gap as two (+5 beats). A pin
+cannot mend it -- simulated with one on every bar from 75 to 84, the
+stretch held 46 beats where the music has 44, because a pin moves beats
+and keeps the count its window's ends hold. And no rule should: over
+every cached grid three or more gaps at 1.3-1.75 pulses fall inside a
+scored span twice, both here. So the listener marks the stretch and says
+the band kept time; its beats are laid on one metronome fitted to the
+steady beats either side (8 bars where they are steady, 4 otherwise, a
+side ending on a beat the tracker found, at most a third of it the
+insertion's, every step between found beats within the stability
+tolerance), counted by time when both sides agree, continued from the
+side's pulse when only one does, and passed through any pin inside it.
+Two first versions were wrong and are on the record in the module note:
+snapping to the tracker's beats in the stretch dragged the line a beat
+late over forty, and averaging in the bars AFTER took the repair's halves
+of the tail's 0.35 s as a 0.176 s pulse. On Oblivion, any selection from
+about 88 s to the span's end gives 44 beats from bar 73 to bar 84, every
+one within 0.017 s of the page's. The stretch is in Oblivion's sidecar
+(88.77-97.44 s, placed with the tool while verifying it), and the card
+moved on that page alone: on the bar 0.836 -> 0.927, rhythm 0.868 ->
+0.890, value 0.824 -> 0.840, edit cost 46.1 -> 42.3, grid doubts 2 -> 0,
+the grid's bar-line steps gone (silver placement 0.790 -> 0.813, rhythm
+0.832 -> 0.837). What remains is a half-beat at page bars 75-77 that the
+OMR check charges to the page.
 
 **The roll's bar NUMBERS, the same day** (the listener agreed it should
 count as the page does). Whatever hole the repair cannot mend, the roll

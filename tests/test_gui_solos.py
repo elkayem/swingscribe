@@ -584,6 +584,26 @@ def test_the_config_offers_the_levels_the_server_accepts(world):
     assert config["solo_separation_model"] == gui_solos.SEPARATION_MODEL
 
 
+def test_the_bands_sit_on_the_steady_grid_like_the_roll():
+    """A stretch the listener marked steady is the roll's grid too
+    (meter.apply_steady), so the Overview's bands count bars on it."""
+    from swingscribe.model import BeatGrid
+
+    head = [round(i * 0.5, 6) for i in range(40)]
+    t = head[-1]
+    lock = [round(t + 0.1 + 0.75 * k, 6) for k in range(12)]  # a mark every 1.5 beats
+    tail = [round(t + 9.0 + i * 0.5, 6) for i in range(40)]
+    truth = head + [round(t + 0.5 * k, 6) for k in range(1, 18)] + tail
+    config = Config()
+
+    def lines(beats, steady=None):
+        grid = BeatGrid(beats=beats, downbeats=[], beats_per_bar=4)
+        return gui_solos.bar_line_times(grid, config, 50.0, {"anchor": 0.0}, None, steady)
+
+    assert lines(head + lock + tail, [(t + 0.2, t + 8.8)]) == pytest.approx(lines(truth))
+    assert lines(head + lock + tail) != pytest.approx(lines(truth))
+
+
 def test_the_bands_sit_on_the_pinned_grid_like_the_roll():
     """Find the solos counts bars on the grid the roll draws, pins and all
     (meter.apply_pins): a slip the listener mended must not come back on the

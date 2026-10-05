@@ -49,6 +49,9 @@ const state = {
   anchor: null,             // seconds; null = auto-detected downbeat
   pins: [],                 // seconds, sorted: beats the listener pinned (meter.apply_pins)
   pinsArmed: false,         // the clear-pins chip has been clicked once
+  steady: [],               // [start, end] seconds: stretches marked steady (meter.apply_steady)
+  steadyArmed: false,       // the Steady tempo tool is in hand
+  steadyClearArmed: false,  // the clear-steady chip has been clicked once
   barsPerChorus: 0,
   review: null,             // cached review payload {notes, diagnostics}
   reviewMode: 'mix',        // mix | transcription | both
@@ -159,6 +162,10 @@ const detail = new WaveView($('wave-detail'), {
   // Alt-click / Alt-drag: the beat is HERE (meter.apply_pins).
   onPin: (t, replaces) => pinBeat(t, replaces),
   onUnpin: (t) => unpinBeat(t),
+  // With the Steady tempo tool in hand: a drag marks a stretch, a click on
+  // one takes it away (meter.apply_steady).
+  onSteady: (a, b) => addSteady(a, b),
+  onSteadyClick: (t) => removeSteadyAt(t),
 });
 
 const stemWave = new WaveView($('wave-stem'), {
@@ -468,6 +475,9 @@ async function loadTrack(track) {
   state.anchor = remembered.anchor ?? null;
   state.pins = cleanPins(remembered.beat_pins);
   state.pinsArmed = false;
+  state.steady = cleanSteady(remembered.steady_spans);
+  state.steadyClearArmed = false;
+  armSteady(false);
   state.barsPerChorus = remembered.bars_per_chorus ?? 0;
   state.formStart = remembered.form_start ?? null;
   state.click = remembered.click ?? false;
@@ -846,6 +856,85 @@ function renderPins() {
   $('pin-beat').disabled = !state.beats;
 }
 
+/* Steady stretches (meter.apply_steady). Where the beat tracker follows
+   something other than the beat for a while -- Oblivion's tail, where it
+   locked onto Powell's three-note groupings -- no pin can mend it, but the
+   listener can say the band kept time: the stretch's beats are laid on one
+   metronome at the tempo of the steady bars around it, for the roll, the
+   page, Export, the chart, Find the solos and the Score button alike. Kept to
+   the millisecond, sorted and merged, like the server's own clean_steady. */
+const STEADY_MIN_S = 0.5;
+
+function cleanSteady(values) {
+  if (!Array.isArray(values)) return [];
+  const pairs = values
+    .filter((v) => Array.isArray(v) && v.length === 2
+      && v.every((x) => typeof x === 'number' && Number.isFinite(x)))
+    .map(([a, b]) => [Math.round(a * 1000) / 1000, Math.round(b * 1000) / 1000])
+    .filter(([a, b]) => a >= 0 && b - a >= STEADY_MIN_S)
+    .sort((x, y) => x[0] - y[0]);
+  const merged = [];
+  for (const [a, b] of pairs) {
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+  return merged;
+}
+
+const steadyParam = () => state.steady.map(([a, b]) => `${a.toFixed(3)},${b.toFixed(3)}`).join(',');
+
+async function setSteady(stretches, message) {
+  state.steady = cleanSteady(stretches);
+  state.steadyClearArmed = false;
+  await maybeLoadBeats();
+  persist();
+  if (message) toast(message);
+}
+
+/* The tool in hand or put down. In hand, a drag on the Detail waveform marks
+   a stretch instead of panning; it goes down by itself once one is marked. */
+function armSteady(on) {
+  state.steadyArmed = Boolean(on) && Boolean(state.beats);
+  detail.setSteadyArmed(state.steadyArmed);
+  renderSteady();
+}
+
+function addSteady(a, b) {
+  armSteady(false);
+  if (b - a < STEADY_MIN_S) {
+    toast('Drag across the whole stretch — at least half a second');
+    return;
+  }
+  setSteady([...state.steady, [a, b]]).then(() => {
+    const laid = (state.beats?.steady ?? []).find((s) => s.start <= a + 0.002 && s.end >= b - 0.002);
+    toast(laid?.bpm
+      ? `Steady ${clock(a)}–${clock(b)} at ${Math.round(laid.bpm)} bpm — its beats are laid on one metronome. `
+        + 'If the bar lines still drift by its end, pin a beat there by ear (Alt-click).'
+      : `No steady bars just before or after ${clock(a)}–${clock(b)} to take a tempo from — `
+        + 'widen it to take in a few bars the ticks have right.');
+  });
+}
+
+function removeSteadyAt(t) {
+  armSteady(false);
+  const kept = state.steady.filter(([a, b]) => !(a <= t && t <= b));
+  if (kept.length === state.steady.length) return;
+  setSteady(kept, 'Steady stretch removed — the ticks there are the tracker’s again');
+}
+
+function renderSteady() {
+  const tool = $('steady-tool');
+  tool.disabled = !state.beats;
+  tool.classList.toggle('active', state.steadyArmed);
+  tool.textContent = state.steadyArmed ? 'Steady tempo: drag across it' : 'Steady tempo';
+  const chip = $('steady-clear');
+  const count = state.steady.length;
+  chip.hidden = !count;
+  chip.classList.toggle('armed', state.steadyClearArmed);
+  chip.textContent = state.steadyClearArmed ? `clear ${count} steady?` : `${count} steady ✕`;
+}
+
 /* The free path: fetch the grid if it's cached, silently accept that it isn't.
    Computing is only ever started by an explicit click on the Beats chip. */
 async function maybeLoadBeats() {
@@ -854,6 +943,7 @@ async function maybeLoadBeats() {
   if (state.timeSignature) params.set('time_signature', state.timeSignature);
   if (state.anchor !== null) params.set('anchor', state.anchor.toFixed(3));
   if (state.pins.length) params.set('pins', pinsParam());
+  if (state.steady.length) params.set('steady', steadyParam());
   if (state.barsPerChorus) params.set('bars_per_chorus', String(state.barsPerChorus));
   if (state.formStart !== null) params.set('form_start', state.formStart.toFixed(3));
   /* With no downbeat placed, the automatic one is voted AROUND THE SELECTION
@@ -917,6 +1007,7 @@ function applyBeats() {
     barsPerChorus: state.barsPerChorus,
   });
   renderPins();
+  renderSteady();
   const reset = $('form-reset');
   reset.hidden = state.formStart === null;
   if (state.formStart !== null) {
@@ -1649,6 +1740,7 @@ function soloParams() {
   if (state.timeSignature) params.set('time_signature', state.timeSignature);
   if (state.anchor !== null) params.set('anchor', state.anchor.toFixed(3));
   if (state.pins.length) params.set('pins', pinsParam());
+  if (state.steady.length) params.set('steady', steadyParam());
   return params;
 }
 
@@ -2945,6 +3037,7 @@ function settingsPayload() {
     anchor: state.anchor,
     // Human judgements, beside the audio like the downbeat: never the cache.
     beat_pins: state.pins,
+    steady_spans: state.steady,
     bars_per_chorus: state.barsPerChorus,
     form_start: state.formStart,
     click: state.click,
@@ -3350,6 +3443,7 @@ function exportSignature() {
     timeSignature: state.timeSignature,
     anchor: state.anchor,
     pins: state.pins,
+    steady: state.steady,
     timing: state.timing,
     key: state.key,
     texture: textureOn(),
@@ -4054,6 +4148,25 @@ $('form-reset').addEventListener('click', async () => {
 
 $('pin-beat').addEventListener('click', () => pinBeat(currentTime()));
 
+$('steady-tool').addEventListener('click', () => {
+  armSteady(!state.steadyArmed);
+  if (state.steadyArmed) toast('Drag across the stretch whose tempo held, on the Detail waveform (Esc to cancel)');
+});
+
+/* Like the pins: clearing every steady stretch arms first. */
+let steadyArmTimer = null;
+$('steady-clear').addEventListener('click', () => {
+  if (!state.steadyClearArmed) {
+    state.steadyClearArmed = true;
+    renderSteady();
+    clearTimeout(steadyArmTimer);
+    steadyArmTimer = setTimeout(() => { state.steadyClearArmed = false; renderSteady(); }, 3000);
+    return;
+  }
+  clearTimeout(steadyArmTimer);
+  setSteady([], 'Steady stretches cleared — the bar grid is the tracker’s again');
+});
+
 /* Pins are the listener's judgements, so clearing them all arms first: the
    first click asks, the second clears, and the question lapses by itself. */
 let pinsArmTimer = null;
@@ -4246,7 +4359,12 @@ document.addEventListener('keydown', (event) => {
       }
       break;
     case 'escape':
-      if (state.tool === 'hands' && state.handSelection.size) selectForHands([], false);
+      if (state.steadyArmed) armSteady(false);
+      else if (state.tool === 'hands' && state.handSelection.size) selectForHands([], false);
+      break;
+    case 'y':
+      // The Steady tempo tool: pick it up, drag across the stretch.
+      if (state.beats) $('steady-tool').click();
       break;
     case ' ':
       event.preventDefault();

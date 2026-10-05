@@ -559,6 +559,17 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   grid can be COMPENSATING a slip the repair now mends: re-vote it on the
   new grid before believing a page that went off the bar (Coltrane's Oleo,
   86.64 -> 86.20).
+- **A stretch the tracker followed wrong while the band kept time is the
+  LISTENER's to mark steady** (2026-10-05, sidecar `steady_spans`,
+  `meter.apply_steady`, the Steady tempo tool, Y). Oblivion's bars 75-84:
+  a lock on Powell's three-note groupings, a mark every 1.5 beats, which
+  neither the repair nor a pin on every bar can mend, and which falls in a
+  scored span nowhere else in the benchmark -- so no rule. The stretch is
+  laid on a metronome fitted to the steady FOUND beats either side; the
+  tracker's beats inside it are never evidence (snapping to them lost a
+  beat over forty), a side the insertion made is never a side, and a pin
+  inside it is a fixed point. Like a pin, it reaches every reader through
+  `meter.bar_grid` and never a cache key.
 - Bar lines are derived by counting beats from an anchor. The beat tracker's
   detected downbeat layer is noise (open-issue #5) and must not be drawn or
   trusted; only its pulse layer is reliable. Its individual marks, that is:

@@ -31,6 +31,9 @@ export class WaveView {
    *                           explicit modifier, never a plain drag: a drag
    *                           pans (the one gesture rule, CLAUDE.md).
    *   onUnpin(t)            – Alt-click on a pin marker: take it away
+   *   onSteady(a, b)        – with the Steady tempo tool armed
+   *                           (setSteadyArmed), a drag marks [a, b] steady
+   *   onSteadyClick(t)      – ... and a click there, without a drag
    *   onWindowDrag(start,w) – the overview's window box was slid
    *   dragPans              – a drag that is not on an A/B handle pans the
    *                           window instead of drawing or moving the
@@ -58,6 +61,8 @@ export class WaveView {
     this.chorusSet = null;
     this.bands = null;                    // proposed solo spans, [{start, end, kind}]
     this.pinDrag = null;                  // {to} while an Alt-drag is placing a pin
+    this.steadyArmed = false;             // the Steady tempo tool is in hand
+    this.steadyDrag = null;               // {a, b} while it is marking a stretch
 
     this._buildOverlays();
     this._bindPointer();
@@ -113,6 +118,13 @@ export class WaveView {
   }
 
   setOverlay(data) { this.overlay = data; this.draw(); }
+
+  /* The Steady tempo tool (meter.apply_steady). While it is in hand a drag
+     marks a stretch instead of panning, and the cursor says so. */
+  setSteadyArmed(on) {
+    this.steadyArmed = Boolean(on);
+    this.el.classList.toggle('steady-armed', this.steadyArmed);
+  }
 
   /* Find the solos: the proposed spans, tinted behind the waveform in
      alternation with a hairline at each boundary, so the strip of labelled
@@ -327,6 +339,7 @@ export class WaveView {
     }
 
     this._drawDoubts(width, height, style);
+    this._drawSteady(height, style);
     this._drawPins(width, height, style);
   }
 
@@ -353,6 +366,34 @@ export class WaveView {
     }
     ctx.globalAlpha = 1;
     ctx.textAlign = 'left';
+  }
+
+  /* The stretches the listener marked steady (meter.apply_steady): a band
+     with the tempo its beats were laid at, or a note that neither side had
+     steady bars to take one from -- and the band a Steady tempo drag is
+     drawing. */
+  _drawSteady(height, style) {
+    const ctx = this.ctx;
+    ctx.fillStyle = style.getPropertyValue('--steady').trim() || '#8fd18f';
+    ctx.font = '10px ui-monospace, Menlo, Consolas, monospace';
+    ctx.textAlign = 'left';
+    const band = (a, b, label) => {
+      if (b < this.win.start || a > this.win.end) return;
+      const x0 = this.timeToX(a);
+      const w = Math.max(3, this.timeToX(b) - x0);
+      ctx.globalAlpha = 0.12;
+      ctx.fillRect(x0, 0, w, height);
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(x0, 0, w, 2);
+      if (label) ctx.fillText(label, Math.max(x0, 0) + 4, 31);
+      ctx.globalAlpha = 1;
+    };
+    for (const s of this.beatsData?.steady ?? []) {
+      band(s.start, s.end, s.bpm ? `steady · ${Math.round(s.bpm)} bpm` : 'steady · no tempo either side');
+    }
+    if (this.steadyDrag) {
+      band(Math.min(this.steadyDrag.a, this.steadyDrag.b), Math.max(this.steadyDrag.a, this.steadyDrag.b), null);
+    }
   }
 
   /* The beats the listener pinned: a line the full height with a flag at the
@@ -566,6 +607,10 @@ export class WaveView {
       this._pinGesture(event);
       return;
     }
+    if (this.steadyArmed && this.opts.onSteady) {
+      this._steadyGesture(event);
+      return;
+    }
     const rect = this.el.getBoundingClientRect();
     const startX = event.clientX - rect.left;
     const startTime = this.xToTime(startX);
@@ -708,6 +753,46 @@ export class WaveView {
     // A cancelled gesture (the browser took the pointer: a system gesture,
     // a lost capture) is neither a click nor a drop: it pins and unpins
     // nothing.
+    const onCancel = () => { finish(); };
+    this.el.addEventListener('pointermove', onMove);
+    this.el.addEventListener('pointerup', onUp);
+    this.el.addEventListener('pointercancel', onCancel);
+  }
+
+  /* The Steady tempo tool in hand: a drag marks a stretch (the band follows
+     the pointer) and a click reports where it landed, which takes away a
+     stretch there. Neither pans, seeks nor touches the selection. */
+  _steadyGesture(event) {
+    event.preventDefault();
+    const rect = this.el.getBoundingClientRect();
+    const startX = event.clientX - rect.left;
+    const clamp = (t) => Math.max(this.bounds.start, Math.min(t, this.bounds.end));
+    const from = clamp(this.xToTime(startX));
+    let moved = false;
+    this.el.setPointerCapture(event.pointerId);
+
+    const onMove = (moveEvent) => {
+      const x = moveEvent.clientX - rect.left;
+      if (!moved && Math.abs(x - startX) < DRAG_THRESHOLD_PX) return;
+      moved = true;
+      this.steadyDrag = { a: from, b: clamp(this.xToTime(x)) };
+      this.draw();
+    };
+    const finish = () => {
+      if (this.el.hasPointerCapture(event.pointerId)) this.el.releasePointerCapture(event.pointerId);
+      this.el.removeEventListener('pointermove', onMove);
+      this.el.removeEventListener('pointerup', onUp);
+      this.el.removeEventListener('pointercancel', onCancel);
+      const drag = this.steadyDrag;
+      this.steadyDrag = null;
+      this.draw();
+      return drag;
+    };
+    const onUp = () => {
+      const drag = finish();
+      if (moved && drag) this.opts.onSteady(Math.min(drag.a, drag.b), Math.max(drag.a, drag.b));
+      else this.opts.onSteadyClick?.(from);
+    };
     const onCancel = () => { finish(); };
     this.el.addEventListener('pointermove', onMove);
     this.el.addEventListener('pointerup', onUp);

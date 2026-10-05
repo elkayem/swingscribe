@@ -21,6 +21,7 @@ from swingscribe.notation import (
     section_for,
     span_anchor,
     span_beats,
+    steady_of,
     with_chords,
 )
 
@@ -470,6 +471,42 @@ def test_the_sidecars_pins_reach_the_grid_the_page_is_built_on():
     assert len(unpinned) == len(pinned) + 1
     assert [b for b in pinned if b <= 31.0] == pytest.approx([b for b in truth if b <= 31.0])
     assert anchor == 0.0
+
+
+def junk_between_steady_bars() -> tuple[list[float], list[float], float]:
+    """(tracked, true, edge): steady bars at 0.5 s, nine seconds the tracker
+    heard as a mark every one and a half beats (Oblivion's lock: the repair
+    reads each 1.5-beat gap as two and gains six), steady bars after."""
+    head = [round(i * 0.5, 6) for i in range(40)]
+    t = head[-1]
+    lock = [round(t + 0.1 + 0.75 * k, 6) for k in range(12)]  # a mark every 1.5 beats
+    tail = [round(t + 9.0 + i * 0.5, 6) for i in range(40)]
+    true = head + [round(t + 0.5 * k, 6) for k in range(1, 18)] + tail
+    return head + lock + tail, true, t
+
+
+def test_the_sidecars_steady_stretches_reach_the_grid_the_page_is_built_on():
+    """Export, the Score button and the harness build their page on this
+    grid, so a stretch the listener marked steady has to reach it, like a
+    pin -- or the roll would show one grid and the page count another."""
+    tracked, true, t = junk_between_steady_bars()
+    marked = {"anchor": 0.0, "steady_spans": [[t + 0.2, t + 8.8]]}
+    plain, _ = bar_grid_for_settings(tracked, [], {"anchor": 0.0}, Config(), 50.0)
+    laid, anchor = bar_grid_for_settings(tracked, [], marked, Config(), 50.0)
+    assert len(plain) == len(laid) + 6
+    assert [b for b in laid if b <= 48.0] == pytest.approx([b for b in true if b <= 48.0])
+    assert anchor == 0.0
+
+
+def test_a_hand_edited_steady_list_is_none_not_an_error():
+    tracked, _true, _t = junk_between_steady_bars()
+    plain, _ = bar_grid_for_settings(tracked, [], {}, Config(), 50.0)
+    for junk in ("19,23", [None, "x"], {"a": 1}, 7, [[1.0]]):
+        assert steady_of({"steady_spans": junk}) == []
+        assert (
+            bar_grid_for_settings(tracked, [], {"steady_spans": junk}, Config(), 50.0)[0] == plain
+        )
+    assert steady_of({"steady_spans": [[5, 9], [1, 2]]}) == [(1.0, 2.0), (5.0, 9.0)]
 
 
 def test_a_hand_edited_pin_list_is_no_pins_not_an_error():

@@ -321,6 +321,43 @@ tracker's beats moves the beats around it but never adds one. Either way, a
 pin where the grid was already right leaves the bar lines away from it where
 they were, numbers and all.
 
+### Marking a stretch steady
+
+Sometimes the ticks go wrong for a whole stretch, not one beat, while the
+band keeps perfect time. On a fast tune the beat tracker can lock onto the
+soloist's phrasing instead of the beat: Bud Powell's three-note groupings on
+Oblivion gave it a tick every one and a half beats for ten bars. The ticks
+there come out crowded and uneven, the bar lines stop or drift, and a pin
+cannot mend it, because almost none of the ticks in the stretch are beats.
+
+Tell SwingScribe the tempo held there instead:
+
+1. Click **Steady tempo**, or press <kbd>Y</kbd>. The button stays lit while
+   the tool is in your hand.
+2. Drag across the stretch on the Detail waveform. Take in the whole of the
+   trouble; starting a beat or two inside it is fine.
+
+SwingScribe lays the stretch's beats on one metronome at the tempo of the
+steady bars just before it, or just after it when the bars before are not
+steady. If there are steady bars on both sides, it counts the beats between
+them from the time, which is exact. A faint green band marks the stretch on
+the Detail view and the piano roll, with the tempo it used.
+
+- If the bar lines still drift a little by the end of a long stretch, the
+  band may have eased the tempo. Pin a beat by ear near the end of the
+  stretch: a pin inside a steady stretch is a fixed point it passes through.
+- If the band says **no tempo either side**, there were no steady bars next
+  to it to take a tempo from. Drag a wider stretch that takes in a few bars
+  the ticks have right.
+- With the tool in hand, click a stretch to remove it. The **N steady ✕**
+  chip removes them all; it asks first, so click it twice. <kbd>Esc</kbd>
+  puts the tool down.
+
+Steady stretches are saved with the track like pins, and the page, **Export
+MusicXML**, the chord symbols, **Score** and Find the solos all use them.
+Use one only where you can hear that the band kept time. Over a ritardando
+or a free passage, a steady stretch draws bar lines the music does not have.
+
 ## Step 2: Isolate and audition
 
 This step is the gate. If the soloist is not clearly on top in the isolated
@@ -764,12 +801,15 @@ field, a menu or a slider.
   grid).
 - <kbd>T</kbd>: pin a beat at the playhead (needs the beat grid). Alt-click
   the Detail view pins one where you click.
+- <kbd>Y</kbd>: pick up the Steady tempo tool, then drag across a stretch
+  on the Detail view (needs the beat grid).
 - <kbd>C</kbd>: turn the click track on or off.
 - <kbd>E</kbd>: switch between the Inspect and Edit tools.
 - <kbd>H</kbd>: switch to the Hands tool and back (two-staff page only).
 - <kbd>↑</kbd> / <kbd>↓</kbd>: with the Hands tool, put the selected notes
   in the right or left hand.
-- <kbd>Esc</kbd>: with the Hands tool, clear the selection.
+- <kbd>Esc</kbd>: put the Steady tempo tool down; with the Hands tool,
+  clear the selection.
 - <kbd>V</kbd>: show or hide the piano model's candidates.
 - <kbd>X</kbd>: export MusicXML.
 - <kbd>P</kbd>: show or hide the page.

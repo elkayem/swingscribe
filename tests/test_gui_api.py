@@ -486,6 +486,37 @@ def test_beats_endpoint_refuses_pins_that_are_not_seconds(world, monkeypatch):
     assert response.status_code == 400
 
 
+def test_beats_endpoint_lays_a_steady_stretch_and_says_at_what_tempo(world, monkeypatch):
+    """A steady stretch is a redraw, like a pin (meter.apply_steady): eleven
+    tracked marks the repair cannot mend come back as the beats, and the
+    payload gives the tempo each stretch was laid at -- or null where no
+    steady bars either side gave one, so the page can say why nothing moved.
+    The stretch is Oblivion's lock: a mark every 1.5 beats for nine seconds,
+    23 beats on the repaired grid where 17 belong."""
+    track = open_track(world)
+    head = [round(i * 0.5, 6) for i in range(40)]
+    t = head[-1]
+    lock = [round(t + 0.1 + 0.75 * k, 6) for k in range(12)]  # a mark every 1.5 beats
+    _seed_grid(monkeypatch, world, head + lock + [round(t + 9.0 + i * 0.5, 6) for i in range(40)])
+    url = f"/api/tracks/{track['id']}/beats"
+    stretch = f"{t + 0.2},{t + 8.8}"
+    laid = world["client"].get(url, params={"anchor": 0.0, "steady": stretch}).json()
+    inside = [b for b in laid["beats"] if t < b < t + 9.0]
+    assert inside == pytest.approx([t + 0.5 * k for k in range(1, 18)], abs=0.001)
+    assert laid["steady"] == [{"start": t + 0.2, "end": t + 8.8, "bpm": 120.0}]
+    plain = world["client"].get(url, params={"anchor": 0.0}).json()
+    assert plain["steady"] == []
+    assert len([b for b in plain["beats"] if t < b < t + 9.0]) == 23
+
+
+def test_beats_endpoint_refuses_steady_that_is_not_pairs_of_seconds(world, monkeypatch):
+    track = open_track(world)
+    _seed_grid(monkeypatch, world, PIN_TRUTH)
+    url = f"/api/tracks/{track['id']}/beats"
+    for text in ("1.0", "1.0,x", "1,2,3"):
+        assert world["client"].get(url, params={"steady": text}).status_code == 400
+
+
 def test_beats_endpoint_rejects_a_nonsense_time_signature(world, monkeypatch):
     from swingscribe import pipeline
     from swingscribe.model import BeatGrid

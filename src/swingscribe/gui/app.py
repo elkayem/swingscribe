@@ -142,6 +142,34 @@ def parse_pins(text: str | None) -> list[float]:
     return meter.clean_pins(values)
 
 
+def parse_steady(text: str | None) -> list[tuple[float, float]]:
+    """The `steady` query parameter -- start,end seconds, pair after pair --
+    as the grid takes them (`meter.clean_steady`). A malformed one is a 400,
+    like `pins`: the page builds this string."""
+    from swingscribe.stages import meter
+
+    if not text:
+        return []
+    try:
+        values = [float(token) for token in text.split(",") if token.strip()]
+    except ValueError as exc:
+        raise HTTPException(400, f"steady must be start,end seconds, not {text!r}") from exc
+    if len(values) % 2:
+        raise HTTPException(400, f"steady must be start,end pairs, not {text!r}")
+    return meter.clean_steady(list(zip(values[::2], values[1::2], strict=True)))
+
+
+def steady_bpm(beats: list, start: float, end: float) -> float | None:
+    """The tempo a steady stretch was laid at on the repaired grid: the
+    median interval of the beats laid in it (`relaid`), or None when it was
+    left as it was."""
+    import statistics
+
+    laid = [b.time for b in beats if b.relaid and not b.pinned and start <= b.time <= end]
+    gaps = [b - a for a, b in zip(laid, laid[1:], strict=False)]
+    return round(60.0 / statistics.median(gaps), 1) if gaps else None
+
+
 def allowed_origins(config: Config) -> frozenset[str]:
     """The origins a state-changing request may come from: this server, by
     any of the names a browser might reach it under."""
@@ -551,11 +579,13 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         pulses_per_bar: int | None = None,
         anchor: float | None = None,
         pins: str | None = None,
+        steady: str | None = None,
     ) -> dict[str, Any]:
         """Where the solos might be: proposed spans for the Overview's bands
         (roadmap O3, `gui/solos.py` over `solo_spans`), or ready:false with
-        what is missing. `pins` are the pinned beats, as `/beats` takes them:
-        the bands sit on the same bar lines as the roll.
+        what is missing. `pins` are the pinned beats and `steady` the steady
+        stretches, as `/beats` takes them: the bands sit on the same bar lines
+        as the roll.
 
         Never computes anything slow, like `/beats`: it needs the beat grid,
         a whole-file stem set and that set's envelopes, all cached, and when
@@ -611,7 +641,9 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             if value is not None
         }
         try:
-            lines = gui_solos.bar_line_times(grid, config, duration, overrides, parse_pins(pins))
+            lines = gui_solos.bar_line_times(
+                grid, config, duration, overrides, parse_pins(pins), parse_steady(steady)
+            )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         payload = gui_solos.propose(env, lines, model, level)
@@ -721,6 +753,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         start: float | None = None,
         end: float | None = None,
         pins: str | None = None,
+        steady: str | None = None,
     ) -> dict[str, Any]:
         """The bar grid for this track+model, or ready:false.
 
@@ -732,6 +765,9 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         `pins` is the beats the listener pinned, comma-separated seconds --
         the sidecar's `beat_pins` as the page holds them now, so a pin
         redraws before it is saved, like a downbeat (meter.apply_pins).
+        `steady` is the stretches the listener marked steady, start,end
+        seconds pair after pair -- the sidecar's `steady_spans` as the page
+        holds them now (meter.apply_steady).
 
         Never computes the beat grid: even at seconds rather than the minutes
         it cost when it chained from a separation, "draw the bars if they're
@@ -791,8 +827,15 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
 
         duration = entry["document"].audio.duration
         near = (start, end) if start is not None and end is not None and end > start else None
+        stretches = parse_steady(steady)
         repaired, sections = meter.bar_grid(
-            grid.beats, grid.downbeats, meter_config, duration, near=near, pins=parse_pins(pins)
+            grid.beats,
+            grid.downbeats,
+            meter_config,
+            duration,
+            near=near,
+            pins=parse_pins(pins),
+            steady=stretches,
         )
         lines = meter.bar_lines(repaired, sections, meter_config.form_start)
 
@@ -820,6 +863,12 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             # The pins as the grid took them: cleaned, and only those inside
             # the track. The roll draws a marker at each.
             "pins": [round(b.time, 3) for b in repaired if b.pinned],
+            # Each steady stretch and the tempo it was laid at, or null where
+            # neither side had steady beats to take one from: the page says
+            # so rather than leave the listener wondering why nothing moved.
+            "steady": [
+                {"start": a, "end": b, "bpm": steady_bpm(repaired, a, b)} for a, b in stretches
+            ],
             # Where the grid's own beat count is unsupported by the time
             # (meter.grid_doubts, R34): a crowded or stretched spot the
             # repair could not settle. The views mark each one, so a slip
