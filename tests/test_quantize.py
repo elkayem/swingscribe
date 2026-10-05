@@ -221,6 +221,24 @@ def test_bar_and_beat_counts_from_the_anchor():
     assert bar_and_beat(9.5, beats, [section]) == (3, 1.5)
 
 
+def test_bar_and_beat_numbers_a_section_after_a_hole_like_the_roll():
+    """`first_bar` numbers a section's first line, and the bar used to be
+    that plus an absolute count from beat 0: after a hole in the tracking,
+    every bar before the section was counted twice (bar 23 where the roll
+    draws 13, R35)."""
+    from swingscribe.config import MeterConfig
+    from swingscribe.stages import meter
+
+    head = [i * 0.5 for i in range(40)]
+    ragged = [19.5 + x for x in (0.3, 0.95, 1.2, 1.9, 2.15, 2.8, 3.1, 3.6)]
+    times = head + ragged + [23.5 + i * 0.5 for i in range(40)]
+    beats, sections = meter.bar_grid(times, [], MeterConfig(anchor=0.0), times[-1] + 1.0)
+    assert len(sections) == 2
+    grid = [b.time for b in beats]
+    for time, number in meter.bar_lines(beats, sections):
+        assert bar_and_beat(float(grid.index(time)), grid, sections) == (number, 0.0)
+
+
 def test_bar_and_beat_outside_any_section_reports_bar_zero():
     """A pickup or a rubato intro must not be forced into a bar."""
     beats = [i * 0.5 for i in range(33)]

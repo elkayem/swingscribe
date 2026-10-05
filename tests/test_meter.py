@@ -645,6 +645,31 @@ def test_bar_lines_land_every_pulses_per_bar_beats():
     assert [n for _t, n in lines][:4] == [1, 2, 3, 4]
 
 
+def holed() -> list[float]:
+    """Twenty steady bars, two bars' time the tracker could not keep, twenty
+    more: two sections with free time between them."""
+    head = steady(40)
+    t = head[-1]
+    ragged = [round(t + x, 6) for x in (0.3, 0.95, 1.2, 1.9, 2.15, 2.8, 3.1, 3.6)]
+    return head + ragged + steady(40, start=t + 4.0)
+
+
+def test_the_bars_in_a_hole_are_counted_the_way_the_page_counts_them():
+    """The page numbers a bar by beat index and knows no free time. The roll
+    numbered only the bars it drew, so after a hole every number ran behind
+    the page's (Oblivion's 50 where the page has 54, R35) and a span's last
+    line and the next span's first wore the same number."""
+    times = holed()
+    beats, sections = meter.bar_grid(times, [], MeterConfig(anchor=0.0), times[-1] + 1.0)
+    assert len(sections) == 2
+    grid = [b.time for b in beats]
+    lines = meter.bar_lines(beats, sections)
+    assert [n for _t, n in lines] == [1 + grid.index(t) // 4 for t, _n in lines]
+    assert 12 not in [n for _t, n in lines]  # the hole's bar is counted, not drawn
+    shifted = meter.bar_lines(beats, sections, form_start=4.0)
+    assert [n for _t, n in shifted] == [n - 2 for _t, n in lines]
+
+
 def test_moving_the_anchor_shifts_every_bar_line():
     """The whole point of the design: the downbeat is one parameter, so a click
     re-phases the entire tune rather than triggering re-analysis."""

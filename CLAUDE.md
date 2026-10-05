@@ -565,7 +565,13 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   the layer's BEST PHASE (`meter._auto_anchor`, what a track with no
   anchor gets) is now measured against references: voted around the span
   it names the right beat on 95 of 96 tracks (D32). Good enough to draw;
-  one click still fixes it.
+  one click still fixes it. Bar NUMBERS count by beat index too, free time
+  included (2026-10-05, R35): a section's `first_bar` is its first line's
+  count from the first section's, `bar_lines` only shifts that for
+  `form_start`, and `quantize.bar_and_beat` counts from the section's own
+  first line. The roll used to number only the bars it drew (Oblivion's
+  bar after a hole was 50 where the page has 54), and the pipeline's
+  quantizer added every earlier bar twice.
 - `gui.*` config is UI state and must never reach a cache key. `stage_config()`
   enforces this via `STAGE_SECTIONS`; changing a port must not throw away a
   separation.

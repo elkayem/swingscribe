@@ -53,7 +53,8 @@ from swingscribe.model import Document, MeterSection, QuantizedNote, SwingSpan
 
 # Bump when this stage's behavior changes without a config change (see
 # pipeline._cache_name).
-CACHE_VERSION = 5  # 5: the line's lag is taken out before the snap (the six-per-beat grid is off)
+CACHE_VERSION = 6  # 5: the line's lag is taken out before the snap (the six-per-beat grid is off)
+# 6: a section's bars are counted from its own first line (R35)
 
 STRAIGHT_PHASE = 0.5
 
@@ -633,7 +634,13 @@ def bar_and_beat(
         pulses = max(1, section.pulses_per_bar)
         phase = _anchor_index(section, beats) % pulses
         offset = index - phase
-        bar = section.first_bar + offset // pulses
+        # `first_bar` numbers the section's FIRST line, so count from it. An
+        # absolute count from beat 0 added every bar before the section to
+        # its number a second time (R35): after a hole in the tracking, the
+        # pipeline's bars ran on from double the roll's.
+        start = min(range(len(beats)), key=lambda i: abs(beats[i] - section.start))
+        first = start + (phase - start) % pulses
+        bar = section.first_bar + (index - first) // pulses
         return bar, (offset % pulses) + (position - index)
     return 0, position
 

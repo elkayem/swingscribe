@@ -1533,6 +1533,22 @@ Not this rule's: Oblivion's last ten bars (89.4-96.3 s) are tracked at
 span, so there is no metronome to bridge with; the page steps +2 and +3
 beats there and the roll marks it "?". A pin is the tool.
 
+**The roll's bar NUMBERS, the same day** (the listener agreed it should
+count as the page does). Whatever hole the repair cannot mend, the roll
+numbered only the bars it drew -- `derive_sections` summed each span's bars
+and `bar_lines` re-counted the drawn lines from `form_start` -- so every
+number after free time ran behind the page's, which counts beats, and a
+span's last line and the next span's first wore the same number. A
+section's `first_bar` is now its first line's count by beat index from the
+first section's, and `form_start` only shifts it. The pipeline's quantizer
+had the opposite bug: `bar_and_beat` added an absolute count from beat 0 to
+`first_bar`, counting every bar before a later section twice (a synthetic
+two-bar hole: bar 23 where the roll draws 13); it counts from the
+section's own first line now. The page (`notation_for_span`, one section
+whose first line is within its first bar) and the chord chart
+(`bar_number_at`, already counted in beats) read the same as before; no
+pin moved. `meter.CACHE_VERSION` 7, `quantize.CACHE_VERSION` 6.
+
 ### R34 - A ghost beat 80 ms from a real one put a page half a bar off, and nothing counted the grid's slips
 
 2026-10-02, the listener on Joe Henderson's A Shade of Jade (a recording

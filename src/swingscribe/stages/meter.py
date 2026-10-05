@@ -77,7 +77,8 @@ BRIDGE_BEATS = 1
 # beats too many (`thin_by_metronome`).
 # 6: doubts too close for the metronome to read alone are read as one, a
 # whole bar too many is thinned, and a re-lay keeps only FOUND beats (R35).
-CACHE_VERSION = 6
+# 7: a section's first_bar counts the bars of free time before it (R35).
+CACHE_VERSION = 7
 
 
 @dataclass(frozen=True)
@@ -1305,8 +1306,14 @@ def derive_sections(
 
     The phase is global: `index % pulses == anchor % pulses` decides a bar line
     everywhere, so a span that does not contain the anchor still counts in step
-    with it. Spans only gate *where* bars are drawn. `judged`: the unpinned
-    grid's answers (`Judgement`).
+    with it. Spans only gate *where* bars are drawn. So is the NUMBER (R35,
+    2026-10-05): a section's `first_bar` counts every bar from the first
+    section's first line by beat index, the bars in the free time between
+    them included, which is how the page numbers them (it counts beats and
+    knows no free time). Counting only the bars drawn numbered the roll's
+    bar after Oblivion's four-second hole 50 where the page has 54, and
+    numbered a span's last line and the next span's first line alike.
+    `judged`: the unpinned grid's answers (`Judgement`).
     """
     signature, pulses = resolve_meter(config)
     spans = metrical_spans(beats, config, judged)
@@ -1321,7 +1328,7 @@ def derive_sections(
     phase = anchor_index % pulses
 
     sections: list[MeterSection] = []
-    bars_before = 0
+    bar_one: int | None = None  # beat index of the first line drawn
     previous_end: int | None = None
     for start, end in spans:
         first = next((i for i in range(start, end) if i % pulses == phase), None)
@@ -1329,9 +1336,12 @@ def derive_sections(
             previous_end = end
             continue  # not even one whole bar fits in this span
         # A span reached across a hole in the tracking still counts in step, but
-        # says so: beats lost in the gap would shift the bar number.
+        # says so: the bars in the gap are counted on the repaired grid there,
+        # and a beat the repair got wrong in it would shift the bar number.
         crossed = previous_end is not None and start > previous_end
         previous_end = end
+        if bar_one is None:
+            bar_one = first
         sections.append(
             MeterSection(
                 start=beats[first].time,
@@ -1339,12 +1349,11 @@ def derive_sections(
                 pulses_per_bar=pulses,
                 time_signature=signature,
                 anchor=beats[anchor_index].time,
-                first_bar=bars_before + 1,
+                first_bar=1 + (first - bar_one) // pulses,
                 confidence=0.75 if crossed else 1.0,
                 origin="user" if config.anchor is not None else "auto",
             )
         )
-        bars_before += (end - first) // pulses
     return sections
 
 
@@ -1391,7 +1400,9 @@ def bar_lines(
     `form_start` says where the tune's form begins, which is not always where
     the audio does: an intro or a vamp is not part of the song structure. Bar 1
     lands there and anything before it numbers zero or negative, so the caller
-    can draw those lines without labelling them.
+    can draw those lines without labelling them. The numbers count the bars of
+    free time between sections too (`derive_sections`), so they are shifted,
+    never re-counted from the lines drawn.
     """
     lines: list[tuple[float, int]] = []
     for section in sections:
@@ -1407,8 +1418,8 @@ def bar_lines(
 
     if form_start is not None and lines:
         # Renumber so the bar nearest form_start becomes bar 1.
-        offset = min(range(len(lines)), key=lambda i: abs(lines[i][0] - form_start))
-        lines = [(time, index - offset + 1) for index, (time, _old) in enumerate(lines)]
+        _time, at_form = min(lines, key=lambda line: abs(line[0] - form_start))
+        lines = [(time, number - at_form + 1) for time, number in lines]
     return lines
 
 
