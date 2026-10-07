@@ -1431,6 +1431,19 @@ docs/pdf2musicxml.md has the measurements. Things not to re-derive:
   mended bars checked by eye did exactly that). The one-rest-fills-it
   rule was measured and refused: right 191 of 191 where a rest was
   misread, but it fires on one in seven bars off for another reason.
+- **A SCAN's tuplet numbers are read off its page image** (2026-10-07,
+  `scanpage.py`, 0.3.35): homr's own detection (staves, noteheads with
+  staff positions, bar lines -- its INTERNAL functions, re-check when
+  homr moves) plus RapidOCR on small lone marks beside each staff
+  become `vector.PrintedPages`, and `apply_printed_tuplets` runs as on a
+  vector page. OCR a digit on its own strokes (a beam in the crop made
+  a 3 a 5); never choose 3 or 5 by the bar's arithmetic (both save the
+  same); a digit with a letter-shaped mark beside it is a chord
+  symbol's ("G 7", "Cm7", a raised "Gm6"), one before the line's first
+  note a bar number; scans take only 3, 5, 6 and 13. Check new digit
+  rules against the page images: the counts said "better" with 55
+  chord 7s claimed as septuplets. Punjab 25 -> 11 bars off. Cached as
+  `pNNN_scan.json`, homr's part and the digits versioned apart.
 - **pdfium's text layer drops the second of two identical characters whose
   boxes touch**: a printed 4/4 arrives as one "4", a 2/2 as one "2", while
   3/4 and 6/8 arrive whole. The page's text OBJECTS still hold both, so a

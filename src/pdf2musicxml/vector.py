@@ -1623,7 +1623,8 @@ def apply_printed_tuplets(part: ET.Element, printed: PrintedPages) -> TupletCorr
             result.already += 1
             claimed.update(member_ids)
             continue
-        normal = TUPLET_NORMAL[count]
+        # A count past 7 (a scan's 13) is in the time of the power of two below it.
+        normal = TUPLET_NORMAL.get(count) or 2 ** (count.bit_length() - 1)
         divisions = divisions_of[id(measure)]
         heads_only = [m for m in members if m.find("chord") is None]
         # Each member's written value as the page shows it; when they sum

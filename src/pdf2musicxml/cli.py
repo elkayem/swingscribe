@@ -35,6 +35,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not read a scan a second time with its ink thinned",
     )
     convert.add_argument(
+        "--no-scan-tuplets",
+        action="store_true",
+        help="do not read a scan's tuplet numbers off its page images",
+    )
+    convert.add_argument(
         "--no-check",
         action="store_true",
         help="do not run the other engine and list the bars the two disagree on",
@@ -189,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
         redetect=args.redetect,
         printed_pitch=not args.no_printed_pitch,
         thin_scans=not args.no_thin,
+        scan_tuplets=not args.no_scan_tuplets,
     )
     results = []
     for target in args.paths:

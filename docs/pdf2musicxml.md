@@ -732,6 +732,73 @@ reading holds), Hawkins's 23 to 19, My Ideal 14 to 9. 20 bars took
 other readings' values, 10 one-system keys went. Eight mended bars were
 checked against the page images and match.
 
+### A scan's tuplet numbers, read off the page image (2026-10-07, 0.3.35-0.3.36)
+
+The listener then dropped the three worst scans (Stitt's Body and Soul,
+Parker's Bird of Paradise Take B, Bud Powell's Nice Work, to
+`excluded/`) and looked at Joe Henderson's Punjab: nearly every miss a
+tuplet -- a 5 under bar 1's sixteenths, six triplets in bars 8-10, eight
+quintuplets and a 13 in bars 46-48. homr read none of the pages' 44
+numbers, Audiveris 14 triplets.
+
+A notation-program PDF gives `vector.apply_printed_tuplets` its inputs
+from the text layer; a scan has none, but homr's own detection, the
+part that runs before its transformer reads the music, finds each staff,
+each notehead with its staff position, and the bar lines.
+`scanpage.read_page` calls it (homr's internal functions: re-check them
+when homr moves) and looks beside each staff for small lone marks, a
+staff space tall or so, which RapidOCR (homr's title reader, already in
+the `omr` group) reads. `printed_pages` turns the lot into
+`vector.PrintedPages`, y turned upward and each head's letter from its
+staff position on a treble staff, and the vector tuplet code does the
+rest, unchanged except that a count past 7 is in the time of the power
+of two below it (13:8). It runs on the primary, thinned and Audiveris
+readings before the merge. Pages are cached beside their images as
+`pNNN_scan.json`, homr's part (seconds a page) and the digits under
+separate versions.
+
+What reading the digits took, all found on the pages:
+
+- **A digit is OCR'd on its own strokes only.** With a beam in the crop,
+  bar 8's "3" read as a 5 (the beam was the 5's flat top); on black and
+  white strokes, 3s read as 6s and the 13 vanished. The grey crop with
+  every other mark blanked reads Punjab's 44 numbers as printed.
+- **The bar cannot tell a 3 from a 5.** Five 16ths as a 5:4 save one
+  16th, and three of them as a 3:2 save one 16th too: choosing the
+  look-alike that fills the bar was choosing at random, and was taken
+  out. The digit is taken as OCR reads it.
+- **A number stands alone.** Chord symbols print their digits with a
+  gap: Benny Goodman's Indiana gave 14 lone 7s ("G 7", "C 6", the C 2.4
+  spaces tall), Lullaby in Rhythm 25 ("Cm7", the m wider than a digit),
+  Hipsippy Blues its chords' raised 6s ("Gm6"), each claimed as a 7:4 or
+  6:4. A mark is a chord symbol's when a letter-shaped neighbour -- up
+  to three spaces tall, no more than twice as wide as tall, filling a
+  sixth of its box -- sits within a space and a half of it, reaching half
+  a space above and below its line; half a tuplet bracket is flat and
+  does not count (Lester Leaps Again's bracketed 5 survives). Scans take
+  only the counts 3, 5, 6 and 13: a chord's 7, 9 or 11 is far commoner
+  than such a tuplet.
+- **A bar number stands before the line's first note** (the vector
+  reader's rule), the first note past the clef: homr finds "notes" in
+  the clef too, and Cherokee's line-start 13 slipped by them.
+- After those rules every 6, 13 and 5 outside Punjab was checked against
+  the page images: two sextuplets, a 13 and seven 5s, all printed.
+- **Never drop a number for leaving its bar off.** Punjab's bar 47
+  holds another misreading, and without its 5 it "filled".
+
+Punjab alone: part 1 25 bars off to 11 (31 groups made tuplets), part 2
+6 to 2. Bar 8's third triplet opens with two rests and its number was
+not found; bar 9 is still taken from a two-voice Audiveris bar.
+
+Over the 50 scans left (0.3.37 against 0.3.34, the three dropped
+files out of both): bars off 201 to 123, 18 transcriptions better and
+none worse; 261 groups made tuplets from 592 numbers read (567 threes,
+19 fives, four sixes, two 13s). Alone Together 19 to 10, How Deep Is
+the Ocean's second part 9 to 1, Yesterdays' 11 to 3, Easy Living 6 to
+1. Vector pages level at 491. Numbers left unapplied are mostly a
+group whose head homr's detection missed, or a run the reading split
+across a bar line.
+
 ## What is left to a human
 
 An OMR reading is a draft. Per page expect a handful of wrong durations,

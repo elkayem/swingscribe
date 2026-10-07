@@ -15,7 +15,7 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
-from pdf2musicxml import convert, layout, musicxml, pdfpages, vector
+from pdf2musicxml import convert, layout, musicxml, pdfpages, scanpage, vector
 from pdf2musicxml.instruments import Instrument, find_instrument, parse_instrument
 from pdf2musicxml.pdfpages import TextLine, is_music_font
 
@@ -1119,7 +1119,7 @@ def test_unclosed_tuplet_is_stripped():
     )
     part = musicxml.first_part(tree.getroot())
     assert musicxml.repair_tuplets(part) == 1
-    assert part.find("measure/note/time-modification") is None
+    assert part.find("measure/note").find("time-modification") is None
 
 
 def test_unbracketed_tuplet_runs_must_make_whole_tuplets():
@@ -1147,7 +1147,7 @@ def test_mixed_values_in_a_bare_run_are_not_several_tuplets():
     run = "".join(tuplet_note(s, 4, "eighth") for s in "CDEF") + tuplet_note("G", 2, "16th")
     part = musicxml.first_part(score([run + note("C", 4, 12)], divisions=12).getroot())
     assert musicxml.repair_tuplets(part) == 1
-    assert part.find("measure/note/time-modification") is None
+    assert part.find("measure/note").find("time-modification") is None
 
 
 def test_chord_tones_on_a_rest_or_after_a_backup_are_unchorded():
@@ -1178,7 +1178,7 @@ def test_dotted_values_never_become_a_tuplet_unit():
     )
     part = musicxml.first_part(score([dotted * 3 + note("C", 4, 12)], divisions=12).getroot())
     assert musicxml.repair_tuplets(part) == 1  # three dotted eighths under 3:2: stripped, no crash
-    assert part.find("measure/note/time-modification") is None
+    assert part.find("measure/note").find("time-modification") is None
 
 
 def test_mixed_quarter_and_eighth_run_gets_its_unit_named():
@@ -1599,7 +1599,7 @@ def test_printed_number_in_a_bar_of_several_voices_is_left_alone():
     result = vector.apply_printed_tuplets(part, pages_with(heads, [mark]))
     assert result.applied == 0 and result.uneven == 1
     assert "the bar has several voices" in result.changes[0]
-    assert part.find("measure/note/time-modification") is None
+    assert part.find("measure/note").find("time-modification") is None
 
 
 def printed_rest(x, value, staff=0, page=0):
@@ -2503,3 +2503,54 @@ def test_combined_values_leave_every_rest_its_value():
     part = musicxml.first_part(score([full, mine_bar, full]).getroot())
     other = musicxml.first_part(score([full, their_bar, full]).getroot())
     assert musicxml.combine_values(part, [other]) == []
+
+
+# ---------------------------------------------------------------- a scan's tuplet numbers
+
+
+def _scan_page(notes, digits, height=1000.0):
+    staff = {"min_x": 0.0, "max_x": 2000.0, "min_y": 400.0, "max_y": 464.0, "unit": 16.0}
+    return {
+        "version": scanpage.SEGMENT_VERSION,
+        "height": height,
+        "staffs": [{**staff, "notes": notes, "bars": [], "digits": digits}],
+    }
+
+
+def test_a_scanned_page_becomes_heads_and_tuplet_numbers():
+    # homr's position 1 is a treble staff's bottom line (E4); y turns upward.
+    notes = [[100.0, 464.0, 1], [120.0, 408.0, 8]]
+    digits = [
+        [110.0, 500.0, "3", 0.97],
+        [300.0, 500.0, "5", 0.5],
+        [400.0, 380.0, "13", 0.9],
+        [500.0, 500.0, "A", 0.99],
+        [600.0, 500.0, "1", 0.9],
+    ]
+    printed = scanpage.printed_pages([_scan_page(notes, digits)])
+    assert [(h.letter, h.octave, h.y) for h in printed.heads] == [("E", 4, 536.0), ("E", 5, 592.0)]
+    assert [(m.count, m.x) for m in printed.marks] == [(3, 110.0), (5, 300.0), (13, 400.0)]
+
+
+def test_a_thirteen_is_in_the_time_of_eight():
+    bar = plain("C", 5, 8, "half") + "".join(plain("D", 5, 1, "16th") for _ in range(13))
+    part = musicxml.first_part(score([bar]).getroot())
+    heads = [head(100, "C", 5)] + [head(120 + 10 * i, "D", 5) for i in range(13)]
+    mark = vector.TupletMark(x=180, y=0, staff=0, count=13, spacing=5.0)
+    printed = vector.PrintedPages(heads, [mark], {(0, 0): []}, None, None)
+    assert vector.apply_printed_tuplets(part, printed).applied == 1
+    assert part.find("measure/note").find("time-modification") is None
+    ratio = part.findall("measure/note")[1].find("time-modification")
+    assert (ratio.findtext("actual-notes"), ratio.findtext("normal-notes")) == ("13", "8")
+    assert musicxml.bars(part)[0].length == 4
+
+
+def test_a_digit_with_a_letter_beside_it_is_a_chord_symbols():
+    # Stats rows as OpenCV gives them: x, y, width, height, area; row 0 the background.
+    digit = (100, 50, 12, 24, 150)
+    box = (100, 50, 112, 74)
+    letter = (70, 56, 30, 18, 200)  # the m of "Cm7", wider than a digit, on its line
+    bracket = (40, 56, 30, 10, 70)  # half a tuplet bracket: a thin line and its hook
+    stem = (96, 0, 3, 80, 240)  # a stem ending beside the number: far taller
+    assert scanpage._beside([(0,) * 5, digit, letter], [1], box, 16.0)
+    assert not scanpage._beside([(0,) * 5, digit, bracket, stem], [1], box, 16.0)

@@ -32,7 +32,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from pdf2musicxml import __version__, layout, musicxml, pdfpages, vector
+from pdf2musicxml import __version__, layout, musicxml, pdfpages, scanpage, vector
 from pdf2musicxml.engines import EngineError, audiveris, homr
 from pdf2musicxml.instruments import Instrument, find_instrument, parse_instrument
 
@@ -58,6 +58,7 @@ class Options:
     redetect: bool = False
     printed_pitch: bool = True  # correct pitches to the text layer's noteheads
     thin_scans: bool = True  # a second homr reading of a scan with its ink thinned
+    scan_tuplets: bool = True  # a scan's tuplet numbers, read off the page image
 
 
 @dataclass
@@ -397,6 +398,27 @@ def _thinned_images(images: list[Path], force: bool = False) -> list[Path]:
     return out
 
 
+def _scan_printed(images: list[Path], options: Options, log: Log) -> vector.PrintedPages | None:
+    """A scan's noteheads, bar lines and tuplet numbers off its page images (`scanpage`).
+
+    None when the option is off, homr's detection is not installed or
+    fails, or the pages print no tuplet number; the conversion goes on.
+    """
+    if not options.scan_tuplets:
+        return None
+    import contextlib
+    import io
+
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            pages = [scanpage.cached_page(image, options.force) for image in images]
+    except Exception as error:  # an optional reader must not end the conversion
+        log(f"    scan tuplet numbers skipped: {type(error).__name__}: {error}")
+        return None
+    printed = scanpage.printed_pages(pages)
+    return printed if printed.marks else None
+
+
 def _read_with(engine: str, images: list[Path], tdir: Path, font: str, force: bool = False):
     """The engine's readings of these page images, joined into one tree, plus its warnings.
 
@@ -585,6 +607,10 @@ def convert_group(
         bar_fix = vector.align_bars(part, printed) if printed else None
         rest_fix = vector.expand_multirests(part, printed) if printed else None
         tuplet_fix = vector.apply_printed_tuplets(part, printed) if printed else None
+        # A scan's tuplet numbers come from its page images, not a text layer.
+        scan_printed = _scan_printed(images, options, log) if scan else None
+        if scan_printed is not None:
+            tuplet_fix = vector.apply_printed_tuplets(part, scan_printed)
         rest_values = vector.correct_rests(part, printed) if printed else None
         filled = musicxml.fill_rest_bars(part)
         musicxml.drop_redundant_times(part)
@@ -606,10 +632,14 @@ def convert_group(
             musicxml.drop_redundant_times(thin_part)
             musicxml.join_short_pairs(thin_part)
             musicxml.join_to_match(thin_part, part)
+            if scan_printed is not None:
+                vector.apply_printed_tuplets(thin_part, scan_printed)
         if other is not None:
             other_part, _, _, _ = _mend(other, options, instrument, title, printed)
             if scan:
                 musicxml.drop_key_flips(other_part)
+            if scan_printed is not None:
+                vector.apply_printed_tuplets(other_part, scan_printed)
             if printed:
                 vector.correct_pitches(other_part, printed.heads)
                 vector.apply_printed_times(other_part, printed)
