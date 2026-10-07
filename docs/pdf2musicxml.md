@@ -663,6 +663,75 @@ page images as `pNNN_thin.musicxml`. Two of the folder's PDFs are
 byte-identical copies of Whisper Not: the batch converts one and skips
 the other, whose outputs then age; convert it by name.
 
+### Sonny Stitt's Body and Soul, bar by bar (2026-10-07, 0.3.32-0.3.34)
+
+The listener went through the first nineteen bars of the worst file in
+the folder (33 of 72 bars off) and named every difference from the
+page. Read against the three readings, most were homr's and Audiveris's
+alike -- a quarter rest at a bar's start read by neither (bars 1 and
+11), triplets read by neither (1, 3, 8, 11, 16) -- and four were the
+tool's:
+
+- **Bar 7 an octave low.** Audiveris reads the plain treble clef of a
+  scan as treble-8vb on some systems and 8va on others (53 of its 274
+  readings), writes its pitches to match, and homr never writes an
+  octave clef; the merge copied the notes into homr's plain clef. 37
+  bars on 17 files sat 9 or more semitones off their neighbours this
+  way. `musicxml.plain_clefs` moves the octave into the pitches when a
+  reading is mended, and the clef becomes the plain one the page
+  prints. Bars that now pair by their notes did not before.
+- **Bar 19 two 32nd notes.** The thinned reading held the whole bar, a
+  32nd long; the plain one held two notes, and "an overfull bar loses
+  first" gave the bar to two notes. That rule (0.3.25) was measured on
+  vector pages, where the page's note count protects it; a scan prints
+  none, and once the octave fix let Audiveris's bars pair, its bar 18 --
+  a quarter rest and a dot short -- beat the thinned bar whose one slip
+  was a quarter rest for an eighth. On a scan the nearer bar now wins
+  (`merge_readings(overfull_first=False)`), as before 0.3.25.
+- **Bar 19 in C.** homr read that system's three flats as none. A key
+  that holds for one system and gives way to the key before it is
+  dropped and its notes re-altered (`drop_key_flips`): checked by eye on
+  every scan where it fired, 9 of 10 were homr's misreading (the tenth,
+  Limehouse Blues, is two flats that homr reads as none or one on every
+  system). On vector pages 2 of 4 were the page's own one-system key,
+  and the page sets the pitches there anyway, so the rule runs on scans
+  only. The flip was invisible at first because joining the page
+  readings lost each page turn: a page's last system ran into the next
+  page's first. `concat` marks a later page's first measure
+  `<print new-page>`, and a bar taken from another reading keeps this
+  reading's system break (it was lost with the other reading's
+  `<print>`, and MuseScore's line with it).
+- **Bars 10 and 17 one value off in each reading.** The plain reading
+  has bar 10's dotted quarter and 32nds for its 16ths; the thinned one
+  the 16ths and a plain quarter. `combine_values` aligns each reading's
+  bar to the merged bar by staff position and lets every note take any
+  value a reading gave it; the one combination that fills the bar with
+  the fewest changes is written. Two limits, both found by checking the
+  mended bars against the pages: a note keeps its tuplet or its lack of
+  one (Audiveris's bar 7 "filled" by unmaking its one right triplet),
+  and a rest keeps its value (Punjab bar 44 paid for a missed triplet
+  with a quarter rest's half; Hawkins's Body and Soul bar 21 doubled an
+  eighth rest for four 16ths read as 32nds). Scans only.
+
+Measured and NOT shipped: the one rest change that fills a bar (bar 18,
+a quarter rest for an eighth). On vector pages, with each rest the page
+corrected put back to the engine's value, it recovers the printed value
+191 times, never a wrong one, 54 ambiguous; but on the 491 vector bars
+still off for other reasons it fires on 68, one in seven, and every one
+of those breaks a rest the page printed. A scan's off bars are mostly
+other errors.
+
+Over the folder, against the morning's 0.3.31: scans 289 bars off to
+258, vector pages level at 491 (the merge, key and value rules are the
+scans' alone, and a vector page's pitches come from the page). 15
+scans improved and 2 worsened, both by one bar that Audiveris had filled
+an octave low and homr's reading now holds, honestly short. Stitt's
+Body and Soul 33 to 28 (bars 7, 10, 17 and 19 of the listener's list
+mended or nearer; 1, 3, 8, 11, 16 and 18 are rests and triplets no
+reading holds), Hawkins's 23 to 19, My Ideal 14 to 9. 20 bars took
+other readings' values, 10 one-system keys went. Eight mended bars were
+checked against the page images and match.
+
 ## What is left to a human
 
 An OMR reading is a draft. Per page expect a handful of wrong durations,

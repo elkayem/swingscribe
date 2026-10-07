@@ -1415,6 +1415,22 @@ docs/pdf2musicxml.md has the measurements. Things not to re-derive:
   off bars vector 593 -> 491, scans 400 -> 289. `render` and `summary`
   prefer the `musicxml/` subfolder: SwingScribe's Export writes pages
   beside the audio in the transcription folder.
+- **Sonny Stitt's Body and Soul, bar by bar** (2026-10-07, 0.3.32-0.3.34,
+  docs/pdf2musicxml.md): Audiveris writes a scan's treble clef as 8vb or
+  8va system by system (53 of 274 readings), so its merged bars came an
+  octave off -- `plain_clefs` moves the octave into the pitches. On a
+  SCAN the nearer bar wins the merge (`overfull_first=False`): without a
+  printed note count "overfull loses first" gave a bar to a reading of
+  2 notes over 22. A key that holds one system and gives way to the key
+  before it is homr's misreading (9 of 10 scans by eye; 2 of 4 on vector
+  pages were real, so scans only): `drop_key_flips` re-alters its notes.
+  `concat` marks each page turn, and a taken bar keeps its system break.
+  `combine_values` fills a scan's off bar with the values the other
+  readings gave the same notes -- but never changes a REST's value or a
+  note's tuplet: either one pays for any other misreading (two of five
+  mended bars checked by eye did exactly that). The one-rest-fills-it
+  rule was measured and refused: right 191 of 191 where a rest was
+  misread, but it fires on one in seven bars off for another reason.
 - **pdfium's text layer drops the second of two identical characters whose
   boxes touch**: a printed 4/4 arrives as one "4", a 2/2 as one "2", while
   3/4 and 6/8 arrive whole. The page's text OBJECTS still hold both, so a

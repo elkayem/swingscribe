@@ -2339,3 +2339,167 @@ def test_a_printed_dotted_rest_gives_the_read_rest_its_dot():
     assert rest_note.findtext("duration") == "18" and rest_note.findtext("type") == "quarter"
     assert len(rest_note.findall("dot")) == 1
     assert musicxml.bars(part)[0].length == 6
+
+
+# ---------------------------------------------------------------- octave clefs, key flips, values
+
+
+def test_an_octave_clef_moves_into_the_pitches_and_the_clef_becomes_plain():
+    # Audiveris read a tenor's treble clef as 8vb, and as 8va on a later system.
+    bar2 = (
+        "<attributes><clef><sign>G</sign><line>2</line>"
+        "<clef-octave-change>1</clef-octave-change></clef></attributes>"
+        + plain("B", 5, 4, "quarter")
+        * 4
+    )
+    part = musicxml.first_part(score([plain("F", 3, 4, "quarter") * 4, bar2]).getroot())
+    ET.SubElement(part.find("measure/attributes/clef"), "clef-octave-change").text = "-1"
+    assert musicxml.plain_clefs(part) == 8
+    assert [n.findtext("pitch/octave") for n in part.iter("note")] == ["4"] * 8
+    assert not list(part.iter("clef-octave-change"))
+
+
+def _keyed(fifths: int, content: str) -> str:
+    return (
+        f'<print new-system="yes"/><attributes><key><fifths>{fifths}</fifths></key></attributes>'
+        + content
+    )
+
+
+def test_a_key_read_for_one_system_only_is_dropped_and_its_notes_take_the_right_key():
+    # Three flats on every system; homr read the second system in C (Stitt's bar 19).
+    flipped = (
+        plain("B", 4, 4, "quarter")
+        + plain("E", 5, 4, "quarter")
+        + plain("C", 5, 4, "quarter")
+        + note("A", 4, 4, alter=-1)
+    )
+    bars_ = [plain("C", 5, 16, "whole"), _keyed(0, flipped), _keyed(-3, plain("B", 4, 16, "whole"))]
+    part = musicxml.first_part(score(bars_).getroot())
+    part.find("measure/attributes/key/fifths").text = "-3"
+    assert musicxml.drop_key_flips(part) == ["2"]
+    assert [k.findtext("fifths") for k in part.iter("key")] == ["-3"]
+    bar2 = part.findall("measure")[1]
+    assert [(n.findtext("pitch/step"), n.findtext("pitch/alter")) for n in bar2.iter("note")] == [
+        ("B", "-1"),
+        ("E", "-1"),
+        ("C", None),
+        ("A", "-1"),
+    ]
+    # A key that holds for two systems is a modulation, and stays.
+    bars_ = [
+        plain("C", 5, 16, "whole"),
+        _keyed(0, plain("B", 4, 16, "whole")),
+        '<print new-system="yes"/>' + plain("B", 4, 16, "whole"),
+        _keyed(-3, plain("B", 4, 16, "whole")),
+    ]
+    part = musicxml.first_part(score(bars_).getroot())
+    part.find("measure/attributes/key/fifths").text = "-3"
+    assert musicxml.drop_key_flips(part) == []
+    assert [k.findtext("fifths") for k in part.iter("key")] == ["-3", "0", "-3"]
+
+
+def test_joined_pages_mark_each_later_page_turn_as_a_system_break():
+    pages = [score([plain("C", 4, 16, "whole")] * 2), score([plain("D", 4, 16, "whole")] * 2)]
+    part = musicxml.first_part(musicxml.concat(pages).getroot())
+    marks = [m.find("print") for m in part.findall("measure")]
+    assert [mark.get("new-page") if mark is not None else None for mark in marks] == [
+        None,
+        None,
+        "yes",
+        None,
+    ]
+    assert [len(system) for system in musicxml.systems_of(part)] == [2, 2]
+
+
+def test_on_a_scan_the_nearer_bar_wins_and_an_overrun_is_one_more_miss():
+    # Stitt's bar 19: the thinned reading a sixteenth long with 17 notes, the plain one 2.
+    sparse = musicxml.first_part(score([plain("D", 5, 1, "32nd") * 2], divisions=8).getroot())
+    full = musicxml.first_part(score([plain("C", 5, 2, "16th") * 17], divisions=8).getroot())
+    assert musicxml.merge_readings(sparse, full, overfull_first=False).taken == 1
+    assert len(sparse.findall("measure/note")) == 17
+    # A vector file with no count for the bar keeps overfull-first.
+    sparse = musicxml.first_part(score([plain("D", 5, 1, "32nd") * 2], divisions=8).getroot())
+    full = musicxml.first_part(score([plain("C", 5, 2, "16th") * 17], divisions=8).getroot())
+    assert musicxml.merge_readings(sparse, full).taken == 0
+
+
+def test_a_taken_bar_keeps_this_readings_system_break():
+    mine = score([note("C", 4, 4) * 4, '<print new-system="yes"/>' + note("D", 4, 4) * 5])
+    theirs = score([note("C", 4, 4) * 4, note("D", 4, 4) * 4])
+    part, other = musicxml.first_part(mine.getroot()), musicxml.first_part(theirs.getroot())
+    assert musicxml.merge_readings(part, other).bars == ["2"]
+    assert part.findall("measure")[1].find("print").get("new-system") == "yes"
+
+
+def test_a_bar_is_filled_with_the_values_another_reading_gave_its_notes():
+    # Stitt's bar 10: 32nds for 16ths in one reading, the dotted quarter's dot lost in the other.
+    run = [("C", 6), ("A", 5), ("E", 5), ("C", 5)]
+    dotted = (
+        "<note><pitch><step>D</step><octave>5</octave></pitch><duration>12</duration>"
+        "<voice>1</voice><type>quarter</type><dot/></note>"
+    )
+    mine_bar = (
+        plain("E", 5, 4, "eighth")
+        + _eighth_rest(4)
+        + "".join(plain(s, o, 1, "32nd") for s, o in run)
+        + dotted
+        + _eighth_rest(4)
+    )
+    their_bar = (
+        plain("E", 5, 4, "eighth")
+        + _eighth_rest(4)
+        + "".join(plain(s, o, 2, "16th") for s, o in run)
+        + plain("D", 5, 8, "quarter")
+        + _eighth_rest(4)
+    )
+    full = plain("C", 5, 32, "whole")
+    part = musicxml.first_part(score([full, mine_bar, full], divisions=8).getroot())
+    other = musicxml.first_part(score([full, their_bar, full], divisions=8).getroot())
+    assert musicxml.combine_values(part, [other]) == ["2"]
+    bar = part.findall("measure")[1]
+    assert [(n.findtext("type"), len(n.findall("dot"))) for n in bar.findall("note")] == [
+        ("eighth", 0),
+        ("eighth", 0),
+        ("16th", 0),
+        ("16th", 0),
+        ("16th", 0),
+        ("16th", 0),
+        ("quarter", 1),
+        ("eighth", 0),
+    ]
+    assert musicxml.bars(part)[1].length == 4
+
+
+def test_combined_values_never_make_or_unmake_a_tuplet():
+    # Audiveris's bar 7 there: a rest and a triplet short of the page, it "filled"
+    # by reading its one right triplet as plain eighths.
+    triplet = (
+        "<note><pitch><step>{}</step><octave>5</octave></pitch><duration>4</duration>"
+        "<voice>1</voice><type>eighth</type><time-modification><actual-notes>3</actual-notes>"
+        "<normal-notes>2</normal-notes></time-modification></note>"
+    )
+    opening = "".join(plain(s, 4, 6, "eighth") for s in "EFG") + "".join(
+        plain(s, 4, 3, "16th") for s in "BAGF"
+    )
+    mine_bar = opening + "".join(triplet.format(s) for s in "CCB")
+    their_bar = opening + "".join(plain(s, 5, 6, "eighth") for s in "CCB")
+    full = plain("C", 5, 48, "whole")
+    part = musicxml.first_part(score([full, mine_bar, full], divisions=12).getroot())
+    other = musicxml.first_part(score([full, their_bar, full], divisions=12).getroot())
+    assert musicxml.combine_values(part, [other]) == []
+    assert musicxml.bars(part)[1].length == Fraction(7, 2)
+
+
+def test_combined_values_leave_every_rest_its_value():
+    # Punjab bar 44: a quarter rest, a triplet read as three plain eighths, a
+    # quarter, a quarter rest; another reading's eighth rest would "fill" it.
+    mine_bar = (
+        rest(4) + "".join(plain(s, 5, 2, "eighth") for s in "GAB") + note("C", 6, 4) + rest(4)
+    )
+    their_bar = _eighth_rest(2) + "".join(plain(s, 5, 2, "eighth") for s in "GAB") + note("C", 6, 4)
+    their_bar += rest(4)
+    full = plain("C", 5, 16, "whole")
+    part = musicxml.first_part(score([full, mine_bar, full]).getroot())
+    other = musicxml.first_part(score([full, their_bar, full]).getroot())
+    assert musicxml.combine_values(part, [other]) == []

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import copy
 import difflib
+import itertools
 import math
 import zipfile
 from dataclasses import dataclass, field
@@ -264,6 +265,103 @@ def strip_spanning_tremolos(part: ET.Element) -> int:
             if len(list(ornaments)) == 0:
                 note.find("notations").remove(ornaments)
     return removed
+
+
+def plain_clefs(part: ET.Element) -> int:
+    """Write an octave clef's notes on the plain clef; return how many notes moved.
+
+    A note under a treble-8vb clef is written an octave below where it sits
+    on the staff. Audiveris reads a tenor saxophone's plain treble clef as
+    8vb on some systems of a scan and 8va on others (53 of its 274
+    readings), and homr never writes an octave clef, so the cross-check's
+    bars came into homr's file an octave off (Sonny Stitt's Body and Soul
+    bar 7, 2026-10-07; 37 bars on 17 files). The octave moves into the
+    pitches and the clef becomes the plain one the page prints.
+    """
+    shift: dict[str, int] = {}
+    moved = 0
+    for measure in part.findall("measure"):
+        for element in measure:
+            if element.tag == "attributes":
+                for clef in element.findall("clef"):
+                    change = clef.find("clef-octave-change")
+                    staff = clef.get("number", "1")
+                    shift[staff] = -int(change.text or 0) if change is not None else 0
+                    if change is not None:
+                        clef.remove(change)
+            elif element.tag == "note":
+                octaves = shift.get(element.findtext("staff") or "1", 0)
+                octave = element.find("pitch/octave")
+                if octaves and octave is not None:
+                    octave.text = str(int(octave.text) + octaves)
+                    moved += 1
+    return moved
+
+
+def _key_alters(fifths: int) -> dict[str, int]:
+    """The alteration a key signature gives each step: {"B": -1, "E": -1} for two flats."""
+    if fifths > 0:
+        return dict.fromkeys("FCGDAEB"[:fifths], 1)
+    return dict.fromkeys("BEADGCF"[:-fifths], -1)
+
+
+def drop_key_flips(part: ET.Element) -> list[str]:
+    """Drop a key signature that holds for one system and gives way to the one before it.
+
+    homr reads the key signature afresh at the start of every system, and
+    on a scan it sometimes misses it: Sonny Stitt's Body and Soul has three
+    flats on every system and its bar 19 came out in C, alone. A key that
+    holds for exactly one system and then returns to the key before it is
+    that misreading (a modulation lasts longer than a line). Its notes were
+    read in the wrong key, so a note on a step the two keys alter
+    differently, carrying the wrong key's alteration, takes the right
+    one's; a natural printed on such a step is the price. Returns the bar
+    numbers where a key was dropped.
+    """
+    measures = part.findall("measure")
+    starts = {id(system[0]) for system in systems_of(part) if system}
+    system_starts = [k for k, measure in enumerate(measures) if id(measure) in starts]
+    keys = [
+        (k, int(key.findtext("fifths")), key)
+        for k, measure in enumerate(measures)
+        for key in measure.findall("attributes/key")[:1]
+        if (key.findtext("fifths") or "").lstrip("-").isdigit()
+    ]
+    dropped = []
+    removed: set[int] = set()
+    for before, flip, after in zip(keys, keys[1:], keys[2:], strict=False):
+        if removed & {id(before[2]), id(flip[2])}:
+            continue
+        if before[1] != after[1] or flip[1] == before[1] or flip[0] not in system_starts:
+            continue
+        following = [k for k in system_starts if k > flip[0]]
+        if not following or after[0] != following[0]:
+            continue
+        wrong, right = _key_alters(flip[1]), _key_alters(before[1])
+        for measure in measures[flip[0] : after[0]]:
+            for pitch in measure.findall("note/pitch"):
+                step = pitch.findtext("step")
+                if wrong.get(step, 0) == right.get(step, 0):
+                    continue
+                alter = pitch.find("alter")
+                if int(float(alter.text if alter is not None else 0)) != wrong.get(step, 0):
+                    continue
+                value = right.get(step, 0)
+                if value == 0 and alter is not None:
+                    pitch.remove(alter)
+                elif value:
+                    if alter is None:
+                        alter = ET.Element("alter")
+                        pitch.insert(1, alter)
+                    alter.text = str(value)
+        for k, _, key in (flip, after):
+            attributes = measures[k].find("attributes")
+            attributes.remove(key)
+            removed.add(id(key))
+            if len(attributes) == 0:
+                measures[k].remove(attributes)
+        dropped.append(measures[flip[0]].get("number", str(flip[0] + 1)))
+    return dropped
 
 
 # ---------------------------------------------------------------- tuplets
@@ -827,7 +925,10 @@ def concat(trees: list[ET.ElementTree]) -> ET.ElementTree:
     Each engine run picks its own `<divisions>`; the joined part uses their
     least common multiple and rescales every duration. A page's opening
     clef, key and time are dropped when they only repeat what is in force,
-    so a page turn does not become a courtesy signature.
+    so a page turn does not become a courtesy signature. A later page's
+    first measure is marked `<print new-page>` when it is not already: homr
+    marks each system after a page's first, and the page turn was lost,
+    which ran a page's last system into the next page's first.
     """
     if not trees:
         raise ValueError("nothing to join")
@@ -879,6 +980,13 @@ def concat(trees: list[ET.ElementTree]) -> ET.ElementTree:
                 divisions = ET.Element("divisions")
                 divisions.text = str(lcm)
                 attributes.insert(0, divisions)
+            elif page_first:
+                mark = measure.find("print")
+                if mark is None:
+                    mark = ET.Element("print")
+                    measure.insert(0, mark)
+                if mark.get("new-system") != "yes":
+                    mark.set("new-page", "yes")
             target.append(measure)
             first = page_first = False
     for number, measure in enumerate(target.findall("measure"), start=1):
@@ -1477,6 +1585,7 @@ def merge_readings(
     printed_counts: list[int | None] | None = None,
     keys: list | None = None,
     other_keys: list | None = None,
+    overfull_first: bool = True,
 ) -> Merge:
     """Take from the other reading each bar it reads better, bar for bar.
 
@@ -1489,7 +1598,9 @@ def merge_readings(
     fill; nearer the signature wins); ties stay with this reading. Both readings are brought to
     one `divisions` first, and this reading's attributes (clef, key,
     time, the divisions) stay on a replaced bar. Readings whose bar
-    counts differ are left alone: nothing pairs their bars.
+    counts differ are left alone: nothing pairs their bars. Without
+    `overfull_first` (a scan, which prints no note count) the nearer bar
+    wins and an overrun is judged like any other miss.
     """
     result = Merge()
     measures = part.findall("measure")
@@ -1518,8 +1629,14 @@ def merge_readings(
         # honest (`vector.drop_unledgered`), count-first kept the overfull
         # bar of the reading that held the page's count against one that
         # filled it; overfull-first without the one-note proviso mended
-        # them but took 43 bars missing 2-14 of the page's notes.
-        within_one = (
+        # them but took 43 bars missing 2-14 of the page's notes. A SCAN
+        # prints no count, and there the nearer bar wins (2026-10-07): with
+        # the cross-check's octave clefs mended its bars paired, and an
+        # Audiveris bar a quarter rest and a dot short beat homr's thinned
+        # bar, whose only slip was a quarter rest for an eighth (Sonny
+        # Stitt's Body and Soul bar 18); bar 19 went to a reading of 2
+        # notes over one of 22, a sixteenth too long.
+        within_one = overfull_first and (
             counts is None
             or counts[k] is None
             or min(this_bars[k].notes, other_bars[j].notes) >= counts[k] - 1
@@ -1545,14 +1662,15 @@ def merge_readings(
         replacement = copy.deepcopy(theirs)
         # Only the other reading's notes and chord symbols come across: its
         # OCR'd text directions ("m9;"), page breaks and bar lines do not,
-        # and this reading's attributes and tempo mark stay.
+        # and this reading's attributes, tempo mark and system break stay
+        # (the break was lost until 0.3.32, and MuseScore's lines with it).
         for child in list(replacement):
             if child.tag in ("attributes", "direction", "print", "barline"):
                 replacement.remove(child)
         keep = [
             child
             for child in mine
-            if child.tag == "attributes"
+            if child.tag in ("attributes", "print")
             or (child.tag == "direction" and child.find("direction-type/metronome") is not None)
         ]
         for offset, child in enumerate(keep):
@@ -1570,3 +1688,180 @@ def merge_readings(
             for beam in note.findall("beam"):
                 note.remove(beam)
     return result
+
+
+def _timed_notes(measure: ET.Element) -> list[ET.Element] | None:
+    """The notes and rests that take time, in order; None for a bar of several voices."""
+    if measure.find("backup") is not None or measure.find("forward") is not None:
+        return None
+    return [
+        n for n in measure.findall("note") if n.find("chord") is None and n.find("grace") is None
+    ]
+
+
+def _staff_position(note: ET.Element):
+    """A rest, or a note's line or space: an accidental misread does not unpair two notes."""
+    if note.find("rest") is not None:
+        return "rest"
+    step, octave = note.findtext("pitch/step"), note.findtext("pitch/octave")
+    if step not in STEPS or not (octave or "").isdigit():
+        return None
+    return int(octave) * 7 + STEPS.index(step)
+
+
+_AFTER_VALUE = ("stem", "notehead", "notehead-text", "staff", "beam", "notations", "lyric", "play")
+
+
+def _value(note: ET.Element, divisions: int) -> tuple:
+    """A note's written value and the time it takes, in quarter notes."""
+    modification = note.find("time-modification")
+    ratio = (
+        None
+        if modification is None
+        else tuple(
+            modification.findtext(tag) for tag in ("actual-notes", "normal-notes", "normal-type")
+        )
+    )
+    duration = Fraction(int(float(note.findtext("duration") or 0)), divisions)
+    return (note.findtext("type"), len(note.findall("dot")), ratio, duration)
+
+
+def _give_value(note: ET.Element, donor: ET.Element, duration: int) -> None:
+    """Write the donor's value (type, dots, tuplet) into `note`, taking `duration` divisions."""
+    note.find("duration").text = str(duration)
+    for tag in ("type", "dot", "time-modification"):
+        for element in note.findall(tag):
+            note.remove(element)
+    for tuplet in note.findall("notations/tuplet"):
+        note.find("notations").remove(tuplet)
+    children = list(note)
+    position = next(
+        (i for i, child in enumerate(children) if child.tag in _AFTER_VALUE), len(children)
+    )
+    accidental = note.find("accidental")
+    if accidental is not None:
+        position = min(position, children.index(accidental))
+    additions = [copy.deepcopy(e) for e in donor if e.tag in ("type", "dot")]
+    if accidental is not None:
+        additions.append(accidental)
+        note.remove(accidental)
+    modification = donor.find("time-modification")
+    if modification is not None:
+        additions.append(copy.deepcopy(modification))
+    for offset, element in enumerate(additions):
+        note.insert(position + offset, element)
+    tuplets = donor.findall("notations/tuplet")
+    if tuplets:
+        notations = note.find("notations")
+        if notations is None:
+            notations = ET.SubElement(note, "notations")
+        for tuplet in tuplets:
+            notations.append(copy.deepcopy(tuplet))
+    notations = note.find("notations")
+    if notations is not None and len(notations) == 0:
+        note.remove(notations)
+
+
+def combine_values(part: ET.Element, readings: list[ET.Element], limit: int = 4096) -> list[str]:
+    """Mend a bar that does not fill its signature with values other readings gave its notes.
+
+    Two homr readings of one scan often hold the same notes and each gets
+    a different one wrong: Sonny Stitt's Body and Soul bar 10 is 16ths
+    read as 32nds with the dotted quarter right in the plain reading, and
+    the 16ths right with the dot lost in the thinned one. Each reading's
+    bar is aligned to this one note for note, by staff position (rests
+    with rests), and every note may take any value a reading gave it; the
+    combination that fills the bar with the fewest changes is written,
+    when there is exactly one, and its tuplets add up. A note keeps its
+    tuplet or its lack of one, and a REST keeps its value: either change
+    pays for any other misreading in the bar. Audiveris's bar 7 there, a
+    quarter rest and a triplet short of the page, "filled" by unmaking its
+    other triplet; Punjab's bar 44 lost a quarter rest's half to a missed
+    triplet, and Hawkins's Body and Soul bar 21 doubled an eighth rest for
+    four 16ths read as 32nds (checked by eye, 2026-10-07). Pitches, ties
+    and the notes themselves stay this reading's. Returns the bars mended.
+    """
+    measures = part.findall("measure")
+    numbers = {measure.get("number"): k for k, measure in enumerate(measures)}
+    off = [numbers[n] for n in validate(part).off_bars if n in numbers]
+    if not off:
+        return []
+    found = bars(part)
+    divisions_at = []
+    divisions = 1
+    for measure in measures:
+        divisions = divisions_of(measure, divisions)
+        divisions_at.append(divisions)
+    sources = []
+    for reading in readings:
+        their_divisions = []
+        divisions = 1
+        for measure in reading.findall("measure"):
+            divisions = divisions_of(measure, divisions)
+            their_divisions.append(divisions)
+        sources.append(
+            (dict(pair_measures(part, reading)), reading.findall("measure"), their_divisions)
+        )
+    mended = []
+    for k in off:
+        notes = _timed_notes(measures[k])
+        expected = found[k].expected
+        if not notes or expected is None:
+            continue
+        options: list[dict[tuple, ET.Element]] = [{_value(n, divisions_at[k]): n} for n in notes]
+        for pairs, theirs, their_divisions in sources:
+            j = pairs.get(k)
+            if j is None:
+                continue
+            donors = _timed_notes(theirs[j])
+            if not donors:
+                continue
+            matcher = difflib.SequenceMatcher(
+                None,
+                [_staff_position(n) for n in notes],
+                [_staff_position(n) for n in donors],
+                autojunk=False,
+            )
+            blocks = [b for b in matcher.get_matching_blocks() if b.size]
+            if not _most(sum(b.size for b in blocks), len(notes), len(donors)):
+                continue
+            for a, b, size in blocks:
+                for offset in range(size):
+                    donor = donors[b + offset]
+                    value = _value(donor, their_divisions[j])
+                    if donor.find("rest") is not None:
+                        continue  # a rest keeps its value: see the docstring
+                    if value[2] == next(iter(options[a + offset]))[2]:
+                        options[a + offset].setdefault(value, donor)
+        varying = [i for i, choice in enumerate(options) if len(choice) > 1]
+        if not varying or math.prod(len(options[i]) for i in varying) > limit:
+            continue
+        base = [_value(n, divisions_at[k]) for n in notes]
+        need = expected - found[k].length
+        best: list[dict[int, tuple]] = []
+        fewest = None
+        for choice in itertools.product(*(list(options[i]) for i in varying)):
+            change = {i: v for i, v in zip(varying, choice, strict=True) if v != base[i]}
+            if sum(v[3] - base[i][3] for i, v in change.items()) != need:
+                continue
+            if any((v[3] * divisions_at[k]).denominator != 1 for v in change.values()):
+                continue
+            if fewest is None or len(change) < fewest:
+                fewest, best = len(change), [change]
+            elif len(change) == fewest:
+                best.append(change)
+        if len(best) != 1:
+            continue
+        trial = copy.deepcopy(measures[k])
+        trial_notes = _timed_notes(trial)
+        for i, v in best[0].items():
+            _give_value(trial_notes[i], options[i][v], int(v[3] * divisions_at[k]))
+        holder = ET.Element("part")
+        holder.append(trial)
+        if repair_tuplets(holder):
+            continue
+        index = list(part).index(measures[k])
+        part.remove(measures[k])
+        part.insert(index, trial)
+        mended.append(trial.get("number", str(k + 1)))
+    return mended

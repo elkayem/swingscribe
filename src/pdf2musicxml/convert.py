@@ -22,6 +22,7 @@ output, page images, logs and the cross-check reading stay under
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import fnmatch
 import json
@@ -112,6 +113,10 @@ class Result:
     rest_notes: list[str] = field(default_factory=list)
     rest_bars_filled: int = 0  # empty or whole-rest bars written as whole-measure rests
     repeats_dropped: int = 0  # the engine's repeat marks the cross-check did not read
+    key_flips: list[str] = field(default_factory=list)  # one-system keys read wrong, dropped
+    bars_combined: list[str] = field(
+        default_factory=list
+    )  # bars filled with other readings' values
     seconds: float = 0.0
     error: str | None = None
 
@@ -168,6 +173,10 @@ class Result:
             parts.append(f"{self.rest_bars_from_page} bars of multi-bar rest from the page")
         if self.repeats_dropped:
             parts.append(f"{self.repeats_dropped} repeat marks dropped")
+        if self.key_flips:
+            parts.append(f"{len(self.key_flips)} one-system keys dropped")
+        if self.bars_combined:
+            parts.append(f"{len(self.bars_combined)} bars filled with the other readings' values")
         if self.tempo:
             parts.append(f"tempo {self.tempo}")
         if self.check_agreement is not None:
@@ -427,6 +436,7 @@ def _mend(
     root = tree.getroot()
     dropped = musicxml.keep_main_part(root)
     part = musicxml.first_part(root)
+    musicxml.plain_clefs(part)
     ties = musicxml.slurs_to_ties(part)
     musicxml.repair_chords(part)
     musicxml.repair_tuplets(part)
@@ -566,6 +576,10 @@ def convert_group(
         dropped = musicxml.keep_main_part(tree.getroot())
         printed = _printed(pdf, pages, indices, options, dropped)
         part, _, ties, time_fix = _mend(tree, options, instrument, title, printed)
+        # A one-system key is homr's misreading on 9 of 10 scans checked by
+        # eye; on a vector page 2 of 4 were the page's own, and there the
+        # page sets the pitches anyway (2026-10-07).
+        key_flips = musicxml.drop_key_flips(part) if scan else []
         correction = vector.correct_pitches(part, printed.heads) if printed else None
         time_change = vector.apply_printed_times(part, printed) if printed else None
         bar_fix = vector.align_bars(part, printed) if printed else None
@@ -581,15 +595,21 @@ def convert_group(
             ] + musicxml.time_changes(part)
         other_part = agreement = merge = thin_merge = None
         repeats_dropped = 0
+        # The plain reading as read, before any bar is taken from another:
+        # its values are one of the three a scan's bar can take below.
+        plain = copy.deepcopy(part) if scan else None
         thin_part = None
         if thin is not None:
             thin_part, _, _, _ = _mend(thin, options, instrument, title, None)
+            musicxml.drop_key_flips(thin_part)
             musicxml.fill_rest_bars(thin_part)
             musicxml.drop_redundant_times(thin_part)
             musicxml.join_short_pairs(thin_part)
             musicxml.join_to_match(thin_part, part)
         if other is not None:
             other_part, _, _, _ = _mend(other, options, instrument, title, printed)
+            if scan:
+                musicxml.drop_key_flips(other_part)
             if printed:
                 vector.correct_pitches(other_part, printed.heads)
                 vector.apply_printed_times(other_part, printed)
@@ -605,19 +625,25 @@ def convert_group(
                 musicxml.bar_signatures(part), musicxml.bar_signatures(other_part)
             )
             if thin_part is not None:
-                thin_merge = musicxml.merge_readings(part, thin_part)
+                thin_merge = musicxml.merge_readings(part, thin_part, overfull_first=False)
             merge = musicxml.merge_readings(
                 part,
                 other_part,
                 vector.printed_count_per_measure(part, printed) if printed else None,
                 vector.printed_bar_per_measure(part, printed) if printed else None,
                 vector.printed_bar_per_measure(other_part, printed) if printed else None,
+                overfull_first=not scan,
             )
             filled += musicxml.fill_rest_bars(part)
         else:
             repeats_dropped = musicxml.strip_repeats(part)
             if thin_part is not None:
-                thin_merge = musicxml.merge_readings(part, thin_part)
+                thin_merge = musicxml.merge_readings(part, thin_part, overfull_first=False)
+        combined = []
+        if plain is not None:
+            readings = [r for r in (plain, thin_part, other_part) if r is not None]
+            if len(readings) > 1:
+                combined = musicxml.combine_values(part, readings)
         validation = musicxml.validate(part)
     except Exception as error:  # one bad reading must not end the batch
         base.error = f"{type(error).__name__}: {error}"
@@ -682,6 +708,8 @@ def convert_group(
         rest_notes=rest_fix.changes if rest_fix else [],
         rest_bars_filled=filled,
         repeats_dropped=repeats_dropped,
+        key_flips=key_flips,
+        bars_combined=combined,
     )
     if other is not None and agreement is not None:
         # The cross-check lives under .work, not beside the primary: the
