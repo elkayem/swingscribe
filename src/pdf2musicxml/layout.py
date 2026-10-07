@@ -45,6 +45,8 @@ class PageInfo:
     first_staff_top: float | None  # of the page height
     lines: list[TextLine] = field(default_factory=list)
     printed_noteheads: int = 0  # from the text layer's glyph shapes; 0 for a scan
+    # A scan's words above its first staff, OCR'd top to bottom; None if not read.
+    scan_header: list[str] | None = None
 
     @property
     def text_lines(self) -> list[TextLine]:
@@ -156,6 +158,29 @@ def pick_title(lines: list[TextLine]) -> str | None:
     return best.text
 
 
+def _words(text: str) -> int:
+    """Words of three letters or more: OCR'd noteheads ("ebe te") and chords ("C-M7") have few."""
+    return len(re.findall(r"[A-Za-z][A-Za-z'’]{2,}", text))
+
+
+def scan_continues(header: list[str], first_page: list[str] | None = None) -> bool:
+    """Whether a scanned page's words above its first staff are NOT a title block.
+
+    A new piece opens with a title block -- the title, "Courtesy of ...",
+    "Transcribed by ...", the recording and its players -- three or more
+    lines of words above the first staff. A continuation page of the same
+    solo carries a running header (the title again, a page number, "2nd
+    Chorus"), chord symbols, bar numbers and what OCR makes of the notes
+    over the staff ("ebe te"), and at most a performance note ("LAY
+    BACK"). Every multi-page scan in the folder is one solo, and eleven
+    were cut in two by the layout rule alone (2026-10-07). `first_page`
+    is unused: matching the running title against an OCR'd title failed
+    twice ("MY 1DEALBMAS"), and the credits do not.
+    """
+    del first_page
+    return sum(1 for text in header if _words(text) >= 2) < 3
+
+
 def group_pages(pages: list[PageInfo], *, single: bool = False) -> list[list[int]]:
     """Page indices grouped into transcriptions, in page order.
 
@@ -165,7 +190,10 @@ def group_pages(pages: list[PageInfo], *, single: bool = False) -> list[list[int
     the highest first staff among the textless pages; and when every
     textless page sits equally low (a book of one-page solos, or a single
     solo with a generous top margin), TITLE_ABSOLUTE decides between
-    "each page is one" and "the file is one".
+    "each page is one" and "the file is one". A textless page whose words
+    above the staff were read and make a running header, not a title
+    block (`scan_continues`), never starts one: the running header pushes
+    a continuation page's staff down as far as a title does.
     """
     staffed = [page for page in pages if page.has_staves]
     if not staffed:
@@ -195,6 +223,17 @@ def group_pages(pages: list[PageInfo], *, single: bool = False) -> list[list[int
             }
         elif base >= TITLE_ABSOLUTE:
             starts |= {page.index for page in textless}
+    opening: list[str] = []
+    for page in staffed:
+        if page.has_text or page.scan_header is None:
+            continue
+        if page.index == staffed[0].index:
+            opening = page.scan_header
+        elif page.index in starts:
+            if scan_continues(page.scan_header, opening):
+                starts.discard(page.index)
+            else:
+                opening = page.scan_header
     starts.add(staffed[0].index)
     groups: list[list[int]] = []
     for page in staffed:

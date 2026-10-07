@@ -2554,3 +2554,25 @@ def test_a_digit_with_a_letter_beside_it_is_a_chord_symbols():
     stem = (96, 0, 3, 80, 240)  # a stem ending beside the number: far taller
     assert scanpage._beside([(0,) * 5, digit, letter], [1], box, 16.0)
     assert not scanpage._beside([(0,) * 5, digit, bracket, stem], [1], box, 16.0)
+
+
+def test_a_scanned_page_with_a_running_header_continues_the_solo():
+    # How Deep Is the Ocean: page 2's running header pushes its staff as low as a title does.
+    title_block = [
+        "Courtesy of www.PeterAndWillAnderson.com",
+        "HOW DEEP IS THE OCEAN",
+        "Transcribed by",
+        "Peter R. Anderson",
+        "RECORDED DECEMBER 8TH, 1943 W/ BILL COLEMAN (T)",
+        "COLEMAN HAWKINS SOLO",
+    ]
+    running = ["HOW DEEP IS THE OCEAN", "LAY BACK", "ebe te", "F#7", "C-M7", "2", "30"]
+    first = layout.PageInfo(0, True, 0.177, [], 0, title_block)
+    second = layout.PageInfo(1, True, 0.162, [], 0, running)
+    assert layout.group_pages([first, second]) == [[0, 1]]
+    # Unread (no OCR installed), the layout rule alone splits them, as before.
+    first.scan_header = second.scan_header = None
+    assert layout.group_pages([first, second]) == [[0], [1]]
+    # A second title block is a second piece.
+    second.scan_header = title_block
+    assert layout.group_pages([first, second]) == [[0], [1]]

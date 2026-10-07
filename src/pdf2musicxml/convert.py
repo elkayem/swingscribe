@@ -226,13 +226,43 @@ def analyze_pages(
         top = layout.staff_top(image)
         lines = pdfpages.page_text(pdf, index)
         printed = vector.printed_noteheads(pdf, index) if lines else 0
-        infos.append(layout.PageInfo(index, top is not None, top, lines, printed))
+        header = None if lines or top is None else _scan_header(image_path, image, top, force)
+        infos.append(layout.PageInfo(index, top is not None, top, lines, printed, header))
     staffed = sum(1 for p in infos if p.has_staves)
     log(
         f"  {count} pages, {staffed} with staves, "
         f"text layer: {'yes' if any(p.text_lines for p in infos) else 'no'}"
     )
     return infos
+
+
+def _scan_header(image_path: Path, image, top: float, force: bool) -> list[str] | None:
+    """A scan's words above its first staff, top to bottom, OCR'd once and kept beside the image.
+
+    None when RapidOCR (the `omr` group) is not installed: the layout rule
+    alone then decides where a transcription starts.
+    """
+    cache = image_path.with_name(f"{image_path.stem}_header.json")
+    if not force and cache.is_file() and cache.stat().st_mtime >= image_path.stat().st_mtime:
+        try:
+            return json.loads(cache.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+    try:
+        import numpy as np
+
+        reader = scanpage._reader()
+    except ImportError:
+        return None
+    band = np.asarray(image.crop((0, 0, image.size[0], max(1, int(image.size[1] * top)))))
+    result = reader(band)
+    lines: list[tuple[float, str]] = []
+    if result is not None and result.boxes is not None:
+        for box, text in zip(result.boxes, result.txts, strict=False):
+            lines.append((min(float(point[1]) for point in box), str(text)))
+    header = [text for _y, text in sorted(lines)]
+    cache.write_text(json.dumps(header), encoding="utf-8")
+    return header
 
 
 def page_image(work: Path, index: int) -> Path:

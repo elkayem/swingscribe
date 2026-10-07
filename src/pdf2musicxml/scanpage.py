@@ -31,7 +31,7 @@ from pdf2musicxml import vector
 # SEGMENT_VERSION for homr's staves, heads and bar lines (seconds a page),
 # DIGITS_VERSION for the numbers only.
 SEGMENT_VERSION = 3
-DIGITS_VERSION = 5
+DIGITS_VERSION = 7
 STEPS = "CDEFGAB"
 # homr's staff position: the bottom line of a treble staff (E4) is 1.
 E4_DIATONIC = 4 * 7 + STEPS.index("E")
@@ -179,10 +179,13 @@ def _digits(gray, staffs: list[dict]) -> list[tuple[int, list]]:
         index, distance = _nearest_staff(staffs, cy)
         staff = staffs[index]
         unit = staff["unit"]
-        if not (0.6 * unit <= h <= 1.6 * unit and 0.15 * unit <= w <= 1.3 * unit):
+        # Hawkins's Body and Soul draws its bracketed 3s two spaces tall.
+        if not (0.6 * unit <= h <= 2.2 * unit and 0.15 * unit <= w <= 1.3 * unit):
             continue
         if not 0.5 * unit <= distance <= 8 * unit:
             continue
+        if cy < 0.05 * gray.shape[0]:
+            continue  # a page number in the running header (Cherokee's and Alone Together's 5)
         if cx < staff["min_x"] + 4 * unit or cx > staff["max_x"]:
             continue
         # A bar number sits before the line's first note; a tuplet number
@@ -209,7 +212,7 @@ def _digits(gray, staffs: list[dict]) -> list[tuple[int, list]]:
             else:
                 groups.append(list(box))
         for left, top, right, bottom, members in groups:
-            if _beside(stats, members, (left, top, right, bottom), unit):
+            if _beside(stats, members, (left, top, right, bottom), unit, labels):
                 continue
             # Only the mark's own strokes, on white: a beam or stem beside
             # it in the crop reads as a 5's flat top (Punjab bar 8's "3").
@@ -228,13 +231,14 @@ def _digits(gray, staffs: list[dict]) -> list[tuple[int, list]]:
     return out
 
 
-def _beside(stats, members: list[int], box: tuple, unit: float) -> bool:
+def _beside(stats, members: list[int], box: tuple, unit: float, labels=None) -> bool:
     """Whether a letter-sized mark sits on the box's line within a space of it.
 
     A letter is up to three spaces tall, no more than twice as wide as
     tall, and fills a sixth or more of its box (Indiana's chord "C" is
     2.4 spaces tall and fills 0.18); half a tuplet bracket, a flat line
-    with a hook, is not. "On its line" reaches half a space
+    with a hook, is not -- and when the hook makes it as tall as a letter,
+    its ink still lies along one row (Body and Soul's brackets). "On its line" reaches half a space
     above and below (a chord's 6 is raised: "Gm6" on Hipsippy Blues) and
     a space and a half to each side (Indiana's "C 6").
     """
@@ -249,9 +253,21 @@ def _beside(stats, members: list[int], box: tuple, unit: float) -> bool:
             continue
         if x > right + 1.5 * unit or x + w < left - 1.5 * unit:
             continue
+        if labels is not None and _along_one_row(labels[y : y + h, x : x + w] == i):
+            continue
         if y < bottom + 0.5 * unit and y + h > top - 0.5 * unit:
             return True
     return False
+
+
+def _along_one_row(mask) -> bool:
+    """Whether most of a mark's ink lies in a band three rows deep: a line, not a letter."""
+    rows = mask.sum(axis=1)
+    total = rows.sum()
+    if total == 0 or len(rows) < 3:
+        return False
+    band = max(rows[k : k + 3].sum() for k in range(len(rows) - 2))
+    return band >= 0.5 * total
 
 
 def cached_page(png: Path, force: bool = False) -> dict:

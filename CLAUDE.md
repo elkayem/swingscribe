@@ -1444,6 +1444,13 @@ docs/pdf2musicxml.md has the measurements. Things not to re-derive:
   rules against the page images: the counts said "better" with 55
   chord 7s claimed as septuplets. Punjab 25 -> 11 bars off. Cached as
   `pNNN_scan.json`, homr's part and the digits versioned apart.
+- **A scanned page without a title block continues the solo** (0.3.38,
+  `layout.scan_continues`, OCR of the band above the first staff cached
+  as `pNNN_header.json`): eleven one-solo scans had been cut in two by
+  the staff-height rule (Hawkins's How Deep, My Ideal, Yesterdays...).
+  Digits up to 2.2 spaces tall (Body and Soul's bracketed 3s), a bracket
+  half (ink along one row) is not a letter, a digit in the top 5% of the
+  page is a page number. NOT yet run over the corpus.
 - **pdfium's text layer drops the second of two identical characters whose
   boxes touch**: a printed 4/4 arrives as one "4", a 2/2 as one "2", while
   3/4 and 6/8 arrive whole. The page's text OBJECTS still hold both, so a
