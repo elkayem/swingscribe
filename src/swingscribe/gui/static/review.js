@@ -178,7 +178,9 @@ export class PianoRoll {
 
   /* Colour notes by hand (`handOf(index)` -> 'right' | 'left'), or pass null
      for a one-staff page. `split` is the first guess's pitch, drawn as a
-     faint line so a note on the wrong side of it is easy to spot. */
+     faint line so a note on the wrong side of it is easy to spot. A
+     multi-horn head colours its voices the same way -- the upper voice as
+     'right', the lower as 'left' -- with no split (`split` null). */
   setHands(handOf, split = this.handSplit) {
     this.handOf = handOf;
     this.handSplit = split;
@@ -593,7 +595,8 @@ export class PianoRoll {
 
     // The split the first guess draws between the hands: a faint dashed line
     // between B3 and middle C, so a note on the wrong side of it stands out.
-    if (this.handOf) {
+    // Two horns' voices have no split to draw (`split` null).
+    if (this.handOf && this.handSplit != null) {
       const y = this.pitchToY(this.handSplit - 0.5, h);
       ctx.save();
       ctx.strokeStyle = this._css('--left-hand', '#8fa7ff');

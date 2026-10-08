@@ -13,7 +13,7 @@ merged: the listener reviews the branch first. Design and state:
 | --- | --- |
 | A. Multi-horn core + `scripts/multi_horn_page.py` | committed, waiting on Local task A |
 | B. Linked sidecars | committed, waiting on Local task B |
-| C. Two parts, GUI, guide | not started |
+| C. Two parts, GUI, guide | committed, waiting on Local task C |
 
 Pushing to `origin/multi-horn` was refused (HTTP 403, "Resource not
 accessible by integration") from the cloud session: the commits exist in
@@ -180,6 +180,32 @@ Commands (from the main checkout, `PYTHONPATH=%MH%\src` as above):
    at the folder browser in both folders and at the cache panel. Report what
    reads wrong or confusing -- the listener asked what the browser should
    show, and this is the proposal above.
+
+## Local task C: two parts and the GUI
+
+What landed: docs/multi-horn.md, "Two parts" and "The GUI"; the user guide's
+"Takes" and "Two horns in harmony" sections.
+
+Run the GUI from the worktree as in Local task B, open the Open Sesame head
+(the span 0-67.308, model bsroformer_sw, stem other), set Ensemble to "Two
+horns (a head)" and Transcribe (the review is the one Local task A cached,
+so it opens at once if the span and stem match). Then:
+
+1. The roll: two colours, the legend, the faint "heard, in neither voice"
+   notes. Click one of each kind; the inspector names the voice.
+2. The Voices tool (H): move a few notes, check the page view and Export
+   follow, then "As heard" puts them back. Erase a note of a pair: its
+   partner should be written once, in the upper voice.
+3. The ear test (Transcription in the A/B) plays both voices.
+4. Staves -> "Two parts (upper + lower)", Written for -> B♭ (trumpet), Lower
+   part -> B♭ tenor: export, open in MuseScore (`.\pdf2musicxml render`
+   on its folder), check two parts, each key and clef, nothing moved an
+   octave, unisons in both parts.
+5. Switch Ensemble back to Horn-led and back again: the edits made on the
+   two-horn view are kept and return.
+
+Report what reads wrong on the page or the roll, any console error (F12),
+and any request that failed.
 
 ## Local check: no cache key moved
 

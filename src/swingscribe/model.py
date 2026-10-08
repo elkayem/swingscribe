@@ -247,6 +247,21 @@ class Notation(BaseModel):
     # a bass staff (NotatedNote.staff), the listener's choice for a piano
     # texture. MIGRATION: additive with a default of 1, nothing moves.
     staves: int = 1
+    # The clef of a one-staff part: "treble", or "bass" for a part that sits
+    # low (a two-horn head written as two PARTS picks each part's clef by its
+    # register, notation.horn_parts). MIGRATION: additive with a default;
+    # every cached Notation is treble, as every page was.
+    clef: str = "treble"
+    # The part's name where a page has more than one (export prints them
+    # then); "" leaves export's own. MIGRATION: additive with a default.
+    part_name: str = ""
+    # Further PARTS of the same page, after this one: a two-horn head written
+    # as two parts, the lower horn's with its own transposition and clef.
+    # Each is a whole Notation over the same bars; chord symbols ride on the
+    # first part only. MIGRATION: additive with a default of none -- every
+    # cached Notation is one part, and no key moves (no stage writes this;
+    # only the page assembly does).
+    parts: list["Notation"] = []
 
 
 class Document(BaseModel):

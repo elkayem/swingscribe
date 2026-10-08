@@ -557,3 +557,95 @@ def test_the_stage_refuses_a_multi_horn_head_without_basic_pitch(monkeypatch):
     monkeypatch.setattr(basic_pitch, "transcribe", missing)
     with pytest.raises(RuntimeError, match="onnxruntime"):
         transcribe._hear_horns(None, 44100, TranscribeConfig(ensemble="multi-horn"))
+
+
+def test_the_roll_gets_every_note_s_voice_and_the_moves_by_its_own_indices():
+    notes = [heard(0.0, 1.0, 72, 1), heard(0.0, 1.0, 67, 2), heard(1.0, 1.0, 74, 1)]
+    erasure = {**erasures.record(notes[0], "other", "m"), "view": erasures.HORNS}
+    move = {"onset": 1.0, "pitch": 74, "voice": 2}
+    resolved = edits.resolve(
+        {"erasures": [erasure], "voices": [move]}, payload(notes), (0.0, 2.0), horns=True
+    )
+    # Its partner erased, the lower note is written in voice 1; the erased
+    # note keeps the voice it was heard in; a move is the roll's own index.
+    assert resolved["note_voices"] == [1, 1, 1]
+    assert resolved["voices"]["lower"] == [2]
+    assert [(n["pitch"], n["voice"]) for n in resolved["audible"]] == [(67, 1), (74, 2)]
+
+
+# ── two parts ─────────────────────────────────────────────────────────────────
+
+
+def test_two_parts_keep_each_horn_s_notes_its_transposition_and_clef():
+    beats = grid()
+    notes = two_horn_line(beats[4:20], [74, 72], [50, 48])  # trumpet over a low trombone
+    region = (beats[4], beats[20])
+    page, lines = notation_for_horns(
+        "t.wav",
+        notes,
+        beats,
+        region,
+        stem="other",
+        config=literal_config(),
+        anchor=beats[4],
+        parts=True,
+        lower_transpose=0,
+    )
+    assert len(page.parts) == 1
+    lower = page.parts[0]
+    assert [p["moved"] for p in lines.phrases] == [0]  # no octave moved in parts
+    assert page.clef == "treble" and lower.clef == "bass"
+    assert page.part_name == "Upper" and lower.part_name == "Lower"
+    assert [b.number for b in page.bars] == [b.number for b in lower.bars]
+    assert {n.pitch for b in lower.bars for n in b.notes if not n.is_rest} == {50, 48}
+    assert all(n.voice == 1 for b in lower.bars for n in b.notes)
+
+
+def test_two_parts_keep_a_unison_in_both():
+    beats = grid()
+    notes = two_horn_line(beats[4:12], [65], [65])
+    region = (beats[4], beats[12])
+    page, lines = notation_for_horns(
+        "t.wav",
+        notes,
+        beats,
+        region,
+        stem="other",
+        config=literal_config(),
+        anchor=beats[4],
+        parts=True,
+    )
+    assert lines.unisons == 0
+    assert any(not n.is_rest for b in page.parts[0].bars for n in b.notes)
+
+
+def test_two_parts_are_two_musicxml_parts_each_in_its_own_key_and_clef():
+    from swingscribe.notation import merge_horn_parts
+
+    upper = Notation(bars=[bar(1, [sound(0, 4, 74)])], transpose=2)
+    lower = Notation(bars=[bar(1, [sound(0, 4, 50)])], transpose=2)
+    page = merge_horn_parts(upper, lower, key=-2, lower_transpose=0)
+    xml = to_musicxml(page, part_name="Head")
+    root = ElementTree.fromstring(xml[xml.index("<score-partwise") :])
+    names = [p.findtext("part-name") for p in root.find("part-list").findall("score-part")]
+    assert names == ["Upper", "Lower"]
+    first, second = root.findall("part")
+    assert first.find(".//key/fifths").text == "0"  # concert Bb major, a Bb part: C
+    assert second.find(".//key/fifths").text == "-2"
+    assert first.find(".//clef/sign").text == "G"
+    assert second.find(".//clef/sign").text == "F"
+    assert first.find(".//transpose") is not None and second.find(".//transpose") is None
+
+
+def test_two_notes_put_in_one_voice_are_a_chord_in_it():
+    beats = grid()
+    notes = [horn(t, BEAT * 0.9, 72) for t in beats[4:12]] + [
+        horn(t, BEAT * 0.9, 67) for t in beats[4:12]
+    ]
+    region = (beats[4], beats[12])
+    page, _ = notation_for_horns(
+        "t.wav", notes, beats, region, stem="other", config=literal_config(), anchor=beats[4]
+    )
+    struck = [n for b in page.bars for n in b.notes if not n.is_rest and not n.tie_stop]
+    assert len(struck) == 8
+    assert all(n.pitch == 72 and n.chord == [67] for n in struck)

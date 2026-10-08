@@ -78,7 +78,10 @@ const state = {
   staves: 1,                // 1 | 2: the All-notes page on one staff, or treble over bass
   hands: new Map(),         // note index -> 'right' | 'left', where the listener chose
   carriedHands: [],         // stored hand choices with no note in this view
-  handSelection: new Set(), // note indices the Hands tool has selected
+  handSelection: new Set(), // note indices the Hands (or Voices) tool has selected
+  voices: new Map(),        // note index -> 1 | 2, where the listener moved a horn's note
+  carriedVoices: [],        // stored voice moves with no note in this view
+  lowerTransposition: null, // a two-part head's lower part (sidecar lower_transposition)
   timing: null,             // swing | literal-16 | literal-32; null = server default
   key: null,                // concert key signature in fifths; null = detect it
   transposition: null,      // the exported part's key; null = server default
@@ -604,6 +607,9 @@ async function loadTrack(track) {
   state.carriedHands = Array.isArray(remembered.hands) ? remembered.hands : [];
   state.hands.clear();
   state.handSelection.clear();
+  state.carriedVoices = Array.isArray(remembered.voices) ? remembered.voices : [];
+  state.voices.clear();
+  state.lowerTransposition = remembered.lower_transposition ?? null;
   state.undoStack.length = 0;
   state.redoStack.length = 0;
   setTool('inspect');
@@ -1212,6 +1218,11 @@ function renderRollLegend() {
       'A note of ours the hand transcription does not have');
     item('missed', '--gt-missed', 'wash', !on('missed'),
       'A written note with nothing of ours under it');
+  } else if (hornsOn()) {
+    item('upper voice', '--lead', '', false,
+      'The higher of two horns sounding together, and a horn alone; the Voices tool moves any note');
+    item('lower voice', '--left-hand', '', false,
+      'The lower of two horns sounding together; the page moves its phrases up an octave where they sit that far under');
   } else if (twoStavesOn()) {
     item('right hand · treble', '--lead', '', false,
       'On the treble staff. First guess: middle C and up; the Hands tool moves any note');
@@ -1231,7 +1242,12 @@ function renderRollLegend() {
 
   const candidates = (state.review.candidates || []).length;
   const second = (state.review.second_voice || []).length;
-  if (candidates) {
+  if (candidates && hornsOn()) {
+    item('heard, in neither voice', '--candidate', '', !state.showSecond,
+      'Notes Basic Pitch heard that neither voice holds: overtone ghosts, and a third note where three sounded at once. Inspect tool: click to hear it. Edit tool: click to add it');
+    item('added to page', '--added', '', false,
+      'A note switched on: it sounds in the ear test and is written in the voice its pitch and its neighbours put it in');
+  } else if (candidates) {
     item('piano model heard', '--candidate', '', !state.showSecond,
       'Every note the piano model heard that the line left out; brighter is louder. Inspect tool: click to hear it. Edit tool: click to add it');
     item('added to page', '--added', '', false,
@@ -2096,6 +2112,23 @@ function twoStavesOn() {
   return textureOn() && state.staves === 2;
 }
 
+/* A multi-horn head (docs/multi-horn.md): two horns, each note in a voice,
+   and the Voices tool -- the Hands tool's gestures -- to move one. */
+function hornsOn() {
+  return (state.ensemble ?? $('ensemble-select').dataset.fallback) === 'multi-horn';
+}
+
+/* Two PARTS: a multi-horn head with Staves set to two. */
+function twoPartsOn() {
+  return hornsOn() && state.staves === 2;
+}
+
+/* Whether the Hands tool's gestures are in hand: a pianist's two staves, or
+   a multi-horn head's voices. */
+function sortingOn() {
+  return Boolean(state.review) && (twoStavesOn() || hornsOn());
+}
+
 /* Note indices belong to one transcription, so they cannot survive — but the
    erasures themselves must. Fold them back into the carried list before
    dropping the indices, or changing stem would quietly destroy every label.
@@ -2110,6 +2143,8 @@ function foldEdits() {
   state.carriedHands = handList();
   state.hands.clear();
   state.handSelection.clear();
+  state.carriedVoices = voiceList();
+  state.voices.clear();
 }
 
 /* The review belongs to one span+stem. When either changes the old notes are
@@ -2229,6 +2264,16 @@ async function showReview(payload) {
     state.carriedHands = payload.hands.carried;
   } else {
     state.hands = new Map();
+  }
+  // A multi-horn head's voice moves, matched onto these notes by content.
+  if (payload.voices) {
+    state.voices = new Map([
+      ...payload.voices.upper.map((index) => [index, 1]),
+      ...payload.voices.lower.map((index) => [index, 2]),
+    ]);
+    state.carriedVoices = payload.voices.carried;
+  } else {
+    state.voices = new Map();
   }
   state.handSelection.clear();
   state.notationScore = null;
@@ -2388,6 +2433,10 @@ function renderInspector(note, index) {
   if (twoStavesOn()) {
     // Which staff it will be written on, and whether that was your call.
     chip(`${handOf(index)} hand${state.hands.has(index) ? '' : ' · guess'}`);
+  }
+  if (hornsOn() && state.review) {
+    // Which horn's voice it is written in, and whether that was your call.
+    chip(`${voiceOf(index) === 2 ? 'lower' : 'upper'} voice${state.voices.has(index) ? '' : ' · as heard'}`);
   }
 
   // What the hand transcription says about this note, if one is loaded.
@@ -2635,6 +2684,8 @@ function erasureList() {
         // Made on the All-notes view, where it means "not on the page", not
         // "not the solo": resolved only there (gui/erasures.py).
         ...(textureOn() ? { piano_notes: 'all' } : {}),
+        // Made on a multi-horn head's view: resolved only there.
+        ...(hornsOn() ? { view: 'horns' } : {}),
       });
     }
   }
@@ -2656,6 +2707,31 @@ function handList() {
   return [...state.carriedHands, ...made].sort((a, b) => a.onset - b.onset);
 }
 
+/* The voice moves written to the sidecar (`voices`): everything carried,
+   plus one record per note the listener put in a voice. Matched back by
+   content, like the hands. */
+function voiceList() {
+  const made = [];
+  if (state.review && hornsOn()) {
+    for (const [index, voice] of [...state.voices].sort((a, b) => a[0] - b[0])) {
+      const note = state.review.notes[index];
+      if (!note) continue;
+      made.push({ onset: round3(note.onset), pitch: note.pitch, voice });
+    }
+  }
+  return [...state.carriedVoices, ...made].sort((a, b) => a.onset - b.onset);
+}
+
+/* A horn's note's voice: the listener's move, else the server's order over
+   the edited notes, else the voice it was heard in. */
+function voiceOf(index) {
+  const chosen = state.voices.get(index);
+  if (chosen) return chosen;
+  const ordered = state.review?.note_voices?.[index];
+  if (ordered) return ordered;
+  return state.review?.notes[index]?.voice ?? 1;
+}
+
 /* The hand a note is on: the listener's choice, else the pitch guess. */
 function handOf(index) {
   const chosen = state.hands.get(index);
@@ -2667,16 +2743,24 @@ function handOf(index) {
 /* Tell the roll how to colour the notes, and show the Hands controls, for
    exactly the view that has two staves. */
 function applyHands() {
-  const on = twoStavesOn() && Boolean(state.review);
-  pianoRoll.setHands(on ? handOf : null, handSplit);
+  const on = sortingOn();
+  const horns = on && hornsOn();
+  // The upper voice wears the right hand's colour, the lower the left's.
+  if (horns) pianoRoll.setHands((index) => (voiceOf(index) === 2 ? 'left' : 'right'), null);
+  else pianoRoll.setHands(on ? handOf : null, handSplit);
   $('hands-tool').hidden = !on;
+  // One tool, two jobs: staves for a pianist, voices for two horns.
+  $('hands-tool').textContent = horns ? 'Voices' : 'Hands';
+  $('to-right').textContent = horns ? 'Upper voice ↑' : 'Right hand ↑';
+  $('to-left').textContent = horns ? 'Lower voice ↓' : 'Left hand ↓';
+  $('to-guess').textContent = horns ? 'As heard' : 'Reset to guess';
   if (!on && state.tool === 'hands') setTool('inspect');
   renderHandControls();
   renderRollLegend();
 }
 
 function renderHandControls() {
-  const on = twoStavesOn() && Boolean(state.review);
+  const on = sortingOn();
   $('hand-controls').hidden = !on;
   if (!on) return;
   const count = state.handSelection.size;
@@ -2705,18 +2789,34 @@ function selectForHands(indices, additive, toggle = false) {
 /* Put the selected notes in one hand, or back to the guess. The selection
    stays, so a wrong call is one more key away from being undone. */
 function assignHands(hand) {
-  if (!state.handSelection.size || !twoStavesOn()) return;
+  if (!state.handSelection.size || !sortingOn()) return;
   pushHistory();
+  const n = state.handSelection.size;
+  const notes = `${n} note${n === 1 ? '' : 's'}`;
+  if (hornsOn()) {
+    // Two horns: up is the upper voice, down the lower; "as heard" forgets
+    // the move. The page writes them where they are put.
+    for (const index of state.handSelection) {
+      if (hand === 'guess') state.voices.delete(index);
+      else state.voices.set(index, hand === 'right' ? 1 : 2);
+    }
+    afterEdit();
+    toast(
+      hand === 'guess'
+        ? `${notes} back to the voice they were heard in`
+        : `${notes} to the ${hand === 'right' ? 'upper' : 'lower'} voice`,
+    );
+    return;
+  }
   for (const index of state.handSelection) {
     if (hand === 'guess') state.hands.delete(index);
     else state.hands.set(index, hand);
   }
   afterEdit();
-  const n = state.handSelection.size;
   toast(
     hand === 'guess'
-      ? `${n} note${n === 1 ? '' : 's'} back to the guess`
-      : `${n} note${n === 1 ? '' : 's'} to the ${hand} hand`,
+      ? `${notes} back to the guess`
+      : `${notes} to the ${hand} hand`,
   );
 }
 
@@ -2739,6 +2839,7 @@ function additionList() {
         stem: state.leadStem,
         model: state.model,
         line: state.line || defaultLine,
+        ...(hornsOn() ? { view: 'horns' } : {}),
       });
     }
   }
@@ -2746,8 +2847,8 @@ function additionList() {
 }
 
 function setTool(tool) {
-  // The Hands tool exists only on a two-staff page.
-  if (tool === 'hands' && !twoStavesOn()) tool = 'inspect';
+  // The Hands tool exists only on a two-staff page or a multi-horn head.
+  if (tool === 'hands' && !sortingOn()) tool = 'inspect';
   state.tool = tool;
   pianoRoll.setTool(tool);
   for (const button of $('tool-group').querySelectorAll('button')) {
@@ -3131,6 +3232,8 @@ function settingsPayload() {
     erasures: erasureList(),
     additions: additionList(),
     hands: handList(),
+    voices: voiceList(),
+    lower_transposition: state.lowerTransposition,
     // The Find the solos view. What the listener DID with a proposal is
     // not here: the server writes `solo_proposals` itself, under the
     // sidecar lock, and this merge leaves that key alone.
@@ -3203,6 +3306,11 @@ function fillSelect(node, values, fallback) {
    dead zone, so writing to it from loadChoices before this line ran would
    throw rather than default. */
 let pianoOracleEnsembles = [];
+// The rhythm a page is written in when the track has chosen none, where it
+// is the ensemble's rather than the config's (config.ENSEMBLE_TIMINGS): a
+// two-horn head is literal. From /api/config, so the menu shows what the
+// page will be.
+let ensembleTimings = {};
 
 async function loadChoices() {
   try {
@@ -3214,8 +3322,10 @@ async function loadChoices() {
   // Asked of the server, never listed here: the UI must not be the second
   // place the routing is written down.
   pianoOracleEnsembles = choices.piano_oracle_ensembles ?? [];
+  ensembleTimings = choices.ensemble_timings ?? {};
   fillLineSelect(choices.lines ?? [], choices.default_line ?? defaultLine);
   fillSelect($('transpose-select'), choices.transpositions ?? [], choices.default_transposition ?? 'C');
+  fillSelect($('lower-transpose-select'), choices.transpositions ?? [], choices.default_transposition ?? 'C');
   fillSelect($('timing-select'), choices.timings ?? [], choices.default_timing ?? 'swing');
   fillSelect($('piano-notes-select'), choices.piano_notes ?? [], 'line');
   fillKeySelect(choices.keys ?? []);
@@ -3280,6 +3390,10 @@ function renderEnsembleHint() {
   if (!hint) return;
   const ensemble = $('ensemble-select').value;
   if (!ensemble || !pianoOracleEnsembles.length) { hint.textContent = ''; return; }
+  if (ensemble === 'multi-horn') {
+    hint.textContent = '· two horns in harmony: both heard, each note in a voice';
+    return;
+  }
   hint.textContent = pianoOracleEnsembles.includes(ensemble)
     ? '· piano model consulted'
     : '· no piano model — pick Trio or Solo piano for a pianist';
@@ -3451,13 +3565,17 @@ async function keepCurrentEnsemble() {
 
 function renderChoices() {
   const ensemble = $('ensemble-select');
+  const ensembleSelect = ensemble;
   const transpose = $('transpose-select');
   const line = $('line-select');
   const timing = $('timing-select');
   if (ensemble.options.length) ensemble.value = state.ensemble ?? ensemble.dataset.fallback;
   if (transpose.options.length) transpose.value = state.transposition ?? transpose.dataset.fallback;
   if (line.options.length) line.value = state.line ?? line.dataset.fallback;
-  if (timing.options.length) timing.value = state.timing ?? timing.dataset.fallback;
+  if (timing.options.length) {
+    const ensemble = state.ensemble ?? ensembleSelect.dataset.fallback;
+    timing.value = state.timing ?? ensembleTimings[ensemble] ?? timing.dataset.fallback;
+  }
   const key = $('key-select');
   key.value = state.key === null ? '' : String(state.key);
   // A new track has not been exported yet: Auto has found nothing to name.
@@ -3480,8 +3598,25 @@ function renderLinePicker() {
   $('line-select').hidden = !pianist || texture;
   $('piano-notes-label').hidden = !pianist;
   $('piano-notes-select').hidden = !pianist;
-  $('staves-label').hidden = !texture;
-  $('staves-select').hidden = !texture;
+  // Staves on a multi-horn head is one staff of two voices, or two parts.
+  const horns = hornsOn();
+  $('staves-label').hidden = !texture && !horns;
+  $('staves-select').hidden = !texture && !horns;
+  const [one, two] = $('staves-select').options;
+  one.textContent = horns ? 'One staff, two voices' : 'One staff';
+  two.textContent = horns ? 'Two parts (upper + lower)' : 'Two staves (treble + bass)';
+  renderLowerTransposition();
+}
+
+/* The lower part's instrument: only for a head written as two parts. */
+function renderLowerTransposition() {
+  const on = twoPartsOn();
+  $('lower-transpose-label').hidden = !on;
+  $('lower-transpose-select').hidden = !on;
+  const menu = $('lower-transpose-select');
+  if (menu.options.length) {
+    menu.value = state.lowerTransposition ?? state.transposition ?? $('transpose-select').dataset.fallback;
+  }
 }
 
 /* ── changes ────────────────────────────────────────────────────────────────
@@ -3526,8 +3661,10 @@ function exportSignature() {
     timing: state.timing,
     key: state.key,
     texture: textureOn(),
-    staves: twoStavesOn() ? 2 : 1,
+    staves: twoStavesOn() || twoPartsOn() ? 2 : 1,
     hands: twoStavesOn() ? [...state.hands].sort((x, y) => x[0] - y[0]) : [],
+    voices: hornsOn() ? [...state.voices].sort((x, y) => x[0] - y[0]) : [],
+    lower: twoPartsOn() ? state.lowerTransposition : null,
     // Where the chart starts is read off the form start and chorus length,
     // which change the page only when there is a chart to place.
     changes: state.changes ? [state.changes, state.formStart, state.barsPerChorus] : null,
@@ -3589,7 +3726,8 @@ function pageSummary(written) {
   const literal = written.timing && written.timing !== 'swing'
     ? ` · ${(LABELS[written.timing] ?? written.timing).toLowerCase()}`
     : '';
-  const staves = written.staves === 2 ? ' · two staves' : '';
+  const staves = written.staves === 2 ? ' · two staves'
+    : written.parts > 1 ? ` · ${written.parts} parts` : '';
   const keyName = written.key ? ` · ${written.key}${written.key_auto ? ' (auto)' : ''}` : '';
   const changes = written.changes;
   const chords = !changes ? ''
@@ -4000,9 +4138,17 @@ $('piano-notes-select').addEventListener('change', async (event) => {
 
 $('staves-select').addEventListener('change', (event) => {
   state.staves = Number(event.target.value) === 2 ? 2 : 1;
+  renderLowerTransposition();
   state.handSelection.clear();
   pianoRoll.setHandSelection(state.handSelection);
   applyHands();
+  renderExport();
+  persist();
+});
+
+$('lower-transpose-select').addEventListener('change', (event) => {
+  state.lowerTransposition = event.target.value;
+  // The lower part's key: a re-export, never a re-transcription.
   renderExport();
   persist();
 });
@@ -4016,8 +4162,8 @@ $('ensemble-select').addEventListener('change', async (event) => {
   // while the view they were made on is still the one isPianist() names.
   foldEdits();
   state.ensemble = event.target.value;
-  renderEnsembleHint();
-  renderLinePicker();
+  // The Rhythm menu's default and the Staves menu follow the ensemble.
+  renderChoices();
   renderSuggestion();  // the listener has chosen: the suggestion steps aside
   await persistNow();  // review_config reads this back off the sidecar
   // This one DOES change the notes: a trio consults the polyphonic piano model
@@ -4426,8 +4572,9 @@ document.addEventListener('keydown', (event) => {
       setTool(state.tool === 'erase' ? 'inspect' : 'erase');
       break;
     case 'h':
-      // The same for the Hands tool, on a two-staff page.
-      if (twoStavesOn() && state.review) setTool(state.tool === 'hands' ? 'inspect' : 'hands');
+      // The same for the Hands tool, on a two-staff page -- the Voices tool
+      // on a multi-horn head.
+      if (sortingOn()) setTool(state.tool === 'hands' ? 'inspect' : 'hands');
       break;
     case 'arrowup':
     case 'arrowdown':

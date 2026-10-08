@@ -102,7 +102,10 @@ button, the page view, the Score button, `run_eval` and
     EXACTLY on a third (`notate.exact_thirds`), which nothing else writes.
 
 New model fields, all additive with defaults (no cached artifact or key
-moved): `NoteEvent.voice`, `NotatedNote.stem`, `NotatedNote.hidden`.
+moved): `NoteEvent.voice`, `NotatedNote.stem`, `NotatedNote.hidden`,
+`Notation.clef`, `Notation.part_name`, `Notation.parts`. A one-part page's
+MusicXML is byte-identical to before (checked against the previous export
+on swing, literal, transposed, grand-staff and double-time pages).
 
 ### The GUI's edits (`gui/edits.py`)
 
@@ -119,6 +122,53 @@ review as its own VIEW:
   switched-on candidate is never pruned again;
 - the listener's voice moves (sidecar `voices`, [{onset, pitch, voice}],
   matched by content through `erasures.match`) are applied on top.
+
+### Two parts
+
+Sidecar `staves: 2` on a multi-horn head (the Staves menu's "Two parts")
+writes the horns as two PARTS of one page (`notation.merge_horn_parts`,
+`Notation.parts`, written by export as two `<part>`s with printed names
+Upper and Lower):
+
+- no octave move and no unison merge: each part is what its horn played;
+- one concert key read over both, each part at its own transposition: the
+  sidecar's `transposition` for the upper part, `lower_transposition` for
+  the lower (the upper's when unset);
+- each part's clef by its register: bass when the length-weighted median of
+  its WRITTEN pitches (concert pitch for a C part) is under middle C
+  (`notation.clef_for`), else treble;
+- chord symbols and the page's words ("Swing") on the upper part only;
+- the Score button and readability read the upper part.
+
+### The GUI
+
+- The Ensemble menu offers "Two horns (a head)" (built from
+  config.ENSEMBLES), with its own hint, and the Rhythm menu shows literal
+  16ths for it until the listener picks another (`/api/config`
+  `ensemble_timings`).
+- The roll colours the upper voice like the line and the lower like the left
+  hand (`review.js` `setHands` with no split line); the legend says so, and
+  the faint candidates are "heard, in neither voice".
+- The Voices tool is the Hands tool's gestures (box select, Ctrl-box adds,
+  click, Ctrl-click; up/down or the buttons; "As heard" forgets a move; H).
+  Moves are stored in the sidecar's `voices`, [{onset, pitch, voice}], and
+  matched by content. `/review` returns `voices` (the moves resolved onto
+  the roll's indices) and `note_voices` (every note's voice as the server
+  ordered the edited set).
+- Two notes put in ONE voice at one onset are written as a chord in it
+  (`notation.with_chords` per voice).
+- The ear test plays both voices (the render synthesises every kept note).
+- The Staves menu reads "One staff, two voices" / "Two parts (upper +
+  lower)", and "Lower part" appears beside "Written for" in two-parts mode.
+- Export's file name carries `2parts` for two parts, `literal16` for the
+  default rhythm, and `lag`/`thirds` for the readings.
+
+A smoke test in headless Chromium against a stubbed server (cloud session,
+2026-10-08): the folder browser grouped takes, a linked take opened, the
+legend, the Voices tool (17 notes box-selected and moved, stored in the
+take's sidecar), the Staves and Lower part menus, and Export in both modes
+(the page named for the take, beside its sidecar) all worked with no
+script error.
 
 ## Open questions for the measurement
 

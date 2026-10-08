@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from swingscribe import chords
-from swingscribe.config import KEY_SIGNATURES, TRANSPOSITIONS, Config
+from swingscribe.config import KEY_SIGNATURES, TRANSPOSITIONS, Config, NotateConfig
 from swingscribe.model import BeatGrid, Document, Notation, NoteEvent
 from swingscribe.notation import (
     bar_grid_for_settings,
@@ -128,13 +128,35 @@ def two_staves(settings: dict[str, Any], texture: bool) -> bool:
     return texture and settings.get("staves") == 2
 
 
-def page_tags(config: Config, settings: dict[str, Any], texture: bool) -> list[str]:
+def two_parts(settings: dict[str, Any], horns: bool) -> bool:
+    """Two PARTS: only ever for a multi-horn head, whose Staves menu offers
+    them (sidecar `staves` 2) -- the upper horn and the lower, each at its
+    own transposition."""
+    return horns and settings.get("staves") == 2
+
+
+def lower_transposition_of(config: Config, settings: dict[str, Any]) -> str:
+    """The lower part's transposition (sidecar `lower_transposition`), else
+    the upper part's -- the sidecar's `transposition`, else the config's. A
+    value this build does not offer is the upper part's, not an error."""
+    upper = settings.get("transposition")
+    upper = upper if upper in TRANSPOSITIONS else config.notate.transposition
+    stored = settings.get("lower_transposition")
+    return stored if stored in TRANSPOSITIONS else upper
+
+
+def page_tags(
+    config: Config, settings: dict[str, Any], texture: bool, horns: bool = False
+) -> list[str]:
     """The filename tags for this page's choices away from their defaults:
-    "all" or "2staves" for a piano texture, "literal16"/"literal32", and a
-    literal page's "lag" and "thirds" readings."""
+    "all" or "2staves" for a piano texture, "2parts" for a two-horn head
+    written as two parts, "literal16"/"literal32", and a literal page's
+    "lag" and "thirds" readings."""
     tags = []
     if texture:
         tags.append("2staves" if two_staves(settings, texture) else "all")
+    if two_parts(settings, horns):
+        tags.append("2parts")
     reading = reading_of(settings, config)
     if reading["timing"] != "swing":
         tags.append(reading["timing"].replace("-", ""))
@@ -302,7 +324,17 @@ def build_notation(
     }
     if run_config.transcribe.uses_multi_horn:
         heard = line + [NoteEvent(source=f"{stem}:added", **note) for note in added or []]
-        notation, _lines = notation_for_horns(audio_path, heard, beats, region, **common)
+        parts = two_parts(settings, True)
+        lower = NotateConfig(transposition=lower_transposition_of(config, settings)).transpose
+        notation, _lines = notation_for_horns(
+            audio_path,
+            heard,
+            beats,
+            region,
+            parts=parts,
+            lower_transpose=lower if parts else None,
+            **common,
+        )
         if notation is None or not notation.bars:
             raise NotReady("the span is too short to bar out - select at least a couple of bars")
         return notation
@@ -531,7 +563,7 @@ def page_path(
         audio_path,
         run_config.transcribe.region or (0.0, None),
         take_of(config, run_config.transcribe.piano_line),
-        page_tags(config, settings, texture),
+        page_tags(config, settings, texture, run_config.transcribe.uses_multi_horn),
         take,
     )
 
@@ -582,7 +614,14 @@ def describe(
         "double_time": bool(settings.get("double_time")),
         "fast_tempo": bool(settings.get("fast_tempo")),
         "bars": len(notation.bars),
-        "notes": sum(1 for bar in notation.bars for n in bar.notes if not n.is_rest),
+        # Every part's: a two-part head's lower part is notes on the page too.
+        "notes": sum(
+            1
+            for part in (notation, *notation.parts)
+            for bar in part.bars
+            for n in bar.notes
+            if not n.is_rest
+        ),
         "key_fifths": notation.key_fifths,
         # The concert key, named, and whether it was detected or chosen: the
         # Key menu shows the detected one beside "Auto".
@@ -591,6 +630,10 @@ def describe(
         "swing": notation.swing,
         "timing": timing_of(config, settings),
         "staves": notation.staves,
+        # A two-horn head written as two parts: how many, and each part's
+        # transposition, upper first.
+        "parts": 1 + len(notation.parts),
+        "part_transposes": [notation.transpose, *(part.transpose for part in notation.parts)],
         "transpose": notation.transpose,
         "time_signature": f"{signature[0]}/{signature[1]}",
     }

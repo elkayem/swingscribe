@@ -486,9 +486,12 @@ def voices_of(bar) -> list[tuple[int, list[NotatedNote]]]:
 
 
 def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
-    """A complete score-partwise MusicXML document."""
-    written_key = notation.key_fifths + fifths_for_transpose(notation.transpose)
+    """A complete score-partwise MusicXML document.
 
+    One part, unless `notation.parts` holds more (a two-horn head written as
+    two parts): each is written as a part of its own, with its own
+    transposition, written key and clef, over the same bars. Part names are
+    printed only when there is more than one."""
     root = ElementTree.Element("score-partwise", {"version": "4.0"})
     work = ElementTree.SubElement(root, "work")
     ElementTree.SubElement(work, "work-title").text = notation.title or "Transcription"
@@ -498,15 +501,38 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
     encoding = ElementTree.SubElement(identification, "encoding")
     ElementTree.SubElement(encoding, "software").text = "SwingScribe"
 
+    parts = [notation, *notation.parts]
     part_list = ElementTree.SubElement(root, "part-list")
-    score_part = ElementTree.SubElement(part_list, "score-part", {"id": "P1"})
-    # The schema requires a part-name; a notation program prints it as the
-    # instrument label left of the first system, where the track's filename
-    # (what callers pass) is noise beside a title that already says it.
-    name = ElementTree.SubElement(score_part, "part-name", {"print-object": "no"})
-    name.text = part_name
+    for number, part in enumerate(parts, start=1):
+        score_part = ElementTree.SubElement(part_list, "score-part", {"id": f"P{number}"})
+        # The schema requires a part-name; a notation program prints it as the
+        # instrument label left of the first system, where the track's
+        # filename (what callers pass) is noise beside a title that already
+        # says it. Two parts need their names to be told apart.
+        if len(parts) > 1:
+            name = ElementTree.SubElement(score_part, "part-name")
+            name.text = part.part_name or (part_name if number == 1 else f"Part {number}")
+        else:
+            name = ElementTree.SubElement(score_part, "part-name", {"print-object": "no"})
+            name.text = part.part_name or part_name
 
-    part = ElementTree.SubElement(root, "part", {"id": "P1"})
+    for number, part in enumerate(parts, start=1):
+        _append_part(root, part, f"P{number}", words=number == 1)
+
+    ElementTree.indent(root, space="  ")
+    body = ElementTree.tostring(root, encoding="unicode")
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" '
+        '"http://www.musicxml.org/dtds/partwise.dtd">\n' + body + "\n"
+    )
+
+
+def _append_part(root, notation: Notation, part_id: str, words: bool = True) -> None:
+    """One <part>: its bars, written in its own transposition and clef. The
+    page's words ("Swing", double time) go over the first part only."""
+    written_key = notation.key_fifths + fifths_for_transpose(notation.transpose)
+    part = ElementTree.SubElement(root, "part", {"id": part_id})
     previous_signature = None
     for index, bar in enumerate(notation.bars):
         measure = ElementTree.SubElement(part, "measure", {"number": str(bar.number)})
@@ -524,7 +550,9 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
                     # A grand staff: <staves> before the clefs (the schema's
                     # order), one numbered clef per staff.
                     ElementTree.SubElement(attributes, "staves").text = str(notation.staves)
-                for number, (sign, line) in enumerate(_clefs(notation.staves), start=1):
+                for number, (sign, line) in enumerate(
+                    _clefs(notation.staves, notation.clef), start=1
+                ):
                     clef = ElementTree.SubElement(
                         attributes, "clef", {"number": str(number)} if notation.staves > 1 else {}
                     )
@@ -533,11 +561,11 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
                 if notation.transpose:
                     _append_transpose(attributes, notation.transpose)
             previous_signature = bar.time_signature
-        if index == 0 and notation.swing:
+        if words and index == 0 and notation.swing:
             # The one word that makes the difference between a readable jazz
             # chart and a wrong one: the eighths on the page are even.
             _append_words(measure, "Swing", notation.staves)
-        if index == 0 and notation.double_time:
+        if words and index == 0 and notation.double_time:
             # The listener's condition for double-time pages: the page must
             # say so, or its values read as twice what was played.
             _append_words(measure, "Notated in double time", notation.staves)
@@ -589,18 +617,13 @@ def to_musicxml(notation: Notation, part_name: str = "Solo") -> str:
                 measure, symbol, notation.transpose, _ticks(symbol.beat) - written, notation.staves
             )
 
-    ElementTree.indent(root, space="  ")
-    body = ElementTree.tostring(root, encoding="unicode")
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" '
-        '"http://www.musicxml.org/dtds/partwise.dtd">\n' + body + "\n"
-    )
 
-
-def _clefs(staves: int) -> list[tuple[str, str]]:
-    """(sign, line) per staff: treble alone, or treble over bass."""
-    return [("G", "2"), ("F", "4")] if staves > 1 else [("G", "2")]
+def _clefs(staves: int, clef: str = "treble") -> list[tuple[str, str]]:
+    """(sign, line) per staff: treble over bass for a grand staff, else the
+    part's own clef -- treble, or bass for a low part (Notation.clef)."""
+    if staves > 1:
+        return [("G", "2"), ("F", "4")]
+    return [("F", "4")] if clef == "bass" else [("G", "2")]
 
 
 def _append_words(measure, text: str, staves: int) -> None:

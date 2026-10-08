@@ -664,6 +664,8 @@ def notation_for_span(
     double_time: bool = False,
     left_hand: list[NoteEvent] | None = None,
     lower_voice: list[NoteEvent] | None = None,
+    horn_parts: bool = False,
+    lower_transpose: int | None = None,
 ) -> Notation | None:
     """Run swing, quantize and notate over one span. None if it is too short.
 
@@ -691,7 +693,10 @@ def notation_for_span(
     swing reading, and merged as voices 1 and 2 of one staff
     (`merge_horn_voices`). A literal page that takes out the line's lag
     (QuantizeConfig.literal_lag) reads it ONCE over both horns and moves
-    them together, so a chord struck behind the beat stays one chord.
+    them together, so a chord struck behind the beat stays one chord. With
+    `horn_parts` the two horns are two PARTS instead (`horn_parts`), the
+    lower one written at `lower_transpose` semitones (the upper part's own
+    when None).
     """
     from swingscribe.stages import notate, quantize, swing
 
@@ -788,7 +793,12 @@ def notation_for_span(
         other = right if lead_is_lower else lower
         follower = _notate_only(other, document, run_config) if other else None
         upper_page, lower_page = (follower, notation) if lead_is_lower else (notation, follower)
-        notation = merge_horn_voices(upper_page, lower_page, run_config.notate.key)
+        if horn_parts:
+            notation = merge_horn_parts(
+                upper_page, lower_page, run_config.notate.key, lower_transpose
+            )
+        else:
+            notation = merge_horn_voices(upper_page, lower_page, run_config.notate.key)
     elif staves:
         other = right if lead_is_left else left
         follower = _notate_only(other, document, run_config) if other else None
@@ -810,16 +820,33 @@ def notation_for_horns(
     notes: list[NoteEvent],
     beats: list[float],
     region: tuple[float, float | None],
+    *,
+    parts: bool = False,
+    lower_transpose: int | None = None,
     **kwargs,
 ) -> tuple[Notation | None, HornLines]:
     """A multi-horn head's page: the voices as one staff writes them
     (`horn_lines`), notated as a two-horn staff (`notation_for_span`'s
     `lower_voice`). THE assembly the Export button, the page view, the
     harness and scripts/multi_horn_page.py share; `kwargs` are
-    `notation_for_span`'s. Returns the page and what the writing did."""
-    lines = horn_lines(notes)
+    `notation_for_span`'s. Returns the page and what the writing did.
+
+    `parts` writes TWO PARTS instead, upper and lower, the lower at its own
+    `lower_transpose`: each part plays its own notes, so nothing is moved an
+    octave and no unison is merged."""
+    lines = horn_lines(notes, move_octaves=not parts, merge_unisons=not parts)
+    # Two notes struck together in ONE voice -- the listener moved one there
+    # with the Voices tool -- are a chord in it, not a grid too coarse (one
+    # would be pushed a 32nd late, or dropped).
     notation = notation_for_span(
-        audio_path, lines.upper, beats, region, lower_voice=lines.lower, **kwargs
+        audio_path,
+        with_chords([], lines.upper),
+        beats,
+        region,
+        lower_voice=with_chords([], lines.lower),
+        horn_parts=parts,
+        lower_transpose=lower_transpose,
+        **kwargs,
     )
     return notation, lines
 
@@ -908,6 +935,94 @@ def merge_horn_voices(
         title=template.title,
         double_time=template.double_time,
     )
+
+
+# A part whose written notes sit mostly under middle C reads on a bass staff:
+# the median written pitch, weighted by length, decides (`clef_for`).
+CLEF_SPLIT = 60
+
+
+def clef_for(bars: list[NotatedBar], transpose: int = 0) -> str:
+    """A part's clef by its register: "bass" when the length-weighted median
+    of its WRITTEN pitches (concert pitch plus the part's transposition --
+    concert pitch itself for a C part) is under middle C, else "treble"."""
+    pitches = [
+        (note.pitch + transpose, note.duration)
+        for bar in bars
+        for note in bar.notes
+        if not note.is_rest
+    ]
+    if not pitches:
+        return "treble"
+    pitches.sort()
+    half = sum(d for _p, d in pitches) / 2.0
+    running = 0.0
+    for pitch, duration in pitches:
+        running += duration
+        if running >= half:
+            return "bass" if pitch < CLEF_SPLIT else "treble"
+    return "treble"
+
+
+def merge_horn_parts(
+    upper: Notation | None,
+    lower: Notation | None,
+    key: int | None = None,
+    lower_transpose: int | None = None,
+) -> Notation:
+    """Two separately notated horns as two PARTS of one page: the upper
+    part, carrying the lower as `parts[0]`. Both over the same bars (a bar a
+    horn sits out is a whole rest in its part), in ONE concert key read over
+    both (`merge_staves`' rule), each with its own transposition -- the
+    lower's `lower_transpose`, else the upper's -- and its own clef by its
+    register (`clef_for`). No octave is moved and no unison merged: each
+    part is what its horn played."""
+    from swingscribe.stages import notate
+
+    voices = {voice: n for voice, n in ((1, upper), (2, lower)) if n is not None}
+    template = next((n for n in voices.values() if n.bars), None) or upper or lower or Notation()
+    bars_of = {voice: {bar.number: bar for bar in n.bars} for voice, n in voices.items()}
+    numbers = sorted({number for bars in bars_of.values() for number in bars})
+    if key is None:
+        sounding = _sounding(bars_of)
+        key = notate.detect_key(sounding) if sounding else template.key_fifths
+    transposes = {
+        1: template.transpose,
+        2: template.transpose if lower_transpose is None else lower_transpose,
+    }
+    parts: dict[int, Notation] = {}
+    for voice, name in ((1, "Upper"), (2, "Lower")):
+        written: list[NotatedBar] = []
+        signature = (4, 4)
+        for number in range(numbers[0], numbers[-1] + 1) if numbers else ():
+            found = [bars[number] for bars in bars_of.values() if number in bars]
+            if found:
+                signature = found[0].time_signature
+            length = signature[0] * 4.0 / signature[1]
+            bar = bars_of.get(voice, {}).get(number)
+            notes = bar.notes if bar is not None else notate.fill_rests([], length)
+            written.append(
+                NotatedBar(
+                    number=number,
+                    time_signature=signature,
+                    notes=[
+                        _respelled(n, key, voice=1, staff=1, stem="", hidden=False) for n in notes
+                    ],
+                )
+            )
+        parts[voice] = Notation(
+            bars=written,
+            key_fifths=key,
+            swing=template.swing,
+            transpose=transposes[voice],
+            title=template.title,
+            double_time=template.double_time,
+            clef=clef_for(written, transposes[voice]),
+            part_name=name,
+        )
+    head = parts[1]
+    head.parts = [parts[2]]
+    return head
 
 
 def _sounding(bars_of: dict[int, dict[int, NotatedBar]]) -> list[tuple[int, float]]:

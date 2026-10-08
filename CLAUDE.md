@@ -307,6 +307,23 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   never in the cache dir. The cache is derived data that must stay safely
   deletable; a span and a downbeat are human judgements. Only the disposable
   recents index stays under the cache.
+- **A sidecar IS a track: "takes"** (2026-10-08, `gui/library.py`,
+  docs/multi-horn-handoff.md). A sidecar may name its audio (`"audio"`,
+  relative to itself): a LINKED take, keyed by its own file name, with the
+  track id digest + 8 hex of its path's hash; no `audio` is the audio's own
+  sidecar, today's rule, and keeps the plain digest. Every settings read
+  and write goes through the open entry's `sidecar` (never
+  `settings_path(audio)` for a take), jobs carry it, and a take's pages are
+  named for it, beside it. Byte-identical copies opened through their OWN
+  sidecars would share the digest -- the bug this started from -- so the
+  copy the recents index already holds the digest for keeps it
+  (`claim_track_id`) and any other is named like a linked take. "New take"
+  copies `RECORDING_KEYS` only. The harness walks takes through ONE
+  function, `library.discover(root) -> [(key, sidecar, audio)]`: an own
+  sidecar keys as its audio's path, the key every pin has. The cache is the
+  RECORDING's (digest): the panel lists the takes sharing it.
+  `scripts/dedupe_audio.py` is prepared and NOT to be run until the
+  listener has reviewed linked sidecars.
 - **The cache panel (`gui/storage.py`, `swingscribe cache ls|rm`) deletes
   stems directories and ingest wavs, and nothing else.** Those are 78 of the
   cache's 78 GB; the bins, reviews and peaks are not worth a control. A
@@ -703,6 +720,30 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   the signal — one says who is playing, the other which horn — so both can only
   come from the listener. Build the menus from those constants, never from a
   hand-copied list, or the UI drifts from what the validator accepts.
+- **`multi-horn` is a head played by two horns in harmony** (2026-10-08,
+  docs/multi-horn.md). HEARING and WRITING are apart, as with the
+  lead-ins: transcribe gives Basic Pitch's notes (onset 0.5, frame 0.3, 23
+  ms) at their heard pitches, each in a voice (`voices.assign`: overtone
+  ghosts dropped, two most confident of three, meaningful overlaps ordered
+  by pitch over the overlap graph, a partnerless note in voice 1); CREPE
+  runs for the trace only. Never the piano oracle; no onnxruntime is an
+  ERROR, never CREPE's line under the multi-horn key. Every `multi_horn_*`
+  field dumps only for multi-horn (a test pins the horn-led, trio and
+  solo-piano dumps). The page is `notation.notation_for_horns`, shared by
+  Export, the page view, Score, run_eval and `scripts/multi_horn_page.py`:
+  one treble staff, the lower voice moved up by octaves PER PHRASE where
+  its median interval is an octave or more (never note by note), a unison
+  written once, each voice quantized on one grid and merged
+  (`merge_horn_voices`: stems up/down where both sound, voice-2 rests
+  `print-object="no"`, no voice-2 rests in a bar of voice 1 alone). Literal
+  16ths by default (`config.ENSEMBLE_TIMINGS`, `notation.timing_for`);
+  `literal_lag` (read once over both horns) and `literal_thirds` are off
+  until measured on the real head. Sidecar `staves: 2` is TWO PARTS
+  (`merge_horn_parts`, `Notation.parts`): no octave move, no unison merge,
+  `lower_transposition`, clef by written register. The review is its own
+  VIEW (`erasures.split_by_view`, records tagged `view: "horns"`), re-ordered
+  over the edited set with `voices.order` (never pruned again), plus the
+  listener's `voices` moves (the Voices tool, the Hands tool's gestures).
 - **The Score button and the F1 on the ground-truth bar are DIFFERENT
   QUESTIONS**, and this is the project's most expensive confusion appearing in
   the UI. The bar's F1 is time-free and pitch-only (`gui/ground_truth.py`):

@@ -85,6 +85,39 @@ edits and the transposition, is saved in a small file beside the audio. For
 `solo.m4a` it is `solo.m4a.swingscribe.json`. Keep it with the audio, and
 the track opens the way you left it.
 
+### Takes: more than one settings file for a recording
+
+One recording often holds more than one thing to transcribe: the head and
+the trumpet solo, say. Each can be a **take** with a settings file of its
+own, named as you like: `Open_Sesame_Melody.swingscribe.json` and
+`Open_Sesame_Freddie_Hubbard_solo.swingscribe.json` beside
+`Open_Sesame.m4a`. A take's file names the recording it belongs to, so it
+may even sit in another folder.
+
+- **New take…** in the header asks for a name and starts a take of the
+  open recording, saved beside the current one. It keeps what you decided
+  about the recording (the downbeat, pinned beats, steady stretches, time
+  signature, chorus length, form start, Fast tune, separation model, chord
+  changes and key) and starts everything about a span fresh (the span,
+  ensemble, edits, hands, voices, score and line).
+- **Rename take…** renames the open take's file. Nothing in it is lost.
+  Renaming the recording's own settings file turns it into a take that
+  names its audio.
+- In the folder browser, a recording with no settings file is listed as
+  itself. Once it has any, each is listed under it by its take name: its
+  own file as "its own sidecar", the others as "take". The recording's row
+  still opens its own settings. A take whose recording lives in another
+  folder is listed in its own folder with an arrow to where the audio is,
+  and one whose audio is missing is shown greyed out rather than hidden.
+- Exported pages are named after the take and written beside its file, so
+  two takes of one recording never overwrite each other's pages.
+- Two takes of one recording share its separated stems and every other
+  cached result, so a separation is never paid for twice. The **Cache**
+  panel says when a recording is "shared by N takes"; deleting its cache
+  affects all of them, and never touches any take's settings.
+- Two identical copies of a recording in different folders each keep their
+  own settings, even with both open in two browser tabs.
+
 ### Freeing disk space
 
 Separated stems are big. The **Cache** panel lists each track's sets of
@@ -436,7 +469,7 @@ track.
 ### Who is playing
 
 **Ensemble** tells SwingScribe who is playing: **Horn-led**, **Trio
-(piano)** or **Solo piano**. A pianist is transcribed with the help of a
+(piano)**, **Solo piano** or **Two horns (a head)**. A pianist is transcribed with the help of a
 polyphonic piano model, which hears every note played. A horn never is,
 because a piano model asked about a saxophone vouches for nothing. The note
 beside the menu says whether the piano model will be consulted. Changing
@@ -540,11 +573,58 @@ Two lanes under the roll show the raw evidence:
 The section's transport plays **Original** (the default), **Transcription**
 (the notes as plain tones, with silenced notes left out) or **Both**.
 
+### Two horns in harmony
+
+Pick **Two horns (a head)** for a head played by two horns in harmony,
+like a hard bop trumpet and tenor. Both horns are heard on the same stem,
+usually `other`, and every note is put in a **voice**: the higher of two
+horns sounding together is the upper voice, the lower one the lower voice.
+A note with no partner (one horn alone, or the two in unison) is in the
+upper voice, so it is written once. The piano model is never consulted.
+
+- The piano roll draws the upper voice in the line's colour and the lower
+  voice in the left hand's colour.
+- Faint notes are ones the model heard that neither voice holds: overtones
+  of a louder note, and a third note where three sounded at once. The Edit
+  tool switches one on, and it is written in whichever voice its pitch and
+  its neighbours put it in.
+- The **Voices** tool moves notes between the voices. It works like the
+  Hands tool: drag a box or click to select, then **Upper voice ↑** or
+  **Lower voice ↓**, or press <kbd>↑</kbd> or <kbd>↓</kbd>. **As heard**
+  gives the selected notes back. <kbd>H</kbd> switches to it and back.
+- Silencing a note of a pair leaves its partner alone, and the partner is
+  then written once, in the upper voice.
+- The ear test plays both voices.
+- Edits made on a two-horn head belong to that view. If you change the
+  ensemble, they are kept in the settings file but not applied, and they
+  come back if you change it back.
+
+The page writes both horns on one treble staff, in concert pitch:
+
+- In a bar where both horns play, the upper voice's stems go up and the
+  lower voice's go down. A bar where only one horn plays looks like an
+  ordinary single line.
+- The lower voice's rests are not drawn. The upper voice's are.
+- Where a phrase of the lower horn sits an octave or more under the upper
+  horn, the whole phrase is written an octave up, so the two lines sit
+  close on the staff. This is decided phrase by phrase, never note by
+  note. A phrase doubled at the octave is written once.
+- A unison is written once, in the upper voice.
+- The rhythm is **literal 16ths** unless you pick another one in the
+  **Rhythm** menu: horns playing a written head play the written rhythm.
+
+Set **Staves** to **Two parts (upper + lower)** to write the horns as two
+separate parts instead. Each part plays its own notes, so nothing is moved
+an octave and a unison is written in both. **Written for** sets the upper
+part's instrument and **Lower part** the lower part's. Each part gets the
+clef its register needs.
+
 ### Inspect, Edit and Hands
 
 The tools sit above the edit bar. <kbd>E</kbd> switches between Inspect and
 Edit. **Hands** appears only on a two-staff page, and <kbd>H</kbd> switches
-to it and back.
+to it and back. On a two-horn head the same tool is called **Voices** (see
+"Two horns in harmony" above).
 
 - **Inspect** is the default. Click a note to move the playhead there, hear
   the note's pitch, and see the evidence behind it in the inspector below:
@@ -808,9 +888,11 @@ field, a menu or a slider.
   on the Detail view (needs the beat grid).
 - <kbd>C</kbd>: turn the click track on or off.
 - <kbd>E</kbd>: switch between the Inspect and Edit tools.
-- <kbd>H</kbd>: switch to the Hands tool and back (two-staff page only).
+- <kbd>H</kbd>: switch to the Hands tool and back (two-staff page only),
+  or to the Voices tool on a two-horn head.
 - <kbd>↑</kbd> / <kbd>↓</kbd>: with the Hands tool, put the selected notes
-  in the right or left hand.
+  in the right or left hand; with the Voices tool, in the upper or lower
+  voice.
 - <kbd>Esc</kbd>: put the Steady tempo tool down; with the Hands tool,
   clear the selection.
 - <kbd>V</kbd>: show or hide the piano model's candidates.

@@ -96,13 +96,22 @@ def resolve(
     mine, rest = gui_erasures.split_by_view(stored_additions, view)
     additions = gui_erasures.resolve_additions(mine, candidates, span)
     additions = {**additions, "carried": additions["carried"] + rest}
-    audible = gui_erasures.audible(notes, erased["silenced"])
+    silenced = set(erased["silenced"])
+    audible = gui_erasures.audible(notes, silenced)
     added = gui_erasures.enabled(candidates, additions["added"])
     voices = None
+    note_voices = None
     if horns:
-        audible, added, voices = _voiced(
-            audible, added, settings.get("voices") or [], span, overlap_s, overlap_share
+        kept = [index for index in range(len(notes)) if index not in silenced]
+        audible, added, voices, ordered = _voiced(
+            notes, kept, added, settings.get("voices") or [], span, overlap_s, overlap_share
         )
+        # Every note's voice as the roll draws it: the order over the
+        # edited set, before the listener's moves (the roll lays those on
+        # itself), and a silenced note's as it was heard.
+        note_voices = [
+            ordered.get(index, int(note.get("voice", 1))) for index, note in enumerate(notes)
+        ]
     return {
         "notes": notes,
         "erasures": erased,
@@ -112,6 +121,7 @@ def resolve(
         "added": added,
         "hands": None,
         "voices": voices,
+        "note_voices": note_voices,
     }
 
 
@@ -135,19 +145,25 @@ def _carried(stored: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _voiced(
-    audible: list[dict[str, Any]],
+    notes: list[dict[str, Any]],
+    kept: list[int],
     added: list[dict[str, Any]],
     moves: list[dict[str, Any]],
     span: tuple[float, float] | None,
     overlap_s: float | None,
     overlap_share: float | None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any], dict[int, int]]:
     """The kept notes of a multi-horn head, each with the voice it is
     written in: ordered over the EDITED set (`voices.order` -- rule 3 alone,
     so nothing the listener kept or switched on is pruned again), then the
-    listener's voice moves applied, matched by content."""
+    listener's voice moves applied, matched by content against the review's
+    notes (as the roll numbers them) and the switched-on candidates.
+
+    Returns (audible, added, the moves' resolution with `upper` and `lower`
+    as indices into the REVIEW's notes, note index -> its ordered voice)."""
     from swingscribe import voices as horn_voices
 
+    audible = [notes[index] for index in kept]
     combined = [*audible, *added]
     rules = {}
     if overlap_s is not None:
@@ -161,4 +177,13 @@ def _voiced(
         {**note, "voice": chosen.get(index, voice)}
         for index, (note, voice) in enumerate(zip(combined, order, strict=True))
     ]
-    return voiced[: len(audible)], voiced[len(audible) :], resolved
+    # The roll numbers the review's notes: report the moves by THOSE indices
+    # (a move on a switched-on candidate is applied, and carried by content).
+    on_notes = dict(enumerate(kept))
+    resolved = {
+        **resolved,
+        "upper": sorted(on_notes[i] for i in resolved["upper"] if i in on_notes),
+        "lower": sorted(on_notes[i] for i in resolved["lower"] if i in on_notes),
+    }
+    ordered = {index: order[position] for position, index in enumerate(kept)}
+    return voiced[: len(audible)], voiced[len(audible) :], resolved, ordered

@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from swingscribe.config import (
+    ENSEMBLE_TIMINGS,
     ENSEMBLES,
     KEY_SIGNATURES,
     LINES,
@@ -458,6 +459,9 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             # validates against, so the page cannot offer what it refuses.
             "timings": list(TIMINGS),
             "default_timing": config.quantize.timing,
+            # The ensembles whose pages have a rhythm of their own when the
+            # track chose none (a two-horn head is literal).
+            "ensemble_timings": dict(ENSEMBLE_TIMINGS),
             "piano_notes": list(PIANO_NOTES),
             "hand_split": HAND_SPLIT,
             # The Key menu: every signature the sidecar's `key` may hold, by
@@ -1010,6 +1014,10 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             "additions": edits["additions"],
             "piano_notes": "all" if texture else "line",
             "hands": edits["hands"],
+            # A multi-horn head: the listener's voice moves matched onto these
+            # notes, and every note's voice as the roll draws it.
+            "voices": edits.get("voices"),
+            "note_voices": edits.get("note_voices"),
         }
 
     @app.get("/api/tracks/{track_id}/transcription")
@@ -1309,16 +1317,13 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         settings = settings_of(entry, track_id)
         # Named the way the export named it: the page's choices ride in the
         # filename, and a horn never has a texture whatever the request says.
-        texture = piano_notes == "all" and (
-            review_config(
-                stem or config.transcribe.stem, start, end, entry, track_id
-            ).transcribe.uses_piano_oracle
-        )
+        routed = review_config(stem or config.transcribe.stem, start, end, entry, track_id)
+        texture = piano_notes == "all" and routed.transcribe.uses_piano_oracle
         path = gui_musicxml.export_path(
             entry["path"],
             span,
             gui_musicxml.take_of(config, line),
-            gui_musicxml.page_tags(config, settings, texture),
+            gui_musicxml.page_tags(config, settings, texture, routed.transcribe.uses_multi_horn),
             take_of(entry),
         )
         if not path.is_file():
