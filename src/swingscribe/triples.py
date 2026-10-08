@@ -191,6 +191,7 @@ def crop(page: Score, lo: float, hi: float) -> Score:
         bars=len({n.bar for n in melody}),
         beats_per_bar=page.beats_per_bar,
         key_fifths=page.key_fifths,
+        graces=page.graces,
     )
 
 

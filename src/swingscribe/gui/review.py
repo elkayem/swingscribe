@@ -179,6 +179,9 @@ def _payload(notes: list[NoteEvent], diagnostics: Any) -> dict[str, Any]:
                 "duration": round(n.duration, _ROUND),
                 "pitch": n.pitch,
                 "confidence": round(n.confidence, _ROUND),
+                # A scoop's mark (NoteEvent.lead_in), only where set: the page
+                # writes it as a grace note, the roll draws it as heard.
+                **({"lead_in": True} if n.lead_in else {}),
             }
             for n in notes
         ],

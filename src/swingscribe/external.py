@@ -85,7 +85,7 @@ import math
 import re
 import struct
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
 from xml.etree import ElementTree
@@ -939,7 +939,8 @@ def crop_score(score, keep: list[int]):
 
     kept = [score.melody[i] for i in sorted(set(keep))]
     if not kept:
-        return Score(score.title, [], [], 0, score.beats_per_bar, score.key_fifths), 0.0
+        empty = Score(score.title, [], [], 0, score.beats_per_bar, score.key_fifths)
+        return replace(empty, graces=score.graces), 0.0
     bar = float(score.beats_per_bar)
     first_bar = math.floor(kept[0].position / bar + 1e-9)
     origin = first_bar * bar
@@ -956,7 +957,8 @@ def crop_score(score, keep: list[int]):
 
     low, high = kept[0].position - 1e-9, kept[-1].position + 1e-9
     notes = [moved(n) for n in score.notes if low <= n.position <= high]
-    return Score(score.title, notes, [moved(n) for n in kept], bars, bar, score.key_fifths), origin
+    cropped = Score(score.title, notes, [moved(n) for n in kept], bars, bar, score.key_fifths)
+    return replace(cropped, graces=score.graces), origin
 
 
 @dataclass

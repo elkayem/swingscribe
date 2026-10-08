@@ -49,7 +49,7 @@ from fractions import Fraction
 from pathlib import Path
 
 from swingscribe.config import Config, QuantizeConfig
-from swingscribe.model import Document, MeterSection, QuantizedNote, SwingSpan
+from swingscribe.model import Document, MeterSection, NoteEvent, QuantizedNote, SwingSpan
 
 # Bump when this stage's behavior changes without a config change (see
 # pipeline._cache_name).
@@ -658,6 +658,7 @@ def quantize_notes(
     min_onsets_for_tuplet: int = 3,
     grid_slack_s: float = 0.02,
     chords: list[list[int]] | None = None,
+    graces: list[list[int]] | None = None,
     quarter_triplets: bool = False,
     min_onsets_for_sixteenth: int = 3,
     offbeat_pair_tuplet_fit: float = 0.0,
@@ -688,6 +689,9 @@ def quantize_notes(
     A literal `timing` bypasses all of it for `literal_notes`. `polyphonic`
     folds notes the grid puts on one position into a chord (`merge_chords`)
     rather than losing one of them.
+
+    `graces` rides beside `chords` (QuantizedNote.grace): each note's grace
+    pitches, set by `absorb_lead_ins`; swing timing only.
 
     `reranker` (A6, docs/reranker.md) is QuantizeConfig.reranker -- "" off,
     or the path of a weights JSON -- or any object with a
@@ -725,9 +729,12 @@ def quantize_notes(
     # fractional offset rides along: the ternary hypothesis is scored and
     # snapped in raw time (see choose_grid — the warp is a binary story).
     extras = chords if chords is not None else [[] for _ in onsets]
-    placed: list[tuple[int, float, float, int, list[int]]] = []
+    ornaments = graces if graces is not None else [[] for _ in onsets]
+    placed: list[tuple[int, float, float, int, list[int], list[int]]] = []
     raw_by_beat: dict[int, list[float]] = {}
-    for onset, duration, pitch, chord in zip(onsets, durations, pitches, extras, strict=True):
+    for onset, duration, pitch, chord, grace in zip(
+        onsets, durations, pitches, extras, ornaments, strict=True
+    ):
         position = beat_position(onset, beats)
         if position is None:
             continue
@@ -740,7 +747,9 @@ def quantize_notes(
         else:
             end_index = int(end)
             warped_end = end_index + warp_phase(end - end_index, by_beat.get(end_index, 0.5))
-        placed.append((index, position - index, max(0.0, warped_end - warped_start), pitch, chord))
+        placed.append(
+            (index, position - index, max(0.0, warped_end - warped_start), pitch, chord, grace)
+        )
         raw_by_beat.setdefault(index, []).append(position - index)
     lags = line_lag(raw_by_beat, lag_window_beats, lag_cap, lag_floor)
     if isolated_lag_max_onsets > 0:
@@ -750,8 +759,10 @@ def quantize_notes(
     # lag-corrected raw offset, chord, and what the replay needs to put the
     # lag and the swing back: the ORIGINAL warped position, the beat's φ*
     # as measured, the φ* the corrected beat was warped under, and the lag.
-    warped: list[tuple[int, float, float, int, float, list[int], float, float, float, float]] = []
-    for index, raw, duration, pitch, chord in placed:
+    warped: list[
+        tuple[int, float, float, int, float, list[int], float, float, float, float, list[int]]
+    ] = []
+    for index, raw, duration, pitch, chord, grace in placed:
         star = by_beat.get(index, STRAIGHT_PHASE)
         lag = lags.get(index, 0.0)
         # The measured offbeat carries the lag too, so the corrected beat is
@@ -770,6 +781,7 @@ def quantize_notes(
                 star,
                 star_l,
                 lag,
+                list(grace),
             )
         )
 
@@ -912,7 +924,7 @@ def quantize_notes(
     )
 
     out, positions = [], []
-    for index, position, duration, pitch, raw, chord, original, star, star_l, lag in warped:
+    for index, position, duration, pitch, raw, chord, original, star, star_l, lag, grace in warped:
         grid = grids.get(index, finest)
         # The NOTATION is the lag-corrected position snapped: in raw time
         # for a ternary beat or a binary beat read STRAIGHT (a performed
@@ -948,6 +960,7 @@ def quantize_notes(
                 # relative to the pulse it deviates from.
                 timing_residual=residual,
                 chord=chord,
+                grace=grace,
             )
         )
     if polyphonic:
@@ -1409,6 +1422,51 @@ def settings(qc: QuantizeConfig) -> dict:
     }
 
 
+# A lead-in and the note it leads into touch: one ends where the other
+# begins (transcribe.LEAD_IN_TOUCH_S; stages never import each other).
+LEAD_IN_TOUCH_S = 0.015
+
+
+def absorb_lead_ins(notes: list[NoteEvent]) -> tuple[list[NoteEvent], list[list[int]]]:
+    """Fold every note marked as leading into the next (NoteEvent.lead_in)
+    into that note, as a transcriber writes it (docs/scoops.md).
+
+    The pair becomes the next note, starting where the lead-in began and
+    lasting both: the pages put the one note at the lead-in's place three
+    times in four. A SCOOP (a semitone under) rides along as the note's grace
+    note, so no heard pitch leaves the page; a RE-ATTACK (the same pitch) is
+    simply the one note. The mark is checked again here -- the next note a
+    semitone up or the same pitch, touching -- because the listener's edits
+    can change which note comes next. Returns the notes and each one's
+    grace pitches.
+    """
+    ordered = sorted(notes, key=lambda n: n.onset)
+    out: list[NoteEvent] = []
+    graces: list[list[int]] = []
+    i = 0
+    while i < len(ordered):
+        note = ordered[i]
+        after = ordered[i + 1] if i + 1 < len(ordered) else None
+        if (
+            note.lead_in
+            and after is not None
+            and after.pitch - note.pitch in (0, 1)
+            and abs(note.onset + note.duration - after.onset) <= LEAD_IN_TOUCH_S
+        ):
+            out.append(
+                after.model_copy(
+                    update={"onset": note.onset, "duration": note.duration + after.duration}
+                )
+            )
+            graces.append([note.pitch] if after.pitch != note.pitch else [])
+            i += 2
+            continue
+        out.append(note)
+        graces.append([])
+        i += 1
+    return out, graces
+
+
 def run(document: Document, config: Config) -> Document:
     grid = document.beat_grid
     if grid is None or len(grid.beats) < 2:
@@ -1420,6 +1478,9 @@ def run(document: Document, config: Config) -> Document:
         available = ", ".join(sorted(document.notes)) or "none (run transcribe first)"
         raise ValueError(f"quantize needs notes for the {stem!r} stem; available: {available}")
 
+    graces = None
+    if qc.absorb_lead_ins and qc.timing == "swing" and not qc.polyphonic:
+        notes, graces = absorb_lead_ins(notes)
     quantized, _positions = quantize_notes(
         [n.onset for n in notes],
         [n.duration for n in notes],
@@ -1428,6 +1489,7 @@ def run(document: Document, config: Config) -> Document:
         document.swing,
         document.meter,
         chords=[list(n.chord) for n in notes],
+        graces=graces,
         **settings(qc),
     )
 

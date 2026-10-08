@@ -216,6 +216,81 @@ def segment_notes(
     return notes
 
 
+# Two notes "touch" when one ends where the next begins: a pitch cut inside
+# one voiced run, to within a frame and a half of the 10 ms hop.
+LEAD_IN_TOUCH_S = 0.015
+# Within this many frames of the next note's start, a corroborated onset is
+# an attack of its own, and the pair is two notes.
+SCOOP_ONSET_FRAMES = 2
+
+
+def mark_lead_ins(
+    notes: list[NoteEvent],
+    pitches: list[float | None],
+    onset_frames: set[int],
+    hop_s: float,
+    offset: float,
+    max_s: float,
+    max_stable: float,
+    reattack_max_s: float = 0.0,
+) -> list[NoteEvent]:
+    """Mark every note that LEADS INTO the next one (NoteEvent.lead_in): a
+    page writes the two as one note (docs/scoops.md). Two kinds, each
+    measured on the pages and WJazzD:
+
+    A SCOOP is the horn player's slide up into a note, which the segmenter
+    cuts at the semitone it passes through. All of these must hold:
+
+    - the next note is ONE semitone above and the two touch (a pitch cut,
+      not a gap);
+    - the note is short: at most `max_s`;
+    - no corroborated onset sits where the next note begins: the attack was
+      the scoop's, and the next note has none of its own;
+    - its frames do not settle: at most `max_stable` of them lie within a
+      quarter-tone of its own semitone. A chromatic approach note sits on
+      its pitch (0.86 of its frames at the median); a scoop passes through
+      (0.33). Without this test the rule costs WJazzD three times as much.
+
+    A RE-ATTACK is a note at most `reattack_max_s` long touching a note of
+    its own pitch: the segmenter cut a held note on an onset just after it
+    began. The pages write ONE note 115 times in 134.
+
+    `pitches` are the frame pitches the notes were rounded from, indexed
+    from the region's start; `offset` is the region's start in the track.
+    The note is only marked, never moved or removed: the line keeps what
+    was heard, and the page decides how to write it.
+    """
+    order = sorted(range(len(notes)), key=lambda i: notes[i].onset)
+    marked = list(notes)  # the caller's order is kept
+    for here, there in zip(order, order[1:], strict=False):
+        note, after = notes[here], notes[there]
+        if abs(note.onset + note.duration - after.onset) > LEAD_IN_TOUCH_S:
+            continue
+        scoop = (
+            after.pitch - note.pitch == 1
+            and note.duration <= max_s + 1e-9
+            and _scoops(note, after, pitches, onset_frames, hop_s, offset, max_stable)
+        )
+        reattack = after.pitch == note.pitch and note.duration <= reattack_max_s + 1e-9
+        if scoop or reattack:
+            marked[here] = note.model_copy(update={"lead_in": True})
+    return marked
+
+
+def _scoops(note, after, pitches, onset_frames, hop_s, offset, max_stable) -> bool:
+    first = round((note.onset - offset) / hop_s)
+    last = first + max(1, round(note.duration / hop_s))
+    frames = [pitches[k] for k in range(max(0, first), min(last, len(pitches)))]
+    voiced = [p for p in frames if p is not None]
+    if not voiced:
+        return False  # not CREPE's note (a filled one): nothing to judge
+    boundary = round((after.onset - offset) / hop_s)
+    if any(abs(f - boundary) <= SCOOP_ONSET_FRAMES for f in onset_frames):
+        return False
+    settled = sum(abs(p - note.pitch) <= 0.25 for p in voiced) / len(voiced)
+    return settled <= max_stable
+
+
 def crop_region(mono, rate: int, region: tuple[float, float | None] | None):
     """Slice a mono signal to [start, end] seconds; a None end means "to the
     end". Returns (signal, offset) where offset is the start time to add back
@@ -1067,6 +1142,23 @@ def analyze(
     # model's word, not the line's, so the line's own floors do not judge it.
     if tc.uses_horn_fill:
         notes = _fill_horn_holes(whole, rate, tc, notes, log=log)
+
+    # Last, on the notes the line will hold: which of them lead into the
+    # next (a scoop, a re-attack). Marked only, never moved; the page writes
+    # each pair as one note.
+    if tc.uses_lead_ins:
+        notes = mark_lead_ins(
+            notes,
+            tuned,
+            onset_frames,
+            hop_s,
+            region_offset,
+            tc.glide_max_ms / 1000.0,
+            tc.glide_max_stable,
+            tc.reattack_max_ms / 1000.0,
+        )
+        if log:
+            print(f"transcribe: {sum(n.lead_in for n in notes)} lead-ins marked")
 
     diagnostics = FrameDiagnostics(
         hop_s=hop_s,

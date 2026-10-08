@@ -1508,3 +1508,88 @@ def test_the_round_two_rules_ship_off_and_key_nothing():
     assert settings(on)["late_downbeat_max_onsets"] == 3
     assert settings(on)["isolated_lag_max_onsets"] == 2
     assert settings(on)["tuplet_pushed_last"] is True
+
+
+# ── scoops (absorb_lead_ins, docs/scoops.md) ─────────────────────────────────
+
+
+def _scooped(pitch_after=64, onset_after=1.06, lead_in=True):
+    return [
+        NoteEvent(onset=0.5, duration=0.4, pitch=60, confidence=0.9, source="t"),
+        NoteEvent(onset=1.0, duration=0.06, pitch=63, confidence=0.9, source="t", lead_in=lead_in),
+        NoteEvent(onset=onset_after, duration=0.40, pitch=pitch_after, confidence=0.9, source="t"),
+    ]
+
+
+def test_a_scoop_folds_onto_its_note_as_a_grace():
+    """The main note starts where the scoop did and lasts both; the scoop's
+    pitch is its grace. Nothing else moves."""
+    from swingscribe.stages.quantize import absorb_lead_ins
+
+    notes, graces = absorb_lead_ins(_scooped())
+    assert [(n.onset, n.pitch) for n in notes] == [(0.5, 60), (1.0, 64)]
+    assert notes[1].duration == pytest.approx(0.46)
+    assert graces == [[], [63]]
+
+
+def test_a_mark_whose_next_note_has_changed_folds_nothing():
+    """The listener's edits can change which note comes next, so the mark is
+    checked again: a semitone up, touching."""
+    from swingscribe.stages.quantize import absorb_lead_ins
+
+    for notes in (_scooped(pitch_after=65), _scooped(onset_after=1.10), _scooped(lead_in=False)):
+        folded, graces = absorb_lead_ins(notes)
+        assert len(folded) == 3 and graces == [[], [], []]
+
+
+def test_the_stage_writes_a_scoop_as_a_grace_where_the_scoop_began():
+    """The scoop sounds on the beat (1.0 s); its note alone would sit a
+    sixteenth later. The page writes the note on the beat, with the grace."""
+    beats = [0.5 * i for i in range(9)]
+    notes = _scooped()
+    notes[1] = notes[1].model_copy(update={"duration": 0.09})
+    notes[2] = notes[2].model_copy(update={"onset": 1.09})
+
+    def placed(scoops):
+        document = Document(
+            audio_path="x.wav",
+            sample_rate=16000,
+            beat_grid=BeatGrid(beats=beats, downbeats=[], beats_per_bar=4),
+            notes={"other": scoops},
+            swing=[],
+        )
+        return run(document, Config()).quantized["other"]
+
+    quantized = placed(notes)
+    assert [(q.pitch, q.grace) for q in quantized] == [(60, []), (64, [63])]
+    assert quantized[1].beat == pytest.approx(2.0)
+    heard = placed([n.model_copy(update={"lead_in": False}) for n in notes])
+    assert [q.pitch for q in heard] == [60, 63, 64]
+    assert heard[2].beat > 2.0
+
+
+def test_a_literal_page_writes_every_heard_note():
+    beats = [0.5 * i for i in range(9)]
+    document = Document(
+        audio_path="x.wav",
+        sample_rate=16000,
+        beat_grid=BeatGrid(beats=beats, downbeats=[], beats_per_bar=4),
+        notes={"other": _scooped()},
+        swing=[],
+    )
+    quantized = run(document, Config(quantize={"timing": "literal-16"})).quantized["other"]
+    assert [q.pitch for q in quantized] == [60, 63, 64]
+    assert not any(q.grace for q in quantized)
+
+
+def test_a_reattack_folds_into_its_note_with_no_grace():
+    from swingscribe.stages.quantize import absorb_lead_ins
+
+    notes = [
+        NoteEvent(onset=1.0, duration=0.08, pitch=64, confidence=0.9, source="t", lead_in=True),
+        NoteEvent(onset=1.08, duration=0.40, pitch=64, confidence=0.9, source="t"),
+    ]
+    folded, graces = absorb_lead_ins(notes)
+    assert [(n.onset, n.pitch) for n in folded] == [(1.0, 64)]
+    assert folded[0].duration == pytest.approx(0.48)
+    assert graces == [[]]

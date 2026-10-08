@@ -83,6 +83,13 @@ class Score:
     bars: int
     beats_per_bar: float
     key_fifths: int  # -1 = one flat, as MuseScore's concertKey
+    # How this reader puts a grace note into `melody` (external.GRACE_RULES):
+    # "keep" -- at its main note's position with no length, as this .mscz
+    # reader does -- or "compete" with its main note for the top of the
+    # position, as `parse_musicxml` does. A page we write is read into its
+    # line by the same rule (`benchmark.grace_line`), or a grace note would
+    # be charged against a reference that cannot hold one.
+    graces: str = "keep"
 
     @property
     def pitches(self) -> list[int]:
@@ -170,7 +177,7 @@ def parse_musicxml(path: str | Path) -> Score:
 
     part = root.find("part")
     if part is None:
-        return Score(title, [], [], 0, beats_per_bar, key_fifths)
+        return Score(title, [], [], 0, beats_per_bar, key_fifths, graces="compete")
 
     cursor = 0.0  # quarter notes since bar 1 beat 1
     # A tie makes the NEXT note at the same pitch a continuation. Held as an
@@ -236,7 +243,7 @@ def parse_musicxml(path: str | Path) -> Score:
         if key not in by_position or note.pitch > by_position[key].pitch:
             by_position[key] = note
     melody = [by_position[k] for k in sorted(by_position)]
-    return Score(title, notes, melody, bars, beats_per_bar, key_fifths)
+    return Score(title, notes, melody, bars, beats_per_bar, key_fifths, graces="compete")
 
 
 # Uncompressed only. .mxl is a zip and would need unpacking; nothing in

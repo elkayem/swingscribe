@@ -459,6 +459,50 @@ def notation_notes(notation) -> list[tuple[float, float, int]]:
     )
 
 
+def grace_line(notation, rule: str = "keep"):
+    """`notation` with its grace notes (NotatedNote.grace) read into the line
+    by a reference reader's rule (`mscz.Score.graces`), and taken off the
+    notes that carried them, so every measure that reads `notation_notes`
+    sees our graces exactly as the reference reader sees a human's.
+
+    "keep" (the .mscz reader): each grace becomes a note of no length at its
+    main note's position, ahead of it. "compete" (the MusicXML reader): a
+    grace takes the position only if it is higher than its main note, and
+    then with no length, as `mscz.parse_musicxml`'s top-of-position rule
+    gives a human's; a scoop from below never is, so it leaves the line.
+    `external._line` is the same rule for another tool's page. A Notation
+    with no graces comes back unchanged.
+    """
+    from swingscribe.model import NotatedNote
+
+    if not any(note.grace for bar in notation.bars for note in bar.notes):
+        return notation
+    bars = []
+    for bar in notation.bars:
+        notes = []
+        for note in bar.notes:
+            if not note.grace:
+                notes.append(note)
+                continue
+            plain = note.model_copy(update={"grace": []})
+            if rule == "keep":
+                notes.extend(
+                    NotatedNote(beat=note.beat, duration=0.0, pitch=pitch, voice=note.voice)
+                    for pitch in note.grace
+                )
+                notes.append(plain)
+            elif max(note.grace) > note.pitch:
+                notes.append(
+                    NotatedNote(
+                        beat=note.beat, duration=0.0, pitch=max(note.grace), voice=note.voice
+                    )
+                )
+            else:
+                notes.append(plain)
+        bars.append(bar.model_copy(update={"notes": notes}))
+    return notation.model_copy(update={"bars": bars})
+
+
 def score_against_notation(notation, score, off_the_bar: bool = False) -> dict[str, float]:
     """Our Notation against a parsed `mscz.Score`, as notation.
 
@@ -485,7 +529,7 @@ def score_against_notation(notation, score, off_the_bar: bool = False) -> dict[s
     """
     from swingscribe.alignment import measured_transposition
 
-    ours = notation_notes(notation)
+    ours = notation_notes(grace_line(notation, getattr(score, "graces", "keep")))
     theirs = [(n.position, n.duration, n.pitch) for n in score.melody]
     if not ours or not theirs:
         return {"rhythm": 0.0, "value": 0.0, "n_matched": 0.0, "transposition": 0.0}
@@ -538,7 +582,9 @@ def score_against_wjazz_notation(notation, positions: list[tuple[float, int]]) -
     """
     from swingscribe.alignment import measured_transposition
 
-    ours = notation_notes(notation)
+    # WJazzD's annotators mark a scoop as a note of its own, so a grace note
+    # of ours stays in the line, as the .mscz reader keeps a human's.
+    ours = notation_notes(grace_line(notation, "keep"))
     if not ours or not positions:
         return {"rhythm": 0.0, "n_matched": 0.0, "transposition": 0.0, "coverage": 0.0}
 

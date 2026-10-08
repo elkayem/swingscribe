@@ -127,7 +127,11 @@ not the grid.
 
 1. **Switch the tuning correction on** -- done 2026-10-08 (the control and
    the shipped numbers are below).
-2. **Merge scoops and re-attacks into the note they belong to.** A short
+2. **Merge scoops and re-attacks into the note they belong to** -- done
+   2026-10-08 as a WRITING rule (docs/scoops.md): WJazzD's annotators mark
+   both as notes, the pages do not, so the line keeps them and the page
+   writes each pair as one note, a scoop with its grace. PDF pages -2.97
+   edits per 100, hand scores +0.003 rhythm and value, Omnibook -1.49. A short
    note touching its neighbour a semitone below and before it, with no
    attack of its own, is the neighbour's scoop; a same-pitch fragment with
    no attack is the held note. Judge it on WJazzD's onsets (audio against

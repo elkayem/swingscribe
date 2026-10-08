@@ -363,6 +363,30 @@ class TranscribeConfig(BaseModel):
     # a pianist on the piano model's line keyed exactly as before.
     tuning_correction: bool = True
     tuning_min_cents: float = 15.0
+    # Mark the notes that LEAD INTO the next one (`transcribe.mark_lead_ins`,
+    # NoteEvent.lead_in), which a page writes as one note (docs/scoops.md).
+    # The line keeps them -- WJazzD's annotators mark both kinds as notes --
+    # and quantize folds them (QuantizeConfig.absorb_lead_ins).
+    #
+    # A SCOOP: at most `glide_max_ms` long, a semitone under the next note
+    # and touching it, no corroborated onset where the next begins, and its
+    # frames on their own semitone at most `glide_max_stable` of the time (a
+    # scoop slides; a chromatic approach note settles). The human pages
+    # write the pair as ONE note two times in three, at the scoop's onset
+    # three times in four; the settling test is the whole rule (without it
+    # WJazzD would pay three times as much and the pages gain nothing more).
+    #
+    # A RE-ATTACK: at most `reattack_max_ms` long and touching a note of its
+    # own pitch (the segmenter cut it on an onset). The pages write one note
+    # 115 times in 134 (WJazzD's annotators about half the time). The other
+    # way round -- a short note AFTER its pitch -- cost the PDF pages' rhythm
+    # and is not marked.
+    #
+    # 0 ms marks none of a kind. CREPE's line only; the fields dump into the
+    # key only there (`uses_lead_ins`).
+    glide_max_ms: float = 100.0
+    glide_max_stable: float = 0.5
+    reattack_max_ms: float = 100.0
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
@@ -404,7 +428,25 @@ class TranscribeConfig(BaseModel):
         if not self.uses_tuning_correction:
             data.pop("tuning_correction", None)
             data.pop("tuning_min_cents", None)
+        if not self.uses_lead_ins:
+            data.pop("glide_max_ms", None)
+            data.pop("glide_max_stable", None)
+            data.pop("reattack_max_ms", None)
         return data
+
+    @property
+    def crepe_line(self) -> bool:
+        """Whether the line is CREPE's: every horn, and a pianist on the CREPE
+        take. A pianist on the piano model's line has its notes from the
+        model, and CREPE's frames are set aside."""
+        return not (self.uses_piano_oracle and self.piano_line == "oracle")
+
+    @property
+    def uses_lead_ins(self) -> bool:
+        """Whether lead-ins are marked on this line (`transcribe.mark_lead_ins`):
+        either kind on, and the line is CREPE's, whose frames and cuts the
+        tests read. The one gate the stage and the key both read."""
+        return (self.glide_max_ms > 0 or self.reattack_max_ms > 0) and self.crepe_line
 
     @property
     def uses_tuning_correction(self) -> bool:
@@ -413,9 +455,7 @@ class TranscribeConfig(BaseModel):
         its pitches from the model's own semitones and sets CREPE's aside,
         so the correction would change nothing there -- and the one gate
         the stage and the cache key both read keeps that key where it was."""
-        return self.tuning_correction and not (
-            self.uses_piano_oracle and self.piano_line == "oracle"
-        )
+        return self.tuning_correction and self.crepe_line
 
     @property
     def uses_horn_fill(self) -> bool:
@@ -741,6 +781,14 @@ class QuantizeConfig(BaseModel):
     # decided down on the Omnibook when offered more, so no weights ship;
     # paired human data (onsets beside a human page) is what could change it.
     reranker: str = ""
+    # Write each note the transcriber marked as leading into the next
+    # (NoteEvent.lead_in) INTO that note: it starts where the lead-in did and
+    # lasts both, a scoop riding along as its grace note (`absorb_lead_ins`).
+    # Swing timing only: a literal page writes every heard note at its own
+    # place. On by default (docs/scoops.md); it can only act on notes a
+    # transcribe key with the lead-in settings produced, so it dumps nothing
+    # while on and no quantize key moved.
+    absorb_lead_ins: bool = True
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
@@ -753,6 +801,8 @@ class QuantizeConfig(BaseModel):
         data = handler(self)
         if data.get("timing") == "swing":
             data.pop("timing", None)
+        if data.get("absorb_lead_ins"):
+            data.pop("absorb_lead_ins", None)
         for field in (
             "polyphonic",
             "late_downbeat_max_onsets",

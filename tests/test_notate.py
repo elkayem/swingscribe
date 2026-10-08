@@ -881,3 +881,16 @@ def test_hold_to_beat_is_off_by_default_keys_nothing_and_reaches_build():
     held = notate.run(document, config).notation
     assert _held(held, 0, 0.0) == pytest.approx(1.0)
     assert _held(held, 0, 1.0) == pytest.approx(1.0)
+
+
+def test_a_grace_note_is_written_on_the_first_piece_only():
+    """A scoop sounds before the attack, not before each tied continuation."""
+    section = MeterSection(
+        start=0.0, end=100.0, pulses_per_bar=4, time_signature=(4, 4), anchor=0.0, first_bar=1
+    )
+    held = QuantizedNote(
+        bar=1, beat=3.0, duration_beats=2.0, pitch=64, timing_residual=0.0, grace=[63]
+    )
+    notation = build([held], [section], swing=False, transpose=0)
+    pieces = [n for bar in notation.bars for n in bar.notes if not n.is_rest]
+    assert [(n.pitch, n.grace) for n in pieces] == [(64, [63]), (64, [])]

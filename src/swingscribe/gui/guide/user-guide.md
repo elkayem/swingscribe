@@ -681,9 +681,12 @@ transposes it for a horn.
 
 - **Swing — eighths** is the default. The swing is read out of the playing:
   a swung pair is written as two even eighths, with "Swing" above the staff,
-  the way a jazz chart is written.
+  the way a jazz chart is written. A scoop, a quick slide up into a note
+  from the semitone below, is written as a small grace note before it, and
+  the note starts where the scoop did. The piano roll still shows the scoop
+  as the separate note it sounded as.
 - **Literal 16ths** writes every note on the nearest sixteenth, exactly as
-  played, with no "Swing" marking. A swung pair usually comes out as a
+  played, with no "Swing" marking, scoops included as notes. A swung pair usually comes out as a
   dotted eighth and a sixteenth. A beat whose notes are too close together
   for sixteenths is written in thirty-seconds.
 - **Literal 32nds** writes every note on the nearest thirty-second.

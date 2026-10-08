@@ -815,9 +815,11 @@ def test_the_crepe_line_keys_exactly_as_before_the_line_fields_existed():
     oracle = TranscribeConfig(ensemble="trio").model_dump(mode="json")
     assert oracle["piano_line"] == "oracle"
     assert oracle["piano_line_continuity"] == 0.02
-    # The tuning correction acts on CREPE's line only, so only that key
-    # carries it (test_tuning_correction_keys_only_where_it_acts).
-    untuned = {k: v for k, v in crepe.items() if not k.startswith("tuning_")}
+    # The tuning correction and the scoop marks act on CREPE's line only, so
+    # only that key carries them (test_tuning_correction_keys_only_where_it_acts).
+    untuned = {
+        k: v for k, v in crepe.items() if not k.startswith(("tuning_", "glide_", "reattack_"))
+    }
     assert {k: v for k, v in oracle.items() if not k.startswith("piano_line")} == untuned
 
 
@@ -1102,3 +1104,103 @@ def test_tuning_correction_keys_only_where_it_acts():
     crepe = Config(transcribe={"ensemble": "trio", "piano_line": "crepe"})
     assert crepe.transcribe.uses_tuning_correction
     assert crepe.stage_config("transcribe")["tuning_correction"] is True
+
+
+# -- scoops (mark_lead_ins, docs/scoops.md) -------------------------------------
+
+
+def _scoop_line(scoop_frames, onsets=()):
+    """A 60-ms note a semitone under a held note, touching it, with the frame
+    pitches the scoop was rounded from: the region starts at 1.0 s."""
+    from swingscribe.model import NoteEvent
+
+    hop = 0.01
+    notes = [
+        NoteEvent(onset=1.20, duration=0.06, pitch=63, confidence=0.9, source="t"),
+        NoteEvent(onset=1.26, duration=0.30, pitch=64, confidence=0.9, source="t"),
+    ]
+    pitches = [None] * 20 + list(scoop_frames) + [64.0] * 30 + [None] * 10
+    return notes, pitches, set(onsets), hop
+
+
+def test_a_note_sliding_into_the_next_is_marked_a_scoop():
+    from swingscribe.stages.transcribe import mark_lead_ins
+
+    notes, pitches, onsets, hop = _scoop_line([62.7, 63.0, 63.3, 63.5, 63.6, 63.8], onsets={20})
+    marked = mark_lead_ins(notes, pitches, onsets, hop, 1.0, 0.1, 0.5)
+    assert [n.lead_in for n in marked] == [True, False]
+    assert [(n.onset, n.pitch) for n in marked] == [(n.onset, n.pitch) for n in notes]
+
+
+def test_a_settled_approach_note_is_not_a_scoop():
+    """A chromatic approach note sits on its own semitone; a scoop passes
+    through it. That test is the whole rule."""
+    from swingscribe.stages.transcribe import mark_lead_ins
+
+    notes, pitches, onsets, hop = _scoop_line([63.0] * 6)
+    assert not any(n.lead_in for n in mark_lead_ins(notes, pitches, onsets, hop, 1.0, 0.1, 0.5))
+
+
+def test_an_attack_where_the_next_note_begins_makes_two_notes():
+    from swingscribe.stages.transcribe import mark_lead_ins
+
+    notes, pitches, _onsets, hop = _scoop_line([62.7, 63.0, 63.3, 63.5, 63.6, 63.8])
+    marked = mark_lead_ins(notes, pitches, {26}, hop, 1.0, 0.1, 0.5)
+    assert not any(n.lead_in for n in marked)
+
+
+def test_only_a_short_note_a_semitone_under_and_touching_is_a_scoop():
+    from swingscribe.stages.transcribe import mark_lead_ins
+
+    notes, pitches, onsets, hop = _scoop_line([62.7, 63.0, 63.3, 63.5, 63.6, 63.8])
+    too_long = mark_lead_ins(notes, pitches, onsets, hop, 1.0, 0.05, 0.5)
+    whole_tone = mark_lead_ins(
+        [notes[0], notes[1].model_copy(update={"pitch": 65})], pitches, onsets, hop, 1.0, 0.1, 0.5
+    )
+    apart = mark_lead_ins(
+        [notes[0], notes[1].model_copy(update={"onset": 1.30})], pitches, onsets, hop, 1.0, 0.1, 0.5
+    )
+    assert not any(n.lead_in for n in too_long + whole_tone + apart)
+
+
+def test_a_note_with_no_frames_of_its_own_is_never_a_scoop():
+    """A note Basic Pitch filled into a hole has no CREPE frames to judge."""
+    from swingscribe.stages.transcribe import mark_lead_ins
+
+    notes, _pitches, onsets, hop = _scoop_line([])
+    assert not any(n.lead_in for n in mark_lead_ins(notes, [None] * 80, onsets, hop, 1.0, 0.1, 0.5))
+
+
+def test_lead_in_settings_key_only_where_they_act():
+    """Marked on CREPE's line only; a pianist on the piano model's line keys
+    without the fields, and 0 ms of both kinds switches the marks off."""
+    on = Config().stage_config("transcribe")
+    assert on["glide_max_ms"] == 100.0 and on["glide_max_stable"] == 0.5
+    oracle = Config(transcribe={"ensemble": "trio"})
+    assert not oracle.transcribe.uses_lead_ins
+    assert "glide_max_ms" not in oracle.stage_config("transcribe")
+    assert on["reattack_max_ms"] == 100.0
+    off = Config(transcribe={"glide_max_ms": 0.0, "reattack_max_ms": 0.0})
+    assert not off.transcribe.uses_lead_ins
+    assert "glide_max_ms" not in off.stage_config("transcribe")
+    assert "reattack_max_ms" not in off.stage_config("transcribe")
+
+
+def test_a_short_note_touching_its_own_pitch_is_a_reattack():
+    """A held note cut on an onset just after it began: the short head leads
+    into the rest. A short TAIL is not marked, nor a long head."""
+    from swingscribe.model import NoteEvent
+    from swingscribe.stages.transcribe import mark_lead_ins
+
+    def pair(first, second):
+        return [
+            NoteEvent(onset=1.0, duration=first, pitch=64, confidence=0.9, source="t"),
+            NoteEvent(onset=1.0 + first, duration=second, pitch=64, confidence=0.9, source="t"),
+        ]
+
+    def marks(notes):
+        return [n.lead_in for n in mark_lead_ins(notes, [], set(), 0.01, 0.0, 0.1, 0.5, 0.1)]
+
+    assert marks(pair(0.08, 0.40)) == [True, False]
+    assert marks(pair(0.40, 0.08)) == [False, False]
+    assert marks(pair(0.15, 0.40)) == [False, False]

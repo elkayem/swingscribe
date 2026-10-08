@@ -30,6 +30,17 @@ class NoteEvent(BaseModel):
     # (notation.with_chords). MIGRATION: additive with a default, so every
     # cached Document deserializes unchanged and no cache key moves.
     chord: list[int] = []
+    # This note LEADS INTO the next one, and a page writes the two as one note
+    # (`transcribe.mark_lead_ins`, docs/scoops.md): a SCOOP -- short, a
+    # semitone under the next and touching it, its pitch never settled, no
+    # attack where the next begins -- or a RE-ATTACK -- short, the next
+    # note's own pitch, touching it. Both are heard: WJazzD's annotators mark
+    # them as notes, so the line keeps them; quantize's `absorb_lead_ins`
+    # folds them into the note they lead into, a scoop as its grace note.
+    # MIGRATION: additive with a default, like `chord`: a cached Document
+    # deserializes with nothing marked, and the keys that produce marked
+    # notes are the transcribe keys that carry the lead-in settings.
+    lead_in: bool = False
 
 
 class BeatGrid(BaseModel):
@@ -88,6 +99,10 @@ class QuantizedNote(BaseModel):
     pitch: int
     timing_residual: float  # microtiming AFTER swing removal — the expressive layer
     chord: list[int] = []  # see NoteEvent.chord; carried, never derived here
+    # Grace notes written before this one, sounding pitches: a scoop the
+    # transcriber marked (NoteEvent.lead_in), folded onto the note it leads
+    # into, which then starts where the scoop did. Additive with a default.
+    grace: list[int] = []
 
 
 class NotatedNote(BaseModel):
@@ -134,6 +149,11 @@ class NotatedNote(BaseModel):
     # additive with a default, like `voice`: every cached Notation
     # deserializes as staff 1 and no cache key moves.
     staff: int = 1
+    # Grace notes before this note (sounding pitches; QuantizedNote.grace),
+    # on the FIRST piece of a tied note only and never on a rest. Written as
+    # <grace/> notes ahead of it. MIGRATION: additive with a default, like
+    # `staff`: every cached Notation deserializes with none.
+    grace: list[int] = []
 
 
 class ChordDegree(BaseModel):

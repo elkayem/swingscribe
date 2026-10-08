@@ -1658,6 +1658,27 @@ list of what is actually wrong; run everything with one command:
   intonation -- so never lower the threshold without re-reading that band.
   It dumps into the key only where it acts (`uses_tuning_correction`): a
   pianist on the piano model's line keys as before.
+- **A lead-in is HEARD as a note and WRITTEN into the next one**
+  (2026-10-08, docs/scoops.md). Two kinds, the same convention gap: a SCOOP
+  (a short slide a semitone under the next note) and a RE-ATTACK HEAD (a
+  note <= 100 ms touching a note of its own pitch). WJazzD's annotators mark
+  both as notes (152 of 220 scoop pairs, half the heads); the human pages
+  write ONE note there (two times in three; 115 of 134). So the rule is
+  split across hearing and writing: `transcribe.mark_lead_ins` only MARKS
+  the note (`NoteEvent.lead_in`; the scoop also needs no corroborated onset
+  at the next note and frames on their own semitone <= 0.5 of the time --
+  that settling test is the scoop rule; without it WJazzD pays three times
+  as much), and quantize's `absorb_lead_ins` folds it into its note at the
+  lead-in's onset, a scoop riding along as `QuantizedNote.grace`, written
+  `<grace slash="yes"/>`. Never move the merge into the transcriber: as a
+  merge the scoops alone cost WJazzD note F1 -0.0064. A short TAIL is not a
+  lead-in (PDF-page rhythm -0.0032). A grace enters the SCORED line by the
+  reference reader's rule (`benchmark.grace_line`, `mscz.Score.graces`):
+  "compete" on MusicXML (a scoop from below leaves the line), "keep" on a
+  .mscz hand score; readability reads the page as written. Literal timing
+  writes every heard note. PDF pages -2.97 edits per 100 (25 / 2), hand
+  scores rhythm and value +0.0032, Omnibook edits -1.49, every hearing pin
+  unmoved.
 - **Second opinions measured and NOT shipped** (2026-09-30,
   docs/kong-bakeoff.md; the downloads live in
   `C:\Users\lkmcg\swingscribe-research`, never the repo). `piano.py`'s

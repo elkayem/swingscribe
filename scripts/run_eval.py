@@ -406,12 +406,15 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
                 "fingerprint": wanted,
                 "region": [low, high],
                 "voiced_fraction": diagnostics.voiced_fraction,
+                # A scoop's mark (NoteEvent.lead_in) only where it is set, so an
+                # entry without scoops reads exactly as it always has.
                 "notes": [
                     {
                         "onset": n.onset,
                         "duration": n.duration,
                         "pitch": n.pitch,
                         "confidence": n.confidence,
+                        **({"lead_in": True} if n.lead_in else {}),
                     }
                     for n in notes
                 ],
@@ -865,6 +868,7 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
                 pitch=n["pitch"],
                 confidence=n["confidence"],
                 source="crepe",
+                lead_in=n.get("lead_in", False),
             )
             for n in run["notes"]
             # A region override means the run covers more music than we are
@@ -967,14 +971,17 @@ def _notation_one(task: tuple) -> dict | None:
     name, run, grid, score_path, cache_dir = task
     _worker_setup(cache_dir)
     from swingscribe import mscz
-    from swingscribe.benchmark import readability
+    from swingscribe.benchmark import grace_line, readability
     from swingscribe.evaluation import tempo_class
     from swingscribe.score_bars import bar_line_trace
 
-    notation = notate_run(name, run, grid)
-    if notation is None or not notation.bars:
+    page = notate_run(name, run, grid)
+    if page is None or not page.bars:
         return None
     reference = mscz.parse_any(score_path)
+    # Every comparison reads our grace notes by the reference reader's rule;
+    # readability reads the page as written.
+    notation = grace_line(page, reference.graces)
     agreement, result = score_notation_page(notation, reference)
     if not result["n_matched"]:
         return None
@@ -989,7 +996,7 @@ def _notation_one(task: tuple) -> dict | None:
         # Whether the page is writable at all -- a question no comparison
         # against a reference can see. Folded in here rather than measured
         # in a pass of its own because the notation is already built.
-        **readability(notation),
+        **readability(page),
         **{k: round(v, 4) for k, v in agreement.items()},
         # What turning our page into theirs costs, per 100 of their notes
         # (docs/roadmap.md E4), off the alignment rhythm and value read.

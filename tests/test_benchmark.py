@@ -1112,3 +1112,48 @@ def test_a_score_cannot_be_placed_on_one_anchor():
 
     with pytest.raises(ValueError):
         place_on_anchors([0.0, 1.0], [1.0, 1.0], [(0.0, 3.0)])
+
+
+# ── our grace notes, read by the reference reader's rule ────────────────────
+
+
+def _graced():
+    from swingscribe.model import NotatedNote
+
+    scoop = NotatedNote(beat=0.0, duration=1.0, pitch=64, grace=[63])
+    return _notation([_bar([scoop, _note(1.0, 3.0, 62)])])
+
+
+def test_a_kept_grace_is_a_note_of_no_length_before_its_main_note():
+    """The .mscz reader keeps a human's grace that way, so ours is too."""
+    from swingscribe.benchmark import grace_line, notation_notes
+
+    assert notation_notes(grace_line(_graced(), "keep")) == [
+        (0.0, 0.0, 63),
+        (0.0, 1.0, 64),
+        (1.0, 3.0, 62),
+    ]
+
+
+def test_a_grace_under_its_note_loses_the_position_when_graces_compete():
+    """The MusicXML reader keeps the top of every position, so a scoop from
+    below leaves the line; a grace above takes the position with no length."""
+    from swingscribe.benchmark import grace_line, notation_notes
+    from swingscribe.model import NotatedNote
+
+    assert notation_notes(grace_line(_graced(), "compete")) == [(0.0, 1.0, 64), (1.0, 3.0, 62)]
+    above = _notation([_bar([NotatedNote(beat=0.0, duration=1.0, pitch=64, grace=[66])])])
+    assert notation_notes(grace_line(above, "compete")) == [(0.0, 0.0, 66)]
+
+
+def test_the_page_scorer_reads_our_graces_as_its_reference_reads_a_humans():
+    """Against a MusicXML page that wrote no grace, a scoop written as one
+    costs nothing; against a hand score that keeps graces it is an insertion,
+    as a separate note always was."""
+    from swingscribe.benchmark import score_against_notation
+
+    melody = [_ScoreNote(0.0, 1.0, 64), _ScoreNote(1.0, 3.0, 62)]
+    compete = _Score(melody)
+    compete.graces = "compete"
+    assert score_against_notation(_graced(), compete)["edit_insertions"] == 0.0
+    assert score_against_notation(_graced(), _Score(melody))["edit_insertions"] == 50.0

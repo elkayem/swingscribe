@@ -584,3 +584,44 @@ def test_each_voice_is_beamed_on_its_own():
         ["end"],
         [],
     ]
+
+
+# ── grace notes (a scoop, NotatedNote.grace) ────────────────────────────────
+
+
+def test_a_grace_note_comes_before_its_note_and_takes_no_time():
+    notation = Notation(bars=[bar_of([note(0.0, 1.0, 64, grace=[63]), note(1.0, 3.0, 62)])])
+    notes = document(notation).find(".//measure").findall("note")
+    assert [n.find("grace") is not None for n in notes] == [True, False, False]
+    assert notes[0].find("grace").get("slash") == "yes"
+    assert notes[0].find("duration") is None
+    assert sum(int(n.findtext("duration")) for n in notes[1:]) == 4 * DIVISIONS
+
+
+def test_our_grace_reads_back_as_the_reference_reader_reads_a_human_one(tmp_path):
+    """mscz.parse_musicxml gives a grace no length and lets it compete for the
+    top of its position: a scoop from below loses to its main note."""
+    from swingscribe import mscz
+
+    notation = Notation(bars=[bar_of([note(0.0, 1.0, 64, grace=[63]), note(1.0, 3.0, 62)])])
+    path = tmp_path / "grace.musicxml"
+    path.write_text(to_musicxml(notation), encoding="utf-8")
+    score = mscz.parse_musicxml(path)
+    assert score.graces == "compete"
+    assert sorted((n.position, n.duration, n.pitch) for n in score.notes) == [
+        (0.0, 0.0, 63),
+        (0.0, 1.0, 64),
+        (1.0, 3.0, 62),
+    ]
+    assert [n.pitch for n in score.melody] == [64, 62]
+
+
+def test_a_grace_from_below_is_spelled_as_its_notes_lower_neighbour():
+    """F sharp into G, not G flat; B into C; C into D flat."""
+    from swingscribe.stages.export import grace_spelling
+
+    assert grace_spelling(66, 67, -1) == ("F", 1, 4)
+    assert grace_spelling(59, 60, 0) == ("B", 0, 3)
+    assert grace_spelling(60, 61, -5) == ("C", 0, 4)
+    # D sharp's lower neighbour would be C double sharp: the key spells it.
+    assert grace_spelling(62, 63, 4) == ("D", 0, 4)

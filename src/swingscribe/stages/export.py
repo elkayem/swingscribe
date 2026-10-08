@@ -50,7 +50,7 @@ from xml.etree import ElementTree
 
 from swingscribe.config import Config
 from swingscribe.model import ChordSymbol, Document, NotatedNote, Notation
-from swingscribe.stages.notate import NATURAL_FIFTHS, QUARTER, spell
+from swingscribe.stages.notate import NATURAL_FIFTHS, QUARTER, STEP_SEMITONE, spell
 
 DIVISIONS = 840  # per quarter note: divisible by 8, 3, 5, 7 (32nds, tuplets)
 
@@ -335,6 +335,9 @@ def _append_note(
     the head only: a reader draws one bracket per group and one beam per
     stem, not one per chord member.
     """
+    if not note.is_rest:
+        for grace in note.grace:
+            _append_grace(parent, note, grace, transpose, written_key, staves)
     pitches = [note.pitch] if note.is_rest else [note.pitch, *sorted(set(note.chord))]
     for index, pitch in enumerate(pitches):
         _append_pitch(
@@ -348,6 +351,45 @@ def _append_note(
             staves=staves,
             beams=None if index else beams,
         )
+
+
+LETTERS = "CDEFGAB"
+
+
+def grace_spelling(grace: int, main: int, written_key: int) -> tuple[str, int, int]:
+    """A grace note's (step, alter, octave): a scoop from below is the note's
+    LOWER NEIGHBOUR, one letter under it -- F sharp into G, never G flat --
+    the way a transcriber writes it. Spelled by the key instead when that
+    would need a double accidental, or when the grace is not a step away."""
+    step, alter, octave = spell(main, written_key)
+    if 0 < main - grace <= 2:
+        index = LETTERS.index(step)
+        below = LETTERS[index - 1]
+        below_octave = octave - 1 if step == "C" else octave
+        natural = (below_octave + 1) * 12 + STEP_SEMITONE[below]
+        if abs(grace - natural) <= 1:
+            return below, grace - natural, below_octave
+    return spell(grace, written_key)
+
+
+def _append_grace(
+    parent, note: NotatedNote, sounding: int, transpose: int, written_key: int, staves: int
+) -> None:
+    """A grace note ahead of `note` (NotatedNote.grace): a slashed eighth, the
+    acciaccatura a transcriber writes for a scoop. No <duration> -- a grace
+    takes no time, and a reader that found one would move the bar's cursor."""
+    element = ElementTree.SubElement(parent, "note")
+    ElementTree.SubElement(element, "grace", {"slash": "yes"})
+    step, alter, octave = grace_spelling(sounding + transpose, note.pitch + transpose, written_key)
+    pitch = ElementTree.SubElement(element, "pitch")
+    ElementTree.SubElement(pitch, "step").text = step
+    if alter:
+        ElementTree.SubElement(pitch, "alter").text = str(alter)
+    ElementTree.SubElement(pitch, "octave").text = str(octave)
+    ElementTree.SubElement(element, "voice").text = str(xml_voice(note))
+    ElementTree.SubElement(element, "type").text = "eighth"
+    if staves > 1:
+        ElementTree.SubElement(element, "staff").text = str(note.staff)
 
 
 def _append_pitch(
