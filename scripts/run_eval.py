@@ -408,6 +408,8 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
                 "voiced_fraction": diagnostics.voiced_fraction,
                 # A scoop's mark (NoteEvent.lead_in) only where it is set, so an
                 # entry without scoops reads exactly as it always has.
+                # A multi-horn head's notes carry the horn each was heard in
+                # (NoteEvent.voice); every other entry reads as it always has.
                 "notes": [
                     {
                         "onset": n.onset,
@@ -415,6 +417,7 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
                         "pitch": n.pitch,
                         "confidence": n.confidence,
                         **({"lead_in": True} if n.lead_in else {}),
+                        **({"voice": n.voice} if settings.uses_multi_horn else {}),
                     }
                     for n in notes
                 ],
@@ -851,7 +854,12 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
     it here is how the scoring harness has gone wrong before (CLAUDE.md).
     """
     from swingscribe.model import NoteEvent
-    from swingscribe.notation import meter_from_settings, notation_for_span
+    from swingscribe.notation import (
+        meter_from_settings,
+        notation_for_horns,
+        notation_for_span,
+        reading_of,
+    )
 
     track = track_of(name)  # the key may carry a take; the sidecar is the track's
     config = eval_config()
@@ -859,31 +867,44 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
     signature, pulses = meter_from_settings(
         sidecar.get("time_signature"), sidecar.get("pulses_per_bar"), config
     )
+    notes = [
+        NoteEvent(
+            onset=n["onset"],
+            duration=n["duration"],
+            pitch=n["pitch"],
+            confidence=n["confidence"],
+            source="crepe",
+            lead_in=n.get("lead_in", False),
+            voice=n.get("voice", 1),
+        )
+        for n in run["notes"]
+        # A region override means the run covers more music than we are
+        # notating (a whole track against one annotated solo), so the
+        # notes have to be cut to it as well as the beat grid.
+        if region is None or region[0] <= n["onset"] <= region[1]
+    ]
+    common = {
+        "stem": run["stem"],
+        "config": config,
+        "anchor": anchor,
+        "time_signature": signature,
+        "pulses_per_bar": pulses,
+        "double_time": bool(sidecar.get("double_time")),
+    }
+    if run.get("ensemble") == "multi-horn":
+        # Two horns on one staff, written by the Export button's own
+        # assembly, in the rhythm the sidecar reads (literal by default for
+        # a multi-horn head). Every other page keeps the default reading the
+        # pins were made on, whatever its sidecar's Rhythm menu says.
+        common["config"] = config.model_copy(
+            update={"quantize": config.quantize.model_copy(update=reading_of(sidecar, config))}
+        )
+        page, _lines = notation_for_horns(
+            str(BENCH / track), notes, beats, region or tuple(run["region"]), **common
+        )
+        return page
     return notation_for_span(
-        str(BENCH / track),
-        [
-            NoteEvent(
-                onset=n["onset"],
-                duration=n["duration"],
-                pitch=n["pitch"],
-                confidence=n["confidence"],
-                source="crepe",
-                lead_in=n.get("lead_in", False),
-            )
-            for n in run["notes"]
-            # A region override means the run covers more music than we are
-            # notating (a whole track against one annotated solo), so the
-            # notes have to be cut to it as well as the beat grid.
-            if region is None or region[0] <= n["onset"] <= region[1]
-        ],
-        beats,
-        region or tuple(run["region"]),
-        stem=run["stem"],
-        config=config,
-        anchor=anchor,
-        time_signature=signature,
-        pulses_per_bar=pulses,
-        double_time=bool(sidecar.get("double_time")),
+        str(BENCH / track), notes, beats, region or tuple(run["region"]), **common
     )
 
 

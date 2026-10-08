@@ -403,7 +403,11 @@ def _append_pitch(
     staves: int = 1,
     beams: list[tuple[int, str]] | None = None,
 ) -> None:
-    element = ElementTree.SubElement(parent, "note")
+    # A rest that keeps its voice's bar adding up without being drawn: the
+    # lower horn's, on a two-horn staff (NotatedNote.hidden).
+    element = ElementTree.SubElement(
+        parent, "note", {"print-object": "no"} if note.hidden and note.is_rest else {}
+    )
     if chord:
         ElementTree.SubElement(element, "chord")
     if note.is_rest:
@@ -445,6 +449,10 @@ def _append_pitch(
         modification = ElementTree.SubElement(element, "time-modification")
         ElementTree.SubElement(modification, "actual-notes").text = str(actual)
         ElementTree.SubElement(modification, "normal-notes").text = str(normal)
+    if note.stem and not note.is_rest:
+        # After <time-modification>, before <staff>: two horns on one staff
+        # stem up and down in a bar that holds both (NotatedNote.stem).
+        ElementTree.SubElement(element, "stem").text = note.stem
     if staves > 1:
         # After <time-modification> and before <notations>: MusicXML's note
         # children are ordered, and a reader that validates refuses the file.

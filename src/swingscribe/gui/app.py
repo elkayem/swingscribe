@@ -29,6 +29,7 @@ from swingscribe.config import (
     Config,
 )
 from swingscribe.gui import audio as gui_audio
+from swingscribe.gui import edits as gui_edits
 from swingscribe.gui import erasures as gui_erasures
 from swingscribe.gui import ground_truth, library, peaks, review, storage, timings
 from swingscribe.gui import jobs as gui_jobs
@@ -306,14 +307,24 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         the review screen and the A/B render come through here so they cannot
         disagree about which notes sound.
 
-        `texture` is a pianist's All-notes view, which resolves only the
-        erasures made on it; the line's are carried through untouched, and
-        the other way round (gui/erasures.py `split_by_texture`).
+        Each view resolves only the erasures made on it -- a pianist's
+        All-notes view (`texture`), a multi-horn head, the line -- and the
+        others' are carried through untouched (gui/erasures.py
+        `split_by_view`).
         """
         settings = library.load_settings(entry["path"], config, track_id)
-        mine, rest = gui_erasures.split_by_texture(settings.get("erasures") or [], texture)
-        resolved = gui_erasures.resolve(mine, notes, review_span(entry, run_config))
-        return {**resolved, "carried": resolved["carried"] + rest}
+        return gui_edits.resolve_erasures(
+            settings.get("erasures") or [],
+            notes,
+            review_span(entry, run_config),
+            view_of(run_config, texture),
+        )
+
+    def view_of(run_config: Config, texture: bool) -> str:
+        """Which view of the span a request is about (gui/erasures.VIEWS)."""
+        if run_config.transcribe.uses_multi_horn:
+            return gui_erasures.HORNS
+        return gui_erasures.ALL if texture else gui_erasures.LINE
 
     def texture_of(run_config: Config, piano_notes: str | None) -> bool:
         """Whether this request is about a pianist's All-notes view. A horn
@@ -346,77 +357,24 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         payload: dict[str, Any],
         texture: bool = False,
     ) -> dict[str, Any]:
-        """Both of the listener's edits against this review, and what they leave.
+        """Both of the listener's edits against this review, and what they leave
+        (gui/edits.py `resolve`). One function, so the ear test, Export and
+        Score cannot disagree about which notes the listener kept.
 
-        `erasures` and `additions` are the two resolutions the client reads;
-        `candidates` is the pool the roll draws (the model's notes the line
-        does not already hold); `audible` and `added` are the notes that reach
-        a render or a page. One function, so the ear test, Export and Score
-        cannot disagree about which notes the listener kept.
-
-        `texture` swaps the line for EVERYTHING the piano model heard (the
-        All-notes view): those become `notes`, there is no pool left to
-        offer, and `hands` resolves the listener's staff assignments, with
-        `right` and `left` the audible notes each hand's staff will hold.
+        `texture` is a pianist's All-notes view; a multi-horn head's review
+        is resolved as its own view, each kept note in its voice.
         """
         settings = library.load_settings(entry["path"], config, track_id)
-        span = review_span(entry, run_config)
-        if texture:
-            notes = sorted(
-                (
-                    {
-                        "onset": c["onset"],
-                        "duration": c["duration"],
-                        "pitch": c["pitch"],
-                        "confidence": c.get("confidence", 0.0),
-                    }
-                    for c in payload.get("candidates") or []
-                ),
-                key=lambda n: (n["onset"], n["pitch"]),
-            )
-            erased = resolve_erasures(track_id, entry, run_config, notes, texture=True)
-            hands = gui_erasures.resolve_hands(settings.get("hands") or [], notes, span)
-            silenced = set(erased["silenced"])
-            sides = gui_erasures.hands_of(notes, hands)
-            kept = [
-                (note, side)
-                for index, (note, side) in enumerate(zip(notes, sides, strict=True))
-                if index not in silenced
-            ]
-            stored = settings.get("additions") or []
-            return {
-                "notes": notes,
-                "erasures": erased,
-                # Additions belong to the line's view; carried, never touched.
-                "additions": {
-                    "added": [],
-                    "carried": stored,
-                    "unmatched": [],
-                    "moved": [],
-                    "stored": len(stored),
-                },
-                "candidates": [],
-                "audible": gui_erasures.audible(notes, silenced),
-                "added": [],
-                "hands": hands,
-                "right": [n for n, side in kept if side == "right"],
-                "left": [n for n, side in kept if side == "left"],
-            }
-        notes = payload["notes"]
-        erased = resolve_erasures(track_id, entry, run_config, notes)
-        candidates = gui_erasures.pool(payload.get("candidates") or [], notes)
-        additions = gui_erasures.resolve_additions(
-            settings.get("additions") or [], candidates, span
+        tc = run_config.transcribe
+        return gui_edits.resolve(
+            settings,
+            payload,
+            review_span(entry, run_config),
+            texture=texture,
+            horns=tc.uses_multi_horn,
+            overlap_s=tc.multi_horn_overlap_ms / 1000.0,
+            overlap_share=tc.multi_horn_overlap_share,
         )
-        return {
-            "notes": notes,
-            "erasures": erased,
-            "additions": additions,
-            "candidates": candidates,
-            "audible": gui_erasures.audible(notes, erased["silenced"]),
-            "added": gui_erasures.enabled(candidates, additions["added"]),
-            "hands": None,
-        }
 
     @app.get("/api/config")
     def get_config() -> dict[str, Any]:

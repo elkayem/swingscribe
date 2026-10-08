@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from swingscribe import chords
-from swingscribe.config import KEY_SIGNATURES, TIMINGS, TRANSPOSITIONS, Config
+from swingscribe.config import KEY_SIGNATURES, TRANSPOSITIONS, Config
 from swingscribe.model import BeatGrid, Document, Notation, NoteEvent
 from swingscribe.notation import (
     bar_grid_for_settings,
@@ -49,7 +49,10 @@ from swingscribe.notation import (
     form_bar_of_page,
     grid_config,
     meter_from_settings,
+    notation_for_horns,
     notation_for_span,
+    reading_of,
+    timing_for,
     with_chords,
 )
 
@@ -90,11 +93,11 @@ def take_of(config: Config, line: str | None) -> str | None:
 
 
 def timing_of(config: Config, settings: dict[str, Any]) -> str:
-    """The sidecar's rhythm choice, or the config's when it holds none (or
-    one this build does not know -- a hand-edited sidecar must not break
-    the button)."""
-    stored = settings.get("timing")
-    return stored if stored in TIMINGS else config.quantize.timing
+    """The sidecar's rhythm choice, or the ensemble's or the config's when
+    it holds none (or one this build does not know -- a hand-edited sidecar
+    must not break the button): `notation.timing_for`, the one rule the
+    harness reads too. A multi-horn head is literal unless chosen swing."""
+    return timing_for(settings, config)
 
 
 def key_of(settings: dict[str, Any]) -> int | None:
@@ -111,13 +114,15 @@ def two_staves(settings: dict[str, Any], texture: bool) -> bool:
 
 def page_tags(config: Config, settings: dict[str, Any], texture: bool) -> list[str]:
     """The filename tags for this page's choices away from their defaults:
-    "all" or "2staves" for a piano texture, "literal16"/"literal32"."""
+    "all" or "2staves" for a piano texture, "literal16"/"literal32", and a
+    literal page's "lag" and "thirds" readings."""
     tags = []
     if texture:
         tags.append("2staves" if two_staves(settings, texture) else "all")
-    timing = timing_of(config, settings)
-    if timing != "swing":
-        tags.append(timing.replace("-", ""))
+    reading = reading_of(settings, config)
+    if reading["timing"] != "swing":
+        tags.append(reading["timing"].replace("-", ""))
+        tags.extend(name for name in ("lag", "thirds") if reading[f"literal_{name}"])
     return tags
 
 
@@ -205,7 +210,7 @@ def notate_config(
                 update={"transposition": transposition, "title": title, "key": key_of(settings)}
             ),
             "quantize": config.quantize.model_copy(
-                update={"timing": timing_of(config, settings), "polyphonic": texture}
+                update={**reading_of(settings, config), "polyphonic": texture}
             ),
         }
     )
@@ -252,6 +257,10 @@ def build_notation(
     staff, `notes` the right hand and `left` the left.
 
     `grid` is the cached tracked grid if the caller has read it already.
+
+    A multi-horn head (the review's ensemble) is written as two horns on
+    one staff (`notation.notation_for_horns`): `notes` and `added` each
+    carry the voice they are written in (gui/edits.py).
     """
     if not notes and not added and not left:
         raise NotReady("nothing to notate - every note in this span is silenced")
@@ -265,6 +274,21 @@ def build_notation(
         settings.get("time_signature"), settings.get("pulses_per_bar"), config
     )
     line = [NoteEvent(source=stem, **note) for note in notes]
+    common = {
+        "stem": stem,
+        "config": notate_config(config, settings, Path(audio_path).stem, texture),
+        "anchor": anchor,
+        "time_signature": signature,
+        "pulses_per_bar": pulses,
+        "sample_rate": document.sample_rate,
+        "double_time": bool(settings.get("double_time")),
+    }
+    if run_config.transcribe.uses_multi_horn:
+        heard = line + [NoteEvent(source=f"{stem}:added", **note) for note in added or []]
+        notation, _lines = notation_for_horns(audio_path, heard, beats, region, **common)
+        if notation is None or not notation.bars:
+            raise NotReady("the span is too short to bar out - select at least a couple of bars")
+        return notation
     left_hand = None
     if texture:
         line = fold_texture(line)

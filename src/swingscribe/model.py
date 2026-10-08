@@ -41,6 +41,15 @@ class NoteEvent(BaseModel):
     # deserializes with nothing marked, and the keys that produce marked
     # notes are the transcribe keys that carry the lead-in settings.
     lead_in: bool = False
+    # Which horn of a multi-horn head played this note, as HEARD: 1 the upper,
+    # 2 the lower (`voices.assign`). A note with no partner -- one horn alone,
+    # or a unison heard as one note -- is 1, so a page writes it once. Every
+    # other ensemble's line is all 1. The page's writing conventions (an
+    # octave moved, a unison written once) are notation's, never this
+    # field's. MIGRATION: additive with a default, like `chord`: every cached
+    # Document deserializes as voice 1, and only the multi-horn transcribe
+    # key -- new with it -- produces a 2.
+    voice: int = 1
 
 
 class BeatGrid(BaseModel):
@@ -154,6 +163,17 @@ class NotatedNote(BaseModel):
     # <grace/> notes ahead of it. MIGRATION: additive with a default, like
     # `staff`: every cached Notation deserializes with none.
     grace: list[int] = []
+    # The stem direction a reader must draw, "up" or "down", or "" to let it
+    # choose. Two horns on one staff (notation.merge_horn_voices) stem the
+    # upper voice up and the lower down in a bar that holds both, and leave
+    # a bar of one voice to the reader. MIGRATION: additive with a default:
+    # every cached Notation deserializes as automatic, and no key moves.
+    stem: str = ""
+    # Written with print-object="no": a rest that keeps its voice's bar
+    # adding up but is not drawn -- the lower horn's rests on a two-horn
+    # staff, where a reader sees one line resting, not two. MIGRATION:
+    # additive with a default, like `stem`.
+    hidden: bool = False
 
 
 class ChordDegree(BaseModel):

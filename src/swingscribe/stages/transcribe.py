@@ -932,6 +932,75 @@ def _consult_piano_oracle(
     return line, extra, oracle
 
 
+def _hear_horns(
+    whole, rate: int, tc: TranscribeConfig, *, log: bool = False
+) -> tuple[list[NoteEvent], list[dict]]:
+    """A multi-horn head: Basic Pitch's notes over the region, each in a
+    voice (`voices.assign`), and the heard notes neither voice holds --
+    overtone ghosts and third notes -- as the candidates a listener may
+    switch on (docs/multi-horn.md).
+
+    `whole` is the whole stem; Basic Pitch hears the region plus a second
+    either side, as the horn fill does. Unlike the fill this is not an
+    improvement to a line that already exists -- it IS the transcription --
+    so a missing onnxruntime is an error with its remedy, never a silent
+    fall back to CREPE's single line cached under the multi-horn key.
+    """
+    from swingscribe import basic_pitch, voices
+
+    progress.report("transcribe", 0.85, "hearing both horns with Basic Pitch")
+    try:
+        heard = basic_pitch.transcribe(
+            whole,
+            rate,
+            tc.region,
+            onset_threshold=tc.multi_horn_onset_threshold,
+            frame_threshold=tc.multi_horn_frame_threshold,
+            min_note_ms=tc.multi_horn_min_note_ms,
+        )
+    except (ImportError, OSError) as exc:
+        raise RuntimeError(
+            "a multi-horn head is heard by Basic Pitch, which needs onnxruntime "
+            f"(the ml dependency group): {type(exc).__name__}: {exc}"
+        ) from exc
+    shift = tc.multi_horn_onset_shift_ms / 1000.0
+    heard = [{**n, "onset": n["onset"] + shift} for n in heard]
+    kept, dropped = voices.assign(
+        heard,
+        overlap_s=tc.multi_horn_overlap_ms / 1000.0,
+        share=tc.multi_horn_overlap_share,
+        ghost_ratio=tc.multi_horn_ghost_ratio,
+    )
+    if log:
+        ghosts = sum(1 for n in dropped if n["dropped"] == voices.GHOST)
+        print(
+            f"transcribe: Basic Pitch heard {len(heard)} notes; {ghosts} overtone ghost(s) "
+            f"and {len(dropped) - ghosts} third note(s) left out of the voices"
+        )
+    notes = [
+        NoteEvent(
+            onset=n["onset"],
+            duration=n["duration"],
+            pitch=int(n["pitch"]),
+            confidence=n["confidence"],
+            source=f"{tc.stem}:basic-pitch",
+            voice=n["voice"],
+        )
+        for n in kept
+    ]
+    candidates = [
+        {
+            "onset": n["onset"],
+            "duration": n["duration"],
+            "pitch": int(n["pitch"]),
+            "confidence": n["confidence"],
+            "dropped": n["dropped"],
+        }
+        for n in dropped
+    ]
+    return notes, candidates
+
+
 def _fill_horn_holes(
     whole, rate: int, tc: TranscribeConfig, notes: list[NoteEvent], *, log: bool = False
 ) -> list[NoteEvent]:
@@ -1114,7 +1183,19 @@ def analyze(
     # are in region time and get the same offset applied.
     second_voice: list[dict] = []
     candidates: list[dict] = []
-    if tc.uses_piano_oracle:
+    if tc.uses_multi_horn:
+        # Two horns in harmony: Basic Pitch's notes, each in a voice, and
+        # CREPE's line set aside -- it follows the upper horn and jumps into
+        # the lower one. Nothing below applies: the line floors, the fill and
+        # the lead-ins are all CREPE's (TranscribeConfig.crepe_line).
+        crepe_count = len(notes)
+        notes, candidates = _hear_horns(whole, rate, tc, log=log)
+        print(
+            f"transcribe: two voices of {sum(n.voice == 1 for n in notes)} and "
+            f"{sum(n.voice == 2 for n in notes)} notes, {len(candidates)} heard notes in "
+            f"neither (CREPE's {crepe_count} set aside)"
+        )
+    elif tc.uses_piano_oracle:
         notes, second_voice, candidates = _consult_piano_oracle(
             mono, rate, tc, region_offset, notes, log=log
         )
@@ -1125,7 +1206,7 @@ def analyze(
     # measurement (docs/benchmark-deficiencies.md D22) is of the notes the
     # review actually shows.
     before = len(notes)
-    if not (tc.uses_piano_oracle and tc.piano_line == "oracle"):
+    if tc.crepe_line:
         notes = reject_line_outliers(
             notes,
             None if tc.uses_piano_oracle else note_loudness_db(notes, mono, rate, region_offset),

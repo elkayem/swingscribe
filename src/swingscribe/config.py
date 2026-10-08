@@ -24,13 +24,22 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "default-config.yaml"
 # Named as types so the GUI can offer exactly what the config accepts. A menu
 # built from a hand-copied list is a menu that drifts out of step with the
 # validator and starts offering values that will be rejected.
-Ensemble = Literal["horn-led", "trio", "solo-piano"]
+# "multi-horn" is a head played by two horns in harmony (docs/multi-horn.md):
+# Basic Pitch hears both, `voices.assign` says which note is which horn's,
+# and the page writes them as two voices on one staff. It never consults the
+# piano model.
+Ensemble = Literal["horn-led", "trio", "solo-piano", "multi-horn"]
 Transposition = Literal["C", "Eb", "Bb", "Bb-tenor"]
 ENSEMBLES: tuple[str, ...] = get_args(Ensemble)
 # Which detector supplies a pianist's line (TranscribeConfig.piano_line). The
 # GUI's menu is built from this, never hand-copied.
 LINES: tuple[str, ...] = ("crepe", "oracle")
 TRANSPOSITIONS: tuple[str, ...] = get_args(Transposition)
+# The rhythm a page is written in when the sidecar has chosen none
+# (QuantizeConfig.timing), where it is not the config's: horns playing in
+# harmony play the rhythm that is written, so a multi-horn head is LITERAL
+# by default (docs/multi-horn.md). Read through `notation.timing_for`.
+ENSEMBLE_TIMINGS: dict[str, str] = {"multi-horn": "literal-16"}
 # How quantize writes rhythm (QuantizeConfig.timing): "swing" reads the feel
 # out and writes swung eighths as eighths under a "Swing" marking; the
 # literal ones snap every onset to the nearest 16th or 32nd, feel and all.
@@ -387,6 +396,28 @@ class TranscribeConfig(BaseModel):
     glide_max_ms: float = 100.0
     glide_max_stable: float = 0.5
     reattack_max_ms: float = 100.0
+    # ── Multi-horn: two horns in harmony (docs/multi-horn.md) ─────────────
+    # The notes are Basic Pitch's over the span, not CREPE's: on the Open
+    # Sesame head CREPE follows the upper horn and jumps into the lower one,
+    # while Basic Pitch hears both (82% of the sounding frames hold exactly
+    # two notes). CREPE still runs for the roll's frame trace and its notes
+    # are set aside, as a pianist's are on the piano model's line. The decode
+    # is Step 0's: onset 0.5, frame 0.3, 23 ms -- never Basic Pitch's own
+    # 128 ms minimum, which deletes every short note.
+    multi_horn_onset_threshold: float = 0.5
+    multi_horn_frame_threshold: float = 0.3
+    multi_horn_min_note_ms: float = 23.0
+    # Basic Pitch's onsets sit 3-4 ms early (the horn fill's measurement);
+    # every note is moved this much late.
+    multi_horn_onset_shift_ms: float = 4.0
+    # `voices.assign`'s rules, in its own units: two notes overlap
+    # MEANINGFULLY when they share at least `overlap_ms`, or `overlap_share`
+    # of the shorter note; an overtone ghost (12, 19, 24, 28... semitones
+    # over a note it sits inside) is dropped when its confidence is at most
+    # `ghost_ratio` of that note's.
+    multi_horn_overlap_ms: float = 60.0
+    multi_horn_overlap_share: float = 0.3
+    multi_horn_ghost_ratio: float = 0.6
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
@@ -432,13 +463,31 @@ class TranscribeConfig(BaseModel):
             data.pop("glide_max_ms", None)
             data.pop("glide_max_stable", None)
             data.pop("reattack_max_ms", None)
+        # The multi-horn fields act only on a multi-horn head, and no other
+        # ensemble's key may carry them: every cached review, separation-
+        # keyed transcription and harness note cache reads exactly as it did
+        # before they existed.
+        if not self.uses_multi_horn:
+            for name in type(self).model_fields:
+                if name.startswith("multi_horn_"):
+                    data.pop(name, None)
         return data
+
+    @property
+    def uses_multi_horn(self) -> bool:
+        """Whether the span is a head played by two horns in harmony: Basic
+        Pitch's notes, each assigned a voice (`voices.assign`). The one gate
+        the stage and the cache key both read."""
+        return self.ensemble == "multi-horn"
 
     @property
     def crepe_line(self) -> bool:
         """Whether the line is CREPE's: every horn, and a pianist on the CREPE
         take. A pianist on the piano model's line has its notes from the
-        model, and CREPE's frames are set aside."""
+        model, and a multi-horn head from Basic Pitch; CREPE's frames are set
+        aside in both."""
+        if self.uses_multi_horn:
+            return False
         return not (self.uses_piano_oracle and self.piano_line == "oracle")
 
     @property
@@ -461,8 +510,9 @@ class TranscribeConfig(BaseModel):
     def uses_horn_fill(self) -> bool:
         """Whether Basic Pitch fills the holes in this line: a horn's, with
         the fill on. Never a pianist's (its line is the piano model's), and
-        this is the one gate the stage and the cache key both read."""
-        return self.horn_fill_gaps and not self.uses_piano_oracle
+        this is the one gate the stage and the cache key both read. Nor a
+        multi-horn head's: its notes are all Basic Pitch's already."""
+        return self.horn_fill_gaps and not self.uses_piano_oracle and not self.uses_multi_horn
 
     @property
     def uses_piano_oracle(self) -> bool:
@@ -471,8 +521,11 @@ class TranscribeConfig(BaseModel):
         `piano_oracle` forces it on; otherwise the ensemble decides, which is
         the routing plan §5 stage 3 specifies. A horn-led solo must never get
         it — a piano model asked about a saxophone vouches for nothing, and
-        rejection would then delete the entire line.
+        rejection would then delete the entire line. Neither may a multi-horn
+        head, whatever `piano_oracle` says: two horns are still horns.
         """
+        if self.uses_multi_horn:
+            return False
         return self.piano_oracle or self.ensemble in ("trio", "solo-piano")
 
 
@@ -789,6 +842,22 @@ class QuantizeConfig(BaseModel):
     # transcribe key with the lead-in settings produced, so it dumps nothing
     # while on and no quantize key moved.
     absorb_lead_ins: bool = True
+    # Two readings a LITERAL page may take, for horns playing a written head
+    # in harmony (docs/multi-horn.md), both OFF: Step 0 found the held
+    # chords of the Open Sesame head 0.1-0.3 of a beat BEHIND the tracked
+    # beat, which the nearest 16th writes on the "e", and its bridge holds
+    # eighth-note triplet chords a literal grid cannot write.
+    #
+    # `literal_lag` takes the line's lag out before the snap, the swing
+    # quantizer's own estimate (quantize.line_lag, with lag_window_beats,
+    # lag_cap and lag_floor): a window median of downbeat offsets, shifted
+    # out, never more than the beat's first onset.
+    literal_lag: bool = False
+    # `literal_thirds` offers a beat of at least `min_onsets_for_tuplet`
+    # onsets, all inside it, a THIRDS grid when its onsets fit thirds
+    # better than the literal grid by `LITERAL_THIRDS_MARGIN` beats of mean
+    # snap error (quantize.literal_notes).
+    literal_thirds: bool = False
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
@@ -809,6 +878,8 @@ class QuantizeConfig(BaseModel):
             "isolated_lag_max_onsets",
             "tuplet_pushed_last",
             "reranker",
+            "literal_lag",
+            "literal_thirds",
         ):
             if not data.get(field):
                 data.pop(field, None)

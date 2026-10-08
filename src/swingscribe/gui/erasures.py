@@ -51,6 +51,16 @@ The first guess is the pitch (`notation.guess_hand`); a note the listener
 moves is stored in the sidecar's `hands` list as {onset, pitch, hand} and
 matched back by the same rule. Erasures made on the "All notes" view carry
 `piano_notes: "all"` and are resolved only there (`split_by_texture`).
+
+## Voices (multi-horn)
+
+A multi-horn head (docs/multi-horn.md) is a THIRD view of a span: both horns,
+each note in a voice. Erasures and additions made on it carry `view: "horns"`
+and are resolved only there (`split_by_view`); on any other view they are
+carried, never resolved, never dropped -- and the other views' records are
+carried on it. A note the listener moves to the other voice is stored in the
+sidecar's `voices` list as {onset, pitch, voice} and matched back by the same
+rule (`resolve_voices`).
 """
 
 from typing import Any
@@ -209,22 +219,75 @@ def match(records: list[dict[str, Any]], notes: list[dict[str, Any]]) -> dict[in
     return pairs
 
 
-def split_by_texture(
-    records: list[dict[str, Any]], texture: bool
+# The views of one span a stored edit can belong to: the line, a pianist's
+# All notes, a multi-horn head's two voices.
+LINE = "line"
+ALL = "all"
+HORNS = "horns"
+VIEWS = (LINE, ALL, HORNS)
+# The voices a multi-horn note can be written in: 1 the upper, 2 the lower.
+VOICES = (1, 2)
+
+
+def view_of(record: dict[str, Any]) -> str:
+    """Which view a stored edit was made on: its `view` when it names one,
+    else All notes for a record carrying `piano_notes: "all"` (every record
+    made there before `view` existed), else the line."""
+    view = record.get("view")
+    if view in VIEWS:
+        return view
+    return ALL if record.get("piano_notes") == "all" else LINE
+
+
+def split_by_view(
+    records: list[dict[str, Any]], view: str
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """(the records made on this view, the rest).
 
-    A pianist has two views of one span -- the melody line, and everything
-    the piano model heard ("All notes") -- and an erasure means something
-    different on each: a left-hand note erased as "not the solo" on the line
-    is exactly what the All-notes page is for. So each view resolves only
-    its own erasures (records made on All notes carry `piano_notes: "all"`;
-    every older record is the line's), and the other view's are carried
-    through untouched. Never dropped: they are still labels.
+    One span has up to three views -- the line, a pianist's All notes, a
+    multi-horn head's two voices -- and an erasure means something different
+    on each: a left-hand note erased as "not the solo" on the line is
+    exactly what the All-notes page is for. So each view resolves only its
+    own records, and the others' are carried through untouched. Never
+    dropped: they are still labels.
     """
-    mine = [r for r in records if (r.get("piano_notes") == "all") == texture]
-    rest = [r for r in records if (r.get("piano_notes") == "all") != texture]
+    mine = [r for r in records if view_of(r) == view]
+    rest = [r for r in records if view_of(r) != view]
     return mine, rest
+
+
+def split_by_texture(
+    records: list[dict[str, Any]], texture: bool
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """`split_by_view` between a pianist's two views: All notes when
+    `texture`, else the line."""
+    return split_by_view(records, ALL if texture else LINE)
+
+
+def resolve_voices(
+    moves: list[dict[str, Any]],
+    notes: list[dict[str, Any]],
+    span: tuple[float, float] | None = None,
+) -> dict[str, Any]:
+    """Match the listener's voice moves onto a multi-horn head's notes.
+
+    Each record is {onset, pitch, voice} for a note the listener put in a
+    voice by hand; every other note keeps the voice it was heard in
+    (`voices.order`). Matched by content like an erasure, because a
+    re-transcription renumbers every note. `upper` and `lower` are the note
+    indices moved; `carried` and `unmatched` mean what they do for
+    erasures, and nothing is dropped.
+    """
+    valid = [m for m in moves if m.get("voice") in VOICES]
+    pairs = match(valid, notes)
+    carried = [record for index, record in enumerate(valid) if index not in pairs]
+    return {
+        "upper": sorted(ni for ri, ni in pairs.items() if valid[ri]["voice"] == 1),
+        "lower": sorted(ni for ri, ni in pairs.items() if valid[ri]["voice"] == 2),
+        "carried": carried,
+        "unmatched": [r for r in carried if _in_span(r, span)],
+        "stored": len(valid),
+    }
 
 
 def resolve_hands(

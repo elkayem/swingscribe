@@ -43,7 +43,9 @@ the one derivation the roll, the Export button and the eval harness share, so
 the page the harness scores is the page the listener sees.
 """
 
-from swingscribe.config import Config
+from dataclasses import dataclass, field
+
+from swingscribe.config import ENSEMBLE_TIMINGS, TIMINGS, Config
 from swingscribe.model import (
     BeatGrid,
     Document,
@@ -84,6 +86,21 @@ HANDS = ("right", "left")
 
 # Below this a span cannot support a bar grid at all -- two bars of 4/4.
 MIN_BEATS = 8
+
+# ── Two horns on one staff (docs/multi-horn.md) ──────────────────────────
+# The lower horn is written an octave (or two) up wherever a PHRASE of it
+# sits that far under the upper voice, so the two lines sit close on the
+# staff the way an arranger writes a head. Decided per phrase, never note by
+# note: a horn's line moved up and down an octave through the transcription
+# is the thing the listener warned against.
+OCTAVE = 12
+# A gap in the lower voice at least this long ends its phrase. The lower
+# voice holds only the notes heard UNDER a partner (voices.assign), so a
+# unison or the upper horn alone also ends one.
+PHRASE_REST_S = 0.25
+# The same pitch in both voices struck this close together is a unison, and
+# is written once, in voice 1.
+UNISON_ONSET_S = 0.05
 
 
 def span_beats(
@@ -204,6 +221,143 @@ def guess_hand(pitch: int) -> str:
     """The first guess at a note's hand: "right" (the treble staff) from
     middle C up, "left" (the bass staff) below it."""
     return "right" if pitch >= HAND_SPLIT else "left"
+
+
+def timing_for(settings: dict, config: Config) -> str:
+    """The rhythm a page is written in: the sidecar's `timing` when it holds
+    one this build knows, else the ensemble's own default (ENSEMBLE_TIMINGS:
+    a multi-horn head is literal), else the config's. The Export button, the
+    page view and the harness all read it here."""
+    stored = settings.get("timing")
+    if stored in TIMINGS:
+        return stored
+    ensemble = settings.get("ensemble") or config.transcribe.ensemble
+    return ENSEMBLE_TIMINGS.get(ensemble, config.quantize.timing)
+
+
+def reading_of(settings: dict, config: Config) -> dict:
+    """The quantize settings a page's sidecar chooses: its rhythm
+    (`timing_for`), and for a literal page the two readings a written head
+    may take, `literal_lag` and `literal_thirds` (QuantizeConfig), both off
+    unless the sidecar turns them on."""
+    return {
+        "timing": timing_for(settings, config),
+        "literal_lag": bool(settings.get("literal_lag", config.quantize.literal_lag)),
+        "literal_thirds": bool(settings.get("literal_thirds", config.quantize.literal_thirds)),
+    }
+
+
+@dataclass
+class HornLines:
+    """Two horns' heard notes as one staff writes them (`horn_lines`)."""
+
+    upper: list[NoteEvent]
+    lower: list[NoteEvent]
+    # One record per phrase of the lower voice: its span, its median
+    # interval under the upper voice (None with no partner) and how far it
+    # was moved up, in semitones.
+    phrases: list[dict] = field(default_factory=list)
+    # Lower notes written once, in voice 1, as a unison.
+    unisons: int = 0
+
+
+def _weighted_median(pairs: list[tuple[float, float]]) -> float | None:
+    """The median of (value, weight) pairs: the value at half the weight."""
+    pairs = sorted((v, w) for v, w in pairs if w > 0)
+    if not pairs:
+        return None
+    half = sum(w for _v, w in pairs) / 2.0
+    running = 0.0
+    for value, weight in pairs:
+        running += weight
+        if running >= half:
+            return value
+    return pairs[-1][0]
+
+
+def lower_phrases(lower: list[NoteEvent], rest: float = PHRASE_REST_S) -> list[list[NoteEvent]]:
+    """The lower voice in phrases: runs of notes with no gap of `rest`."""
+    phrases: list[list[NoteEvent]] = []
+    end = None
+    for note in sorted(lower, key=lambda n: n.onset):
+        if end is None or note.onset - end >= rest:
+            phrases.append([])
+        phrases[-1].append(note)
+        end = note.onset + note.duration if end is None else max(end, note.onset + note.duration)
+    return phrases
+
+
+def phrase_interval(phrase: list[NoteEvent], upper: list[NoteEvent]) -> float | None:
+    """How far a phrase of the lower voice sits under the upper voice: the
+    median interval to the upper notes sounding over it, weighted by how
+    long each pair sounds together. None when nothing sounds over it."""
+    pairs = []
+    for low in phrase:
+        for high in upper:
+            shared = min(low.onset + low.duration, high.onset + high.duration) - max(
+                low.onset, high.onset
+            )
+            if shared > 0:
+                pairs.append((float(high.pitch - low.pitch), shared))
+    return _weighted_median(pairs)
+
+
+def horn_lines(
+    notes: list[NoteEvent],
+    *,
+    move_octaves: bool = True,
+    merge_unisons: bool = True,
+    rest: float = PHRASE_REST_S,
+    unison_onset: float = UNISON_ONSET_S,
+) -> HornLines:
+    """Two horns' heard notes (NoteEvent.voice) as one staff writes them.
+
+    Hearing and writing are kept apart, as with the lead-ins (docs/
+    scoops.md): the transcriber gives each horn its HEARD pitches, and this
+    is where the page's conventions are applied.
+
+    - The lower voice is moved up by whole octaves PER PHRASE, wherever the
+      phrase's median interval under the upper voice is an octave or more:
+      an octave and a third becomes a third (the Open Sesame head's bars
+      15-16), and a phrase doubled at the octave becomes a unison.
+    - A unison -- the same pitch struck within `unison_onset` in both voices
+      -- is written ONCE, in voice 1.
+
+    `move_octaves` and `merge_unisons` are off for two PARTS, where each
+    horn plays its own notes at its own octave.
+    """
+    upper = sorted((n for n in notes if n.voice != 2), key=lambda n: (n.onset, -n.pitch))
+    lower = sorted((n for n in notes if n.voice == 2), key=lambda n: (n.onset, -n.pitch))
+    moved: list[NoteEvent] = []
+    phrases = []
+    for phrase in lower_phrases(lower, rest):
+        interval = phrase_interval(phrase, upper)
+        shift = 0
+        if move_octaves and interval is not None and interval >= OCTAVE:
+            shift = OCTAVE * int(interval // OCTAVE)
+        phrases.append(
+            {
+                "start": phrase[0].onset,
+                "end": max(n.onset + n.duration for n in phrase),
+                "notes": len(phrase),
+                "interval": interval,
+                "moved": shift,
+            }
+        )
+        moved.extend(n.model_copy(update={"pitch": n.pitch + shift}) for n in phrase)
+    unisons = 0
+    if merge_unisons:
+        kept = []
+        for note in moved:
+            if any(
+                high.pitch == note.pitch and abs(high.onset - note.onset) <= unison_onset
+                for high in upper
+            ):
+                unisons += 1
+                continue
+            kept.append(note)
+        moved = kept
+    return HornLines(upper=upper, lower=moved, phrases=phrases, unisons=unisons)
 
 
 def span_anchor(
@@ -509,6 +663,7 @@ def notation_for_span(
     second_voice: list[NoteEvent] | None = None,
     double_time: bool = False,
     left_hand: list[NoteEvent] | None = None,
+    lower_voice: list[NoteEvent] | None = None,
 ) -> Notation | None:
     """Run swing, quantize and notate over one span. None if it is too short.
 
@@ -529,6 +684,14 @@ def notation_for_span(
     right hand's, the melodic stream the estimator is built for, exactly as
     the overlay takes the line's. Only a page with no right hand at all
     reads its swing from the left.
+
+    `lower_voice`, when given (even empty), makes a two-horn staff: `notes`
+    is the upper horn and this the lower (`horn_lines` has already written
+    them), each quantized on its own on the same grid under the upper's
+    swing reading, and merged as voices 1 and 2 of one staff
+    (`merge_horn_voices`). A literal page that takes out the line's lag
+    (QuantizeConfig.literal_lag) reads it ONCE over both horns and moves
+    them together, so a chord struck behind the beat stays one chord.
     """
     from swingscribe.stages import notate, quantize, swing
 
@@ -543,7 +706,9 @@ def notation_for_span(
     # the tracked grid (`cover`): a grid that ends before a note drops it.
     # Bar 1 is still a TRACKED beat -- chosen above, before any continuation.
     tracked = (beats[0], beats[-1])
-    onsets = [n.onset for n in (*notes, *(left_hand or ()), *(second_voice or ()))]
+    onsets = [
+        n.onset for n in (*notes, *(left_hand or ()), *(second_voice or ()), *(lower_voice or ()))
+    ]
     low = min([region[0] or 0.0, *onsets]) - MARGIN_SECONDS
     high = max([beats[-1] if region[1] is None else region[1], *onsets]) + MARGIN_SECONDS
     kept = span_beats(cover(beats, low, high), region)
@@ -573,8 +738,17 @@ def notation_for_span(
         }
     )
     staves = left_hand is not None
+    horns = lower_voice is not None
     right, left = list(notes), list(left_hand or [])
+    lower = list(lower_voice or [])
     lead_is_left = staves and not right and bool(left)
+    lead_is_lower = horns and not right and bool(lower)
+    if horns and run_config.quantize.timing != "swing" and run_config.quantize.literal_lag:
+        right, lower = _unlag_together(right, lower, kept, run_config)
+        run_config = run_config.model_copy(
+            update={"quantize": run_config.quantize.model_copy(update={"literal_lag": False})}
+        )
+    lead = left if lead_is_left else lower if lead_is_lower else right
 
     def on_grid(grid: list[float]) -> Document:
         return Document(
@@ -582,7 +756,7 @@ def notation_for_span(
             sample_rate=sample_rate,
             beat_grid=BeatGrid(beats=grid, downbeats=[], beats_per_bar=pulses_per_bar),
             meter=[section_for(grid, anchor, time_signature, pulses_per_bar)],
-            notes={stem: left if lead_is_left else right},
+            notes={stem: lead},
         )
 
     # The swing reading is taken over the TRACKED beats only, exactly as it
@@ -610,7 +784,12 @@ def notation_for_span(
     for stage in (quantize.run, notate.run):
         document = stage(document, run_config)
     notation = document.notation
-    if staves:
+    if horns:
+        other = right if lead_is_lower else lower
+        follower = _notate_only(other, document, run_config) if other else None
+        upper_page, lower_page = (follower, notation) if lead_is_lower else (notation, follower)
+        notation = merge_horn_voices(upper_page, lower_page, run_config.notate.key)
+    elif staves:
         other = right if lead_is_left else left
         follower = _notate_only(other, document, run_config) if other else None
         key = run_config.notate.key
@@ -621,9 +800,137 @@ def notation_for_span(
         )
     if notation is not None and double_time:
         notation.double_time = True
-    if notation is not None and second_voice and not staves:
+    if notation is not None and second_voice and not staves and not horns:
         merge_second_voice(notation, _notate_only(second_voice, document, run_config))
     return notation
+
+
+def notation_for_horns(
+    audio_path: str,
+    notes: list[NoteEvent],
+    beats: list[float],
+    region: tuple[float, float | None],
+    **kwargs,
+) -> tuple[Notation | None, HornLines]:
+    """A multi-horn head's page: the voices as one staff writes them
+    (`horn_lines`), notated as a two-horn staff (`notation_for_span`'s
+    `lower_voice`). THE assembly the Export button, the page view, the
+    harness and scripts/multi_horn_page.py share; `kwargs` are
+    `notation_for_span`'s. Returns the page and what the writing did."""
+    lines = horn_lines(notes)
+    notation = notation_for_span(
+        audio_path, lines.upper, beats, region, lower_voice=lines.lower, **kwargs
+    )
+    return notation, lines
+
+
+def _time_at(position: float, beats: list[float]) -> float:
+    """The time of a beat position (`quantize.beat_position`'s inverse)."""
+    index = min(max(0, int(position)), len(beats) - 2)
+    return beats[index] + (position - index) * (beats[index + 1] - beats[index])
+
+
+def _unlag_together(
+    upper: list[NoteEvent], lower: list[NoteEvent], beats: list[float], config: Config
+) -> tuple[list[NoteEvent], list[NoteEvent]]:
+    """Both horns with the line's lag taken out, read ONCE over all their
+    onsets (`quantize.literal_lags`) and applied to each: two horns attack a
+    chord together, and a lag read per voice could write one of them on the
+    beat and the other on the "e". A note keeps its length."""
+    from swingscribe.stages import quantize
+
+    qc = config.quantize
+    lags = quantize.literal_lags(
+        [n.onset for n in (*upper, *lower)], beats, qc.lag_window_beats, qc.lag_cap, qc.lag_floor
+    )
+    if not lags:
+        return upper, lower
+
+    def moved(note: NoteEvent) -> NoteEvent:
+        position = quantize.beat_position(note.onset, beats)
+        if position is None:
+            return note
+        onset = _time_at(quantize.unlag_position(position, lags), beats)
+        return note if onset == note.onset else note.model_copy(update={"onset": onset})
+
+    return [moved(n) for n in upper], [moved(n) for n in lower]
+
+
+def merge_horn_voices(
+    upper: Notation | None, lower: Notation | None, key: int | None = None
+) -> Notation:
+    """Two separately notated horns as voices 1 and 2 of ONE staff.
+
+    Bar by bar over the union of both voices' bars. In a bar where the lower
+    horn sounds, the upper voice's stems go up and the lower's down, and
+    the lower voice's rests are written but not drawn (print-object="no"):
+    a reader sees one line resting, not two. A bar where only the upper horn
+    sounds is the upper voice alone, stems left to the reader, with no
+    lower-voice rests at all. The upper voice's rests are always drawn. The
+    key is read ONCE over both voices (`merge_staves`' rule); `key` is the
+    listener's when they chose one.
+    """
+    from swingscribe.stages import notate
+
+    voices = {voice: n for voice, n in ((1, upper), (2, lower)) if n is not None}
+    template = next((n for n in voices.values() if n.bars), None) or upper or lower or Notation()
+    bars_of = {voice: {bar.number: bar for bar in n.bars} for voice, n in voices.items()}
+    numbers = sorted({number for bars in bars_of.values() for number in bars})
+    if key is None:
+        sounding = _sounding(bars_of)
+        key = notate.detect_key(sounding) if sounding else template.key_fifths
+    merged: list[NotatedBar] = []
+    signature = (4, 4)
+    for number in range(numbers[0], numbers[-1] + 1) if numbers else ():
+        found = [bars[number] for bars in bars_of.values() if number in bars]
+        if found:
+            signature = found[0].time_signature
+        length = signature[0] * 4.0 / signature[1]
+        top = bars_of.get(1, {}).get(number)
+        bottom = bars_of.get(2, {}).get(number)
+        both = bottom is not None and any(not n.is_rest for n in bottom.notes)
+        written: list[NotatedNote] = []
+        for note in top.notes if top is not None else notate.fill_rests([], length):
+            stem = "up" if both and not note.is_rest else ""
+            written.append(_respelled(note, key, voice=1, staff=1, stem=stem, hidden=False))
+        if both:
+            for note in bottom.notes:
+                stem = "" if note.is_rest else "down"
+                written.append(
+                    _respelled(note, key, voice=2, staff=1, stem=stem, hidden=note.is_rest)
+                )
+        merged.append(NotatedBar(number=number, time_signature=signature, notes=written))
+    return Notation(
+        bars=merged,
+        key_fifths=key,
+        swing=template.swing,
+        transpose=template.transpose,
+        title=template.title,
+        double_time=template.double_time,
+    )
+
+
+def _sounding(bars_of: dict[int, dict[int, NotatedBar]]) -> list[tuple[int, float]]:
+    """(pitch, duration) of every sounding note, chord members included: what
+    one key signature is read from, over every staff or voice of a page."""
+    return [
+        (pitch, note.duration)
+        for bars in bars_of.values()
+        for bar in bars.values()
+        for note in bar.notes
+        if not note.is_rest
+        for pitch in (note.pitch, *note.chord)
+    ]
+
+
+def _respelled(note: NotatedNote, key: int, **update) -> NotatedNote:
+    """A note moved into a merged page: `update`, and spelled in its key."""
+    from swingscribe.stages import notate
+
+    if not note.is_rest:
+        step, alter, octave = notate.spell(note.pitch, key)
+        update |= {"step": step, "alter": alter, "octave": octave}
+    return note.model_copy(update=update)
 
 
 def merge_staves(right: Notation | None, left: Notation | None, key: int | None = None) -> Notation:
@@ -642,14 +949,7 @@ def merge_staves(right: Notation | None, left: Notation | None, key: int | None 
     template = next((n for n in parts.values() if n.bars), None) or right or left or Notation()
     bars_of = {staff: {bar.number: bar for bar in n.bars} for staff, n in parts.items()}
     numbers = sorted({number for bars in bars_of.values() for number in bars})
-    sounding = [
-        (pitch, note.duration)
-        for bars in bars_of.values()
-        for bar in bars.values()
-        for note in bar.notes
-        if not note.is_rest
-        for pitch in (note.pitch, *note.chord)
-    ]
+    sounding = _sounding(bars_of)
     if key is None:
         key = notate.detect_key(sounding) if sounding else template.key_fifths
     merged: list[NotatedBar] = []

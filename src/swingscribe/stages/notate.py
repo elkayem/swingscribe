@@ -569,13 +569,15 @@ def snap_values(
     thirds. `ternary_beats` cannot tell that from the positions: it knows
     sixteenths and thirds, and a 32nd at 3/8 of a beat is nearer a third,
     so the beat was read as a triplet and the page grew brackets its
-    quantizer never chose. Told, it reads no beat as ternary and keeps
-    every value on the 32nd grid.
+    quantizer never chose. Told, it reads as ternary only a beat holding an
+    onset EXACTLY on a third (`exact_thirds`) -- which a literal quantizer
+    writes only when it was asked to read thirds (QuantizeConfig.
+    literal_thirds) -- and keeps every other value on the 32nd grid.
     """
     if not events:
         return events
     absolute = [bars_index.start_of(bar) + beat for bar, beat, _d, _p in events]
-    ternary = set() if literal else ternary_beats(absolute)
+    ternary = exact_thirds(absolute) if literal else ternary_beats(absolute)
     binary = LITERAL_VALUES if literal else BINARY_VALUES
     out = []
     for index, (bar, beat, duration, pitch) in enumerate(events):
@@ -583,6 +585,20 @@ def snap_values(
         values = TERNARY_VALUES if int(absolute[index] // 1.0) in ternary else binary
         out.append((bar, beat, snap_value(duration, gap, values), pitch))
     return out
+
+
+def exact_thirds(absolute: list[float]) -> set[int]:
+    """The beats of a LITERAL page holding an onset on a third of the beat.
+
+    A literal quantizer puts every onset on a 16th or a 32nd, and a third is
+    on neither (the nearest 32nds are an eighth of a beat away), so an onset
+    there can only be a beat it read in thirds."""
+    beats: set[int] = set()
+    for position in absolute:
+        fraction = position % 1.0
+        if any(abs(fraction - third) <= TICK for third in (1 / 3, 2 / 3)):
+            beats.add(int(position // 1.0))
+    return beats
 
 
 def ternary_beats(absolute: list[float]) -> set[int]:

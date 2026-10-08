@@ -677,6 +677,8 @@ def quantize_notes(
     isolated_lag_max_onsets: int = 0,
     tuplet_pushed_last: bool = False,
     reranker="",
+    literal_lag: bool = False,
+    literal_thirds: bool = False,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -686,7 +688,10 @@ def quantize_notes(
     would fail for anything outside a meter section — a pickup, a rubato
     intro — which is exactly where a round-trip check matters most.
 
-    A literal `timing` bypasses all of it for `literal_notes`. `polyphonic`
+    A literal `timing` bypasses all of it for `literal_notes`, which takes
+    the line's lag out first when `literal_lag` asks (`literal_lags`, with
+    the lag window above) and offers thirds when `literal_thirds` does.
+    `polyphonic`
     folds notes the grid puts on one position into a chord (`merge_chords`)
     rather than losing one of them.
 
@@ -714,6 +719,13 @@ def quantize_notes(
             LITERAL_DIVISIONS[timing],
             chords=chords,
             polyphonic=polyphonic,
+            lags=(
+                literal_lags(onsets, beats, lag_window_beats, lag_cap, lag_floor)
+                if literal_lag
+                else None
+            ),
+            thirds=literal_thirds,
+            min_onsets_for_thirds=min_onsets_for_tuplet,
         )
     by_beat, _track = pooled_phase(spans, straight_bur_ceiling)
     finest = max(1, resolution // 4)  # grid steps per beat at full resolution
@@ -1017,6 +1029,52 @@ def fold_near_onsets(
     )
 
 
+# A literal beat is read in THIRDS (QuantizeConfig.literal_thirds) only when
+# its onsets fit thirds better than the literal grid by this many beats of
+# mean snap error. An eighth-note triplet played on the beat misses the 16th
+# grid by 0.056 on average and thirds by nothing; three sixteenths miss
+# thirds by 0.083 and the grid by nothing; a laid-back figure at (0.1, 0.4,
+# 0.75) misses both, the grid by less.
+LITERAL_THIRDS_MARGIN = 0.02
+
+
+def literal_lags(
+    onsets: list[float], beats: list[float], window: int, cap: float, floor: float
+) -> dict[int, float]:
+    """The line's lag behind the beat, per beat, for a literal page: the
+    swing quantizer's own estimate (`line_lag`) over these onsets' raw
+    offsets. A multi-horn page reads it once over BOTH voices
+    (notation.notation_for_span), so the two horns' chords move together."""
+    raw_by_beat: dict[int, list[float]] = {}
+    for onset in onsets:
+        position = beat_position(onset, beats)
+        if position is None:
+            continue
+        index = int(position)
+        raw_by_beat.setdefault(index, []).append(position - index)
+    return line_lag(raw_by_beat, window, cap, floor)
+
+
+def unlag_position(position: float, lags: dict[int, float]) -> float:
+    """A beat position with its beat's lag taken out (`unlag_phase`)."""
+    index = int(position)
+    return index + unlag_phase(position - index, lags.get(index, 0.0))
+
+
+def _fits_thirds(offsets: list[float], grid: int, min_onsets: int) -> bool:
+    """Does this literal beat read better in thirds than on its grid?
+    Enough onsets to show a triplet, every one INSIDE the beat on thirds
+    (one the thirds send to 1.0 is the next beat's note, early), kept
+    apart, and a mean snap error `LITERAL_THIRDS_MARGIN` under the grid's."""
+    if len(offsets) < max(1, min_onsets) or not _keeps_apart(offsets, 3):
+        return False
+    if any(snap(o, 3)[0] >= 1.0 - 1e-9 for o in offsets):
+        return False
+    on_thirds = statistics.fmean(abs(snap(o, 3)[1]) for o in offsets)
+    on_grid = statistics.fmean(abs(snap(o, grid)[1]) for o in offsets)
+    return on_thirds + LITERAL_THIRDS_MARGIN < on_grid
+
+
 def literal_notes(
     onsets: list[float],
     durations: list[float],
@@ -1026,6 +1084,9 @@ def literal_notes(
     divisions: int,
     chords: list[list[int]] | None = None,
     polyphonic: bool = False,
+    lags: dict[int, float] | None = None,
+    thirds: bool = False,
+    min_onsets_for_thirds: int = 3,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Every onset on the NEAREST point of a fixed grid: the literal page.
 
@@ -1045,6 +1106,13 @@ def literal_notes(
       it a chord (`merge_chords`): two notes on one grid point are a
       chord, not a mistake.
 
+    Two readings are offered for a written head played in harmony
+    (QuantizeConfig.literal_lag / literal_thirds, docs/multi-horn.md), both
+    off by default: `lags` takes each beat's lag out of its onsets before
+    the snap (`literal_lags`; a note keeps its length), and `thirds` lets a
+    beat of at least `min_onsets_for_thirds` onsets that fits thirds
+    (`_fits_thirds`) be written in them -- the bridge's triplet chords.
+
     Returns (notes, snapped positions in absolute beats), like
     `quantize_notes`. The positions are raw beat time -- there is no warp
     to put back, so replay them with no swing spans.
@@ -1061,6 +1129,8 @@ def literal_notes(
         length = (
             end - position if end is not None else duration / _beat_length(beats, int(position))
         )
+        if lags:
+            position = unlag_position(position, lags)
         placed.append((position, max(0.0, length), pitch, list(chord)))
     placed.sort(key=lambda note: (note[0], note[2]))
 
@@ -1077,6 +1147,8 @@ def literal_notes(
             )
             if not _keeps_apart(offsets, grid) or pushed:
                 grid = divisions * 2
+        if thirds and _fits_thirds(offsets, grid, min_onsets_for_thirds):
+            grid = 3
         grids[index] = grid
 
     out: list[QuantizedNote] = []
@@ -1419,6 +1491,8 @@ def settings(qc: QuantizeConfig) -> dict:
         "isolated_lag_max_onsets": qc.isolated_lag_max_onsets,
         "tuplet_pushed_last": qc.tuplet_pushed_last,
         "reranker": qc.reranker,
+        "literal_lag": qc.literal_lag,
+        "literal_thirds": qc.literal_thirds,
     }
 
 

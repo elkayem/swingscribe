@@ -159,13 +159,41 @@ def cached_review(document: Document, config: Config, model: str) -> dict[str, A
     return payload
 
 
-def _payload(notes: list[NoteEvent], diagnostics: Any) -> dict[str, Any]:
+def _candidate(n: dict[str, Any]) -> dict[str, Any]:
+    """One heard note the transcription left out, for the wire.
+
+    The piano model's carry a MIDI velocity, and their confidence is that
+    out of 127 -- the shape every pianist's cached review already has. Basic
+    Pitch's (a multi-horn head) carry their own 0-1 amplitude as the
+    confidence and say why neither voice holds them (`voices.assign`)."""
+    if "velocity" in n:
+        return {
+            "onset": round(float(n["onset"]), _ROUND),
+            "duration": round(float(n["duration"]), _ROUND),
+            "pitch": int(n["pitch"]),
+            "confidence": round(float(n.get("velocity", 0)) / 127.0, _ROUND),
+            "velocity": int(n.get("velocity", 0)),
+        }
+    return {
+        "onset": round(float(n["onset"]), _ROUND),
+        "duration": round(float(n["duration"]), _ROUND),
+        "pitch": int(n["pitch"]),
+        "confidence": round(float(n.get("confidence", 0.0)), _ROUND),
+        **({"dropped": n["dropped"]} if n.get("dropped") else {}),
+    }
+
+
+def _payload(notes: list[NoteEvent], diagnostics: Any, voices: bool = False) -> dict[str, Any]:
     """Serialize notes + frame trace for the wire.
 
     Frame arrays are parallel and equal length; the client indexes them by
     frame number, and turns a click on a note into a frame range via `hop_s`
     and `start`. `None` (a gated-out or unpitched frame) is preserved as null,
     because "no pitch here" is itself diagnostic.
+
+    `voices` is a multi-horn head's review: every note carries the horn it
+    was heard in (NoteEvent.voice), 1 the upper and 2 the lower. Every other
+    review keeps the shape it always had, with no `voice` at all.
     """
     frames = len(diagnostics.periodicity)
 
@@ -182,6 +210,7 @@ def _payload(notes: list[NoteEvent], diagnostics: Any) -> dict[str, Any]:
                 # A scoop's mark (NoteEvent.lead_in), only where set: the page
                 # writes it as a grace note, the roll draws it as heard.
                 **({"lead_in": True} if n.lead_in else {}),
+                **({"voice": n.voice} if voices else {}),
             }
             for n in notes
         ],
@@ -202,16 +231,9 @@ def _payload(notes: list[NoteEvent], diagnostics: Any) -> dict[str, Any]:
         # Everything the piano model heard: the candidate pool a pianist's
         # transcriber switches notes on from (gui/erasures.py additions). Same
         # rule as the overlay — a separate key, never entries in "notes".
-        "candidates": [
-            {
-                "onset": round(float(n["onset"]), _ROUND),
-                "duration": round(float(n["duration"]), _ROUND),
-                "pitch": int(n["pitch"]),
-                "confidence": round(float(n.get("velocity", 0)) / 127.0, _ROUND),
-                "velocity": int(n.get("velocity", 0)),
-            }
-            for n in getattr(diagnostics, "candidates", []) or []
-        ],
+        # A multi-horn head's are the notes Basic Pitch heard that neither
+        # voice holds -- overtone ghosts and third notes (`voices.assign`).
+        "candidates": [_candidate(n) for n in getattr(diagnostics, "candidates", []) or []],
         "diagnostics": {
             "hop_s": diagnostics.hop_s,
             "start": round(diagnostics.start, _ROUND),
@@ -242,6 +264,6 @@ def analyze_and_cache(document: Document, config: Config, model: str) -> dict[st
         raise ValueError(f"no {stem!r} stem for {model}; available: {available or 'none'}")
 
     notes, diagnostics = transcribe.analyze(stem_path, config.transcribe)
-    payload = _payload(notes, diagnostics)
+    payload = _payload(notes, diagnostics, voices=config.transcribe.uses_multi_horn)
     _cache(config).put_json(review_key(document, config, model), payload)
     return payload
