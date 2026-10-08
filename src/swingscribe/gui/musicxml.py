@@ -61,13 +61,28 @@ class NotReady(Exception):
     """A precondition the user can fix -- and the message says how."""
 
 
+def take_name(audio_path: str | Path, take: str | Path | None = None) -> str:
+    """What a page is named for: a linked take's name (its sidecar's), or
+    the audio's own stem."""
+    if take is not None:
+        from swingscribe.gui.library import take_key
+
+        return take_key(take)
+    return Path(audio_path).stem
+
+
 def export_path(
     audio_path: str | Path,
     region: tuple[float, float | None] | None,
     line: str | None = None,
     tags: list[str] | None = None,
+    take: str | Path | None = None,
 ) -> Path:
     """Where this span's score goes: beside the audio, span in the name.
+
+    A linked take (`take`, its sidecar) writes beside its SIDECAR, named
+    for the take -- Open_Sesame_Melody.0-67s.literal16.musicxml -- so two
+    takes of one recording never overwrite each other's pages.
 
     A whole-track export keeps the bare name; anything narrower carries its
     bounds, so the four choruses you exported one at a time are four files
@@ -77,14 +92,15 @@ def export_path(
     are the page choices away from their defaults (`page_tags`), for the same
     reason again: a literal page must not overwrite the swing one.
     """
-    source = Path(audio_path)
-    take = "".join(f".{part}" for part in [line, *(tags or [])] if part)
+    folder = Path(take).parent if take is not None else Path(audio_path).parent
+    stem = take_name(audio_path, take)
+    choices = "".join(f".{part}" for part in [line, *(tags or [])] if part)
     if region is None or (region[0] in (None, 0.0) and region[1] is None):
-        return source.with_name(f"{source.stem}{take}.musicxml")
+        return folder / f"{stem}{choices}.musicxml"
     low = region[0] or 0.0
     high = region[1]
     span = f"{low:.0f}-{high:.0f}s" if high is not None else f"from{low:.0f}s"
-    return source.with_name(f"{source.stem}.{span}{take}.musicxml")
+    return folder / f"{stem}.{span}{choices}.musicxml"
 
 
 def take_of(config: Config, line: str | None) -> str | None:
@@ -228,6 +244,7 @@ def build_notation(
     texture: bool = False,
     left: list[dict[str, Any]] | None = None,
     grid: BeatGrid | None = None,
+    take: str | None = None,
 ):
     """The reviewed span as a Notation, or raise something the user can fix.
 
@@ -276,7 +293,7 @@ def build_notation(
     line = [NoteEvent(source=stem, **note) for note in notes]
     common = {
         "stem": stem,
-        "config": notate_config(config, settings, Path(audio_path).stem, texture),
+        "config": notate_config(config, settings, take_name(audio_path, take), texture),
         "anchor": anchor,
         "time_signature": signature,
         "pulses_per_bar": pulses,
@@ -302,7 +319,7 @@ def build_notation(
         beats,
         region,
         stem=stem,
-        config=notate_config(config, settings, Path(audio_path).stem, texture),
+        config=notate_config(config, settings, take_name(audio_path, take), texture),
         anchor=anchor,
         time_signature=signature,
         pulses_per_bar=pulses,
@@ -334,6 +351,7 @@ def page_of(
     added: list[dict[str, Any]] | None = None,
     texture: bool = False,
     left: list[dict[str, Any]] | None = None,
+    take: str | None = None,
 ) -> tuple[Notation, str, dict[str, Any] | None]:
     """The page Export writes, as (Notation, MusicXML text, what became of
     the chord chart), written nowhere.
@@ -368,13 +386,14 @@ def page_of(
         texture=texture,
         left=left,
         grid=grid,
+        take=take,
     )
     status = problem
     if chart is not None:
         notation, status = place_changes(
             notation, chart, document, config, run_config, settings, grid
         )
-    return notation, to_musicxml(notation, part_name=Path(audio_path).stem), status
+    return notation, to_musicxml(notation, part_name=take_name(audio_path, take)), status
 
 
 def counts_from_form(settings: dict[str, Any]) -> bool:
@@ -502,15 +521,18 @@ def page_path(
     audio_path: str | Path,
     settings: dict[str, Any],
     texture: bool = False,
+    take: str | None = None,
 ) -> Path:
     """Where Export writes this review's page: the span, the take and the
-    page's choices in the name (`export_path`). The page view names the
-    same file, so it says which page it is showing."""
+    page's choices in the name (`export_path`), beside a linked take's
+    sidecar. The page view names the same file, so it says which page it
+    is showing."""
     return export_path(
         audio_path,
         run_config.transcribe.region or (0.0, None),
         take_of(config, run_config.transcribe.piano_line),
         page_tags(config, settings, texture),
+        take,
     )
 
 
@@ -585,8 +607,10 @@ def export_span(
     added: list[dict[str, Any]] | None = None,
     texture: bool = False,
     left: list[dict[str, Any]] | None = None,
+    take: str | None = None,
 ) -> dict[str, Any]:
-    """Write the reviewed span to MusicXML and say what was written."""
+    """Write the reviewed span to MusicXML and say what was written. `take`
+    is a linked take's sidecar: the page is named for it, beside it."""
     from swingscribe.benchmark import readability
 
     notation, xml, changes = page_of(
@@ -600,12 +624,13 @@ def export_span(
         added,
         texture=texture,
         left=left,
+        take=take,
     )
-    path = page_path(config, run_config, audio_path, settings, texture)
+    path = page_path(config, run_config, audio_path, settings, texture, take)
     try:
         path.write_text(xml, encoding="utf-8")
     except OSError as exc:
-        raise NotReady(f"could not write beside the audio: {exc}") from exc
+        raise NotReady(f"could not write the page: {exc}") from exc
 
     # Reference-free, a property of the page just written (benchmark.py):
     # reported with the export because this is the moment the page exists.

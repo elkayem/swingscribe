@@ -131,18 +131,28 @@ LEAD_FLOOR_S = 0.08
 
 
 def process(
-    audio: Path, config, relocate: bool, dry_run: bool, log=print, bars_only: bool = False
+    audio: Path,
+    config,
+    relocate: bool,
+    dry_run: bool,
+    log=print,
+    bars_only: bool = False,
+    sidecar: Path | None = None,
 ) -> dict:
+    """Place one take's score: the audio's own (`sidecar` None), its score
+    named like the audio, or a linked take's, its score named like the take
+    beside its sidecar (gui/library.py, takes)."""
     from swingscribe import mscz
     from swingscribe.benchmark import locate_score
     from swingscribe.gui import library
     from swingscribe.score_bars import bars_on_grid, clock_anchors
 
-    score_path = score_beside(audio)
+    named = sidecar.parent / library.take_key(sidecar) if sidecar is not None else audio
+    score_path = score_beside(named)
     if score_path is None:
-        log(f"{audio.name}: no score beside it — skipped")
+        log(f"{named.name}: no score beside it — skipped")
         return {"status": "no score"}
-    sidecar_path = library.settings_path(audio)
+    sidecar_path = sidecar if sidecar is not None else library.settings_path(audio)
     stored = {}
     if sidecar_path.is_file():
         stored = json.loads(sidecar_path.read_text(encoding="utf-8"))
@@ -217,7 +227,7 @@ def process(
     if dry_run:
         log(f"  -> would write {sidecar_path.name}: region {region}")
     else:
-        library.save_settings(str(audio), settings, config)
+        library.save_settings(str(audio), settings, config, sidecar_path)
         log(f"  -> {sidecar_path.name} written")
     return {"status": "placed", **found}
 
@@ -237,18 +247,28 @@ def main() -> None:
     parser.add_argument("--ensemble", default="horn-led", help="horn-led | trio | solo-piano")
     args = parser.parse_args()
 
+    from swingscribe.gui import library
+
     folder = BENCH_DIR / args.folder if args.folder else BENCH_DIR
     files = sorted(
         (p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES),
         key=lambda p: p.name.lower(),
     )
+    # Every audio file (its own sidecar), and every LINKED take in the folder
+    # (library.discover), whose score is named like the take.
+    work: list[tuple[str, Path, Path | None]] = [(p.name, p, None) for p in files]
+    work += [
+        (library.take_key(sidecar), audio, sidecar)
+        for _key, sidecar, audio in library.discover(folder)
+        if sidecar.parent == folder and library.is_linked(sidecar, audio) and audio.is_file()
+    ]
     if args.file:
         wanted = set(args.file)
-        files = [p for p in files if p.name in wanted]
-        missing = wanted - {p.name for p in files}
+        work = [w for w in work if w[0] in wanted]
+        missing = wanted - {w[0] for w in work}
         if missing:
             raise SystemExit(f"no such file(s) in {folder}: {', '.join(sorted(missing))}")
-    if not files:
+    if not work:
         raise SystemExit(f"no audio in {folder}")
 
     cache_dir = args.cache_dir.resolve()
@@ -267,11 +287,18 @@ def main() -> None:
             ),
         }
     )
-    print(f"{len(files)} file(s) in {folder}; {base.separate.model}, {args.stem}, {args.ensemble}")
+    print(f"{len(work)} take(s) in {folder}; {base.separate.model}, {args.stem}, {args.ensemble}")
     tally: dict[str, int] = {}
-    for audio in files:
-        print(f"\n== {audio.name} ==")
-        outcome = process(audio, base, args.relocate, args.dry_run, bars_only=args.bars_only)
+    for name, audio, sidecar in work:
+        print(f"\n== {name} ==")
+        outcome = process(
+            audio,
+            base,
+            args.relocate,
+            args.dry_run,
+            bars_only=args.bars_only,
+            sidecar=sidecar,
+        )
         tally[outcome["status"]] = tally.get(outcome["status"], 0) + 1
     print("\n" + ", ".join(f"{count} {status}" for status, count in sorted(tally.items())))
 

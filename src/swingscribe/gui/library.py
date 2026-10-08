@@ -1,8 +1,17 @@
 """Track identity, discovery, stem availability, and remembered UI state.
 
-The GUI never invents its own notion of a track. A track *is* its audio bytes,
+The GUI never invents its own notion of a track's AUDIO. Audio *is* its bytes,
 identified by the same sha256 prefix ingest uses for its normalized wav, so the
 GUI and the CLI always agree about which cached artifacts belong to which file.
+
+A TRACK, though, is a sidecar (2026-10-08, "takes"): the listener's
+judgements about one recording -- a span, a downbeat, an ensemble -- live in
+`<name>.swingscribe.json`, and one recording may carry several, one per take
+the listener wants to keep apart (the head, the trumpet solo). A sidecar may
+name its audio (`"audio"`, a path relative to the sidecar), which makes it a
+LINKED take; with no `audio` it is the audio's OWN sidecar, beside the file
+it is named for, exactly as every sidecar was before. See `audio_of`,
+`track_id_for` and `discover`.
 
 Heavy imports stay inside functions: this module must import without the ml
 dependency group (CLAUDE.md), which CI never installs.
@@ -10,6 +19,7 @@ dependency group (CLAUDE.md), which CI never installs.
 
 import hashlib
 import json
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -97,6 +107,7 @@ def browse(path: str | Path | None, config: Config) -> dict[str, Any]:
     dirs: list[dict[str, Any]] = []
     files: list[dict[str, Any]] = []
     scores: list[dict[str, Any]] = []
+    sidecars: list[Path] = []
     try:
         entries = list(root.iterdir())
     except PermissionError:
@@ -107,6 +118,8 @@ def browse(path: str | Path | None, config: Config) -> dict[str, Any]:
         try:
             if p.is_dir():
                 dirs.append({"name": p.name, "path": str(p)})
+            elif is_sidecar(p):
+                sidecars.append(p)
             elif p.suffix.lower() in AUDIO_SUFFIXES and not is_derived_output(p):
                 files.append({"name": p.name, "path": str(p), "size": p.stat().st_size})
             elif ground_truth.is_score(p):
@@ -121,15 +134,61 @@ def browse(path: str | Path | None, config: Config) -> dict[str, Any]:
     dirs.sort(key=lambda d: d["name"].lower())
     files.sort(key=lambda f: f["name"].lower())
     scores.sort(key=lambda f: f["name"].lower())
+    elsewhere = _group_takes(root, files, sidecars)
     parent = root.parent
     return {
         "path": str(root),
         "parent": None if parent == root else str(parent),  # a drive root is its own parent
         "dirs": dirs,
         "files": files,
+        "takes": elsewhere,
         "scores": scores,
         "drives": list_drives(),
     }
+
+
+def _group_takes(
+    root: Path, files: list[dict[str, Any]], sidecars: list[Path]
+) -> list[dict[str, Any]]:
+    """The folder browser's takes (docs/multi-horn-handoff.md, "Linked
+    sidecars"). Every audio file in `files` gains its `takes`: each sidecar
+    in this folder whose audio it is, by take name, its own sidecar first --
+    an audio with none is listed as the audio alone. Returned: the sidecars
+    here whose audio is NOT in this folder -- a linked take of a recording
+    kept elsewhere, listed in its own folder with where its audio is
+    (`relative`), and a take whose audio is missing, shown as missing and
+    never dropped."""
+    by_audio = {_norm(f["path"]): f for f in files}
+    for f in files:
+        f["takes"] = []
+    elsewhere: list[dict[str, Any]] = []
+    for sidecar in sorted(sidecars, key=lambda p: p.name.lower()):
+        audio = audio_of(sidecar)
+        linked = is_linked(sidecar, audio)
+        take = {"name": take_key(sidecar), "sidecar": str(sidecar), "linked": linked}
+        home = by_audio.get(_norm(audio))
+        if home is not None:
+            home["takes"].append(take)
+            continue
+        if not linked and not audio.is_file():
+            # An own sidecar whose audio has gone: shown, never dropped.
+            elsewhere.append({**take, "audio": str(audio), "relative": audio.name, "missing": True})
+            continue
+        try:
+            relative = os.path.relpath(audio, root)
+        except ValueError:  # another drive (Windows)
+            relative = str(audio)
+        elsewhere.append(
+            {
+                **take,
+                "audio": str(audio),
+                "relative": Path(relative).as_posix(),
+                "missing": not audio.is_file(),
+            }
+        )
+    for f in files:
+        f["takes"].sort(key=lambda t: (t["linked"], t["name"].lower()))
+    return elsewhere
 
 
 def list_tracks(config: Config) -> list[dict[str, Any]]:
@@ -469,9 +528,202 @@ SETTINGS_SUFFIX = ".swingscribe.json"
 
 
 def settings_path(audio_path: str | Path) -> Path:
-    """Where this track's settings live: beside the audio, plainly named."""
+    """Where the audio's OWN settings live: beside it, plainly named."""
     source = Path(audio_path)
     return source.with_name(source.name + SETTINGS_SUFFIX)
+
+
+# ── Takes: a sidecar IS a track ─────────────────────────────────────────────
+# The listener names takes freely -- Open_Sesame.m4a with the sidecars
+# Open_Sesame_Freddie_Hubbard_solo and Open_Sesame_Melody -- and keeps
+# byte-identical copies of one recording in two folders. Both used to be ONE
+# track to the GUI (its id is the audio's digest), so opening one copy
+# repointed the other's open tab at the wrong sidecar. A sidecar may now name
+# its audio, and its key and track id are its own.
+
+# What a new take copies from the one it starts from: the judgements about
+# the RECORDING -- its grid, meter, form, separation, changes and key -- and
+# not those about one span of it (region, ensemble, edits, score, line),
+# which the new take is for.
+RECORDING_KEYS = (
+    "anchor",
+    "beat_pins",
+    "steady_spans",
+    "time_signature",
+    "pulses_per_bar",
+    "bars_per_chorus",
+    "form_start",
+    "fast_tempo",
+    "model",
+    "changes",
+    "key",
+)
+
+# Characters a take name may not hold: it becomes a file name on Windows.
+_BAD_NAME_CHARS = frozenset('<>:"/\\|?*')
+
+
+def is_sidecar(path: str | Path) -> bool:
+    return Path(path).name.endswith(SETTINGS_SUFFIX)
+
+
+def take_key(sidecar_path: str | Path) -> str:
+    """A take's name: its sidecar's file name without the suffix. An audio's
+    own sidecar is named for the audio file, extension and all."""
+    return Path(sidecar_path).name.removesuffix(SETTINGS_SUFFIX)
+
+
+def _norm(path: str | Path) -> str:
+    """A path as two paths to one file compare equal, without resolving
+    links (a OneDrive folder is one)."""
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
+def audio_of(sidecar_path: str | Path, settings: dict[str, Any] | None = None) -> Path:
+    """The audio a sidecar is about: its `audio` field, relative to the
+    sidecar's folder (absolute when the two are on different drives), or --
+    with none -- the file beside it named by its key, today's rule."""
+    sidecar = Path(sidecar_path)
+    if settings is None:
+        settings = _read_json(sidecar)
+    linked = settings.get("audio")
+    if isinstance(linked, str) and linked.strip():
+        return Path(os.path.normpath(sidecar.parent / linked))
+    return sidecar.with_name(take_key(sidecar))
+
+
+def is_linked(sidecar_path: str | Path, audio_path: str | Path) -> bool:
+    """Is this sidecar a take of its own (not the audio's own sidecar)?"""
+    return _norm(sidecar_path) != _norm(settings_path(audio_path))
+
+
+def track_id_for(
+    audio_path: str | Path, sidecar_path: str | Path | None = None, digest: str | None = None
+) -> str:
+    """A track's id: the audio's digest for its own sidecar -- every id the
+    GUI ever handed out, unchanged -- and the digest plus a short hash of
+    the sidecar's path for a linked take, so two takes of one recording are
+    two tracks whose caches are still the recording's."""
+    digest = digest or file_digest(audio_path)
+    if sidecar_path is None or not is_linked(sidecar_path, audio_path):
+        return digest
+    tail = hashlib.sha256(_norm(sidecar_path).encode("utf-8")).hexdigest()[:8]
+    return f"{digest}-{tail}"
+
+
+def claim_track_id(
+    config: Config, audio_path: str | Path, sidecar_path: str | Path, digest: str | None = None
+) -> str:
+    """The id a track is opened under: `track_id_for`, except that the plain
+    digest belongs to ONE copy of a recording. Byte-identical copies in two
+    folders each have their own sidecar, and under one id a tab open on one
+    copy read and wrote the other's. So the copy the recents index already
+    holds the digest for keeps it -- every id handed out before takes
+    existed is unchanged -- and any other copy's own sidecar is named like
+    a linked take: digest plus a hash of its sidecar's path."""
+    digest = digest or file_digest(audio_path)
+    if is_linked(sidecar_path, audio_path):
+        return track_id_for(audio_path, sidecar_path, digest)
+    holder = remembered_path(config, digest)
+    if holder and _norm(holder) != _norm(audio_path) and Path(holder).is_file():
+        tail = hashlib.sha256(_norm(sidecar_path).encode("utf-8")).hexdigest()[:8]
+        return f"{digest}-{tail}"
+    return digest
+
+
+def audio_digest_of(track_id: str) -> str:
+    """The audio's digest inside a track id (`track_id_for`)."""
+    return track_id[:DIGEST_CHARS]
+
+
+def _relative_audio(sidecar: Path, audio_path: str | Path) -> str:
+    try:
+        return Path(os.path.relpath(Path(audio_path), sidecar.parent)).as_posix()
+    except ValueError:  # another drive (Windows)
+        return str(Path(audio_path).resolve())
+
+
+def check_take_name(name: str) -> str:
+    """A take name as a file name will hold it, or ValueError."""
+    cleaned = name.strip()
+    if not cleaned or cleaned in (".", ".."):
+        raise ValueError("a take needs a name")
+    if any(c in _BAD_NAME_CHARS for c in cleaned) or cleaned.endswith((".", " ")):
+        raise ValueError(f"{name!r} cannot be a file name")
+    if cleaned.endswith(SETTINGS_SUFFIX):
+        cleaned = cleaned.removesuffix(SETTINGS_SUFFIX)
+    return cleaned
+
+
+def new_take(
+    audio_path: str | Path,
+    name: str,
+    folder: str | Path | None = None,
+    source: str | Path | None = None,
+) -> Path:
+    """Start a take of this recording: a new sidecar named `name` in
+    `folder` (the source take's folder by default), holding the source
+    take's RECORDING_KEYS and nothing about any span. Refuses a name already
+    taken. Returns the new sidecar."""
+    name = check_take_name(name)
+    source_path = Path(source) if source else settings_path(audio_path)
+    target = Path(folder or source_path.parent) / f"{name}{SETTINGS_SUFFIX}"
+    with _settings_lock:
+        if target.exists():
+            raise FileExistsError(f"a take named {name!r} is already there")
+        current = _read_json(source_path)
+        copied = {key: current[key] for key in RECORDING_KEYS if key in current}
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _write_take(target, audio_path, copied)
+    return target
+
+
+def rename_take(sidecar_path: str | Path, audio_path: str | Path, name: str) -> Path:
+    """Rename a take in place. An audio's own sidecar renamed becomes a
+    LINKED take (it now names its audio); nothing in it is lost. Returns
+    the new sidecar."""
+    name = check_take_name(name)
+    sidecar = Path(sidecar_path)
+    target = sidecar.with_name(f"{name}{SETTINGS_SUFFIX}")
+    with _settings_lock:
+        if _norm(target) == _norm(sidecar):
+            return sidecar
+        if target.exists():
+            raise FileExistsError(f"a take named {name!r} is already there")
+        _write_take(target, audio_path, _read_json(sidecar))
+        sidecar.unlink(missing_ok=True)
+    return target
+
+
+def _write_take(target: Path, audio_path: str | Path, settings: dict[str, Any]) -> None:
+    data = dict(settings)
+    data["file"] = Path(audio_path).name
+    if is_linked(target, audio_path):
+        data["audio"] = _relative_audio(target, audio_path)
+    else:
+        data.pop("audio", None)
+    target.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def discover(root: str | Path) -> list[tuple[str, Path, Path]]:
+    """Every take under `root`: (key, sidecar, audio), sorted by sidecar.
+
+    The key is the sidecar's path relative to `root` without the suffix,
+    forward slashes -- for an audio's own sidecar exactly the audio's
+    relative path every harness pin is keyed by, and for a linked take its
+    own name, so two takes of one recording are two rows. The audio may be
+    missing; callers check. The one walk the harness scripts share
+    (run_eval, score_benchmark, benchmark_batch, locate_scores, wjazz_batch).
+    """
+    base = Path(root)
+    found = []
+    for sidecar in sorted(base.rglob(f"*{SETTINGS_SUFFIX}")):
+        folder = sidecar.parent.relative_to(base)
+        key = take_key(sidecar)
+        if folder != Path("."):
+            key = f"{folder.as_posix()}/{key}"
+        found.append((key, sidecar, audio_of(sidecar)))
+    return found
 
 
 def _legacy_path(config: Config, track_id: str) -> Path:
@@ -487,8 +739,13 @@ def _read_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def load_settings(audio_path: str | Path, config: Config, track_id: str) -> dict[str, Any]:
-    """This track's settings, migrating a pre-move sidecar if one exists."""
+def load_settings(
+    audio_path: str | Path, config: Config, track_id: str, sidecar: str | Path | None = None
+) -> dict[str, Any]:
+    """This track's settings, migrating a pre-move sidecar if one exists.
+    `sidecar` is a take's own (linked) sidecar; None is the audio's own."""
+    if sidecar is not None and is_linked(sidecar, audio_path):
+        return _read_json(Path(sidecar))
     settings = _read_json(settings_path(audio_path))
     if settings:
         return settings
@@ -511,12 +768,17 @@ def load_settings(audio_path: str | Path, config: Config, track_id: str) -> dict
 _settings_lock = threading.RLock()
 
 
-def save_settings(audio_path: str | Path, settings: dict[str, Any], config: Config) -> Path:
-    """Merge and write, falling back to the cache dir if the audio's folder is
-    not writable (a read-only library, a mounted share). Returns where it went,
-    so the UI can say."""
+def save_settings(
+    audio_path: str | Path,
+    settings: dict[str, Any],
+    config: Config,
+    sidecar: str | Path | None = None,
+) -> Path:
+    """Merge and write, falling back to the cache dir if the sidecar's folder
+    is not writable (a read-only library, a mounted share). Returns where it
+    went, so the UI can say. `sidecar` is a take's own; None the audio's."""
     with _settings_lock:
-        return _save_settings(audio_path, settings, config)
+        return _save_settings(audio_path, settings, config, sidecar)
 
 
 def update_settings(
@@ -524,28 +786,39 @@ def update_settings(
     config: Config,
     change: Callable[[dict[str, Any]], dict[str, Any]],
     track_id: str | None = None,
+    sidecar: str | Path | None = None,
 ) -> dict[str, Any]:
     """Read this track's settings, merge in what `change` returns for them,
     and write -- all under the one lock, so a list read here cannot be
     overwritten by a write that read it before. Returns what was merged."""
     with _settings_lock:
-        current = load_settings(audio_path, config, track_id or file_digest(audio_path))
+        track_id = track_id or track_id_for(audio_path, sidecar)
+        current = load_settings(audio_path, config, track_id, sidecar)
         updates = change(current)
         if updates:
-            _save_settings(audio_path, updates, config)
+            _save_settings(audio_path, updates, config, sidecar)
         return updates
 
 
-def _save_settings(audio_path: str | Path, settings: dict[str, Any], config: Config) -> Path:
-    path = settings_path(audio_path)
+def _save_settings(
+    audio_path: str | Path,
+    settings: dict[str, Any],
+    config: Config,
+    sidecar: str | Path | None = None,
+) -> Path:
+    linked = sidecar is not None and is_linked(sidecar, audio_path)
+    path = Path(sidecar) if linked else settings_path(audio_path)
     merged = _read_json(path) | settings
     merged["file"] = Path(audio_path).name  # so the file is identifiable on sight
+    if linked:
+        # A take of its own names its audio, relative to itself.
+        merged["audio"] = _relative_audio(path, audio_path)
     payload = json.dumps(merged, indent=2, sort_keys=True)
     try:
         path.write_text(payload, encoding="utf-8")
         return path
     except OSError:
-        fallback = _legacy_path(config, file_digest(audio_path))
+        fallback = _legacy_path(config, track_id_for(audio_path, path if linked else None))
         fallback.parent.mkdir(parents=True, exist_ok=True)
         fallback.write_text(payload, encoding="utf-8")
         return fallback
@@ -573,17 +846,23 @@ def remember_open(
     audio_path: str | Path,
     when: float | None = None,
     stem_digest: str | None = None,
+    sidecar: str | Path | None = None,
 ) -> None:
     """Record a track as opened. Fields already in its entry survive: the
     `stem_digest` (the digest its stems directories are named by, see
     `stem_digest`) is what lets the storage view name a stems directory
-    without re-hashing a 200 MB wav, so it is kept once learned."""
+    without re-hashing a 200 MB wav, so it is kept once learned. A linked
+    take's entry also keeps its `sidecar`, which is what the id names."""
     index = _read_json(_recents_path(config))
     entry = index.get(track_id) if isinstance(index.get(track_id), dict) else {}
     entry["path"] = str(audio_path)
     entry["opened_at"] = time.time() if when is None else when
     if stem_digest:
         entry["stem_digest"] = stem_digest
+    if sidecar is not None and track_id != audio_digest_of(track_id):
+        # The id names a sidecar (a linked take, or another copy's own):
+        # reopening by id after a restart needs it.
+        entry["sidecar"] = str(sidecar)
     index[track_id] = entry
     path = _recents_path(config)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -594,6 +873,12 @@ def remembered_path(config: Config, track_id: str) -> str | None:
     """The audio a track id refers to, for recovering after a server restart."""
     entry = _read_json(_recents_path(config)).get(track_id)
     return entry.get("path") if isinstance(entry, dict) else None
+
+
+def remembered_sidecar(config: Config, track_id: str) -> str | None:
+    """The linked take a track id refers to, or None for an audio's own."""
+    entry = _read_json(_recents_path(config)).get(track_id)
+    return entry.get("sidecar") if isinstance(entry, dict) else None
 
 
 def recent_tracks(config: Config) -> list[dict[str, Any]]:
@@ -607,12 +892,19 @@ def recent_tracks(config: Config) -> list[dict[str, Any]]:
         source = record.get("path") if isinstance(record, dict) else None
         if not source or not Path(source).is_file():
             continue
-        settings = load_settings(source, config, track_id)
+        # A linked take renamed or deleted since is gone from the list; the
+        # new name is remembered when it is opened.
+        sidecar = record.get("sidecar")
+        if sidecar and not Path(sidecar).is_file():
+            continue
+        settings = load_settings(source, config, track_id, sidecar)
         entries.append(
             {
                 "id": track_id,
                 "path": source,
-                "name": Path(source).name,
+                "name": take_key(sidecar) if sidecar else Path(source).name,
+                "sidecar": sidecar,
+                "audio_name": Path(source).name,
                 "opened_at": record.get("opened_at", 0),
                 "stem": settings.get("stem"),
                 "model": settings.get("model"),

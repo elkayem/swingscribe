@@ -18,7 +18,12 @@ so it is paid once.
 
 What deletion never touches: the sidecar beside the audio (a span and a
 downbeat are human judgements -- library.py says why they left the cache),
-and the recents entry, which is how the track is found again. Nothing here
+and the recents entry, which is how the track is found again.
+
+The unit here is the RECORDING (its audio digest), not the take: two takes
+of one recording -- two sidecars, two track ids (library.track_id_for) --
+share every stem and wav, so each entry lists the `takes` the recents index
+knows for it, and the panel says when deleting would reach more than one. Nothing here
 imports fastapi: the CLI's `cache` command uses it too, because the eval
 harness keeps a second cache the GUI cannot see.
 """
@@ -176,7 +181,11 @@ def _digest_index(
     by_digest: dict[str, str] = {}
     for track_id, paths in wavs.items():
         record = recents.get(track_id)
-        digest = record.get("stem_digest") if record else None
+        # A recording opened only as a linked take knows its digest there.
+        learned = record or next(
+            (r for i, r in recents.items() if library.audio_digest_of(i) == track_id), None
+        )
+        digest = learned.get("stem_digest") if learned else None
         if not digest:
             wav = paths[0]
             try:
@@ -203,11 +212,13 @@ def _digest_index(
                     config, track_id, record.get("path", ""), record.get("opened_at"), digest
                 )
         by_digest[digest] = track_id
-    # A remembered track whose wav is gone still names its stems directories.
+    # A remembered track whose wav is gone still names its stems directories
+    # -- by its RECORDING's id: a linked take's id is the audio's digest
+    # plus a tail, and the cache is the recording's.
     for track_id, record in recents.items():
         digest = record.get("stem_digest")
         if digest and digest not in by_digest:
-            by_digest[digest] = track_id
+            by_digest[digest] = library.audio_digest_of(track_id)
     if memo_changed:
         memo_path.parent.mkdir(parents=True, exist_ok=True)
         memo_path.write_text(json.dumps(memo, indent=2, sort_keys=True), encoding="utf-8")
@@ -229,16 +240,39 @@ def inventory(config: Config, busy: set[tuple[str, str]] | None = None) -> dict[
 
     tracks: dict[str, dict[str, Any]] = {}
 
+    def takes_of(track_id: str) -> list[tuple[str, dict[str, Any]]]:
+        """(id, recents record) of every take opened on this recording, its
+        own sidecar first."""
+        found = [
+            (other, record)
+            for other, record in recents.items()
+            if library.audio_digest_of(other) == track_id
+        ]
+        return sorted(found, key=lambda pair: (pair[0] != track_id, pair[0]))
+
     def track_entry(track_id: str, name: str | None, path: str | None) -> dict[str, Any]:
         entry = tracks.get(track_id)
         if entry is None:
-            record = recents.get(track_id, {})
+            mine = takes_of(track_id)
+            record = recents.get(track_id) or (mine[0][1] if mine else {})
             source = record.get("path") or path
             entry = {
                 "id": track_id,
                 "name": Path(source).name if source else (name or track_id),
                 "path": source,
-                "known": track_id in recents,
+                "known": bool(mine),
+                # The takes that share this cache: every sidecar the recents
+                # index has opened on this recording. More than one means a
+                # delete here reaches all of them.
+                "takes": [
+                    {
+                        "name": library.take_key(r["sidecar"])
+                        if r.get("sidecar")
+                        else Path(r.get("path") or "").name,
+                        "linked": bool(r.get("sidecar")),
+                    }
+                    for _id, r in mine
+                ],
                 # False when the audio has moved since: the stems are for a
                 # file the listener no longer has under that name.
                 "source_exists": bool(source) and Path(source).is_file(),

@@ -57,7 +57,10 @@ export function initStorage({ api, toast, currentTrackId, onChanged }) {
       toast(`Freed ${bytes(result.freed)} — ${what}`);
       render(result);
       // The open track just lost stems: its model chips must stop saying "ready".
-      if (affectedTrackId && affectedTrackId === currentTrackId()) onChanged();
+      // A linked take's id is the recording's digest plus a tail, and the
+      // cache is the recording's: any take of it is affected.
+      const open = currentTrackId();
+      if (affectedTrackId && open && open.slice(0, 16) === affectedTrackId) onChanged();
     } catch (error) {
       toast(error.message, true);
       refresh();
@@ -103,10 +106,16 @@ export function initStorage({ api, toast, currentTrackId, onChanged }) {
     // The audio is gone from where it was: these stems are for a file the
     // listener no longer has under that name — the first thing to reclaim.
     const moved = track.path && !track.source_exists ? 'audio moved · ' : '';
-    meta.textContent = `${moved}${bytes(track.bytes)}`;
+    // Two takes of one recording share its cache: a delete here reaches both.
+    const takes = track.takes ?? [];
+    const shared = takes.length > 1 ? `shared by ${takes.length} takes · ` : '';
+    meta.textContent = `${moved}${shared}${bytes(track.bytes)}`;
+    if (takes.length > 1) meta.title = `Takes of this recording: ${takes.map((t) => t.name).join(', ')}`;
     const all = document.createElement('button');
     all.className = 'chip';
-    all.title = 'Delete every stem set and the ingested wav for this track. Its span, downbeat and erasures live beside the audio and are kept.';
+    all.title = takes.length > 1
+      ? `Delete every stem set and the ingested wav for this recording -- shared by ${takes.length} takes (${takes.map((t) => t.name).join(', ')}). Their spans, downbeats and erasures live in their sidecars and are kept.`
+      : 'Delete every stem set and the ingested wav for this track. Its span, downbeat and erasures live beside the audio and are kept.';
     const busy = track.stems.some((item) => item.busy);
     all.disabled = busy;
     armable(all, 'Delete all', `free ${bytes(track.bytes)}?`, () =>

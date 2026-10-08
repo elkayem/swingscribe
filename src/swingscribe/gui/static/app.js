@@ -347,8 +347,10 @@ function renderTrackList(node, items) {
       : (item.stem ?? '');
     li.innerHTML = `<span class="name"></span><span class="meta"></span>`;
     li.querySelector('.name').textContent = item.name;
-    li.querySelector('.meta').textContent = meta;
-    li.addEventListener('click', () => openTrack(item.path));
+    // A linked take names the recording it is a take of.
+    li.querySelector('.meta').textContent = item.sidecar
+      ? `take of ${item.audio_name}${meta ? ` · ${meta}` : ''}` : meta;
+    li.addEventListener('click', () => openTrack(item.path, item.sidecar));
     node.appendChild(li);
   }
 }
@@ -412,7 +414,35 @@ function renderBrowse(data) {
     li.querySelector('.meta').textContent = scoring ? '' : meta;
     li.addEventListener('click', () => (scoring ? chooseScore(file.path) : openTrack(file.path)));
     node.appendChild(li);
+    // Once a recording has sidecars, each is listed by its take name under
+    // it (gui/library.py, takes). The audio's own row still opens its own.
+    if (!scoring && file.takes?.length) {
+      li.classList.add('has-takes');
+      li.querySelector('.meta').textContent = `${meta} · ${file.takes.length} take${file.takes.length === 1 ? '' : 's'}`;
+      for (const take of file.takes) node.appendChild(takeItem(take, take.linked ? 'take' : 'its own sidecar'));
+    }
   }
+  // Takes whose recording is in another folder, or missing: listed here, in
+  // their own folder, with where the audio is. A missing one is shown, never
+  // dropped, and opens nothing.
+  if (!scoring) {
+    for (const take of data.takes ?? []) {
+      node.appendChild(take.missing
+        ? takeItem(take, `audio missing: ${take.relative}`, true)
+        : takeItem(take, `→ ${take.relative}`));
+    }
+  }
+}
+
+function takeItem(take, meta, missing = false) {
+  const li = document.createElement('li');
+  li.className = missing ? 'take missing' : 'take';
+  li.innerHTML = '<span class="name"></span><span class="meta"></span>';
+  li.querySelector('.name').textContent = take.name;
+  li.querySelector('.meta').textContent = meta;
+  li.title = take.sidecar;
+  if (!missing) li.addEventListener('click', () => openTrack(take.sidecar));
+  return li;
 }
 
 function showPickerError(message) {
@@ -421,16 +451,53 @@ function showPickerError(message) {
   node.hidden = false;
 }
 
-async function openTrack(path) {
+/* `path` is an audio file or a take's sidecar; `sidecar` names a take of
+   the audio at `path` (the recents list keeps both). */
+async function openTrack(path, sidecar = null) {
   try {
     const track = await api('/api/tracks/open', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path }),
+      body: JSON.stringify(sidecar ? { path, sidecar } : { path }),
     });
     await loadTrack(track);
   } catch (error) {
     showPickerError(error.message);
+  }
+}
+
+/* What every job and re-open sends about the open track: its audio, and a
+   linked take's sidecar, whose settings the server must read. */
+function trackRef() {
+  const ref = { path: state.track.path };
+  if (state.track.linked) ref.sidecar = state.track.sidecar;
+  return ref;
+}
+
+/* "New take…" and "Rename take…" (gui/library.py, takes). A take is a
+   sidecar of its own for this recording: a new one starts from this take's
+   judgements about the recording -- grid, meter, form, separation, changes,
+   key -- and none about a span. Renaming the audio's own sidecar makes it a
+   take that names its audio. Either way the page opens the result. */
+async function takeAction(kind) {
+  if (!state.track) return;
+  const asking = kind === 'new'
+    ? 'Name the new take (its sidecar is saved beside this one):'
+    : 'Rename this take:';
+  const suggested = kind === 'new' ? '' : state.track.name;
+  const name = window.prompt(asking, suggested);
+  if (!name || !name.trim() || (kind === 'rename' && name.trim() === state.track.name)) return;
+  try {
+    await persistNow();
+    const track = await api(`/api/tracks/${state.track.id}/${kind === 'new' ? 'takes' : 'rename'}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    await loadTrack(track);
+    toast(kind === 'new' ? `New take: ${track.name}` : `Renamed: ${track.name}`);
+  } catch (error) {
+    toast(error.message, true);
   }
 }
 
@@ -441,7 +508,13 @@ async function loadTrack(track) {
   $('picker').hidden = true;
   $('picker-close').hidden = false;
   $('workspace').hidden = false;
-  $('track-title').textContent = `${track.name} · ${clock(track.duration, false)}`;
+  // A linked take says which recording it is a take of.
+  $('track-title').textContent = track.linked
+    ? `${track.name} · take of ${track.audio_name} · ${clock(track.duration, false)}`
+    : `${track.name} · ${clock(track.duration, false)}`;
+  $('track-title').title = track.sidecar ?? '';
+  $('new-take').hidden = false;
+  $('rename-take').hidden = false;
   $('track-title').classList.add('loaded');
   $('time-total').textContent = clock(track.duration, false);
   $('overview-duration').textContent = clock(track.duration, false);
@@ -1195,7 +1268,7 @@ async function toggleBeats() {
   chip.textContent = 'Beats…';
   try {
     const job = await post('/api/jobs', {
-      path: state.track.path, model: state.model, kind: 'beats',
+      ...trackRef(), model: state.model, kind: 'beats',
     });
     await pollBeatsJob(job.id, chip);
   } catch (error) {
@@ -1589,7 +1662,7 @@ async function refreshModelStatus() {
 async function startSeparation() {
   if (!state.track || !state.model) return;
   try {
-    const body = { path: state.track.path, model: state.model };
+    const body = { ...trackRef(), model: state.model };
     if (state.selection) { body.start = state.selection.a; body.end = state.selection.b; }
     const job = await post('/api/jobs', body);
     $('separate-btn').disabled = true;
@@ -1681,7 +1754,7 @@ async function pollJob(jobId) {
   state.track = await api('/api/tracks/open', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: state.track.path }),
+    body: JSON.stringify(trackRef()),
   }).catch(() => state.track);
   await refreshAudition();
 }
@@ -1796,7 +1869,12 @@ async function runSolosJob() {
   const track = state.track;
   let job;
   try {
-    job = await post('/api/jobs', { path: track.path, model: soloSeparationModel, kind: 'solos' });
+    job = await post('/api/jobs', {
+      path: track.path,
+      ...(track.linked ? { sidecar: track.sidecar } : {}),
+      model: soloSeparationModel,
+      kind: 'solos',
+    });
   } catch (error) {
     toast(error.message, true);
     return;
@@ -2090,7 +2168,7 @@ async function startTranscribe() {
   try {
     const { a, b } = state.selection;
     const job = await post('/api/jobs', {
-      path: state.track.path, model: state.model, kind: 'transcribe',
+      ...trackRef(), model: state.model, kind: 'transcribe',
       stem: state.leadStem, start: a, end: b, line: state.line || undefined,
     });
     const finished = await watchJob(job.id, (update) => {
@@ -3094,6 +3172,7 @@ async function persistNow() {
 
 const LABELS = {
   'horn-led': 'Horn-led',
+  'multi-horn': 'Two horns (a head)',
   trio: 'Trio (piano)',
   'solo-piano': 'Solo piano',
   C: 'C — concert',
@@ -3812,6 +3891,8 @@ setPaper(page.paper);
 // ── events ──────────────────────────────────────────────────────────────────
 
 $('open-picker').addEventListener('click', () => openPicker('track'));
+$('new-take').addEventListener('click', () => takeAction('new'));
+$('rename-take').addEventListener('click', () => takeAction('rename'));
 $('picker-close').addEventListener('click', () => { $('picker').hidden = true; });
 
 /* Quit: one click stops the server; with a job in flight the server refuses
@@ -4225,7 +4306,7 @@ async function setFastTempo(on) {
       state.showBeats = true;
       chip.textContent = 'Fast tune…';
       const job = await post('/api/jobs', {
-        path: state.track.path, model: state.model, kind: 'beats',
+        ...trackRef(), model: state.model, kind: 'beats',
       });
       await pollBeatsJob(job.id, chip);
     }

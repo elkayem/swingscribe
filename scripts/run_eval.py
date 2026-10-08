@@ -142,19 +142,44 @@ def notes_cache(step_cost: float, dip_db: float) -> Path:
     return Path(f".benchmark-notes-c{step_cost}-d{dip_db}.json")
 
 
-def sidecar_name(sidecar_path: Path, sidecar: dict) -> str:
-    """The track's key: its path relative to benchmark/, with forward slashes.
+def sidecar_name(sidecar_path: Path, sidecar: dict | None = None) -> str:
+    """A take's key (`bench_takes`, `library.discover`): its sidecar's path
+    relative to benchmark/ without the suffix, forward slashes. For an
+    audio's own sidecar that is the audio's path -- the key every pin has.
+    `sidecar` is unused, kept for the scripts that pass it."""
+    from swingscribe.gui import library
 
-    `sidecar["file"]` is a bare filename, because the sidecar lives beside its
-    audio and does not need to say where that is. Once benchmark/ has
-    subfolders (benchmark/wjazzd/, added when the library outgrew one flat
-    directory) the bare name no longer locates the file, and two tracks in
-    different folders could collide on it. Forward slashes so a key pinned on
-    Windows matches one pinned anywhere else.
-    """
     folder = sidecar_path.parent.relative_to(BENCH)
-    name = sidecar.get("file") or sidecar_path.name.removesuffix(".swingscribe.json")
+    name = library.take_key(sidecar_path)
     return name if folder == Path(".") else f"{folder.as_posix()}/{name}"
+
+
+def bench_takes(log=print) -> list[tuple[str, Path, Path, dict]]:
+    """Every take in benchmark/ whose audio is on disk: (key, sidecar, audio,
+    the sidecar's settings), through `library.discover`, the one walk every
+    harness script shares.
+
+    The key is the take's path relative to benchmark/, with forward slashes:
+    for an audio's own sidecar exactly its audio's path, the key every pin
+    has always had (subfolders included, so two tracks in different folders
+    cannot collide; forward slashes so a key pinned on Windows matches one
+    pinned anywhere else), and for a linked take its own name, so two takes
+    of one recording are two rows. Its audio is the take's `audio`, which a
+    linked take may keep in another folder.
+    """
+    from swingscribe.gui import library
+
+    found = []
+    for key, sidecar_path, audio in library.discover(BENCH):
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        named = sidecar.get("file")
+        if named and "audio" not in sidecar and named != audio.name:
+            # Keyed by the sidecar's own name since takes existed; before,
+            # by this field. Say so, rather than score a different file.
+            log(f"  {key}: sidecar names {named!r} as its file; keyed by the sidecar's name")
+        if audio.is_file():
+            found.append((key, sidecar_path, audio, sidecar))
+    return found
 
 
 # A pianist is scored TWICE: on the pipeline's default line and on the other
@@ -333,11 +358,7 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
 
     runs = json.loads(cache.read_text(encoding="utf-8")) if cache.is_file() else {}
     live: set[str] = set()
-    for sidecar_path in sorted(BENCH.rglob("*.swingscribe.json")):
-        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        name = sidecar_name(sidecar_path, sidecar)
-        if not (BENCH / name).is_file():
-            continue
+    for name, _sidecar_path, audio, sidecar in bench_takes(log):
         # A pianist is transcribed on both lines (SECOND_TAKE); a horn has no
         # second take, because the picker reads the piano model and a piano
         # model asked about a saxophone vouches for nothing.
@@ -379,7 +400,7 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
                     "transcribe": settings,
                 }
             )
-            document = library.ingested_document(BENCH / name, config)
+            document = library.ingested_document(audio, config)
             # Through library.resolve_stem, the same resolver the GUI uses: a
             # composite like "other+vocals" (Oleo's fix, R16) is summed on
             # demand beside its parts. Building the path by hand skipped every
@@ -457,14 +478,11 @@ def beat_grids(cache: Path = GRIDS_CACHE, log=print) -> dict:
     from swingscribe.stages import beats
 
     grids = json.loads(cache.read_text(encoding="utf-8")) if cache.is_file() else {}
-    for sidecar_path in sorted(BENCH.rglob("*.swingscribe.json")):
-        # rglob and the subfolder-qualified key, matching transcribe_all. With
-        # the flat glob this silently skipped every track under benchmark/
-        # wjazzd/, which cost them their beat score AND their notation score --
-        # the exact "scores a subset without saying so" failure this docstring
-        # is about, reintroduced by making two of three globs recursive.
-        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        name = sidecar_name(sidecar_path, sidecar)
+    # The same walk and the same keys as transcribe_all (`bench_takes`). With a flat
+    # glob this once silently skipped every track under benchmark/wjazzd/,
+    # which cost them their beat score AND their notation score -- the exact
+    # "scores a subset without saying so" failure this docstring is about.
+    for name, _sidecar_path, audio, sidecar in bench_takes(lambda _message: None):
         cached = grids.get(name)
         # The listener's Fast tune tracks this track's grid at half speed
         # (notation.grid_config), as the Score button reads it; an entry
@@ -478,9 +496,9 @@ def beat_grids(cache: Path = GRIDS_CACHE, log=print) -> dict:
         # auto anchor's phase, when the sidecar has no downbeat) and the
         # track's length (how far the edge pulse may be extended), so such an
         # entry is tracked once more and keeps its beats.
-        if (cached is not None and "duration" in cached) or not (BENCH / name).is_file():
+        if cached is not None and "duration" in cached:
             continue
-        document = library.ingested_document(BENCH / name, config)
+        document = library.ingested_document(audio, config)
         started = time.time()
         # No stems on the document: the mix is the source, and handing this
         # stage a drum stem would measure a grid the pipeline does not build.

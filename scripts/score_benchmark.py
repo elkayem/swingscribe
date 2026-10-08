@@ -113,22 +113,25 @@ def discover_tunes(bench: Path = BENCH) -> dict[str, tuple[str, str, str, str]]:
     benchmark folder is a personal library that differs per machine, and a
     partial run is more useful than none.
     """
+    from swingscribe.gui import library
+
     found = {}
-    for sidecar_path in sorted(bench.rglob("*.swingscribe.json")):
+    # Every take (library.discover): an audio's own sidecar keyed by its
+    # audio's path relative to benchmark/, as always, and a linked take by
+    # its own name -- the run key the harness scores it under. Its audio may
+    # live elsewhere (TAKES).
+    for audio_name, sidecar_path, audio in library.discover(bench):
         try:
             sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        audio_name, score_path = sidecar.get("file"), sidecar.get("score")
-        if not audio_name or not score_path:
+        score_path = sidecar.get("score")
+        if not score_path:
             continue
-        # Keys are relative to benchmark/, which now has subfolders.
-        folder = sidecar_path.parent.relative_to(bench)
-        if folder != Path("."):
-            audio_name = f"{folder.as_posix()}/{audio_name}"
         mscz_name = score_file(sidecar_path, score_path, bench)
-        if mscz_name is None or not (bench / audio_name).is_file():
+        if mscz_name is None or not audio.is_file():
             continue
+        TAKES[audio_name] = (sidecar_path, audio)
         instrument = INSTRUMENT_OF.get(sidecar.get("ensemble") or "", "horn")
         key = tune_key(audio_name)
         if key in found:
@@ -148,6 +151,8 @@ def discover_tunes(bench: Path = BENCH) -> dict[str, tuple[str, str, str, str]]:
     return found
 
 
+# Track key -> (its sidecar, its audio), for every take discover_tunes keeps.
+TAKES: dict[str, tuple[Path, Path]] = {}
 TUNES = discover_tunes()
 
 
@@ -164,8 +169,8 @@ def transcribe_all(cache_path: Path, step_cost: float = 0.0) -> dict:
     base = Config()
     runs = {}
     for key, (audio_name, _, title, _) in TUNES.items():
-        src = BENCH / audio_name
-        sidecar = json.loads(Path(str(src) + ".swingscribe.json").read_text(encoding="utf-8"))
+        sidecar_path, src = TAKES[audio_name]
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
         model, stem = sidecar["model"], sidecar["stem"]
         lo, hi = sidecar["region"]
         config = base.model_copy(

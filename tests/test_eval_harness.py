@@ -185,14 +185,20 @@ def test_the_batch_sheet_for_a_subfolder_sits_beside_its_audio():
 
 def test_every_sidecar_walk_in_the_harness_is_recursive():
     """A structural guard, because the failure it prevents is silent: the run
-    still succeeds, it just quietly covers less music than its header claims."""
+    still succeeds, it just quietly covers less music than its header claims.
+    Both scripts walk the takes through `library.discover`, the one walk, and
+    that walk is recursive."""
+    from swingscribe.gui import library
+
     for path in (SCRIPTS / "run_eval.py", SCRIPTS / "score_benchmark.py"):
         source = path.read_text(encoding="utf-8")
         assert '.glob("*.swingscribe.json")' not in source, (
             f"{path.name} walks sidecars with a flat glob; tracks in "
             f"benchmark/ subfolders would be skipped without a word"
         )
-        assert '.rglob("*.swingscribe.json")' in source
+        assert "library.discover(" in source
+    discover = Path(library.__file__).read_text(encoding="utf-8")
+    assert '.rglob(f"*{SETTINGS_SUFFIX}")' in discover
 
 
 # -- the notes cache must not outlive its tracks ---------------------------
@@ -1214,3 +1220,46 @@ def test_the_scorecard_renders_every_new_section(capsys):
     assert "edit cost 50.0 / 55.0 per 100 notes over 1" in out
     assert "PDF pages, silver by tempo class" in out
     assert "WJazzD by tempo class" in out
+
+
+# -- linked sidecars: a take is a track (gui/library.py) ---------------------
+
+
+def test_a_linked_take_is_keyed_by_its_own_name_and_finds_its_audio(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_eval, "BENCH", tmp_path)
+    own = write_sidecar(tmp_path / "Multi-Horn", "Open_Sesame.m4a")
+    take = tmp_path / "Multi-Horn" / "Open_Sesame_Melody.swingscribe.json"
+    take.write_text(
+        json.dumps({"audio": "Open_Sesame.m4a", "region": [0.0, 67.3], "model": "m"}),
+        encoding="utf-8",
+    )
+    found = {key: (sidecar, audio) for key, sidecar, audio, _ in run_eval.bench_takes()}
+    assert found["Multi-Horn/Open_Sesame.m4a"] == (own, tmp_path / "Multi-Horn/Open_Sesame.m4a")
+    assert found["Multi-Horn/Open_Sesame_Melody"][1] == tmp_path / "Multi-Horn/Open_Sesame.m4a"
+    assert run_eval.sidecar_name(take) == "Multi-Horn/Open_Sesame_Melody"
+    # Its page reads its own sidecar, by the same key.
+    assert (tmp_path / "Multi-Horn/Open_Sesame_Melody.swingscribe.json").is_file()
+
+
+def test_a_take_whose_audio_is_missing_is_not_scored(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_eval, "BENCH", tmp_path)
+    (tmp_path / "Gone.swingscribe.json").write_text(
+        json.dumps({"audio": "nowhere.m4a", "region": [0, 1]}), encoding="utf-8"
+    )
+    assert run_eval.bench_takes() == []
+
+
+def test_discover_tunes_benchmarks_a_linked_take_with_a_score(tmp_path):
+    (tmp_path / "Head.musicxml").write_text("<score-partwise/>", encoding="utf-8")
+    write_sidecar(tmp_path / "Multi-Horn", "Open_Sesame.m4a")
+    take = tmp_path / "Multi-Horn" / "Open_Sesame_Melody.swingscribe.json"
+    take.write_text(
+        json.dumps({"audio": "Open_Sesame.m4a", "score": str(tmp_path / "Head.musicxml")}),
+        encoding="utf-8",
+    )
+    found = score_benchmark.discover_tunes(tmp_path)
+    ((audio, score, title, _instrument),) = found.values()
+    assert audio == "Multi-Horn/Open_Sesame_Melody"
+    assert score == "Head.musicxml"
+    assert title == "Open Sesame Melody"
+    assert score_benchmark.TAKES[audio] == (take, tmp_path / "Multi-Horn/Open_Sesame.m4a")

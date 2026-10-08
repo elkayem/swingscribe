@@ -244,6 +244,11 @@ select:disabled, .chip-select:disabled { opacity: 0.38; cursor: default; box-sha
 .track-list .meta { color: var(--muted); font: 12px var(--mono); font-variant-numeric: tabular-nums; }
 .track-list li.dir .name::before { content: "📁 "; }
 .track-list li.dir .meta { color: var(--muted); }
+/* Takes (linked sidecars): listed under their recording, indented, by take name. */
+.track-list li.take { padding-left: 28px; }
+.track-list li.take .name::before { content: "↳ "; color: var(--muted); }
+.track-list li.take.missing { cursor: default; opacity: 0.55; }
+.track-list li.take.missing:hover { background: none; }
 
 .browse-bar { display: flex; align-items: center; gap: 6px; margin: 8px 8px 0; }
 .browse-bar #browse-up { flex: 0 0 auto; }

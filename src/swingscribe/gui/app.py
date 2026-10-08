@@ -71,11 +71,25 @@ class RevalidatingStatic(StaticFiles):
 
 
 class OpenRequest(BaseModel):
+    # An audio file (its own sidecar), or a sidecar -- a take, linked or not.
     path: str
+    # A take's sidecar, when `path` is its audio (library.audio_of).
+    sidecar: str | None = None
+
+
+class TakeRequest(BaseModel):
+    """A take to start from this one (`name`, in `folder` or this take's
+    folder), or this take's new name."""
+
+    name: str
+    folder: str | None = None
 
 
 class JobRequest(BaseModel):
     path: str
+    # The take the job is for, when it is a linked one: its settings (the
+    # ensemble, Fast tune) are what the job reads.
+    sidecar: str | None = None
     model: str
     kind: str = "separate"  # separate | beats | transcribe — see gui_jobs.JOB_STAGES
     # Transcribe jobs need the span and the lead stem; ignored for the others.
@@ -214,19 +228,36 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
     def resolve(track_id: str) -> dict[str, Any]:
         """Track id -> its open record, reopening it if the server restarted.
 
-        The sidecar remembers the source path, so a reload of the page after a
-        restart recovers rather than dead-ending on an unknown id.
+        The recents index remembers the source path (and a linked take's
+        sidecar), so a reload of the page after a restart recovers rather
+        than dead-ending on an unknown id.
         """
         entry = app.state.tracks.get(track_id)
         if entry is not None:
             return entry
         remembered = library.remembered_path(config, track_id)
         if remembered and Path(remembered).is_file():
-            return open_track(remembered)
+            entry = open_track(remembered, library.remembered_sidecar(config, track_id))
+            # Under the id it was asked by too, should the claim have moved
+            # (library.claim_track_id: the other copy has gone since).
+            app.state.tracks[track_id] = entry
+            return entry
         raise HTTPException(404, f"unknown track {track_id!r}; open it again")
 
-    def open_track(path: str) -> dict[str, Any]:
+    def open_track(path: str, sidecar: str | None = None) -> dict[str, Any]:
+        """Open a track: an audio file (with its own sidecar, or the take
+        `sidecar` names), or a sidecar -- a take -- whose audio it names
+        (library.audio_of). The entry carries its `sidecar`, and every read
+        and write of the track's settings goes through it: two takes of one
+        recording are two tracks, two ids, two sidecars, one cache."""
         source = Path(path).expanduser()
+        take = Path(sidecar).expanduser() if sidecar else None
+        if library.is_sidecar(source):
+            if not source.is_file():
+                raise HTTPException(404, f"no such take: {source}")
+            take, source = source, library.audio_of(source)
+            if not source.is_file():
+                raise HTTPException(404, f"the audio of {take.name} is missing: {source}")
         if not source.is_file():
             raise HTTPException(404, f"no such file: {source}")
         if source.suffix.lower() not in library.AUDIO_SUFFIXES:
@@ -235,21 +266,44 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             document = library.ingested_document(source, config)
         except Exception as exc:
             raise HTTPException(422, f"could not decode {source.name}: {exc}") from exc
-        track_id = library.file_digest(source)
-        entry = {"path": str(source.resolve()), "document": document}
+        audio = str(source.resolve())
+        take_path = Path(take).absolute() if take is not None else library.settings_path(audio)
+        track_id = library.claim_track_id(config, audio, take_path, library.file_digest(source))
+        entry = {
+            "id": track_id,
+            "path": audio,
+            "document": document,
+            "sidecar": str(take_path),
+            "linked": library.is_linked(take_path, audio),
+        }
         app.state.tracks[track_id] = entry
         # The wav digest rides along so the storage view can name this
         # track's stems directories without hashing the wav again.
         library.remember_open(
-            config, track_id, entry["path"], stem_digest=library.stem_digest(document)
+            config,
+            track_id,
+            entry["path"],
+            stem_digest=library.stem_digest(document),
+            sidecar=take_path,
         )
         return entry
+
+    def settings_of(entry: dict[str, Any], track_id: str | None = None) -> dict[str, Any]:
+        """The open track's settings, read from ITS sidecar."""
+        return library.load_settings(
+            entry["path"], config, track_id or entry["id"], entry.get("sidecar")
+        )
+
+    def take_of(entry: dict[str, Any]) -> str | None:
+        """A linked take's sidecar, which names and places its outputs; None
+        for an audio's own, whose outputs go beside the audio as always."""
+        return entry["sidecar"] if entry.get("linked") else None
 
     def review_config(
         stem: str,
         start: float | None,
         end: float | None,
-        track_path: str | None = None,
+        entry: dict[str, Any] | None = None,
         track_id: str | None = None,
         line: str | None = None,
     ) -> Config:
@@ -275,8 +329,8 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         # belongs in the key: it changes the notes, so a run with it on must
         # not serve a review computed without it.
         ensemble = config.transcribe.ensemble
-        if track_path is not None and track_id is not None:
-            stored = library.load_settings(track_path, config, track_id).get("ensemble")
+        if entry is not None:
+            stored = settings_of(entry, track_id).get("ensemble")
             if stored in ENSEMBLES:
                 ensemble = stored
         if line is not None and line not in LINES:
@@ -312,7 +366,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         others' are carried through untouched (gui/erasures.py
         `split_by_view`).
         """
-        settings = library.load_settings(entry["path"], config, track_id)
+        settings = settings_of(entry, track_id)
         return gui_edits.resolve_erasures(
             settings.get("erasures") or [],
             notes,
@@ -364,7 +418,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         `texture` is a pianist's All-notes view; a multi-horn head's review
         is resolved as its own view, each kept note in its voice.
         """
-        settings = library.load_settings(entry["path"], config, track_id)
+        settings = settings_of(entry, track_id)
         tc = run_config.transcribe
         return gui_edits.resolve(
             settings,
@@ -430,22 +484,70 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         except (NotADirectoryError, FileNotFoundError, PermissionError) as exc:
             raise HTTPException(400, f"cannot open {path or '(library folder)'}: {exc}") from exc
 
-    @app.post("/api/tracks/open")
-    def post_open(request: OpenRequest) -> dict[str, Any]:
-        entry = open_track(request.path)
+    def opened(entry: dict[str, Any]) -> dict[str, Any]:
+        """What the page needs about an open track: the id, the take's name
+        and sidecar, the audio, and the remembered state."""
         document = entry["document"]
-        track_id = library.file_digest(entry["path"])
         assert document.audio is not None  # ingest guarantees this or raises
+        track_id = entry["id"]
         return {
             "id": track_id,
-            "name": Path(entry["path"]).name,
+            "name": library.take_key(entry["sidecar"])
+            if entry["linked"]
+            else Path(entry["path"]).name,
             "path": entry["path"],
+            "audio_name": Path(entry["path"]).name,
+            # The take: its sidecar, and whether it names its audio (a
+            # linked take) or is the audio's own.
+            "sidecar": entry["sidecar"],
+            "linked": entry["linked"],
             "duration": document.audio.duration,
             "sample_rate": document.audio.sample_rate,
             "models": library.model_status(document, config),
-            "state": library.load_settings(entry["path"], config, track_id),
-            "settings_path": str(library.settings_path(entry["path"])),
+            "state": settings_of(entry, track_id),
+            "settings_path": entry["sidecar"],
         }
+
+    @app.post("/api/tracks/open")
+    def post_open(request: OpenRequest) -> dict[str, Any]:
+        return opened(open_track(request.path, request.sidecar))
+
+    @app.post("/api/tracks/{track_id}/takes")
+    def post_new_take(track_id: str, request: TakeRequest) -> dict[str, Any]:
+        """ "New take...": a sidecar of its own for this recording, named
+        freely, in `folder` (this take's by default), starting with this
+        take's judgements about the RECORDING -- grid, meter, form,
+        separation, changes, key (library.RECORDING_KEYS) -- and nothing
+        about a span. Opened and returned as the track the page now shows."""
+        entry = resolve(track_id)
+        try:
+            sidecar = library.new_take(
+                entry["path"], request.name, request.folder, source=entry["sidecar"]
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except FileExistsError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(409, f"could not write the take: {exc}") from exc
+        return opened(open_track(entry["path"], str(sidecar)))
+
+    @app.post("/api/tracks/{track_id}/rename")
+    def post_rename_take(track_id: str, request: TakeRequest) -> dict[str, Any]:
+        """ "Rename take...": the sidecar renamed in place, nothing in it lost.
+        The audio's own sidecar renamed becomes a linked take. The id names
+        the sidecar, so the page gets a new id back."""
+        entry = resolve(track_id)
+        try:
+            sidecar = library.rename_take(entry["sidecar"], entry["path"], request.name)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except FileExistsError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(409, f"could not rename the take: {exc}") from exc
+        app.state.tracks.pop(track_id, None)
+        return opened(open_track(entry["path"], str(sidecar)))
 
     @app.get("/api/tracks/{track_id}/peaks")
     def get_peaks(
@@ -566,7 +668,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         entry = resolve(track_id)
         document = entry["document"]
         duration = float(document.audio.duration)
-        settings = library.load_settings(entry["path"], config, track_id)
+        settings = settings_of(entry, track_id)
         cached = pipeline.cached_document(
             entry["path"],
             grid_config(config, settings),
@@ -605,7 +707,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         payload = gui_solos.propose(env, lines, model, level)
-        settings = library.load_settings(entry["path"], config, track_id)
+        settings = settings_of(entry, track_id)
         return {"ready": True, **gui_solos.annotate(payload, gui_solos.records_of(settings))}
 
     @app.post("/api/tracks/{track_id}/solos/choice")
@@ -651,7 +753,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             existing = stored if isinstance(stored, list) else []
             return {gui_solos.SIDECAR_KEY: gui_solos.merge(existing, record)}
 
-        library.update_settings(entry["path"], config, change, track_id)
+        library.update_settings(entry["path"], config, change, track_id, entry.get("sidecar"))
         return made
 
     @app.get("/api/tracks/{track_id}/stem")
@@ -694,7 +796,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
 
         headers = {"Cache-Control": "no-store"}
         if download:
-            name = Path(entry["path"]).stem
+            name = gui_musicxml.take_name(entry["path"], take_of(entry))
             span = f"{start:.1f}-{end:.1f}s" if end is not None else "full"
             headers["Content-Disposition"] = f'attachment; filename="{name}.{stem}.{span}.wav"'
         return Response(content=payload, media_type="audio/wav", headers=headers)
@@ -756,7 +858,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         # every track call and the rest of them still need it.
         # The listener's Fast tune reads the grid tracked at half speed
         # (notation.grid_config), like every other reader of the grid.
-        settings = library.load_settings(entry["path"], config, track_id)
+        settings = settings_of(entry, track_id)
         document = pipeline.cached_document(
             entry["path"],
             grid_config(run_config, settings),
@@ -890,7 +992,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         the staff assignments. Switching views costs no transcription.
         """
         entry = resolve(track_id)
-        run_config = review_config(stem, start, end, entry["path"], track_id, line)
+        run_config = review_config(stem, start, end, entry, track_id, line)
         payload = review.cached_review(entry["document"], run_config, model)
         if payload is None:
             return {"ready": False}
@@ -930,7 +1032,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         """
         entry = resolve(track_id)
         document = entry["document"]
-        run_config = review_config(stem, start, end, entry["path"], track_id, line)
+        run_config = review_config(stem, start, end, entry, track_id, line)
         payload = review.cached_review(document, run_config, model)
         if payload is None:
             raise HTTPException(404, "not transcribed yet")
@@ -978,7 +1080,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         the sidecar.
         """
         entry = resolve(track_id)
-        run_config = review_config(stem, start, end, entry["path"], track_id, line)
+        run_config = review_config(stem, start, end, entry, track_id, line)
         payload = review.cached_review(entry["document"], run_config, model)
         if payload is None:
             raise HTTPException(409, "transcribe the span first")
@@ -989,7 +1091,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         # a line note — notation.with_chords).
         edits = resolve_edits(track_id, entry, run_config, payload, texture)
         audible = edits["audible"]
-        settings = library.load_settings(entry["path"], config, track_id)
+        settings = settings_of(entry, track_id)
         # The overlay goes through erasures too: a second-voice note the
         # listener silenced on the review screen must not reappear on the page.
         overlay = [] if texture else payload.get("second_voice") or []
@@ -1008,6 +1110,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             "added": edits["added"],
             "texture": texture,
             "left": edits["left"] if grand else None,
+            "take": take_of(entry),
         }
 
     @app.post("/api/tracks/{track_id}/export")
@@ -1099,6 +1202,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
                     inputs["audio_path"],
                     inputs["settings"],
                     inputs["texture"],
+                    inputs["take"],
                 ).name,
                 **gui_musicxml.describe(notation, config, inputs["settings"], changes),
             },
@@ -1147,7 +1251,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         if not ground_truth.is_score(score_path):
             raise HTTPException(400, f"not a MuseScore file: {score_path.name}")
 
-        run_config = review_config(stem, start, end, entry["path"], track_id, line)
+        run_config = review_config(stem, start, end, entry, track_id, line)
         if texture_of(run_config, piano_notes):
             raise HTTPException(
                 409, "Score compares a melody line - switch Piano notes to Melody line"
@@ -1156,7 +1260,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         if payload is None:
             raise HTTPException(409, "transcribe the span first")
         edits = resolve_edits(track_id, entry, run_config, payload)
-        settings = library.load_settings(entry["path"], config, track_id)
+        settings = settings_of(entry, track_id)
         try:
             return gui_musicxml.score_span(
                 entry["document"],
@@ -1202,12 +1306,12 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
                 None if end is None else round(end, SPAN_PRECISION),
             )
         )
-        settings = library.load_settings(entry["path"], config, track_id)
+        settings = settings_of(entry, track_id)
         # Named the way the export named it: the page's choices ride in the
         # filename, and a horn never has a texture whatever the request says.
         texture = piano_notes == "all" and (
             review_config(
-                stem or config.transcribe.stem, start, end, entry["path"], track_id
+                stem or config.transcribe.stem, start, end, entry, track_id
             ).transcribe.uses_piano_oracle
         )
         path = gui_musicxml.export_path(
@@ -1215,6 +1319,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             span,
             gui_musicxml.take_of(config, line),
             gui_musicxml.page_tags(config, settings, texture),
+            take_of(entry),
         )
         if not path.is_file():
             raise HTTPException(404, "not exported yet")
@@ -1265,7 +1370,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
         if not ground_truth.is_score(score_path):
             raise HTTPException(400, f"not a MuseScore file: {score_path.name}")
 
-        run_config = review_config(stem, start, end, entry["path"], track_id, line)
+        run_config = review_config(stem, start, end, entry, track_id, line)
         if texture_of(run_config, piano_notes):
             raise HTTPException(
                 409, "ground truth compares a melody line - switch Piano notes to Melody line"
@@ -1297,11 +1402,13 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             raise HTTPException(400, f"unknown model {request.model!r}")
         if request.kind not in gui_jobs.JOB_STAGES:
             raise HTTPException(400, f"unknown job kind {request.kind!r}")
-        entry = open_track(request.path)  # decode errors surface now, not in the worker
+        # Decode errors surface now, not in the worker; a linked take's
+        # settings are its own sidecar's.
+        entry = open_track(request.path, request.sidecar)
         # Beats and Find the solos track the grid this track READS: with the
         # listener's Fast tune on, at half speed, under its own key and its
         # own job variant, so it never dedupes onto an ordinary Beats job.
-        settings = library.load_settings(entry["path"], config, library.file_digest(entry["path"]))
+        settings = settings_of(entry)
         tracked = grid_config(config, settings)
         fast = "fast" if tracked is not config else ""
         if request.kind == "solos":
@@ -1327,12 +1434,7 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             if not request.stem:
                 raise HTTPException(400, "a transcribe job needs a stem")
             run_config = review_config(
-                request.stem,
-                request.start,
-                request.end,
-                entry["path"],
-                library.file_digest(entry["path"]),
-                request.line,
+                request.stem, request.start, request.end, entry, entry["id"], request.line
             )
             # variant keys the job (and its cache) to this exact span+stem+config,
             # so two spans never dedupe onto each other.
@@ -1475,7 +1577,9 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
             raise HTTPException(409, f"could not delete: {exc}") from exc
         # Its ingest wav is gone, so the open record points at nothing;
         # dropping it makes the next request re-ingest (seconds) via resolve().
-        app.state.tracks.pop(track_id, None)
+        # Every take of the recording shares that wav (library.track_id_for).
+        for open_id in [i for i in app.state.tracks if library.audio_digest_of(i) == track_id]:
+            app.state.tracks.pop(open_id, None)
         return {
             "freed": result["freed"],
             "removed": result["removed"],
@@ -1487,9 +1591,9 @@ def create_app(config: Config, on_quit: Callable[[], None] | None = None) -> Fas
     @app.post("/api/tracks/{track_id}/state")
     def post_state(track_id: str, request: StateRequest) -> dict[str, Any]:
         entry = resolve(track_id)
-        written = library.save_settings(entry["path"], request.state, config)
+        written = library.save_settings(entry["path"], request.state, config, entry.get("sidecar"))
         return {
-            "settings": library.load_settings(entry["path"], config, track_id),
+            "settings": settings_of(entry, track_id),
             "settings_path": str(written),
         }
 

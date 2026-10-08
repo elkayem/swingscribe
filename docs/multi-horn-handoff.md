@@ -11,9 +11,13 @@ merged: the listener reviews the branch first. Design and state:
 
 | Piece | State |
 | --- | --- |
-| A. Multi-horn core + `scripts/multi_horn_page.py` | pushed, waiting on Local task A |
-| B. Linked sidecars | not started |
+| A. Multi-horn core + `scripts/multi_horn_page.py` | committed, waiting on Local task A |
+| B. Linked sidecars | committed, waiting on Local task B |
 | C. Two parts, GUI, guide | not started |
+
+Pushing to `origin/multi-horn` was refused (HTTP 403, "Resource not
+accessible by integration") from the cloud session: the commits exist in
+the cloud checkout only until GitHub access is restored there.
 
 ## Setting up (once)
 
@@ -101,6 +105,81 @@ What to report back (SendMessage to this session):
    stems, hidden rests and voices look right on the page.
 5. Any overtone ghost kept, or real note dropped as a ghost or a third
    (the dump's heard section and the review's candidates).
+
+## Local task B: linked sidecars ("takes")
+
+What landed (gui/library.py, docs/multi-horn.md has the multi-horn half):
+
+- A sidecar may carry `"audio": "<path relative to the sidecar>"`; it is
+  then a LINKED take. Its key is its own file name minus
+  `.swingscribe.json`. With no `audio`, today's rule: the sibling audio
+  named by the key. No existing sidecar is touched.
+- Track id: the audio's digest for its own sidecar (unchanged); digest plus
+  an 8-character hash of the sidecar's path for a linked take. ONE
+  REFINEMENT of the approved design, for the listener to confirm: two
+  byte-identical copies each opened through their OWN sidecar would still
+  share the digest, which is the bug that started this. So the plain digest
+  stays with the copy the recents index already holds it for (every id
+  handed out before is unchanged), and another copy's own sidecar is named
+  like a linked take (`library.claim_track_id`).
+- Every settings read and write goes through the open entry's sidecar
+  (`load_settings` / `save_settings` / `update_settings` take `sidecar`);
+  jobs carry `sidecar` for a linked take.
+- "New take..." (top bar) asks for a name and saves the sidecar beside the
+  current one (the API takes a `folder` too; the button does not ask for one
+  yet). It copies anchor, beat_pins, steady_spans, time_signature,
+  pulses_per_bar, bars_per_chorus, form_start, fast_tempo, model, changes,
+  key, and starts region, ensemble, erasures, additions, hands, score and
+  line fresh. "Rename take..." renames the sidecar in place; the audio's own
+  sidecar renamed becomes a linked take.
+- Folder browser: an audio file with no sidecar is listed as the audio.
+  With sidecars, the audio's row still opens its own sidecar and every
+  sidecar in that folder about it is listed under it by take name (its own
+  sidecar shown as "its own sidecar", linked ones as "take"). A linked
+  sidecar whose audio is in another folder is listed in its own folder as
+  "-> ../folder/file"; one whose audio is missing is shown greyed as "audio
+  missing: ..." and opens nothing (never dropped). Recents name a linked
+  take and say "take of <audio>".
+- Export, the page view and the stem download are named for a linked take
+  and written beside its sidecar (`Open_Sesame_Melody.0-67s.literal16.musicxml`);
+  an audio's own sidecar names and places them exactly as before.
+- The cache panel lists each recording once (its digest) and says "shared by
+  N takes" (names in the tooltip) when more than one take has been opened on
+  it.
+- Harness: `library.discover(root) -> [(key, sidecar, audio)]` is the one
+  walk run_eval, score_benchmark, benchmark_batch and locate_scores use;
+  wjazz_batch takes the own sidecar's path from `library.settings_path`. A
+  take's key is its sidecar's path; for an audio's own sidecar that is the
+  audio's path, the key every pin has. run_eval logs a line when an own
+  sidecar's `file` field disagrees with its name (it used to key by `file`).
+- `scripts/dedupe_audio.py` is PREPARED, NOT RUN: dry run by default; with
+  `--apply` it would keep one copy of each byte-identical group, make every
+  other copy's sidecars linked takes of it (name, folder and contents kept,
+  so no harness key moves) and delete the copy.
+
+Commands (from the main checkout, `PYTHONPATH=%MH%\src` as above):
+
+1. Acceptance, the harness card byte-identical:
+   ```
+   .venv\Scripts\python.exe %MH%\scripts\run_eval.py --db wjazz\wjazzd.db
+   ```
+   Expect every pin to hold, nothing re-transcribed, and NO "sidecar names
+   ... as its file" lines. Report any such line and any moved pin.
+2. The dedupe dry run, to see what it WOULD do (it changes nothing):
+   ```
+   .venv\Scripts\python.exe %MH%\scripts\dedupe_audio.py benchmark --keep-in Multi-Horn
+   ```
+   Report the KEEP/DELETE/LINK lines (or the group count, if long). Do not
+   pass `--apply`.
+3. In the GUI from the worktree (`set PYTHONPATH=%MH%\src` then
+   `.venv\Scripts\python.exe -m swingscribe gui`, or the base-interpreter
+   route): open `Open_Sesame.m4a`, press New take..., name it
+   `Open_Sesame_Melody`; check the new sidecar beside it (an `audio` field,
+   the anchor copied, no region); open both copies of the recording in two
+   tabs and confirm each tab saves to its own sidecar; Rename take...; look
+   at the folder browser in both folders and at the cache panel. Report what
+   reads wrong or confusing -- the listener asked what the browser should
+   show, and this is the proposal above.
 
 ## Local check: no cache key moved
 

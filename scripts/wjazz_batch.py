@@ -556,7 +556,9 @@ def process_file(
 
     reused = None
     if reuse_span and not fresh:
-        sidecar_path = Path(str(audio_path) + ".swingscribe.json")
+        # The audio's own sidecar (gui/library.py): a WJazzD file is one solo,
+        # so the batch never makes a linked take of it.
+        sidecar_path = library.settings_path(audio_path)
         if sidecar_path.is_file():
             stored = json.loads(sidecar_path.read_text(encoding="utf-8"))
             if stored.get("melid") == melid and stored.get("region"):

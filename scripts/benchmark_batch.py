@@ -74,7 +74,6 @@ SHEET_PATH = BENCH_DIR / "benchmark_test.xlsx"
 
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-AUDIO_SUFFIXES = {".m4a", ".mp3", ".wav", ".flac"}
 JOB_POLL_S = 2.0
 JOB_TIMEOUT_S = 30 * 60  # a fresh htdemucs_ft separation on CPU is ~11 min
 
@@ -108,13 +107,6 @@ HEADERS = [
 FIELDS = HEADERS  # row keys match headers one-to-one here (no melid/number split)
 
 
-def audio_files(folder: Path = BENCH_DIR) -> list[Path]:
-    return sorted(
-        (p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES),
-        key=lambda p: p.name.lower(),
-    )
-
-
 def sheet_for(folder: Path) -> tuple[Path, str]:
     """The sheet a folder's rows go to, and its sheet title: the root's is
     benchmark_test.xlsx, a subfolder's sits inside it, named after it."""
@@ -136,9 +128,20 @@ def wait_for_job(client, job: dict, log) -> dict:
 
 
 def run_job(
-    client, path: str, kind: str, model: str, stem=None, span=None, line=None, log=print
+    client,
+    path: str,
+    kind: str,
+    model: str,
+    stem=None,
+    span=None,
+    line=None,
+    log=print,
+    sidecar: str | None = None,
 ) -> dict:
     body = {"path": path, "kind": kind, "model": model}
+    if sidecar:
+        # A linked take's job reads its own sidecar (its ensemble, Fast tune).
+        body["sidecar"] = sidecar
     if kind == "transcribe":
         body |= {"stem": stem, "start": span[0], "end": span[1], "line": line}
     elif kind == "separate" and span is not None:
@@ -152,14 +155,21 @@ def run_job(
     return wait_for_job(client, job, log)
 
 
-def process_track(client, audio_path: Path, log=print) -> dict:
+def process_track(client, audio_path: Path, log=print, sidecar: Path | None = None) -> dict:
     """One track through open → review (transcribing if needed) → export →
     score → ground truth. Always returns a FIELDS-keyed dict; on any failure
-    `status` says why and the other columns stay blank."""
-    row: dict = dict.fromkeys(FIELDS, "")
-    row["file"] = audio_path.name
+    `status` says why and the other columns stay blank. `sidecar` is a
+    linked take's (library.discover); its row is named for the take."""
+    from swingscribe.gui import library
 
-    opened = client.post("/api/tracks/open", json={"path": str(audio_path)})
+    row: dict = dict.fromkeys(FIELDS, "")
+    linked = sidecar is not None and library.is_linked(sidecar, audio_path)
+    row["file"] = library.take_key(sidecar) if linked else audio_path.name
+    take = str(sidecar) if linked else None
+
+    opened = client.post(
+        "/api/tracks/open", json={"path": str(audio_path)} | ({"sidecar": take} if take else {})
+    )
     if opened.status_code != 200:
         row["status"] = f"could not open: {opened.json().get('detail', opened.text)}"
         return row
@@ -204,9 +214,17 @@ def process_track(client, audio_path: Path, log=print) -> dict:
             params={"model": model, "start": span[0], "end": span[1]},
         ).json()
         if stem not in stems.get("stems", []):
-            run_job(client, str(audio_path), "separate", model, span=span, log=log)
+            run_job(client, str(audio_path), "separate", model, span=span, log=log, sidecar=take)
         job = run_job(
-            client, str(audio_path), "transcribe", model, stem=stem, span=span, line=line, log=log
+            client,
+            str(audio_path),
+            "transcribe",
+            model,
+            stem=stem,
+            span=span,
+            line=line,
+            log=log,
+            sidecar=take,
         )
         if job["state"] != "done":
             row["status"] = f"transcribe failed: {job.get('error') or job['state']}"
@@ -222,7 +240,7 @@ def process_track(client, audio_path: Path, log=print) -> dict:
 
     exported = client.post(f"/api/tracks/{track_id}/export", params=params)
     if exported.status_code == 409 and "Beats" in exported.json().get("detail", ""):
-        run_job(client, str(audio_path), "beats", model, log=log)
+        run_job(client, str(audio_path), "beats", model, log=log, sidecar=take)
         exported = client.post(f"/api/tracks/{track_id}/export", params=params)
     if exported.status_code != 200:
         row["status"] = f"export failed: {exported.json().get('detail', exported.text)}"
@@ -293,28 +311,35 @@ def main() -> None:
     from fastapi.testclient import TestClient
 
     from swingscribe.config import Config
+    from swingscribe.gui import library
     from swingscribe.gui.app import create_app
 
-    files = audio_files(folder)
+    # Every take in the folder (library.discover): an audio's own sidecar,
+    # named for its audio as every row always was, and each linked take,
+    # named for itself. Not the subfolders: each is a sheet of its own.
+    takes = [
+        (key.rsplit("/", 1)[-1], sidecar, audio)
+        for key, sidecar, audio in library.discover(folder)
+        if sidecar.parent == folder and audio.is_file()
+    ]
     if args.file:
         wanted = set(args.file)
-        files = [p for p in files if p.name in wanted]
-        missing = wanted - {p.name for p in files}
+        takes = [t for t in takes if t[0] in wanted or t[2].name in wanted]
+        missing = wanted - {t[0] for t in takes} - {t[2].name for t in takes}
         if missing:
             raise SystemExit(f"no such file(s) in {folder}: {', '.join(sorted(missing))}")
-    files = [p for p in files if (folder / f"{p.name}.swingscribe.json").is_file()]
-    if not files:
+    if not takes:
         print(f"Nothing to do — no sidecar'd audio in {folder}.")
         return
 
-    print(f"Processing {len(files)} file(s): {', '.join(p.name for p in files)}")
+    print(f"Processing {len(takes)} take(s): {', '.join(name for name, *_ in takes)}")
     client = TestClient(create_app(Config.from_yaml()))
     wb, ws = batch_sheet.load_or_create_sheet(sheet_path, HEADERS, sheet_title)
     index = batch_sheet.row_index(ws)
 
-    for audio_path in files:
-        print(f"\n== {audio_path.name} ==")
-        row = process_track(client, audio_path)
+    for name, sidecar, audio_path in takes:
+        print(f"\n== {name} ==")
+        row = process_track(client, audio_path, sidecar=sidecar)
         batch_sheet.write_row(ws, index, row["file"], row, FIELDS)
         batch_sheet.save_sheet(wb, ws, sheet_path, HEADERS)
         print(f"  -> {row['status'] or 'ok'}")
