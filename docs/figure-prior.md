@@ -826,9 +826,12 @@ What moved, and what it means:
   drifted since 2026-09-25 (`0 1/4` on the hand scores 1.75% then, 2.13% now;
   on the Omnibook 1.51% then, 1.54% now), which is the transcriber's:
   the horn hole-filler (2026-09-30) adds short notes between a line's
-  phrases, and these are the figures a short note forms. So the lone-"e"
-  excess against the humans is now 4.4x with the prior against 5.9x at the
-  September setting, and it is not the prior that grew it. One small
+  phrases, and these are the figures a short note forms. With the prior on,
+  `0 1/4` read 0.66% of the hand scores' onset beats (2.2x the humans') on
+  2026-09-26 and reads 1.32% (4.4x) today; with it off, 1.75% (5.9x) then and
+  2.13% (7.1x) now. The excess doubled with the prior on and grew by a fifth
+  with it off, so the prior's own bite is intact and the new short notes are
+  the transcriber's. One small
   side effect is new to this table: the prior leans the late note of a
   two-onset beat to the "a" (`0 3/4` 0.27 > 0.39 on the hand scores, 0.46 >
   0.74 on the Omnibook) where it used to sit on the "e", a figure the
