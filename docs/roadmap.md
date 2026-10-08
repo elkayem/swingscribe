@@ -341,9 +341,13 @@ None of 17,640 single pins on the cached grids breaks a grid.
 
 ## 5. Ruled out
 
-**Tuning.** Off-A440 recordings do not explain the semitone errors: over 175
-cached reviews the median tuning offset is 6.6 cents, 9 exceed 20 cents and
-none exceed 30 (circular mean of CREPE's pitch over confident in-note frames).
+**Tuning -- withdrawn 2026-10-08 for old transfers.** Over 175 cached
+reviews of MODERN recordings the median offset is 6.6 cents, and there it
+explains nothing. The swing-era 78s the listener added are another
+population: Lester Young's sides run 15-30 cents sharp, and correcting from
+15 cents lifts every such track, none down (WJazzD, Omnibook and pages;
+docs/pages-round2.md). `TranscribeConfig.tuning_correction`, off pending
+the listener.
 
 **Basic Pitch as the line**, and as a pitch voter (A2).
 

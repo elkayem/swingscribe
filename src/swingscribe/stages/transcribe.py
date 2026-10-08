@@ -69,6 +69,28 @@ def hz_to_midi(hz: float) -> float:
     return 69.0 + 12.0 * math.log2(hz / 440.0)
 
 
+def tuning_offset(midi: list[float | None]) -> tuple[float, float]:
+    """(offset in semitones, -0.5..0.5; concentration 0..1) of a recording
+    from the equal-tempered grid at A440: the circular mean of each frame's
+    distance from its nearest semitone. Vibrato, bends and passing pitches
+    spread around the true tuning and average out; a whole recording off
+    A440 (a 78 transferred a little fast) moves every frame the same way.
+    Frames that are None are not counted."""
+    sin_sum = cos_sum = 0.0
+    count = 0
+    for value in midi:
+        if value is None:
+            continue
+        angle = 2.0 * math.pi * (value - round(value))
+        sin_sum += math.sin(angle)
+        cos_sum += math.cos(angle)
+        count += 1
+    if not count:
+        return 0.0, 0.0
+    offset = math.atan2(sin_sum, cos_sum) / (2.0 * math.pi)
+    return offset, math.hypot(sin_sum, cos_sum) / count
+
+
 def _hz_to_bin(hz: float) -> float:
     """Frequency to CREPE pitch-bin index (fractional)."""
     return (1200.0 * math.log2(hz / 10.0) - CENTS_ORIGIN) / CENTS_PER_BIN
@@ -979,8 +1001,26 @@ def analyze(
             f"by harmonic attack (rest were other instruments)"
         )
 
+    # The recording's own A, measured on the frames the line is built from
+    # and taken out where notes are ROUNDED (TranscribeConfig.
+    # tuning_correction). Only there: the harmonic-energy test above looks
+    # for the pitch's harmonics at their true frequency, and the median
+    # filter commutes with a constant shift.
+    tuned = pitches
+    if tc.tuning_correction:
+        offset, concentration = tuning_offset(pitches)
+        applied = abs(offset) * 100.0 >= tc.tuning_min_cents
+        if applied:
+            tuned = [None if p is None else p - offset for p in pitches]
+        if log:
+            print(
+                f"transcribe: tuning {offset * 100.0:+.1f} cents from A440 "
+                f"(concentration {concentration:.2f}), "
+                f"{'corrected' if applied else 'left alone'}"
+            )
+
     notes = segment_notes(
-        pitches,
+        tuned,
         [float(p) for p in periodicity[:count]],
         onset_frames,
         hop_s=hop_s,

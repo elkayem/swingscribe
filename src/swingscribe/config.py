@@ -346,6 +346,20 @@ class TranscribeConfig(BaseModel):
     # Basic Pitch's matched onsets sit 3-4 ms early on the tuning subset;
     # every copied onset is moved this much late.
     horn_fill_onset_shift_ms: float = 4.0
+    # Take the recording's own tuning out of the pitch before notes are
+    # rounded (`transcribe.tuning_offset`): the circular mean of every voiced
+    # frame's distance from the equal-tempered grid. A 78 transferred a
+    # little fast reads 15-30 cents sharp -- Lester Young's Tea for Two
+    # +30, and 9.6% of its notes a semitone HIGH against 0.3% low; Hank
+    # Mobley's Smokin' -30 and the other way (2026-10-08, the PDF pages).
+    # Corrected only from `tuning_min_cents`: over the whole harness with
+    # the correction from 10 cents, every one of the 19 tracks at 15 cents
+    # or more heard better (+0.03 at 15-20, +0.13 past 25) and none worse,
+    # while the 20 at 10-15 were a mixed bag holding every loss -- at that
+    # size the estimate is as likely the player's own intonation as the
+    # transfer (docs/pages-round2.md). Off, and out of the key while off.
+    tuning_correction: bool = False
+    tuning_min_cents: float = 15.0
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
@@ -384,6 +398,9 @@ class TranscribeConfig(BaseModel):
             for name in type(self).model_fields:
                 if name.startswith("horn_fill_"):
                     data.pop(name, None)
+        if not self.tuning_correction:
+            data.pop("tuning_correction", None)
+            data.pop("tuning_min_cents", None)
         return data
 
     @property

@@ -1056,3 +1056,37 @@ def test_a_changed_horn_fill_setting_is_a_different_key():
     assert key() != key(horn_fill_onset_threshold=0.7)
     assert key() != key(horn_fill_gaps=False)
     assert key(ensemble="trio") == key(ensemble="trio", horn_fill_onset_threshold=0.7)
+
+
+def test_tuning_offset_reads_a_recording_off_a440():
+    """A 78 transferred a little fast: every frame sits 30 cents sharp of its
+    semitone, with vibrato around it, and the offset is the 30 cents."""
+    from swingscribe.stages.transcribe import tuning_offset
+
+    frames = [60.3 + 0.08 * ((-1) ** i) for i in range(200)] + [67.3, 64.28, 64.32]
+    offset, concentration = tuning_offset([*frames, None, None])
+    assert offset == pytest.approx(0.30, abs=0.01)
+    assert concentration > 0.8
+
+
+def test_tuning_offset_wraps_around_the_semitone():
+    """A recording 40 cents FLAT reads -0.4, not +0.6: frames at 59.6 and
+    61.6 are near 60 and 62 respectively, and the mean is circular."""
+    from swingscribe.stages.transcribe import tuning_offset
+
+    offset, _ = tuning_offset([59.6, 61.6, 63.6, 59.62, 61.58])
+    assert offset == pytest.approx(-0.40, abs=0.01)
+
+
+def test_tuning_offset_of_nothing_is_none_at_all():
+    from swingscribe.stages.transcribe import tuning_offset
+
+    assert tuning_offset([None, None]) == (0.0, 0.0)
+
+
+def test_tuning_correction_stays_out_of_the_key_while_off():
+    """No transcription key moved when the field arrived."""
+    off = Config().stage_config("transcribe")
+    assert "tuning_correction" not in off and "tuning_min_cents" not in off
+    on = Config(transcribe={"tuning_correction": True}).stage_config("transcribe")
+    assert on["tuning_correction"] is True and on["tuning_min_cents"] == 15.0

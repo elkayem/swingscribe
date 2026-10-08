@@ -61,11 +61,15 @@ SCORE_SUFFIXES = (".xml", ".musicxml", ".mscz", ".mscx")
 
 
 def score_beside(audio: Path) -> Path | None:
-    """The score named like the audio, in the folder beside it."""
-    for suffix in SCORE_SUFFIXES:
-        candidate = audio.with_suffix(suffix)
-        if candidate.is_file():
-            return candidate
+    """The score named like the audio, in the folder beside it -- or in a
+    `musicxml/` folder beside it, where pdf2musicxml writes the PDF pages'
+    readings (benchmark/Transcriptions_Other/musicxml/); the listener keeps
+    those recordings one level up, beside the PDFs."""
+    for folder in (audio.parent, audio.parent / "musicxml"):
+        for suffix in SCORE_SUFFIXES:
+            candidate = (folder / audio.name).with_suffix(suffix)
+            if candidate.is_file():
+                return candidate
     return None
 
 
