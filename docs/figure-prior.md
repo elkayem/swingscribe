@@ -805,39 +805,37 @@ What moved, and what it means:
   pair 54.95 / 55.03 / 57.29, single 18.08 / 19.75 / 9.77, triplet 3.66 /
   5.20 / 6.02.
 - **Us against the humans, rerun (single process, notes cache untouched,
-  the transcriber as of 81faf95).** Share of beats with an onset, with the
-  prior off and at the shipped 0.015:
+  the transcriber and the notation as of 84461d6).** Share of beats with an
+  onset, with the prior off and at the shipped 0.015; the ratio of ours to
+  the humans' in brackets:
 
   | figure | hand scores | ours, off | ours, 0.015 | Omnibook | ours, off | ours, 0.015 |
   |---|---|---|---|---|---|---|
-  | 0 1/2 | 55.03 | 50.33 (0.91) | 50.21 (0.91) | 57.29 | 50.78 (0.89) | 50.48 (0.88) |
-  | 0 1/3 2/3 | 5.20 | 4.81 (0.92) | 5.08 (0.98) | 6.02 | 4.52 (0.75) | 4.74 (0.79) |
-  | 0 1/4 1/2 3/4 | 2.22 | 0.66 (0.30) | 0.66 (0.30) | 3.57 | 1.76 (0.49) | 1.73 (0.49) |
-  | 0 1/2 3/4 | 1.49 | 0.74 (0.49) | 1.12 (0.75) | 1.52 | 0.88 (0.58) | 1.20 (0.78) |
-  | 0 1/4 | 0.30 | 2.13 (7.1) | 1.32 (4.4) | 0.10 | 1.54 (14.8) | 1.32 (12.6) |
-  | 0 1/4 1/2 | 0.38 | 1.28 (3.3) | 1.24 (3.2) | 0.54 | 1.62 (3.0) | 1.83 (3.4) |
-  | 1/4 1/2 | 0.04 | 0.54 (12.7) | 0.47 (10.9) | 0.04 | 0.78 (18.7) | 0.60 (14.3) |
-  | 0 3/4 | 0.04 | 0.27 (6.4) | 0.39 (9.1) | 0.27 | 0.46 (1.7) | 0.74 (2.7) |
+  | 0 1/2 | 55.03 | 50.68 (0.92) | 50.76 (0.92) | 57.29 | 51.02 (0.89) | 50.62 (0.88) |
+  | 0 1/3 2/3 | 5.20 | 4.70 (0.90) | 4.97 (0.95) | 6.02 | 4.15 (0.69) | 4.32 (0.72) |
+  | 0 1/4 1/2 3/4 | 2.22 | 0.58 (0.26) | 0.58 (0.26) | 3.57 | 1.57 (0.44) | 1.59 (0.44) |
+  | 0 1/2 3/4 | 1.49 | 0.58 (0.39) | 0.97 (0.65) | 1.52 | 0.79 (0.51) | 1.06 (0.70) |
+  | 0 1/4 | 0.30 | 1.82 (6.1) | 0.97 (3.3) | 0.10 | 1.29 (12.3) | 1.20 (11.5) |
+  | 0 1/4 1/2 | 0.38 | 1.13 (2.9) | 1.01 (2.6) | 0.54 | 1.45 (2.7) | 1.71 (3.1) |
+  | 1/4 1/2 | 0.04 | 0.50 (11.8) | 0.43 (10.0) | 0.04 | 0.81 (19.3) | 0.60 (14.4) |
+  | 0 3/4 | 0.04 | 0.19 (4.6) | 0.31 (7.3) | 0.27 | 0.36 (1.3) | 0.70 (2.6) |
 
-  (Ratio of ours to the human's in brackets.) The prior still does its job:
-  the lone-"e" figure `0 1/4` falls by 0.8 of a point on the hand scores and
-  0.2 on the Omnibook, the three-onset sixteenth figure `0 1/2 3/4` and the
-  triplet rise toward the human share. But the prior-OFF baseline itself
-  drifted since 2026-09-25 (`0 1/4` on the hand scores 1.75% then, 2.13% now;
-  on the Omnibook 1.51% then, 1.54% now), which is the transcriber's:
-  the horn hole-filler (2026-09-30) adds short notes between a line's
-  phrases, and these are the figures a short note forms. With the prior on,
-  `0 1/4` read 0.66% of the hand scores' onset beats (2.2x the humans') on
-  2026-09-26 and reads 1.32% (4.4x) today; with it off, 1.75% (5.9x) then and
-  2.13% (7.1x) now. The excess doubled with the prior on and grew by a fifth
-  with it off, so the prior's own bite is intact and the new short notes are
-  the transcriber's. One small
-  side effect is new to this table: the prior leans the late note of a
-  two-onset beat to the "a" (`0 3/4` 0.27 > 0.39 on the hand scores, 0.46 >
-  0.74 on the Omnibook) where it used to sit on the "e", a figure the
-  humans write 0.04% and 0.27% of the time. It is small (ten and thirty-seven
-  beats) and in the direction of fewer lone-"e" figures, but it is a
-  figure the corpus calls rare being traded for one it calls rarer.
+  The prior still does its job: the lone-"e" figure `0 1/4` falls by 0.85 of
+  a point on the hand scores and 0.1 on the Omnibook, and the three-onset
+  sixteenth figure `0 1/2 3/4` and the triplet rise toward the human share.
+  The prior-OFF baseline moved over the month, in two steps that are
+  measured and one cause that is not. On the hand scores `0 1/4` read 1.75%
+  on 2026-09-25, 2.13% after the horn hole-filler (2026-09-30) and the tuning
+  correction (81faf95) were in, and 1.82% once 84461d6 wrote scoops and
+  short re-attacks into the note they lead into; with the prior on, 0.66%,
+  1.32%, 0.97%. So the commit that folds the short lead-in notes took back
+  about a third of the rise; which of the earlier two changes caused it was
+  not isolated. One small side effect is new to this table: the prior leans
+  the late note of a two-onset beat to the "a" (`0 3/4` 0.19 > 0.31% on the
+  hand scores, 0.36 > 0.70% on the Omnibook) instead of the "e", a figure
+  the humans write 0.04% and 0.27% of the time. It is small (a few beats in
+  a hundred) and in the direction of fewer lone-"e" figures, but it is a
+  rare figure traded for a rarer one.
 
 **One hold-out was missing.** Wesley Chin's Speak No Evil (Shorter) is a
 copy of WJazzD solo 435, the same recording as a benchmark track: the
