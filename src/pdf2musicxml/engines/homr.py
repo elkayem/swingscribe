@@ -48,6 +48,21 @@ def command(image: Path) -> list[str]:
     return [sys.executable, "-c", RUNNER, str(image)]
 
 
+def image_argument(image: Path, cwd: Path) -> Path:
+    """The image's path from the child's working directory.
+
+    homr opens it with OpenCV's `imread`, which takes a narrow path on
+    Windows and cannot open one holding a character outside the code page
+    ("À la Mode - Wayne Shorter Solo"). Relative to the working directory,
+    under the same `.work` folder, the path is the folders between the two
+    and the page's own ASCII name.
+    """
+    try:
+        return Path(os.path.relpath(image, cwd))
+    except ValueError:  # another drive
+        return image
+
+
 def run(
     images: list[Path], out_dir: Path, *, timeout: int = 1800, reuse: bool = True
 ) -> list[Path]:
@@ -73,7 +88,7 @@ def run(
         log_path = out_dir / f"{image.stem}.homr.log"
         with open(log_path, "w", encoding="utf-8") as log:
             process = subprocess.run(
-                command(image),
+                command(image_argument(image, out_dir)),
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 env=environment(),

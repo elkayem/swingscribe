@@ -9,6 +9,7 @@ grouping pages into transcriptions, and the command lines it builds.
 
 from __future__ import annotations
 
+import sys
 from fractions import Fraction
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -353,6 +354,9 @@ def test_music_fonts_are_not_titles_but_text_and_script_faces_are():
     assert not is_music_font("Inkpen2ScriptStd") and not is_music_font("ReprisetextStd")
     assert not is_music_font("MuseJazzText") and not is_music_font("FuturaLT-Bold")
     assert not is_music_font("OpusTextStd")  # tuplet digits: never wordy anyway
+    # Sibelius's Pori family (Hank Mobley's The Breakdown, Hipsippy Blues)
+    assert is_music_font("PoriStd-Regular") and is_music_font("PoriSpecialStd-Regular")
+    assert not is_music_font("PoriTextStd-Regular")
 
 
 def test_noteheads_are_told_by_shape_not_code():
@@ -652,9 +656,45 @@ def test_homr_child_environment_makes_a_relative_pythonpath_absolute(monkeypatch
     assert homr.command(Path("p001.png"))[-1] == "p001.png"
 
 
-def text_pdf(path: Path, lines: list[tuple[str, float, float]]) -> None:
-    """A one-page PDF with Helvetica text: (text, size, y from the bottom in points)."""
+def test_homr_is_handed_a_page_path_without_the_pdfs_own_name(tmp_path):
+    # OpenCV's imread cannot open "À la Mode - Wayne Shorter Solo\pages\p001.png"
+    from pdf2musicxml.engines import homr
+
+    work = tmp_path / "À la Mode - Wayne Shorter Solo"
+    image = work / "pages" / "p001.png"
+    argument = homr.image_argument(image, work / "t01" / "homr")
+    assert argument == Path("..") / ".." / "pages" / "p001.png"
+    assert str(argument).isascii()
+
+
+def test_a_scanned_page_under_a_non_ascii_folder_is_read(tmp_path):
+    cv2 = pytest.importorskip("cv2")
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("homr")
+    folder = tmp_path / "À la Mode"
+    folder.mkdir()
+    png = folder / "p001.png"
+    page = np.full((400, 300, 3), 255, dtype=np.uint8)
+    page[100:110, 20:280] = 0
+    ok, data = cv2.imencode(".png", page)
+    png.write_bytes(data.tobytes())
+    if sys.platform == "win32":
+        assert cv2.imread(str(png)) is None  # the trap itself
+    assert scanpage.page_gray(png).ndim == 2
+    here = Path.cwd()
+    with scanpage._in_folder(png) as name:
+        assert name == "p001.png" and cv2.imread(name) is not None
+    assert Path.cwd() == here
+
+
+def text_pdf(path: Path, lines: list[tuple[str, float, float]], extra: str = "") -> None:
+    """A one-page PDF with Helvetica text: (text, size, y from the bottom in points).
+
+    `extra` is more content-stream operators, appended as they are.
+    """
     content = "\n".join(f"BT /F1 {size} Tf 72 {y} Td ({text}) Tj ET" for text, size, y in lines)
+    if extra:
+        content += "\n" + extra
     body = content.encode("latin-1")
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -678,6 +718,25 @@ def text_pdf(path: Path, lines: list[tuple[str, float, float]]) -> None:
         xref,
     )
     path.write_bytes(bytes(out))
+
+
+def test_a_watermark_set_at_45_degrees_is_not_read(tmp_path):
+    # Wesley Chin's "WESLEYCHIN.COM" across every page: its glyph boxes
+    # change once a page has been rendered, so it reached the readers
+    # differently on a first conversion and a re-run.
+    pytest.importorskip("pypdfium2")
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as raw
+
+    pdf = tmp_path / "watermark.pdf"
+    text_pdf(
+        pdf,
+        [("Speak No Evil", 24, 700)],
+        extra="BT /F1 60 Tf 0.7071 0.7071 -0.7071 0.7071 150 200 Tm (WESLEYCHIN.COM) Tj ET",
+    )
+    assert [line.text for line in pdfpages.page_text(pdf, 0)] == ["Speak No Evil"]
+    textpage = pdfium.PdfDocument(str(pdf))[0].get_textpage()
+    assert "".join(g.char for g in vector._glyphs(textpage, raw)) == "SpeakNoEvil"
 
 
 def test_page_text_keeps_a_small_caps_title_on_one_line(tmp_path):
@@ -1380,6 +1439,30 @@ def test_tempo_mark_reads_the_beat_glyph_the_number_and_the_words():
     assert vector.tempo_mark(_tempo_line(number="3")) is None
 
 
+def test_tracked_out_tempo_words_stay_one_word():
+    # The Breakdown's "swing" in Futura Light, boxes as pdfium gives them:
+    # 1.7 points between i and n is a fifth of the i, not a word space.
+    font = "FuturaLT-Light"
+    boxes = [
+        ("s", 54.87, 58.26, 700.68, 706.05),
+        ("w", 58.75, 66.91, 700.51, 706.21),
+        ("i", 67.81, 68.71, 700.77, 708.12),
+        ("n", 70.39, 74.09, 700.77, 706.05),
+        ("g", 75.29, 80.33, 697.89, 706.05),
+        ("h", 84.59, 88.35, 700.68, 711.95),
+        ("=", 92.21, 97.76, 702.23, 705.13),
+        ("1", 102.81, 104.64, 700.77, 709.19),
+        ("1", 109.63, 111.47, 700.77, 709.19),
+        ("9", 114.83, 120.74, 700.7, 709.3),
+    ]
+    glyphs = [
+        vector.Glyph(c, "OpusTextStd" if c in "h=" else font, left, bottom, right, top)
+        for c, left, right, bottom, top in boxes
+    ]
+    tempo = vector.tempo_mark(glyphs)
+    assert (tempo.words, tempo.unit, tempo.per_minute) == ("swing", "half", 119)
+
+
 def test_set_tempo_writes_the_metronome_mark_and_the_playback_tempo():
     tree = score(quarters(2))
     root = tree.getroot()
@@ -1651,6 +1734,78 @@ def test_the_beams_over_a_group_set_its_value_when_the_engine_read_it_a_level_of
     }
     result = vector.apply_printed_tuplets(part, pages)
     assert [k.findtext("type") for k in part.findall("measure/note")[:3]] == ["16th"] * 3
+
+
+def test_a_triplet_inside_a_longer_beamed_run_keeps_both_its_beams():
+    # East of the Sun bar 40: A B, then a 16th triplet C D E, all under one
+    # primary beam from A; the triplet's own second beam. The primary runs
+    # past the group but ends on noteheads, so it is a beam, not a text line.
+    bar = "".join(plain(s, 5, 3, "16th") for s in "ABCDE") + plain("F", 5, 12, "quarter") * 3
+    part = musicxml.first_part(score([bar], divisions=12).getroot())
+    heads = [head(100 + 12 * i, s, 5) for i, s in enumerate("ABCDE")]
+    heads += [head(170 + 15 * i, "F", 5) for i in range(3)]
+    mark = vector.TupletMark(x=136.0, y=-15.0, staff=0, count=3, spacing=5.0)
+    pages = pages_with(heads, [mark])
+    pages.beams = {
+        (0, 0): [
+            (98.0, 18.0, 150.0, 20.5),  # primary, A to E
+            (98.0, 14.0, 114.0, 16.5),  # second beam, A B
+            (122.0, 14.0, 150.0, 16.5),  # second beam, C D E
+        ]
+    }
+    result = vector.apply_printed_tuplets(part, pages)
+    assert result.applied == 1
+    kids = part.findall("measure/note")
+    assert [k.findtext("type") for k in kids[2:5]] == ["16th"] * 3
+    assert musicxml.bars(part)[0].length == 4
+    # Bar 90: an eighth, then a 16th triplet under the same primary beam,
+    # slanting toward the triplet's last head: its second beam 1.65 spaces
+    # off, nearer than a tie's limit, is still stacked on the first.
+    bar = plain("F", 5, 6, "eighth") + "".join(plain(s, 5, 3, "16th") for s in "DCB")
+    bar += plain("F", 5, 12, "quarter") * 3
+    part = musicxml.first_part(score([bar], divisions=12).getroot())
+    heads = [head(100, "F", 5)] + [head(112 + 12 * i, s, 5) for i, s in enumerate("DCB")]
+    heads += [head(170 + 15 * i, "F", 5) for i in range(3)]
+    heads[3].y = 7.0
+    mark = vector.TupletMark(x=124.0, y=-15.0, staff=0, count=3, spacing=5.0)
+    pages = pages_with(heads, [mark])
+    pages.beams = {(0, 0): [(98.0, 18.0, 138.0, 20.5), (110.0, 14.0, 138.0, 16.5)]}
+    result = vector.apply_printed_tuplets(part, pages)
+    assert result.applied == 1
+    kids = part.findall("measure/note")
+    assert [k.findtext("type") for k in kids[1:4]] == ["16th"] * 3
+    assert musicxml.bars(part)[0].length == 4
+
+
+def test_beams_stack_on_the_innermost_one_a_stems_length_from_the_heads():
+    spacing = 5.0
+    # Benny Goodman bar 20: three beams of a long rising run, measured at
+    # their box centres 5.2, 6.0 and 6.75 spaces from a triplet's heads.
+    assert vector._stacked([(26.0, 26.0), (30.0, 30.0), (33.75, 33.75)], spacing) == 3
+    # East of the Sun bar 90: the inner beam 1.5 spaces off, the outer 2.0.
+    assert vector._stacked([(7.5, 7.5), (10.0, 10.0)], spacing) == 2
+    # A tie hugging the heads alone is no beam; the next staff's beams alone neither.
+    assert vector._stacked([(4.0, 4.0)], spacing) == 0
+    assert vector._stacked([(36.0, 36.0), (40.0, 40.0)], spacing) == 0
+
+
+def test_thick_ledger_lines_are_not_beams():
+    # Cheese Cake bar 44: Inkpen2's ledgers under two E6s (on A5 and C6,
+    # 2.4 spaces wide, a third of a space thick) read as two beams each.
+    staff = vector.Staff(bottom=0.0, spacing=5.0, left=0.0, right=600.0)
+    heads = [head(100, "E", 6), head(121, "E", 6)]
+    for h in heads:
+        h.y = 35.0
+    ledgers = [(0, x - 6.0, y - 0.8, x + 6.0, y + 0.8) for x in (100, 121) for y in (25.0, 30.0)]
+    beam = (0, 99.0, 49.0, 122.0, 51.5)  # stem to stem, between the heads
+    assert vector.drop_ledgers([*ledgers, beam], heads, [staff]) == [beam]
+    # A bracket's half under notes inside the staff sits where a ledger
+    # would, centred on a note; no head is beyond it, so it stays.
+    inside = [head(200, "G"), head(212, "A")]
+    for h in inside:
+        h.y = 10.0
+    bracket = (0, 194.0, -10.4, 206.0, -9.6)
+    assert vector.drop_ledgers([bracket], inside, [staff]) == [bracket]
 
 
 def test_two_read_measures_on_one_printed_bar_are_joined_and_the_repeat_goes():

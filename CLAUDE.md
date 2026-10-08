@@ -1457,6 +1457,30 @@ docs/pdf2musicxml.md has the measurements. Things not to re-derive:
   values). Scans' biggest remaining error is homr's beam COUNT (eighths
   as 16ths), and reading beams from the pixels was measured and fails on
   the Anderson hand: an eighth beam is as thick as two 16th beams.
+- **A watermark is not read, and a first conversion must read what a
+  re-run reads** (0.3.41-0.3.43, `pdfpages.is_watermark`): Wesley Chin's
+  "WESLEYCHIN.COM" (and Cotton Tail's) is a text font at 45 degrees whose
+  glyph boxes pdfium reports DIFFERENTLY once any page of the document has
+  been rendered in the same process -- a first conversion renders, a
+  re-run loads the PNGs -- and the huge rotated boxes hid real tuplet
+  numbers either way (Speak No Evil: 12 on a first run, 13 on a re-run,
+  14 once dropped). Text-font characters more than 25 degrees off the
+  page's axes are dropped; the music font's rotated "~" of a wavy line
+  holds its box and stays. Also: Sibelius's Pori family is a music font
+  (two Hank Mobley pages had been read as scans); OpenCV's `imread`
+  cannot open a Windows path with "À" in it (homr is handed a path
+  relative to its working directory, scanpage decodes bytes); a tempo
+  mark's word space is measured against the run's tallest glyph ("swi n
+  g", "Ba llad"). A drum score (percussion staff) is not converted.
+  The numbers it uncovered fixed how beams value a tuplet (0.3.44-0.3.50,
+  vector 494 -> 451 off over the same 222 files): a beam running past the
+  group counts when both its ends are on noteheads (`_ends_at_heads`,
+  a 16th triplet inside a 16th run); beams stack on the nearest one a
+  stem's length off, nearer or farther (`_stacked`: slanted groups,
+  long rising beams); thick Inkpen2 ledgers are not beams
+  (`drop_ledgers`, only between the staff and a head beyond it). A
+  strict-bracket window and a bracket-hook direction rule were measured
+  and withdrawn (a misfiled "3" applied; 126 real numbers skipped).
 - **pdfium's text layer drops the second of two identical characters whose
   boxes touch**: a printed 4/4 arrives as one "4", a 2/2 as one "2", while
   3/4 and 6/8 arrive whole. The page's text OBJECTS still hold both, so a

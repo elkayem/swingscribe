@@ -14,12 +14,13 @@ rendered pages back into a PDF that any engine renders 1:1.
 
 from __future__ import annotations
 
+import math
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
 # Fonts that carry notation rather than words. A line set in one of these is
-# never a title, however large. Sibelius (Opus, Inkpen2, Reprise, Helsinki),
+# never a title, however large. Sibelius (Opus, Inkpen2, Reprise, Helsinki, Pori),
 # Finale (Maestro, Engraver, Jazz, Petrucci), MuseScore (Leland, MuseJazz,
 # Petaluma, Bravura, Emmentaler/Gonville) and LilyPond (feta) all appear in
 # transcription PDFs found on the web.
@@ -28,6 +29,7 @@ MUSIC_FONT_MARKERS = (
     "inkpen",
     "reprise",
     "helsinki",
+    "pori",
     "maestro",
     "engraver",
     "petrucci",
@@ -73,6 +75,30 @@ def music_family(name: str) -> bool:
     """
     lowered = name.lower().replace(" ", "")
     return any(marker in lowered for marker in MUSIC_FONT_MARKERS)
+
+
+# A watermark across the page ("WESLEYCHIN.COM", Wesley Chin's pages; Cotton
+# Tail's) is a text font set at 45 degrees, and its glyph boxes are not even
+# stable: pdfium reports them differently once a page of the document has
+# been rendered in the same process, so a first conversion and a re-run read
+# different pages (Speak No Evil, 2026-10-07: a bracketed 3 lost on the first
+# run under the watermark's box). Nothing the readers look for is set that
+# far off the page's axes. The music font's own rotated glyphs -- a wavy
+# line's "~" laid along its slope -- are not text and hold their boxes.
+OFF_AXIS_DEGREES = 25.0
+
+
+def is_watermark(textpage, index: int, font: str) -> bool:
+    """A text-font character set more than OFF_AXIS_DEGREES off the page's axes."""
+    import pypdfium2.raw as raw
+
+    if music_family(font):
+        return False
+    radians = raw.FPDFText_GetCharAngle(textpage, index)
+    if radians < 0:  # pdfium could not say
+        return False
+    degrees = math.degrees(radians) % 90
+    return min(degrees, 90 - degrees) > OFF_AXIS_DEGREES
 
 
 @dataclass(frozen=True)
@@ -173,6 +199,8 @@ def page_text(pdf: Path, index: int) -> list[TextLine]:
         char_size = top - bottom
         if not char_font or char_size <= 0:
             pending_space = True
+            continue
+        if is_watermark(textpage, i, char_font):
             continue
         same_line = (
             char_font == font

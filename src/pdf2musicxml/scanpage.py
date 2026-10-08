@@ -22,7 +22,9 @@ arithmetic.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 from pathlib import Path
 
 from pdf2musicxml import vector
@@ -66,11 +68,15 @@ def read_page(png: Path) -> dict:
 def page_gray(png: Path):
     """The page as homr's segmentation sees it: cropped, resized, contrast-adjusted, grey."""
     import cv2
+    import numpy as np
     from homr.autocrop import autocrop
     from homr.color_adjust import apply_clahe
     from homr.resize import resize_image
 
-    image = apply_clahe(resize_image(autocrop(cv2.imread(str(png)))))
+    # imdecode, not imread: OpenCV's imread takes a narrow path on Windows
+    # and cannot open one with a character outside the code page in it.
+    image = cv2.imdecode(np.fromfile(png, dtype=np.uint8), cv2.IMREAD_COLOR)
+    image = apply_clahe(resize_image(autocrop(image)))
     return image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
 
@@ -84,6 +90,22 @@ def _add_digits(page: dict, gray) -> None:
     page["digits_version"] = DIGITS_VERSION
 
 
+@contextlib.contextmanager
+def _in_folder(png: Path):
+    """The image's bare name, from inside its folder, for homr's own `imread`.
+
+    OpenCV cannot open a Windows path holding a character outside the code
+    page ("À la Mode - Wayne Shorter Solo"); the page images' own names
+    are ASCII.
+    """
+    here = os.getcwd()
+    os.chdir(Path(png).parent)
+    try:
+        yield Path(png).name
+    finally:
+        os.chdir(here)
+
+
 def _segment(png: Path) -> dict:
     """homr's staves, noteheads (x, y, staff position) and bar lines, digits left empty."""
     import numpy as np
@@ -92,7 +114,8 @@ def _segment(png: Path) -> dict:
     from homr.note_detection import add_notes_to_staffs, combine_noteheads_with_stems
     from homr.staff_detection import break_wide_fragments, detect_staff
 
-    predictions, debug = load_and_preprocess_predictions(str(png), False, False, False)
+    with _in_folder(png) as name:
+        predictions, debug = load_and_preprocess_predictions(name, False, False, False)
     symbols = predict_symbols(debug, predictions)
     symbols.staff_fragments = break_wide_fragments(symbols.staff_fragments)
     heads = combine_noteheads_with_stems(symbols.noteheads, symbols.stems_rest)

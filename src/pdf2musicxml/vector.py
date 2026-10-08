@@ -34,7 +34,7 @@ from fractions import Fraction
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from pdf2musicxml.pdfpages import is_music_font, music_family
+from pdf2musicxml.pdfpages import is_music_font, is_watermark, music_family
 
 STEPS = "CDEFGAB"
 ACCIDENTALS = {"b": -1, "#": 1, "n": 0, "": -1, "": 1, "": 0}
@@ -43,6 +43,9 @@ CLEFS = {"&": "treble", "?": "bass", "": "treble", "": "bass"}
 # Metronome-mark beat glyphs in the Sibelius and Finale TEXT fonts (Opus
 # Text, Inkpen2 Text, Reprise Text, Engraver Text, Jazz Text).
 BEAT_GLYPHS = {"w": "whole", "h": "half", "q": "quarter", "e": "eighth", "x": "16th"}
+# A gap between two letters of a tempo mark's words wider than this share of
+# the run's tallest glyph is a word space.
+WORD_SPACE = 0.25
 BEAT_QUARTERS = {"whole": 4.0, "half": 2.0, "quarter": 1.0, "eighth": 0.5, "16th": 0.25}
 # A tuplet digit and the count it plays in the time of.
 TUPLET_NORMAL = {3: 2, 5: 4, 6: 4, 7: 4}
@@ -558,7 +561,7 @@ def read_page(pdf: Path, index: int) -> PagePrint | None:
         times=time_signatures(glyphs, staves, _object_boxes(page)),
         tempo=tempo_mark(glyphs),
         rests=rests,
-        beams=find_beams(page, staves),
+        beams=drop_ledgers(find_beams(page, staves), heads, staves),
         flags=flags,
         multirests=multi_rests(paths, glyphs, staves, barlines, heads),
     )
@@ -574,6 +577,8 @@ def _glyphs(textpage, raw) -> list[Glyph]:
         name_buffer = (raw.c_char * 128)()
         raw.FPDFText_GetFontInfo(textpage, i, name_buffer, 128, raw.c_int())
         font = name_buffer.value.decode("latin-1", "replace").split("+", 1)[-1]
+        if is_watermark(textpage, i, font):
+            continue
         left, bottom, right, top = textpage.get_charbox(i)
         out.append(Glyph(char, font, left, bottom, right, top))
     return out
@@ -790,15 +795,22 @@ def _words_before(glyphs: list[Glyph], beat: Glyph) -> str:
         and g.height >= 0.3 * beat.height
     ]
     same_line.sort(key=lambda g: g.left)
-    text = ""
-    previous: Glyph | None = None
+    run: list[Glyph] = []
+    previous = beat
     for glyph in reversed(same_line):
-        gap = previous.left - glyph.right if previous is not None else beat.left - glyph.right
-        if gap > 2.5 * glyph.height:
+        if previous.left - glyph.right > 2.5 * glyph.height:
             break
-        space = " " if gap > 0.2 * glyph.height and text else ""
-        text = glyph.char + space + text
+        run.insert(0, glyph)
         previous = glyph
+    # A word space is measured against the run's tallest glyph, not each
+    # letter's own height: a tracked-out "swing" in Futura Light (Hank
+    # Mobley's The Breakdown) leaves 1.7 points between i and n, more than
+    # a fifth of the i, and came out "swi n g".
+    line = max((g.height for g in run), default=0.0)
+    text = ""
+    for left, glyph in zip([None, *run], run, strict=False):
+        space = left is not None and glyph.left - left.right > WORD_SPACE * line
+        text += (" " if space else "") + glyph.char
     return " ".join(text.split()).strip(" (")
 
 
@@ -924,6 +936,50 @@ def has_ledger(head: Printed, spacing: float, paths) -> bool:
         if abs((top + bottom) / 2 - head.y) <= LEDGER_REACH * spacing:
             return True
     return False
+
+
+def drop_ledgers(
+    beams: list[tuple[int, float, float, float, float]],
+    heads: list[Printed],
+    staves: list[Staff],
+) -> list[tuple[int, float, float, float, float]]:
+    """The beam-like paths less the ledger lines among them.
+
+    Inkpen2 draws a ledger line 2.4 spaces wide and a third of a space
+    thick, which passes for a beam; stacked over a high note's stem they
+    read as its beams (Cheese Cake bar 44, 2026-10-07: a quarter-note
+    triplet's two E6s, each with ledgers on A5 and C6, became 16ths). A
+    ledger is centred on its head and lies on a line position between the
+    staff and that head; a beam runs from stem to stem, between its heads,
+    and a tuplet bracket's half is not beyond the staff from any head
+    (the first version took brackets over in-staff notes for ledgers and
+    lost a triplet's rest on five files).
+    """
+
+    def beyond(head: Printed, staff: Staff, steps: float) -> bool:
+        place = (head.y - staff.bottom) / staff.spacing
+        return place >= steps - 0.6 if steps > 0 else place <= steps + 0.6
+
+    out = []
+    for staff_index, left, bottom, right, top in beams:
+        staff = staves[staff_index]
+        spacing = staff.spacing
+        steps = ((bottom + top) / 2 - staff.bottom) / spacing
+        ledger = (
+            (steps < -0.5 or steps > 4.5)
+            and abs(steps - round(steps)) <= 0.25
+            and top - bottom < LEDGER_MAX_HEIGHT * spacing
+            and right - left <= LEDGER_WIDTH[1] * spacing
+            and any(
+                h.staff == staff_index
+                and abs(h.x - (left + right) / 2) <= 0.5 * spacing
+                and beyond(h, staff, steps)
+                for h in heads
+            )
+        )
+        if not ledger:
+            out.append((staff_index, left, bottom, right, top))
+    return out
 
 
 def drop_unledgered(heads: list[Printed], staves: list[Staff], paths) -> list[Printed]:
@@ -1233,12 +1289,26 @@ def _onsets(slots: list[Slot], spacing: float) -> list[tuple[float, list[tuple]]
 BEAM_VALUES = {1: "eighth", 2: "16th", 3: "32nd"}
 
 
+def _ends_at_heads(left: float, right: float, head_xs: list[float], spacing: float) -> bool:
+    """Both ends of a path at a notehead's stem: a beam, where a text line ends anywhere.
+
+    East of the Sun bar 40 (2026-10-07): a 16th triplet inside a run of
+    16ths, its primary beam starting two notes before the bracket. Read
+    as running past the group, the beam was dropped and the triplet's one
+    remaining beam made it eighths.
+    """
+    return any(abs(left - x) <= 1.2 * spacing for x in head_xs) and any(
+        abs(right - x) <= 1.2 * spacing for x in head_xs
+    )
+
+
 def _beams_over(
     paths: list[tuple[float, float, float, float]],
     head_xs: list[float],
     head_ys: list[float],
     spacing: float,
     mark_x: float,
+    staff_xs: list[float] = (),
 ) -> int:
     """How many beams run over a group of noteheads: paths from its first stem to its last.
 
@@ -1246,7 +1316,9 @@ def _beams_over(
     space or two, and the tuplet number sits under its span; a tie or slur
     hugs the heads, a tuplet bracket is broken at its number and so never
     spans it, a text line runs far past the group, and the next staff's
-    beams lie seven spaces off where a stem reaches three or four.
+    beams lie seven spaces off where a stem reaches three or four. A beam
+    of a longer group runs past the tuplet but ends on the staff's
+    noteheads (`staff_xs`) at both ends.
     Measured on Inkpen2: beams 0.5 of a space thick, 1.5 with their slope.
     """
     if len(head_xs) < 2:
@@ -1256,21 +1328,41 @@ def _beams_over(
     for left, bottom, right, top in paths:
         if not left <= mark_x <= right:
             continue
-        if not first_x - 2.0 * spacing <= left <= first_x + 1.2 * spacing:
-            continue
-        if not last_x - 1.2 * spacing <= right <= last_x + 2.0 * spacing:
+        spans = (
+            first_x - 2.0 * spacing <= left <= first_x + 1.2 * spacing
+            and last_x - 1.2 * spacing <= right <= last_x + 2.0 * spacing
+        )
+        longer = (
+            left <= first_x + 1.2 * spacing
+            and right >= last_x - 1.2 * spacing
+            and _ends_at_heads(left, right, staff_xs, spacing)
+        )
+        if not spans and not longer:
             continue
         centre = (bottom + top) / 2
-        distance = min(abs(centre - y) for y in head_ys)
-        # A stem's length away: nearer is a tie, farther the next staff's beams.
-        if not 1.8 * spacing <= distance <= 6.5 * spacing:
-            continue
-        centres.append(centre)
-    if not centres:
+        centres.append((centre, min(abs(centre - y) for y in head_ys)))
+    return _stacked(centres, spacing)
+
+
+def _stacked(centres: list[tuple[float, float]], spacing: float) -> int:
+    """How many beams are stacked over a stem: (centre, distance from the heads) of each path.
+
+    A beam lies a stem's length from the heads: nearer is a tie, farther
+    the next staff's beams. The nearest such beam and the paths stacked
+    within a space and a half of it are the group's beams -- the inner
+    ones included when a slanted group brings them nearer a head than a
+    tie's limit (East of the Sun bar 90: the second beam 1.5 spaces
+    from the last head of a 16th triplet, the first 2.0), and the outer
+    ones past the next staff's distance when a long beam's box centre is
+    far from where it crosses the group (Benny Goodman's Body and Soul
+    bar 20: four 32nd triplets under one rising beam, the outermost
+    measured 6.75 spaces off the third triplet's heads).
+    """
+    anchors = [(c, d) for c, d in centres if 1.8 * spacing <= d <= 6.5 * spacing]
+    if not anchors:
         return 0
-    # The beams of one group are stacked within a space or so of each other.
-    nearest = min(centres, key=lambda c: min(abs(c - y) for y in head_ys))
-    return sum(1 for c in centres if abs(c - nearest) <= 1.6 * spacing)
+    nearest = min(anchors, key=lambda a: a[1])[0]
+    return sum(1 for c, d in centres if d >= 1.0 * spacing and abs(c - nearest) <= 1.6 * spacing)
 
 
 def _pair_rests(
@@ -1451,15 +1543,17 @@ def _page_value(
     flags: list[tuple[float, float, int]],
     mark: TupletMark,
     group: tuple[float, float],
+    head_xs: list[float] = (),
 ) -> tuple[Fraction | None, bool]:
     """A member's written value as the page shows it, in quarters, and whether the page said so.
 
     A rest prints its value in its glyph; a note's is its beams (paths
     over its stem, a stem's length away, not the bracket at the number's
     height, and not running more than four spaces past the group's ends
-    -- a text line over the bar does), else its flag glyphs, else a
-    quarter, or the longer value the reading gives an unbeamed,
-    unflagged head.
+    -- a text line over the bar does -- unless both its ends land on a
+    notehead of the staff, `head_xs`: the beam of a longer group the
+    tuplet sits inside), else its flag glyphs, else a quarter, or the
+    longer value the reading gives an unbeamed, unflagged head.
     """
     from pdf2musicxml.musicxml import NOMINAL_QUARTERS
 
@@ -1472,16 +1566,16 @@ def _page_value(
     for left, bottom, right, top in paths:
         if not left <= x + 0.8 * spacing or not right >= x - 0.8 * spacing:
             continue
-        if left < group[0] - 4.0 * spacing or right > group[1] + 4.0 * spacing:
+        if (
+            left < group[0] - 4.0 * spacing or right > group[1] + 4.0 * spacing
+        ) and not _ends_at_heads(left, right, head_xs, spacing):
             continue
         centre = (bottom + top) / 2
         if abs(centre - mark.y) <= 1.2 * spacing and top - bottom <= 1.0 * spacing:
             continue  # the bracket
-        if 1.8 * spacing <= abs(centre - y) <= 6.5 * spacing:
-            centres.append(centre)
-    if centres:
-        nearest = min(centres, key=lambda c: abs(c - y))
-        beams = sum(1 for c in centres if abs(c - nearest) <= 1.6 * spacing)
+        centres.append((centre, abs(centre - y)))
+    beams = _stacked(centres, spacing)
+    if beams:
         return Fraction(NOMINAL_QUARTERS[BEAM_VALUES.get(beams, "32nd")]), True
     flagged = [
         n
@@ -1490,6 +1584,12 @@ def _page_value(
     ]
     if flagged:
         return Fraction(NOMINAL_QUARTERS["eighth" if max(flagged) == 1 else "16th"]), True
+    if any(d > 6.5 * spacing for _c, d in centres):
+        # Beams over the stem, but measured farther than a stem reaches: a
+        # long rising beam's box centre is far from where it meets this
+        # note (I Can't Get Started bar 21, a 16th triplet's C#6 7 spaces
+        # off), or the next staff's. Unknown, not a quarter.
+        return None, False
     kind = element.findtext("type")
     if kind in ("half", "whole", "breve", "long"):
         return Fraction(NOMINAL_QUARTERS[kind]), False
@@ -1552,6 +1652,7 @@ def apply_printed_tuplets(part: ET.Element, printed: PrintedPages) -> TupletCorr
         bars = printed.barlines.get((mark.page, mark.staff), [])
         paths = printed.beams.get((mark.page, mark.staff), [])
         flags = printed.flags.get((mark.page, mark.staff), [])
+        staff_xs = [s[0] for s in by_staff.get((mark.page, mark.staff), []) if s[4] == "head"]
         # The bracket's own extent, when one is drawn, says which onsets it
         # holds: a "3" over quarter, quarter, eighth, eighth holds four.
         window = None
@@ -1634,7 +1735,16 @@ def apply_printed_tuplets(part: ET.Element, printed: PrintedPages) -> TupletCorr
         for x, (element, what, y, value) in slots:
             if element.find("chord") is None:
                 page_value, said = _page_value(
-                    x, y, what, value, element, paths, flags, mark, (window[0][0], window[-1][0])
+                    x,
+                    y,
+                    what,
+                    value,
+                    element,
+                    paths,
+                    flags,
+                    mark,
+                    (window[0][0], window[-1][0]),
+                    staff_xs,
                 )
                 page_values.append(page_value)
                 evidence = evidence or said
@@ -1727,6 +1837,7 @@ def apply_printed_tuplets(part: ET.Element, printed: PrintedPages) -> TupletCorr
             [y for _x, group in window for _e, what, y, _v in group if what == "head"],
             mark.spacing,
             mark.x,
+            staff_xs,
         )
         if beams in BEAM_VALUES:
             chosen = BEAM_VALUES[beams]

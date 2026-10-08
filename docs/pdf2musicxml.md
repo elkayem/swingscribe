@@ -855,6 +855,83 @@ single eighth beam is drawn as thick as the pair (20-27 px against
 19-26 at 21 px a space). homr fails on exactly that, and so would any
 count from the pixels; those values are the proofreader's.
 
+### New pages, a watermark, and beams over a triplet (2026-10-07, 0.3.41-0.3.50)
+
+The listener added thirteen notation-program PDFs. One is a drum score
+(Art Blakey's A Night in Tunisia intro, a percussion staff with no
+pitches) and was not converted. The other twelve went through, and
+three of them, plus older pages, exposed four defects:
+
+- **A font family nobody listed.** The Breakdown is engraved in Sibelius's
+  Pori family (`PoriStd`, `PoriSpecialStd`, `PoriTextStd`,
+  `PoriChordsStd`); with no music font recognised it was read as a scan.
+  Hipsippy Blues, already in the corpus, had been read the same way.
+  Both now count their noteheads (300 of 300; 486 of 486).
+- **A path OpenCV cannot open.** "À la Mode - Wayne Shorter Solo" failed:
+  OpenCV's `imread` takes a narrow path on Windows. homr is now handed
+  the page's path relative to its working directory (both under the
+  same `.work` folder, so only ASCII names remain), and `scanpage`
+  decodes the bytes itself.
+- **Tracked-out tempo words.** "swing" in Futura Light came out "swi n g":
+  a word space is now measured against the run's tallest glyph, not the
+  letter's own height. Six of 135 tempo marks changed, all corrections
+  ("Fu n k", "Ba llad"); 129 did not move.
+- **A first conversion and a re-run read different pages.** Speak No Evil
+  gave 2 bars off on its first conversion and 3 on every re-run, from
+  byte-identical engine readings. pdfium reports the boxes of a ROTATED
+  glyph differently once any page of the document has been rendered in
+  the same process; a first conversion renders the pages, a re-run loads
+  their PNGs. The rotated glyphs are Wesley Chin's 45-degree
+  "WESLEYCHIN.COM" watermark (Cotton Tail has another), and their huge
+  boxes sat on real tuplet numbers in both states (Speak No Evil: 12
+  numbers found on a first run, 13 on a re-run, 14 on the page). A
+  text-font character more than 25 degrees off the page's axes is now
+  dropped (`pdfpages.is_watermark`); the music font's rotated "~" of a
+  wavy line keeps its box and stays. 32 more tuplet numbers on 15 files.
+
+The numbers the watermark had hidden then exposed how a member's value
+is read from its beams, checked bar by bar against the pages:
+
+- A triplet inside a longer beamed run (East of the Sun bar 40: two
+  16ths, a 16th triplet, more 16ths) has its primary beam running past
+  the group, and a path more than four spaces past the group was taken
+  for a text line over the bar; the triplet kept one beam and became
+  eighths. A path that runs past the group but ENDS ON NOTEHEADS at both
+  ends is a beam (`_ends_at_heads`; the "LAY BACK" line ends nowhere
+  near one).
+- A slanted group brings its inner beam nearer the last head than a tie's
+  1.8-space limit (bar 90: 1.5 spaces), and a long rising beam's box
+  centre is far from where it crosses a group in the middle of its run
+  (Benny Goodman's Body and Soul bar 20: the outermost of three beams
+  6.75 spaces off). The nearest beam a stem's length away anchors the
+  count, and every path stacked within 1.6 spaces of it counts, nearer
+  or farther (`_stacked`). A note with beams over it measured only past
+  6.5 spaces is unknown, not a quarter (I Can't Get Started bar 21).
+- Inkpen2's ledger lines are 2.4 spaces wide and a third of a space thick
+  and passed for beams under the new stacking (Cheese Cake bar 44: a
+  quarter-note triplet's two E6s became 16ths). A path centred on a
+  head, on a line position between the staff and that head, is a ledger
+  (`drop_ledgers`); the first version also took tuplet brackets over
+  in-staff notes for ledgers and lost a triplet's rest on five files.
+
+Two rules were tried and withdrawn. Taking the bracket's own extent
+over its half-space tolerance when it holds exactly the number fixed
+East of the Sun bar 102 (a "5" over five 32nds, its hook ending short
+of the next eighth) but applied a "3" filed under the wrong staff on
+Scream Machine. Reading which way a bracket's hooks point to catch
+such a misfiled number skipped 126 numbers on 50 files. Bar 102 is now
+left alone and flagged, where it was written as a 5:4 of 16ths over six
+notes that happened to fill the bar.
+
+Over the 222 vector files that existed before the round, bars off
+494 -> 451; against 0.3.43 (watermark fixed, beams not), 33 files
+better and 4 worse. Of the thirteen bars newly off, six were checked
+against their pages: four hold the page's tuplet now and are off for
+another misreading the old value had hidden (Like Someone in Love bar
+16: a 32nd triplet, and a ghost note read as a grace), Free For All bar
+88 is wrong either way (the engine dropped a note), and East of the Sun
+bar 102 is the one left alone. Scans unchanged at 114.
+
 ## What is left to a human
 
 An OMR reading is a draft. Per page expect a handful of wrong durations,
