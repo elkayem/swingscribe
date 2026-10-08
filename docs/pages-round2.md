@@ -125,9 +125,8 @@ not the grid.
 
 ## Next, in order
 
-1. **Switch the tuning correction on** -- the control held (below): the largest
-   single gain these pages show, on exactly the recordings a jazz listener
-   brings first, at the cost of one circular mean.
+1. **Switch the tuning correction on** -- done 2026-10-08 (the control and
+   the shipped numbers are below).
 2. **Merge scoops and re-attacks into the note they belong to.** A short
    note touching its neighbour a semitone below and before it, with no
    attack of its own, is the neighbour's scoop; a same-pitch fragment with
@@ -183,8 +182,29 @@ player leaning sharp as a transfer running fast. So `tuning_min_cents` is
 worse, and a track under 15 keeps today's notes exactly, so this table IS
 the threshold's effect. Chosen on dev data with the test split held out.
 
-**Still off by default.** Switching it on moves every transcription key:
-every cached review in the GUI re-transcribes once (seconds on the GPU),
-the harness re-transcribes everything (about 90 minutes), and the pins
-move up by the amounts above. One line in config.py, and the listener's
-call.
+**On by default since 2026-10-08**, the listener's call on this table. It
+acts only on CREPE's line (`TranscribeConfig.uses_tuning_correction`): a
+pianist on the piano model's line keys exactly as before, so only horns and
+the pianists' CREPE takes re-transcribed. The harness at 15 cents, paired
+by recording against the card it replaced: 31 of 194 runs changed and the
+other 163 are note for note what they were.
+
+| set / measure | change [95% interval] | up / down |
+|---|---|---|
+| pages pitch F1 | +0.0157 [+0.0032, +0.0317] | 6 / 0 |
+| pages edits per 100 notes | -4.33 [-8.81, -0.89] | 6 better / 0 |
+| pages rhythm / value | +0.0118 / +0.0142 | 5 / 1, 6 / 0 |
+| Omnibook pitch F1 | +0.0144 [+0.0026, +0.0311] | 5 / 0 |
+| Omnibook rhythm / value | +0.0112 / +0.0082 | 5 / 1 |
+| WJazzD note F1 | +0.0018 [+0.0003, +0.0038] | 4 / 0 |
+| hand scores pitch F1 | +0.0025 | 1 / 0 (Confirmation) |
+
+Silver pages' mean pitch F1 0.850 -> 0.867, edits per 100 64.4 -> 60.2;
+bronze 0.773 -> 0.787. What reads down is small and explained: My Little
+Suede Shoes (Omnibook, +15.6 cents, the smallest correction) rhythm -0.011;
+Daahoud rhythm -0.004 with value +0.016; and two WJazzD solos' beat F1
+(Blues For Alice -0.007, Cherokee -0.015), whose GRID did not change -- the
+beat score places WJazzD's beats by a fit made from our notes, and that fit
+moved by about 20 ms as their note F1 rose (+0.053, +0.027). Cherokee's page
+also matches 21 more notes, which expose a half-beat excursion over bars
+80-82 (WJazzD bar-line steps 45 -> 47).

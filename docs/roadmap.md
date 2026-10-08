@@ -346,8 +346,10 @@ reviews of MODERN recordings the median offset is 6.6 cents, and there it
 explains nothing. The swing-era 78s the listener added are another
 population: Lester Young's sides run 15-30 cents sharp, and correcting from
 15 cents lifts every such track, none down (WJazzD, Omnibook and pages;
-docs/pages-round2.md). `TranscribeConfig.tuning_correction`, off pending
-the listener.
+docs/pages-round2.md). `TranscribeConfig.tuning_correction` is ON since
+2026-10-08 (the listener's call): 31 of 194 harness runs changed, the other
+163 note for note, and every set up or level -- pages pitch F1 +0.016 (6 up,
+0 down), Omnibook +0.014 (5 / 0), WJazzD note F1 +0.0018 (4 / 0).
 
 **Basic Pitch as the line**, and as a pitch voter (A2).
 

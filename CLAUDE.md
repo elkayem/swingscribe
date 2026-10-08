@@ -1646,6 +1646,18 @@ list of what is actually wrong; run everything with one command:
   52 up / 2 down over 73 (recall +0.016, precision -0.002); Omnibook pitch
   F1 +0.0070; the listener's horn pages gain ornaments the transcriber
   left out (edit cost +0.80 per 100).
+- **The recording's own tuning is taken out of CREPE's line** (2026-10-08,
+  `TranscribeConfig.tuning_correction`, on, docs/pages-round2.md): the
+  circular mean of every voiced frame's distance from A440, subtracted
+  where notes are rounded and nowhere else (the harmonic-energy onset test
+  looks for the TRUE frequency), from `tuning_min_cents` 15. Swing-era 78
+  transfers run 15-30 cents off (Lester Young's Tea for Two +30: pitch F1
+  0.635 -> 0.803); modern recordings sit under 13 and are left alone, so
+  163 of 194 harness runs did not change by a note. 10-15 cents held every
+  loss when measured -- there a "tuning" is as likely the player's own
+  intonation -- so never lower the threshold without re-reading that band.
+  It dumps into the key only where it acts (`uses_tuning_correction`): a
+  pianist on the piano model's line keys as before.
 - **Second opinions measured and NOT shipped** (2026-09-30,
   docs/kong-bakeoff.md; the downloads live in
   `C:\Users\lkmcg\swingscribe-research`, never the repo). `piano.py`'s

@@ -1007,7 +1007,7 @@ def analyze(
     # for the pitch's harmonics at their true frequency, and the median
     # filter commutes with a constant shift.
     tuned = pitches
-    if tc.tuning_correction:
+    if tc.uses_tuning_correction:
         offset, concentration = tuning_offset(pitches)
         applied = abs(offset) * 100.0 >= tc.tuning_min_cents
         if applied:

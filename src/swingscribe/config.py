@@ -357,8 +357,11 @@ class TranscribeConfig(BaseModel):
     # or more heard better (+0.03 at 15-20, +0.13 past 25) and none worse,
     # while the 20 at 10-15 were a mixed bag holding every loss -- at that
     # size the estimate is as likely the player's own intonation as the
-    # transfer (docs/pages-round2.md). Off, and out of the key while off.
-    tuning_correction: bool = False
+    # transfer (docs/pages-round2.md). On by default since 2026-10-08 (the
+    # listener's call on that table); only CREPE's line is corrected, so
+    # the fields are dumped only where they act (`uses_tuning_correction`):
+    # a pianist on the piano model's line keyed exactly as before.
+    tuning_correction: bool = True
     tuning_min_cents: float = 15.0
 
     @model_serializer(mode="wrap")
@@ -398,10 +401,21 @@ class TranscribeConfig(BaseModel):
             for name in type(self).model_fields:
                 if name.startswith("horn_fill_"):
                     data.pop(name, None)
-        if not self.tuning_correction:
+        if not self.uses_tuning_correction:
             data.pop("tuning_correction", None)
             data.pop("tuning_min_cents", None)
         return data
+
+    @property
+    def uses_tuning_correction(self) -> bool:
+        """Whether the recording's tuning is taken out of CREPE's line: on,
+        and the line is CREPE's. A pianist on the piano model's line has
+        its pitches from the model's own semitones and sets CREPE's aside,
+        so the correction would change nothing there -- and the one gate
+        the stage and the cache key both read keeps that key where it was."""
+        return self.tuning_correction and not (
+            self.uses_piano_oracle and self.piano_line == "oracle"
+        )
 
     @property
     def uses_horn_fill(self) -> bool:

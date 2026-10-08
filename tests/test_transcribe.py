@@ -815,7 +815,10 @@ def test_the_crepe_line_keys_exactly_as_before_the_line_fields_existed():
     oracle = TranscribeConfig(ensemble="trio").model_dump(mode="json")
     assert oracle["piano_line"] == "oracle"
     assert oracle["piano_line_continuity"] == 0.02
-    assert {k: v for k, v in oracle.items() if not k.startswith("piano_line")} == crepe
+    # The tuning correction acts on CREPE's line only, so only that key
+    # carries it (test_tuning_correction_keys_only_where_it_acts).
+    untuned = {k: v for k, v in crepe.items() if not k.startswith("tuning_")}
+    assert {k: v for k, v in oracle.items() if not k.startswith("piano_line")} == untuned
 
 
 def test_a_horn_never_carries_the_line_in_its_key():
@@ -1084,9 +1087,18 @@ def test_tuning_offset_of_nothing_is_none_at_all():
     assert tuning_offset([None, None]) == (0.0, 0.0)
 
 
-def test_tuning_correction_stays_out_of_the_key_while_off():
-    """No transcription key moved when the field arrived."""
-    off = Config().stage_config("transcribe")
+def test_tuning_correction_keys_only_where_it_acts():
+    """Off, the fields are out of the key (no key moved when they arrived);
+    on (the default), a CREPE line keys with them and a pianist on the piano
+    model's line, whose pitches CREPE does not set, keys without them."""
+    off = Config(transcribe={"tuning_correction": False}).stage_config("transcribe")
     assert "tuning_correction" not in off and "tuning_min_cents" not in off
-    on = Config(transcribe={"tuning_correction": True}).stage_config("transcribe")
+    on = Config().stage_config("transcribe")
     assert on["tuning_correction"] is True and on["tuning_min_cents"] == 15.0
+    oracle = Config(transcribe={"ensemble": "trio"})
+    assert oracle.transcribe.piano_line == "oracle"
+    assert not oracle.transcribe.uses_tuning_correction
+    assert "tuning_correction" not in oracle.stage_config("transcribe")
+    crepe = Config(transcribe={"ensemble": "trio", "piano_line": "crepe"})
+    assert crepe.transcribe.uses_tuning_correction
+    assert crepe.stage_config("transcribe")["tuning_correction"] is True
