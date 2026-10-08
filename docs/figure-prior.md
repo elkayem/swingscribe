@@ -732,6 +732,134 @@ notes (4,203) and its page hit reads 74.9% -> 74.8%, re-pinned. The dev
 pages that get recordings are still in the count; do not tune the prior's
 WEIGHT on them -- that is what the test split is for.
 
+## Re-tally, 2026-10-08
+
+The listener's corrections and a full re-conversion of the folder landed
+(about a dozen new Wesley Chin solos, the book splits merged into one file
+per tune, the printed-text fixes of 0.3.41-0.3.43). The count was re-run on
+the settled folder: 271 files, taken after the 07:16 re-conversion finished
+and with no converter running. (A count at 23:45 the night before, in the
+middle of the previous re-conversion, had read 53,637 onset beats; the
+folder moves while a conversion runs, so wait for it.) **The table did not
+move.** Every number below is the
+2026-09-25 value, then today's.
+
+| | 2026-09-25 | 2026-10-08 |
+|---|---|---|
+| transcriptions counted (after the hold-outs below) | 268 | 263 |
+| notes | 119,606 | 124,723 |
+| bars filling their signature | 19,166 of 20,214 (94.8%) | 20,871 of 21,503 (97.1%) |
+| bars the converter's tuplet bookkeeping doubts | 769 | 952 |
+| tuplet notes, whole corpus | 10.3% | 11.0% |
+| tuplet notes, counted bars (plain / strict) | 7.9% / 5.8% | 8.0% / 5.7% |
+| files with a tempo mark of 40 bpm or more | 111 | 122 |
+| beats with an onset, plain filter | 49,373 over 245 files | 53,322 over 240 files |
+| distinct figures | 132 | 149 |
+
+Share of beats with an onset, pooled and by source (plain filter):
+
+| figure | pooled | Wesley Chin | maxgrynchuk | peterandwillanderson |
+|---|---|---|---|---|
+| 0 1/2 | 55.05 > 54.95 | 57.67 > 58.02 | 48.40 > 48.03 | 55.75 > 55.08 |
+| 0 | 17.99 > 18.08 | 17.91 > 18.41 | 22.56 > 22.16 | 16.43 > 16.37 |
+| 1/2 | 11.50 > 11.64 | 13.00 > 13.06 | 12.81 > 13.24 | 10.10 > 10.00 |
+| 0 1/4 1/2 3/4 | 4.93 > 4.76 | 3.33 > 2.80 | 5.33 > 5.31 | 5.80 > 6.05 |
+| 0 1/3 2/3 | 3.67 > 3.66 | 2.65 > 2.65 | 3.40 > 3.36 | 4.40 > 4.54 |
+| 0 1/2 3/4 | 1.23 > 1.26 | 1.27 > 1.29 | 1.03 > 1.04 | 1.28 > 1.32 |
+| 1/2 3/4 | 1.00 > 1.01 | 0.75 > 0.70 | 0.95 > 1.00 | 1.17 > 1.24 |
+| 0 1/4 | 0.44 > 0.43 | 0.39 > 0.31 | 0.31 > 0.33 | 0.51 > 0.55 |
+| 0 1/4 1/2 | 0.42 > 0.41 | 0.46 > 0.41 | 0.58 > 0.59 | 0.34 > 0.34 |
+
+What moved, and what it means:
+
+- **No pooled figure moved by 0.2 of a point.** Under the strict filter the
+  same: pair 59.04 > 59.10, single 17.32 > 17.53, triplet 2.95 > 2.88, four
+  sixteenths 4.42 > 4.10. The 2/2 table is within half a point on every
+  row (pair 44.50 > 45.03), and the rests (95.0% on the beat, 4.6% on the
+  "and"; eighth 36.0, quarter 33.4, half 15.2, whole 11.6, sixteenth 2.6)
+  and the tie rate (0.034 > 0.035) within a few tenths.
+- **The triplet row did not rise, and the filter's bias against tuplet
+  bars is now larger, not smaller.** The converter now reads 11.0% of the
+  whole corpus as tuplet notes, but the bars the filters keep hold 8.0%
+  (strict 5.7%), because the bookkeeping now doubts 952 bars against 769.
+  The triplet figure is 3.66% of onset beats against 5.20% on the
+  listener's twelve and 6.02% on the Omnibook. The corpus table's triplet
+  row is still a floor; the gap to the judge sets did not close with the
+  cleanup. Wesley Chin's stratum, the one nearest the judge set, reads the
+  same 2.65% as before with 62 files in it instead of 52.
+- **Wesley Chin's four-sixteenth beat fell from 3.33 to 2.80%** as his
+  stratum grew from 52 files to 62 (new solos and re-read old ones, which
+  this count does not separate); the other two strata moved by under 0.3.
+  Nothing in the prior depends on it at that size.
+- **Conditioning, held out, given the onset count:** the previous figure's
+  class still carries +0.025 bit (it was +0.031), the tempo band and the
+  onset density, the source and the metre still carry less than nothing
+  (-0.030, -0.039, -0.034, -0.009). Under the brief's 0.1 bit on all of them,
+  so the prior is still one table. The tempo bands now hold 513, 2,415,
+  6,476, 15,369 and 2,783 onset beats over 5, 19, 31, 54 and 8 files
+  (under 100 up to 300 and over): the ends are still thin.
+- **The three human sets, side by side.** The listener's twelve and the
+  Omnibook are identical to September on every tabulated row but two (the hand
+  scores' `0 1/2 3/4` 1.45 > 1.49 and lone "and" 11.69 > 11.65, where the
+  listener corrected Mobley's bars 19 and 52). The corpus beside them:
+  pair 54.95 / 55.03 / 57.29, single 18.08 / 19.75 / 9.77, triplet 3.66 /
+  5.20 / 6.02. The ratio table of "us against the humans" is the September
+  one: our pages are unchanged where it matters (the pins read identical on
+  every hand-score and Omnibook number), so it was not rerun, and could not
+  be today: the harness's note cache is held by another session's run.
+
+**One hold-out was missing.** Wesley Chin's Speak No Evil (Shorter) is a
+copy of WJazzD solo 435, the same recording as a benchmark track: the
+page's melody aligns to it at 387 of 408 notes (95%), against 23% for
+Hubbard's solo on the same tune (solo 170, the control). It is dropped
+from every count now (`OVERLAP`, eight pages). The same check read the
+earlier holdouts: Embraceable You 96% (a copy, as dropped); Joy Spring 48%
+of the page's notes and Ornithology (1948) 19% (other takes: Joy Spring
+stays dropped, as it was, out of caution; the 1948 Ornithology stays
+counted). It is a development page, so it was in the shipped table.
+
+### What a rebuilt table would change
+
+`figure_prior.py build` leaves out the 77 pages of the locked test split, so
+a rebuilt table is counted from 174 pages (38,734 beats with an onset)
+against the committed one's 177 pages (36,556), 119 figures against 110.
+Rebuilt on today's corpus, with Speak No Evil out:
+
+- on the fourteen commonest figures no surprisal moves by 0.1 nat (pair
+  0.58 > 0.58, single 1.75 > 1.75, lone "and" 2.19 > 2.18, triplet 3.28 >
+  3.28, four sixteenths 2.99 > 3.03; the lone "e" `0 1/4`, 5.52 > 5.60, is
+  the largest). The share-weighted mean change is 0.009 nat. Sixty-one of
+  the 134 figures in either table moved by a quarter nat or more, but none
+  has more than 30 counts and together they are 0.38% of the beats; 24 are
+  new to the table and 15 gone. At 0.015 beats per nat the largest change
+  among figures in both tables (1.4 nats) is 0.02 of a beat.
+- the quantizer instrument against its pin, committed table first as the
+  control (**unchanged**), then the final candidate (patched in memory, the
+  repo file untouched): dropped notes 4,203 of 198,983, as pinned. The
+  medium band reads late offbeat as dotted 563 > 493, laid-back beat 222 >
+  165, early offbeat as sixteenth 1,107 > 1,109, page hit 64.99 > 65.39%;
+  overall page hit 74.83 > 74.90%. The direction is what the prior is for
+  (dotted and laid-back figures a little rarer), and nothing it should not
+  touch moved.
+- the harness against the pins, on the table built just before the last
+  hold-out (a run that ended before another session's change to the
+  transcribe default could reach it; its card carries no sign of it, since
+  no horn's note count moved): **16 of 4,768 pinned numbers moved, none on
+  the hand scores or the Omnibook.** Nine are on two pages-set pages: eight
+  rows of Hawkins's My Ideal (the converter merged its two parts into one
+  file, so its reference changed) and one event on Spontaneous Combustion.
+  Seven are WJazzD collateral rows on four tracks: rhythm -0.0095 on My
+  Little Suede Shoes (one note fewer), +0.0028 on George's Dilemma, -0.0046
+  on Brother Hubbard, and a note gained on My Favorite Things. Over the 73
+  solos the paired mean change in Flex-Q rhythm is -0.0002 [-0.0005,
+  +0.0001], one up, two down, seventy level, sign test p 1.0.
+
+So the rebuild is safe and almost a no-op; it also is not needed to answer
+anything. It is not committed: the pins are held by another session's
+re-pin, and the table is the listener's to refresh when the corpus has
+settled. When it does: `figure_prior.py build`, then the quantize tests,
+then `run_eval --pin` and `wjazz_quantize --pin`.
+
 ## Findings to report, not to implement
 
 1. **Tuplet share.** The corpus reads 10.3% tuplet notes whole, 7.9% in

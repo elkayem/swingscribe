@@ -82,6 +82,10 @@ OVERLAP = {
         "wjazzd/Herbie_Hancock_Gingerbread_Boy_solo_186 (the same Miles Smiles track)"
     ),
     "Charlie-Parker-Embraceable-You": "wjazzd/Charlie_Parker_Embraceable_You_solo_56",
+    # Added 2026-10-08, when Wesley Chin's Shorter pages arrived: the page's
+    # melody aligns to WJazzD solo 435 at 387 of its 408 notes (95%) against
+    # 23% for Hubbard's solo on the same tune, so it is the same take.
+    "Speak No Evil - Wayne Shorter Solo EDITED 2025": "wjazzd/Wayne_Shorter_Speak_No_Evil_solo_435",
     "Charlie-Parker-Moose-the-Mooche": "Omnibook/Moose_The_Mooche",
     "Moose the Mooche - Hank Mobley, Sonny Stitt, Charlie Parker Solos": (
         "Omnibook/Moose_The_Mooche (Parker's chorus among the three)"
