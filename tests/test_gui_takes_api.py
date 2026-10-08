@@ -9,9 +9,10 @@ from swingscribe.config import Config
 from swingscribe.model import AudioRef, Document
 
 pytest.importorskip("fastapi", reason="gui dependency group not installed")
-pytest.importorskip("httpx2", reason="the test client needs httpx2")
-
-from fastapi.testclient import TestClient  # noqa: E402
+try:
+    from fastapi.testclient import TestClient
+except RuntimeError as exc:  # starlette's test client wants its http library
+    pytest.skip(f"no test client: {exc}", allow_module_level=True)
 
 from swingscribe.gui import app as gui_app  # noqa: E402
 from swingscribe.gui import library  # noqa: E402
