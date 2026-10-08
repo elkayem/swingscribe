@@ -1450,7 +1450,13 @@ docs/pdf2musicxml.md has the measurements. Things not to re-derive:
   the staff-height rule (Hawkins's How Deep, My Ideal, Yesterdays...).
   Digits up to 2.2 spaces tall (Body and Soul's bracketed 3s), a bracket
   half (ink along one row) is not a letter, a digit in the top 5% of the
-  page is a page number. NOT yet run over the corpus.
+  page is a page number, a flat dash against it a chord's minus. A
+  "must sit by a beam" rule cost seven real 3s for two chorus numbers
+  and was withdrawn. `combine_values` tries every reading's bar as the
+  one whose notes are kept (Body and Soul bar 18: plain notes, thinned
+  values). Scans' biggest remaining error is homr's beam COUNT (eighths
+  as 16ths), and reading beams from the pixels was measured and fails on
+  the Anderson hand: an eighth beam is as thick as two 16th beams.
 - **pdfium's text layer drops the second of two identical characters whose
   boxes touch**: a printed 4/4 arrives as one "4", a 2/2 as one "2", while
   3/4 and 6/8 arrive whole. The page's text OBJECTS still hold both, so a

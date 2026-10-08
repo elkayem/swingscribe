@@ -1804,64 +1804,116 @@ def combine_values(part: ET.Element, readings: list[ET.Element], limit: int = 40
         )
     mended = []
     for k in off:
-        notes = _timed_notes(measures[k])
         expected = found[k].expected
-        if not notes or expected is None:
+        if expected is None:
             continue
-        options: list[dict[tuple, ET.Element]] = [{_value(n, divisions_at[k]): n} for n in notes]
+        # This reading's bar first, then each other reading's paired bar as
+        # the one whose notes are kept: Hawkins's Body and Soul bar 18 holds
+        # its notes right in the plain reading (as 32nds) and its values
+        # right in the thinned one, which reads a note too many.
+        candidates = [(measures[k], divisions_at[k], False)]
         for pairs, theirs, their_divisions in sources:
             j = pairs.get(k)
-            if j is None:
+            if j is not None:
+                candidates.append((theirs[j], their_divisions[j], True))
+        for c, (base, base_divisions, foreign) in enumerate(candidates):
+            donors = [(m, d) for i, (m, d, _) in enumerate(candidates) if i != c]
+            trial = _fill(base, base_divisions, expected, donors, limit)
+            if trial is None:
                 continue
-            donors = _timed_notes(theirs[j])
-            if not donors:
-                continue
-            matcher = difflib.SequenceMatcher(
-                None,
-                [_staff_position(n) for n in notes],
-                [_staff_position(n) for n in donors],
-                autojunk=False,
-            )
-            blocks = [b for b in matcher.get_matching_blocks() if b.size]
-            if not _most(sum(b.size for b in blocks), len(notes), len(donors)):
-                continue
-            for a, b, size in blocks:
-                for offset in range(size):
-                    donor = donors[b + offset]
-                    value = _value(donor, their_divisions[j])
-                    if donor.find("rest") is not None:
-                        continue  # a rest keeps its value: see the docstring
-                    if value[2] == next(iter(options[a + offset]))[2]:
-                        options[a + offset].setdefault(value, donor)
-        varying = [i for i, choice in enumerate(options) if len(choice) > 1]
-        if not varying or math.prod(len(options[i]) for i in varying) > limit:
-            continue
-        base = [_value(n, divisions_at[k]) for n in notes]
-        need = expected - found[k].length
-        best: list[dict[int, tuple]] = []
-        fewest = None
-        for choice in itertools.product(*(list(options[i]) for i in varying)):
-            change = {i: v for i, v in zip(varying, choice, strict=True) if v != base[i]}
-            if sum(v[3] - base[i][3] for i, v in change.items()) != need:
-                continue
-            if any((v[3] * divisions_at[k]).denominator != 1 for v in change.values()):
-                continue
-            if fewest is None or len(change) < fewest:
-                fewest, best = len(change), [change]
-            elif len(change) == fewest:
-                best.append(change)
-        if len(best) != 1:
-            continue
-        trial = copy.deepcopy(measures[k])
-        trial_notes = _timed_notes(trial)
-        for i, v in best[0].items():
-            _give_value(trial_notes[i], options[i][v], int(v[3] * divisions_at[k]))
-        holder = ET.Element("part")
-        holder.append(trial)
-        if repair_tuplets(holder):
-            continue
-        index = list(part).index(measures[k])
-        part.remove(measures[k])
-        part.insert(index, trial)
-        mended.append(trial.get("number", str(k + 1)))
+            if foreign:
+                factor = Fraction(divisions_at[k], base_divisions)
+                if factor.denominator != 1:
+                    continue
+                if factor != 1:
+                    _rescale(trial, int(factor))
+                # The other reading's notes only; this reading's attributes,
+                # tempo mark and system break stay (as `merge_readings`).
+                for child in list(trial):
+                    if child.tag in ("attributes", "direction", "print", "barline"):
+                        trial.remove(child)
+                keep = [
+                    child
+                    for child in measures[k]
+                    if child.tag in ("attributes", "print")
+                    or (
+                        child.tag == "direction"
+                        and child.find("direction-type/metronome") is not None
+                    )
+                ]
+                for offset, child in enumerate(keep):
+                    trial.insert(offset, copy.deepcopy(child))
+                trial.set("number", measures[k].get("number", str(k + 1)))
+            index = list(part).index(measures[k])
+            part.remove(measures[k])
+            part.insert(index, trial)
+            mended.append(trial.get("number", str(k + 1)))
+            break
+    for note in part.iter("note"):
+        for beam in note.findall("beam"):
+            note.remove(beam)
     return mended
+
+
+def _fill(
+    base: ET.Element,
+    base_divisions: int,
+    expected: Fraction,
+    donors: list[tuple[ET.Element, int]],
+    limit: int,
+) -> ET.Element | None:
+    """`base` with the values the donor bars give its notes, when exactly one fill exists."""
+    notes = _timed_notes(base)
+    if not notes:
+        return None
+    options: list[dict[tuple, ET.Element]] = [{_value(n, base_divisions): n} for n in notes]
+    for measure, divisions in donors:
+        their = _timed_notes(measure)
+        if not their:
+            continue
+        matcher = difflib.SequenceMatcher(
+            None,
+            [_staff_position(n) for n in notes],
+            [_staff_position(n) for n in their],
+            autojunk=False,
+        )
+        blocks = [b for b in matcher.get_matching_blocks() if b.size]
+        if not _most(sum(b.size for b in blocks), len(notes), len(their)):
+            continue
+        for a, b, size in blocks:
+            for offset in range(size):
+                donor = their[b + offset]
+                if donor.find("rest") is not None:
+                    continue  # a rest keeps its value: see `combine_values`
+                value = _value(donor, divisions)
+                if value[2] == next(iter(options[a + offset]))[2]:
+                    options[a + offset].setdefault(value, donor)
+    varying = [i for i, choice in enumerate(options) if len(choice) > 1]
+    if not varying or math.prod(len(options[i]) for i in varying) > limit:
+        return None
+    original = [_value(n, base_divisions) for n in notes]
+    need = expected - _measure_length(base, base_divisions)
+    best: list[dict[int, tuple]] = []
+    fewest = None
+    for choice in itertools.product(*(list(options[i]) for i in varying)):
+        change = {i: v for i, v in zip(varying, choice, strict=True) if v != original[i]}
+        if sum(v[3] - original[i][3] for i, v in change.items()) != need:
+            continue
+        if any((v[3] * base_divisions).denominator != 1 for v in change.values()):
+            continue
+        if fewest is None or len(change) < fewest:
+            fewest, best = len(change), [change]
+        elif len(change) == fewest:
+            best.append(change)
+    if len(best) != 1:
+        return None
+    trial = copy.deepcopy(base)
+    trial_notes = _timed_notes(trial)
+    for i, v in best[0].items():
+        _give_value(trial_notes[i], options[i][v], int(v[3] * base_divisions))
+    holder = ET.Element("part")
+    holder.append(trial)
+    if repair_tuplets(holder):
+        return None
+    holder.remove(trial)
+    return trial

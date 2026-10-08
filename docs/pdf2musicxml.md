@@ -799,6 +799,62 @@ the Ocean's second part 9 to 1, Yesterdays' 11 to 3, Easy Living 6 to
 group whose head homr's detection missed, or a run the reading split
 across a bar line.
 
+### One solo per scan, and the Hawkins scans' bracketed 3s (2026-10-07, 0.3.38-0.3.39)
+
+Starting on the Coleman Hawkins solos showed that How Deep Is the Ocean,
+My Ideal and Yesterdays had each been cut in two: a scan's second page
+carries a running header (the title small, a page number), which pushes
+its first staff as far down the page as a title block does, and
+`group_pages` started a new piece wherever every scanned page sat that
+low (`TITLE_ABSOLUTE`, written for a ten-solo ebook since removed). OCR
+of the band above the first staff (`convert._scan_header`, cached as
+`pNNN_header.json`) settles it: a title page holds a title block, three
+or more lines of words of three letters or more ("Courtesy of ...",
+"Peter R. Anderson", "Recorded in NYC ..."), and a page without one
+continues the piece (`layout.scan_continues`). Matching the running
+title against the first page's title failed twice on OCR ("MY
+1DEALBMAS") and is not used; OCR of notes over the staff ("ebe te") and
+chord symbols have too few real words to count. Eleven PDFs became one
+transcription each, every one a single Anderson solo; no other scan's
+grouping moved. Their off counts rise a little where they were joined:
+a part's last bar and the next part's first bar were edges, allowed to
+run short, and are interior bars now.
+
+Body and Soul read no tuplet number at all: its 3s are drawn two spaces
+tall inside brackets, past the 1.6-space limit, and the bracket's
+hooked half filled its box like a letter. Digits may now be 2.2 spaces
+tall; a mark whose ink lies along one row is a line, not a letter; a
+digit in the top 5% of a page is a page number; a short flat dash
+against a digit is a chord's minus ("Eb-6"). Body and Soul now reads 13
+numbers (8 made triplets, 5 the engine already had), Hipsippy Blues 26.
+A rule that a tuplet number must have a beam, bracket or stem within
+2.5 spaces toward its staff was measured and withdrawn: it removed
+Norman's Blues' two chorus numbers (which the tuplet code refuses
+anyway) and seven real triplet numbers set three spaces below their
+beams.
+
+The listener then checked Body and Soul by eye: bar 5's eighth-note
+triplets written as 16ths, bar 10's eighth rest lost, an F in bar 18
+that is not printed, bar 23's opening 16th rest lost, a C in bar 27 an
+eighth read as a 16th. Bars 10 and 18 were right in a reading the merge
+did not choose: the plain reading holds bar 18's notes (as 32nds), the
+thinned one its 16ths and a note too many. `combine_values` now tries
+every reading's paired bar as the one whose notes are kept -- the
+merged bar first, then the plain, thinned and Audiveris bars -- and
+writes the first that fills uniquely with values the others give the
+same notes (`_fill`; rests and tuplets still never change). Bars 5
+(written as 6 in the file, which counts the pickup), 10 and 18 came out
+as printed; 23 and 27 hold no reading's right answer. Body and Soul 19
+bars off to 13; the scans 123 to 117 (the three that rose are the
+joined solos' former edge bars).
+
+Reading a scan's BEAMS was tried and is not possible on this hand:
+measured beside each stem on the page at its own resolution, the two
+16th beams show no lighter row between them in most columns, and a
+single eighth beam is drawn as thick as the pair (20-27 px against
+19-26 at 21 px a space). homr fails on exactly that, and so would any
+count from the pixels; those values are the proofreader's.
+
 ## What is left to a human
 
 An OMR reading is a draft. Per page expect a handful of wrong durations,

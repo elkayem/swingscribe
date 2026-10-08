@@ -31,7 +31,7 @@ from pdf2musicxml import vector
 # SEGMENT_VERSION for homr's staves, heads and bar lines (seconds a page),
 # DIGITS_VERSION for the numbers only.
 SEGMENT_VERSION = 3
-DIGITS_VERSION = 7
+DIGITS_VERSION = 9
 STEPS = "CDEFGAB"
 # homr's staff position: the bottom line of a treble staff (E4) is 1.
 E4_DIATONIC = 4 * 7 + STEPS.index("E")
@@ -240,13 +240,23 @@ def _beside(stats, members: list[int], box: tuple, unit: float, labels=None) -> 
     with a hook, is not -- and when the hook makes it as tall as a letter,
     its ink still lies along one row (Body and Soul's brackets). "On its line" reaches half a space
     above and below (a chord's 6 is raised: "Gm6" on Hipsippy Blues) and
-    a space and a half to each side (Indiana's "C 6").
+    a space and a half to each side (Indiana's "C 6"). A short flat dash
+    against the digit at its middle is a chord's minus ("Eb-6", "C-7" on
+    My Ideal); a bracket half is longer and hooked.
     """
     left, top, right, bottom = box
     for i in range(1, len(stats)):
         if i in members:
             continue
         x, y, w, h, area = (int(v) for v in stats[i])
+        if (
+            h <= 0.4 * unit
+            and 0.3 * unit <= w <= 1.3 * unit
+            and x <= right + 0.8 * unit
+            and x + w >= left - 0.8 * unit
+            and top <= y + h / 2 <= bottom
+        ):
+            return True
         if not (0.4 * unit <= h <= 3 * unit and w <= 2.5 * unit and w <= 2 * h):
             continue
         if area < 0.15 * w * h:

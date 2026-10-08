@@ -2576,3 +2576,27 @@ def test_a_scanned_page_with_a_running_header_continues_the_solo():
     # A second title block is a second piece.
     second.scan_header = title_block
     assert layout.group_pages([first, second]) == [[0], [1]]
+
+
+def test_a_dash_against_a_digit_makes_it_a_chord_symbols():
+    # "Eb-6" on My Ideal: the minus is flat and short, a bracket half long and hooked.
+    digit, box = (100, 50, 12, 24, 150), (100, 50, 112, 74)
+    minus = (88, 60, 10, 3, 30)
+    assert scanpage._beside([(0,) * 5, digit, minus], [1], box, 16.0)
+
+
+def test_a_bar_can_be_filled_from_another_readings_notes():
+    # Hawkins's Body and Soul bar 18: the merged (thinned) bar has a note too
+    # many in 16ths; the plain reading has the right notes, its first four as
+    # 32nds. Only the plain bar, given the 16ths, fills.
+    tail = "".join(plain(s, 5, 2, "16th") for s in "BECG") + plain("B", 4, 8, "quarter") + rest(8)
+    merged = "".join(plain(s, 4, 2, "16th") for s in "FDEFG") + tail
+    other = "".join(plain(s, 4, 1, "32nd") for s in "FDEG") + tail
+    full = plain("C", 5, 32, "whole")
+    part = musicxml.first_part(score([full, merged, full], divisions=8).getroot())
+    reading = musicxml.first_part(score([full, other, full], divisions=8).getroot())
+    assert musicxml.combine_values(part, [reading]) == ["2"]
+    bar = part.findall("measure")[1]
+    assert [n.findtext("pitch/step") for n in bar.findall("note")][:4] == list("FDEG")
+    assert [n.findtext("type") for n in bar.findall("note")][:4] == ["16th"] * 4
+    assert musicxml.bars(part)[1].length == 4
