@@ -1056,7 +1056,13 @@ Results and limits: `docs/m6-notate.md`.
   and the mechanism stays (the MEDIAN beat, not each beat: per beat it
   reached Soul Station's long beats at 100 bpm) for a human ballad page
   to judge. A HALF-RATE grid (Brother Hubbard) looked like a ballad to it
-  and read worse; R32 fixed the grid.
+  and read worse; R32 fixed the grid. **Human ballad pages exist now**
+  (2026-10-08, docs/writing-round2.md round 3): at 0.7 s both trusted ones
+  read up (Say It rhythm +0.012, value +0.030; Embraceable You +0.023,
+  +0.013), the untrusted My Ideal reads down (0.857 -> 0.790; its grid runs
+  at the wrong pulse), and the tie rate TRIPLES on all three (0.03 -> 0.09-
+  0.11 against a human's 0.022). Still off: two pages and a tie cost are the
+  listener's call, not a rule's.
 - **The triplet deficit is mostly gone, and the 4x frame was wrong (D12).**
   Post-D11 we write 12.0% tuplet notes; only 59.8% of WJazzD's ternary notes
   are real 3+-onset triplet figures (the rest are swung pairs annotated at

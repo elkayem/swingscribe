@@ -307,6 +307,43 @@ seventh rule and finished in a second run with two workers; each run takes
 its own baseline, so every row is paired against a baseline built in the
 same process.
 
+## Round 3 (2026-10-08): the same rules on 28 more pages
+
+The listener's new recordings added 28 trusted dev PDF pages (docs/pages-
+round2.md), and two transcriber changes landed under every page since this
+round was run: the tuning correction (81faf95) and the lead-ins written as
+one note (84461d6, docs/scoops.md). Each rule was switched on by
+environment override over the whole harness against 84461d6's card, paired
+by recording (hand scores n=12, Omnibook 22, PDF pages 28):
+
+| rule | hand rhythm | Omnibook rhythm | PDF pages rhythm | on the bar | verdict |
+|---|---|---|---|---|---|
+| late downbeat, 2 onsets | **-0.0015\*** (0 / 4) | -0.0007 | -0.0017 | **down on all three sets\*** | down |
+| late downbeat, 3 onsets | **-0.0015\*** (1 / 5) | -0.0019 | -0.0039 | **down on all three sets\*** | down |
+| isolated lag, 2 onsets | -0.0001 | +0.0001 | +0.0005 | level | level (PDF edits -0.13\*) |
+| tuplet, pushed last | +0.0001 | -0.0008 | -0.0003 | level | level |
+| R31 ballad grids (0.7 s) | 0 | 0 | +0.0013 (2 / 0) | +0.0007 | two pages up, ties x3 |
+
+The verdicts of this round stand on twice the pages: the late downbeat is
+decided down again, the lag and the pushed triplet are level. R31 finally
+has human ballad pages to judge it: the two trusted ones read up (Say It
+rhythm +0.012, value +0.030, edits -1.4; Embraceable You +0.023, +0.013,
+-4.8), the untrusted third (Coleman Hawkins's My Ideal, its grid at the
+wrong pulse) reads down (-0.068), and the tie rate triples on every one of
+them, 0.03 -> 0.09-0.11 against a human page's 0.022. It stays off: two
+pages, and a page-appearance cost the measures do not charge.
+
+What the lead-ins did to this round's classes, on the eleven triples' (c)
+row (our notes on our grid): nothing measurable. "Triplet read binary"
+stays 5.2% of matched notes (2.8% -> 3.0% of intervals charged), the
+page's quarter written as our eighth 2.1% -> 2.2% -- these solos are
+mostly Parker's, with few scoops or re-attacks to write.
+
+So the hand-rule route is closed on more data too. The lever left is the
+one docs/reranker.md named: a choice among readings LEARNED from paired
+data -- our onsets beside a human page -- which now exists at the scale it
+asked for (62 dev pages with audio).
+
 ## Caveats
 
 - **Eight triples, seven by Parker, six from one book**; every (a) and (c)
