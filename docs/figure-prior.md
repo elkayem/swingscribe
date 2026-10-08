@@ -803,10 +803,38 @@ What moved, and what it means:
   scores' `0 1/2 3/4` 1.45 > 1.49 and lone "and" 11.69 > 11.65, where the
   listener corrected Mobley's bars 19 and 52). The corpus beside them:
   pair 54.95 / 55.03 / 57.29, single 18.08 / 19.75 / 9.77, triplet 3.66 /
-  5.20 / 6.02. The ratio table of "us against the humans" is the September
-  one: our pages are unchanged where it matters (the pins read identical on
-  every hand-score and Omnibook number), so it was not rerun, and could not
-  be today: the harness's note cache is held by another session's run.
+  5.20 / 6.02.
+- **Us against the humans, rerun (single process, notes cache untouched,
+  the transcriber as of 81faf95).** Share of beats with an onset, with the
+  prior off and at the shipped 0.015:
+
+  | figure | hand scores | ours, off | ours, 0.015 | Omnibook | ours, off | ours, 0.015 |
+  |---|---|---|---|---|---|---|
+  | 0 1/2 | 55.03 | 50.33 (0.91) | 50.21 (0.91) | 57.29 | 50.78 (0.89) | 50.48 (0.88) |
+  | 0 1/3 2/3 | 5.20 | 4.81 (0.92) | 5.08 (0.98) | 6.02 | 4.52 (0.75) | 4.74 (0.79) |
+  | 0 1/4 1/2 3/4 | 2.22 | 0.66 (0.30) | 0.66 (0.30) | 3.57 | 1.76 (0.49) | 1.73 (0.49) |
+  | 0 1/2 3/4 | 1.49 | 0.74 (0.49) | 1.12 (0.75) | 1.52 | 0.88 (0.58) | 1.20 (0.78) |
+  | 0 1/4 | 0.30 | 2.13 (7.1) | 1.32 (4.4) | 0.10 | 1.54 (14.8) | 1.32 (12.6) |
+  | 0 1/4 1/2 | 0.38 | 1.28 (3.3) | 1.24 (3.2) | 0.54 | 1.62 (3.0) | 1.83 (3.4) |
+  | 1/4 1/2 | 0.04 | 0.54 (12.7) | 0.47 (10.9) | 0.04 | 0.78 (18.7) | 0.60 (14.3) |
+  | 0 3/4 | 0.04 | 0.27 (6.4) | 0.39 (9.1) | 0.27 | 0.46 (1.7) | 0.74 (2.7) |
+
+  (Ratio of ours to the human's in brackets.) The prior still does its job:
+  the lone-"e" figure `0 1/4` falls by 0.8 of a point on the hand scores and
+  0.2 on the Omnibook, the three-onset sixteenth figure `0 1/2 3/4` and the
+  triplet rise toward the human share. But the prior-OFF baseline itself
+  drifted since 2026-09-25 (`0 1/4` on the hand scores 1.75% then, 2.13% now;
+  on the Omnibook 1.51% then, 1.54% now), which is the transcriber's:
+  the horn hole-filler (2026-09-30) adds short notes between a line's
+  phrases, and these are the figures a short note forms. So the lone-"e"
+  excess against the humans is now 4.4x with the prior against 5.9x at the
+  September setting, and it is not the prior that grew it. One small
+  side effect is new to this table: the prior leans the late note of a
+  two-onset beat to the "a" (`0 3/4` 0.27 > 0.39 on the hand scores, 0.46 >
+  0.74 on the Omnibook) where it used to sit on the "e", a figure the
+  humans write 0.04% and 0.27% of the time. It is small (ten and thirty-seven
+  beats) and in the direction of fewer lone-"e" figures, but it is a
+  figure the corpus calls rare being traded for one it calls rarer.
 
 **One hold-out was missing.** Wesley Chin's Speak No Evil (Shorter) is a
 copy of WJazzD solo 435, the same recording as a benchmark track: the
