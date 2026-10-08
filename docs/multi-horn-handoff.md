@@ -11,13 +11,9 @@ merged: the listener reviews the branch first. Design and state:
 
 | Piece | State |
 | --- | --- |
-| A. Multi-horn core + `scripts/multi_horn_page.py` | committed, waiting on Local task A |
-| B. Linked sidecars | committed, waiting on Local task B |
-| C. Two parts, GUI, guide | committed, waiting on Local task C |
-
-Pushing to `origin/multi-horn` was refused (HTTP 403, "Resource not
-accessible by integration") from the cloud session: the commits exist in
-the cloud checkout only until GitHub access is restored there.
+| A. Multi-horn core + `scripts/multi_horn_page.py` | pushed, waiting on Local task A |
+| B. Linked sidecars | pushed, waiting on Local task B |
+| C. Two parts, GUI, guide | pushed, waiting on Local task C |
 
 ## Setting up (once)
 
