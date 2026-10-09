@@ -73,7 +73,7 @@ def test_a_multi_horn_dump_carries_its_own_fields_and_none_of_crepes():
     assert dumped["multi_horn_min_note_ms"] == 23.0
     # The rules' own version: a change to voices.py moves the GUI's review
     # key, which hashes this dump and never transcribe.CACHE_VERSION.
-    assert dumped["multi_horn_version"] == 5
+    assert dumped["multi_horn_version"] == 6
     # The horn fill, the tuning, the lead-ins and the piano line are CREPE's
     # or the piano model's; a multi-horn head reads none of them.
     for gone in ("horn_fill_gaps", "tuning_correction", "glide_max_ms", "piano_line"):

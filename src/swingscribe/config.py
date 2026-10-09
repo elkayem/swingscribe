@@ -433,10 +433,11 @@ class TranscribeConfig(BaseModel):
     # Open Sesame head, Local task A6). 0 dB joins nothing. Only a HELD
     # note: the first must last `held_min_ms` (A7: the rule's first cut
     # joined the riff's staccato repeats, 0.06-0.16 s; the five ran
-    # 0.64-1.31 s).
+    # 0.64-1.31 s; the A section's held E-flat, 0.31-0.34 s, is one note
+    # too, the listener's mark of 2026-10-09, so the floor is 250 ms).
     multi_horn_held_dip_db: float = 5.0
     multi_horn_held_onset_ms: float = 60.0
-    multi_horn_held_min_ms: float = 400.0
+    multi_horn_held_min_ms: float = 250.0
     # The voices' rules themselves (voices.py, transcribe._hear_horns), as a
     # number: the GUI's review key hashes this config's dump and never
     # transcribe.CACHE_VERSION, so a change to the rules that moves no
@@ -446,8 +447,9 @@ class TranscribeConfig(BaseModel):
     # notes joined where CREPE holds them, lead-ins marked. 3: a legato
     # successor keeps its horn's voice (voices.legato_successors). 4: a
     # split held note is joined under the other horn (voices.join_held).
-    # 5: ... only after a held note (multi_horn_held_min_ms).
-    multi_horn_version: int = 5
+    # 5: ... only after a held note (multi_horn_held_min_ms). 6: that floor
+    # at 250 ms, not 400 (the A section's held E-flat).
+    multi_horn_version: int = 6
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):

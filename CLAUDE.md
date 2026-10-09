@@ -761,9 +761,10 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   the next note 3x longer, so a 16th run is never a chain) and the page
   folds it as a grace (`literal_lead_ins`, on for this ensemble only). The
   GUI's review key hashes the transcribe dump and never CACHE_VERSION:
-  bump `multi_horn_version` with ANY rule change (5 since rule 5b: a
-  split HELD note -- the first 400 ms or more, never the riff's staccato
-  repeats -- is joined where the OTHER horn sounds across the join with no
+  bump `multi_horn_version` with ANY rule change (6 since 2026-10-09: a
+  split HELD note -- the first 250 ms or more, never the riff's staccato
+  repeats of 60-160 ms; the A section's 310-340 ms E-flat is one half note
+  by the listener's ear -- is joined where the OTHER horn sounds across the join with no
   attack within 60 ms and the stem's energy dips under 5 dB,
   `voices.join_held` -- the listener's five marks, A6-A7). Notes of the
   two voices struck within half an eighth (a quarter beat, 30-60 ms) are

@@ -414,7 +414,7 @@ def test_the_energy_dip_is_the_join_against_the_two_notes_median():
 def test_a_short_repeat_under_the_other_horn_stays_two_notes():
     """The riff's staccato repeats (Local task A7): "E-flat, E-flat" of 0.14
     s each under the other horn's held note is two notes. Only a held note
-    (0.4 s or more) is joined."""
+    (0.25 s or more) is joined."""
     short = [note(0.0, 0.14, 75), note(0.14, 0.14, 75), note(0.0, 0.6, 70)]
     for n, v in zip(short, (1, 1, 2), strict=True):
         n["voice"] = v
@@ -425,3 +425,15 @@ def test_a_short_repeat_under_the_other_horn_stays_two_notes():
         n["voice"] = v
     kept, held_at = voices.join_held(held, flat_energy())
     assert held_at == [0.7, 0.9] and [n["duration"] for n in kept if n["voice"] == 1] == [1.2]
+
+
+def test_the_a_sections_held_e_flat_is_one_note():
+    """The listener's mark of 2026-10-09: the A section's E-flat, heard as
+    0.33 s and then a re-trigger under the other horn's held note, is ONE
+    half note ("quarter C on 1, half note E-flat on 2, quarter C on 4")."""
+    notes = [note(0.0, 0.33, 75), note(0.33, 0.15, 75), note(0.0, 0.6, 67)]
+    for n, v in zip(notes, (1, 1, 2), strict=True):
+        n["voice"] = v
+    kept, held_at = voices.join_held(notes, flat_energy())
+    assert held_at == [0.33]
+    assert [n["duration"] for n in kept if n["voice"] == 1] == [pytest.approx(0.48)]

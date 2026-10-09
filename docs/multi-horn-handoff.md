@@ -1,11 +1,55 @@
-# Multi-horn: hand-off between the cloud and the local session
+# Multi-horn: hand-off and state
 
-The cloud session writes the code and the synthetic CI tests on the
-`multi-horn` branch; it has no audio, no GPU and no stems cache. The LOCAL
-session (Windows, the listener's PC) fetches the branch and runs everything
-that needs real audio, then reports back with SendMessage. Nothing here is
-merged: the listener reviews the branch first. Design and state:
-[multi-horn.md](multi-horn.md).
+**Merged to master 2026-10-09. The cloud/local split is over:** from here
+the LOCAL session develops on master itself (the listener's decision), and
+the "Local task" sections below are the record of how each rule was
+measured. Design and state: [multi-horn.md](multi-horn.md).
+
+## Paused 2026-10-09: where to pick up
+
+Development is paused until the listener's usage limit resets. They are
+using the tools meanwhile, noting what needs fixing, and writing their own
+version of the Open Sesame head as GROUND TRUTH (the bridge screenshot in
+`benchmark/Multi-Horn/` is an internet transcription, wrong in places --
+never tune to it). When they hand it over, score our page against it first.
+
+State of the Open Sesame head (`benchmark/Multi-Horn/Open_Sesame_Melody.
+swingscribe.json`, a linked take of the Transcriptions_Other recording,
+span 0-67.308 s; latest page `benchmark/Multi-Horn/v8/os8.musicxml`):
+swing rhythm, lag out, staccato quarters for the riff, page bars 23-24 as
+quarter-note triplets in both voices, the listener's held notes joined
+(rule 5b at 250 ms), the G-flat slides gone. 2158 tests pass on Windows.
+
+Open items, each confirmed by the listener's ear unless marked:
+
+1. **Page bar 10: both horns enter on the "and of 2".** The trumpet's
+   D-flat (9.866 s) is 58 ms after the tenor's B-flat (9.808); even with
+   one_attack's 60 ms window the page still writes the trumpet on 3
+   (`~C5:2 Db5 ...` against the tenor's `~Ab4:1.5 Bb4 ...`). Find out why
+   the window did not pair them.
+2. **Page bar 44 (their bar 26): the trumpet's F is a TIED HALF NOTE, a
+   quarter rest, then F on 4.** We write a tied quarter and two quarter
+   rests: the joined F4's heard end (42.198 s, beat ~1.45) is early, as a
+   fading held note's is. Idea, unmeasured: round a held note's end UP to
+   the next beat when the rest left after it is a beat or more.
+3. **Page bar 44's lower voice**: the tenor goes E-flat on 1 to D on 3
+   ("there might be a D-flat grace on 3"); we write Db4 Db4. The frames bend
+   Db-D-Db (Local task A6's trace); ambiguous, one note.
+4. **Riff spelling of rhythm**: the listener writes the riff (pages 10, 14,
+   22-24, 26, 30) as STACCATO QUARTERS -- now the head's default (Short
+   notes menu). Check their ground truth for which notes they mark.
+5. **Page 34's D5 between E-flats (33.067 s, 58 ms, a semitone slide by
+   the rule)**: written as nothing now; a turn or nothing? Not asked yet.
+6. **Page 21's lower G4 join (20.323 s)** rode along with the A-section
+   E-flat's (same 0.31 s first note): not asked by itself.
+7. Local task A8's GUI checks were not run (the Short notes menu, the
+   Triplet mark on the roll, Export's `.eighths` tag). Do them on the
+   listener's first report.
+
+The dedupe clean-up is DONE (Local task B2): 37 copies in the Recycle Bin,
+undo with `scripts\dedupe_audio.py --undo C:\dedupe-backup\manifest-
+20261008-apply.json` (also there: every sidecar as it was). The listener
+may empty the Recycle Bin when satisfied.
 
 ## Status
 

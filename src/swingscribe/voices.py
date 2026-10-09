@@ -149,10 +149,12 @@ SUCCESSOR_MAX_STEP = 2
 # The listener's five ran 0.64-1.31 s; the joins the rule wrongly made at
 # first were the riff's staccato repeats, 0.06-0.16 s (Local task A7). The
 # 0.31-0.34 s pairs between them (the A section's "E-flat for a beat and a
-# half, E-flat on the and") are the listener's to hear, and stay two notes.
+# half, E-flat on the and") are one held note too: the listener writes
+# that bar "quarter C on 1, half note E-flat on 2, quarter C on 4"
+# (2026-10-09). So the floor sits between 0.16 and 0.31 s.
 HELD_ONSET_S = 0.06
 HELD_MAX_DIP_DB = 5.0
-HELD_MIN_S = 0.4
+HELD_MIN_S = 0.25
 DIP_WINDOW_S = 0.03
 
 
