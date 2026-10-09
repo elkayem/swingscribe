@@ -957,13 +957,16 @@ class NotateConfig(BaseModel):
     # page has, or the next note anticipated -- so our eighth and rest was
     # right. 0 is off.
     hold_to_beat: float = 0.0
-    # A REST no longer than this, in beats, before the voice's next note is
-    # written into the note before it (notate.notated_durations): silence,
-    # not the onset-to-onset gap `legato_cap` asks about. 0 is off. A two-
-    # horn head takes an eighth (notation.writing_of; sidecar `close_rests`
-    # false keeps the rests): the listener heard the head's held notes as
-    # held to the next note -- bar 24's lower A a whole note where we wrote
-    # three and a half beats and an eighth rest (Local task A4, 2026-10-09).
+    # A REST no longer than this, in beats, after a HELD note (a half note or
+    # more, notate.CLOSE_AFTER_BEATS) and before the voice's next note is
+    # written into the note (notate.notated_durations): silence, not the
+    # onset-to-onset gap `legato_cap` asks about. 0 is off. A two-horn head
+    # takes an eighth (notation.writing_of; sidecar `close_rests` false
+    # keeps the rests): the listener heard the head's held notes as held to
+    # the next note -- bar 24's lower A a whole note where we wrote three
+    # and a half beats and an eighth rest (Local task A4, 2026-10-09). A
+    # short note's rest is articulation: the riff's staccato eighths keep
+    # theirs (A5).
     close_rests: float = 0.0
     # Leave a two-horn head's faint scraps off the page (notation.is_faint:
     # under 80 ms, confidence under 0.4, not a lead-in). OFF until measured

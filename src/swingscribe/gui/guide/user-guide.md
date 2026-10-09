@@ -117,6 +117,13 @@ may even sit in another folder.
   affects all of them, and never touches any take's settings.
 - Two identical copies of a recording in different folders each keep their
   own settings, even with both open in two browser tabs.
+- The project's clean-up script (`scripts/dedupe_audio.py`) turns
+  identical copies into takes of one file, keeping the copy made first.
+  A folder can then hold settings files and pages with no audio of its
+  own: on the benchmark, `Omnibook/` holds its takes and MusicXML, and the
+  recordings they name are in `wjazzd/`. The browser lists each take there
+  with an arrow to its recording. The clean-up sends the copies to the
+  Recycle Bin and writes a manifest, and `--undo` puts everything back.
 
 ### Freeing disk space
 
@@ -613,6 +620,11 @@ The page writes both horns on one treble staff, in concert pitch:
 - A scoop into a held note (a short note a semitone under it) is written
   as a grace note on the note it leads into, and a note re-attacked with a
   short "head" is written as one note.
+- A held note (a half note or longer) followed by a breath of an eighth
+  or less before the horn's next note is written to that note: a whole
+  note, not three and a half beats and an eighth rest. A short note keeps
+  its rest, so a staccato riff of eighths and eighth rests is written as
+  played.
 - The rhythm is **Swing** unless you pick another one in the **Rhythm**
   menu: eighths where a beat shows no more, sixteenths where one does,
   triplets, and "Swing" over the staff. For a head played in straight

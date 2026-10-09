@@ -11,8 +11,8 @@ merged: the listener reviews the branch first. Design and state:
 
 | Piece | State |
 | --- | --- |
-| A. Multi-horn core + `scripts/multi_horn_page.py` | measured four times (Local tasks A-A4); swing is the head's default, lag read once over both horns; the listener's bar 24/26/29 corrections in; waiting on Local task A5 |
-| B. Linked sidecars | accepted (Local task B); every script finds a take's audio through library; dedupe reversible (Recycle Bin or --trash, manifest, --undo); the listener said go: waiting on Local task B2 |
+| A. Multi-horn core + `scripts/multi_horn_page.py` | measured five times (Local tasks A-A5); swing is the head's default, lag read once over both horns; bar 26 fixed on the page, rests closed only after a held note, faint scraps must be isolated; waiting on Local task A6 and the listener's marks |
+| B. Linked sidecars | done (Local tasks B, B2): 37 copies linked and in the Recycle Bin, 4 left, 313 MB; the card byte-identical before and after; the manifest write survives OneDrive now |
 | C. Two parts, GUI, guide | checked (Local task C); fixes pushed |
 
 What the reports changed (2026-10-09; details in
@@ -33,6 +33,17 @@ What the reports changed (2026-10-09; details in
 - Local task C: the page summary gives both parts' intervals ("written
   +2 / +14"); the Voices tool stores only real moves; the guide says a
   tenor part can sit above the trumpet's on the page.
+- Local tasks A5 and B2 (multi-horn.md, "The fifth measurement"): the
+  page re-ordered the edited voices without `continue_voices`, so bar 26's
+  D-flat fell back to voice 1 (fixed in `gui/edits.py`); closing rests
+  took the riff's staccato eighth rests (now only after a half note or
+  longer); `--drop-faint` took bar 36's real figure (a scrap must be
+  isolated now); the dedupe manifest's replace failed under OneDrive after
+  step 1 of 37 (retried, then written in place, else the `.tmp` keeps the
+  newer revision and `--undo` reads it). After the clean-up
+  `benchmark/Omnibook/` holds sidecars and MusicXML only: its recordings
+  are linked to their identical copies in `wjazzd/` (the copy made first),
+  and the user guide says so.
 
 ## Setting up (once)
 
@@ -319,6 +330,57 @@ it), so no track drops out once its copy is gone.
 
 Report: the dry run's counts, the apply's output and manifest path, each
 comparison, and anything the undo rehearsal did not restore.
+
+## Local task A6: the head after A5, and the listener's marks
+
+What landed after A5 (multi-horn.md, "The fifth measurement"):
+
+- Bar 26 on the PAGE: the GUI's edits (`gui/edits.py`, which the script's
+  dump and Export both go through) now keep a partnerless note in voice 2
+  where it continues a voice-2 line, as the review already did. The review
+  is reused: no key moved, `multi_horn_version` is still 3.
+- A rest is closed only after a HELD note (a half note or longer): the
+  riff's eighth rests come back, bar 24's whole note stays.
+- A faint scrap must be ISOLATED (no other faint note within 0.15 s), so
+  `--drop-faint` keeps bar 36's figure. Still off by default.
+- `dedupe_audio.py`'s manifest write retries a locked replace, then writes
+  in place, and if both fail keeps the newer revision in the `.tmp`, which
+  `--undo` reads. Nothing to re-run for B2.
+
+```
+set PAGE=.venv\Scripts\python.exe scripts\multi_horn_page.py AUDIO --sidecar TAKE --start 0 --end 67.308
+%PAGE% --out OUT\os6.musicxml --dump-voices OUT\os6.txt
+%PAGE% --no-close-rests --out OUT\os6.open.musicxml --dump-voices OUT\os6.open.txt
+%PAGE% --drop-faint --out OUT\os6.faint.musicxml --dump-voices OUT\os6.faint.txt
+```
+
+Report:
+
+1. `os6` against `os5`, page bars 41-56 above all: page 44 (L26) should
+   read v2 "Eb4:2 Db4 ..." with the D-flats in the lower voice, and v1 the
+   trumpet's F4s; any other bar whose lower line changed (a legato step
+   kept in voice 2) and whether it is right.
+2. Closing rests, `os6` against `os6.open`: how many rests are closed now
+   (A5 closed 30), and which. Bar 24's A must still be a whole note; the
+   riff on pages 10, 14, 22-30 must have its eighth rests.
+3. `os6.faint` against `os6`: page 47's scrap goes; pages 54 and 56 keep
+   their figures. The faint list from `os6.txt`.
+4. In the GUI, the head's roll draws bar 26's D-flats in the lower
+   voice's colour, and the page view and Export agree with `os6`.
+5. The listener's marks, by ear:
+   - the five joins with an energy dip under 2 dB: 24.900 A-flat 4, 28.931
+     F5, 41.651 C4, 45.427 B-flat 3, 55.256 A-flat 4 -- one note or a
+     re-attack? (Two clear repeats as controls: 12.121 C5, 27.513 C5.)
+   - the riff's eighth rests: staccato as now written, or held?
+   - any held note (a half note or longer) whose eighth rest before the
+     next note IS a real rest;
+   - the trumpet's F4 at 42.094 (104 ms after the held F4): tied over, or
+     re-attacked?
+   - bar 28's G-flat at 43.790 (70 ms, 0.31, 46 ms before the G): a scoop
+     (a grace note), nothing, or a note?
+   - pages 47 and 49: does the lower horn really come in an eighth late?
+6. Optional, B2's fix: the scratch-folder rehearsal again, under OneDrive
+   and with the DEFAULT manifest path; it must complete.
 
 ## Local task B: linked sidecars ("takes")
 

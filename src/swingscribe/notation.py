@@ -244,10 +244,11 @@ def timing_for(settings: dict, config: Config) -> str:
     return ENSEMBLE_TIMINGS.get(ensemble, config.quantize.timing)
 
 
-# A two-horn head's rest of up to an EIGHTH before the voice's next note is
-# written into the note before it (NotateConfig.close_rests): the listener
-# heard bar 24's lower A held to the next note, a whole note, where the
-# page wrote three and a half beats and an eighth rest (Local task A4).
+# A two-horn head's rest of up to an EIGHTH after a held note, before the
+# voice's next note, is written into the note (NotateConfig.close_rests,
+# notate.CLOSE_AFTER_BEATS): the listener heard bar 24's lower A held to the
+# next note, a whole note, where the page wrote three and a half beats and
+# an eighth rest (Local task A4); the riff's staccato eighths keep theirs.
 HEAD_CLOSE_RESTS = 0.5
 
 
@@ -297,7 +298,7 @@ class HornLines:
     phrases: list[dict] = field(default_factory=list)
     # Lower notes written once, in voice 1, as a unison.
     unisons: int = 0
-    # The faint scraps (`is_faint`), whether or not they were left off.
+    # The faint scraps (`faint_scraps`), whether or not they were left off.
     faint: list[NoteEvent] = field(default_factory=list)
 
 
@@ -403,12 +404,31 @@ def phrase_interval(phrase: list[NoteEvent], upper: list[NoteEvent]) -> float | 
 # measured on the head (NotateConfig.drop_faint, sidecar `drop_faint`):
 # `horn_lines` lists the scraps either way, and the script's dump says
 # what the rule would take.
+#
+# And ISOLATED: a short, unsure note with another within FAINT_NEIGHBOUR_S
+# is part of a figure, not a scrap. The head's bar 36 is three notes of
+# 58-70 ms at confidence 0.31-0.35, 92 ms apart, and real (Local task A5:
+# without this, `drop_faint` took them and a bar-38 pair with them).
 FAINT_MAX_S = 0.08
 FAINT_CONFIDENCE = 0.4
+FAINT_NEIGHBOUR_S = 0.15
 
 
 def is_faint(note: NoteEvent) -> bool:
+    """Short AND unsure AND not a lead-in: what a scrap is made of."""
     return note.duration < FAINT_MAX_S and note.confidence < FAINT_CONFIDENCE and not note.lead_in
+
+
+def faint_scraps(notes: list[NoteEvent], near: float = FAINT_NEIGHBOUR_S) -> list[NoteEvent]:
+    """The faint notes (`is_faint`) with no other faint note, in either
+    voice, starting within `near` seconds of them: a lone scrap, never a
+    run of quick soft notes."""
+    faint = sorted((n for n in notes if is_faint(n)), key=lambda n: n.onset)
+    return [
+        n
+        for k, n in enumerate(faint)
+        if not any(abs(m.onset - n.onset) <= near for j, m in enumerate(faint) if j != k)
+    ]
 
 
 def horn_lines(
@@ -438,11 +458,12 @@ def horn_lines(
 
     `move_octaves` and `merge_unisons` are off for two PARTS, where each
     horn plays its own notes at its own octave. `drop_faint` leaves the
-    faint scraps (`is_faint`) off the page; they are listed either way.
+    faint scraps (`faint_scraps`) off the page; they are listed either way.
     """
-    faint = [n for n in notes if is_faint(n)]
+    faint = faint_scraps(notes)
     if drop_faint:
-        notes = [n for n in notes if not is_faint(n)]
+        scraps = {id(n) for n in faint}
+        notes = [n for n in notes if id(n) not in scraps]
     upper = sorted((n for n in notes if n.voice != 2), key=lambda n: (n.onset, -n.pitch))
     lower = sorted((n for n in notes if n.voice == 2), key=lambda n: (n.onset, -n.pitch))
     moved: list[NoteEvent] = []

@@ -80,7 +80,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "--no-close-rests",
         action="store_true",
-        help="keep a rest of an eighth or less before a voice's next note (sidecar close_rests)",
+        help="keep a held note's rest of an eighth or less before the voice's next note "
+        "(sidecar close_rests)",
     )
     parser.add_argument(
         "--no-fold",

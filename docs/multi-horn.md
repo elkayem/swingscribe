@@ -390,6 +390,47 @@ what each became:
 - Bars 36 and 38: the internet page's triplets "look wrong"; writing none
   is right, and the triplet gates stay as they are.
 
+## The fifth measurement (Local task A5, 2026-10-09)
+
+The head on swing, 70 bars, 379 notes, readability 1.000, ties 0.156; four
+of four files open in MuseScore; no tuplets anywhere (bars 36 and 38, as
+the listener said). Basic Pitch heard 381: 10 overtone ghosts and 3 third
+notes left out, 67 tails cut, 7 legato successors, 36 split held notes
+joined, 10 lead-ins. Bars 23, 24, 27 and 32 read as the listener hears
+them; bar 24's lower A is a whole note. What it found, and what changed:
+
+- Bar 26 was still wrong ON THE PAGE, and right in the review. `voices.
+  assign` kept the tenor's D-flat in voice 2 (`continue_voices`), but the
+  GUI's edits re-order the EDITED set (`gui/edits.py`, so an erased
+  partner leaves its note written once) with `voices.order` alone, which
+  put every partnerless note back in voice 1. The edits now run
+  `continue_voices` after the order too; with the E-flat's tail cut where
+  the D-flat begins, the two touch, so the touch rule finds the step
+  without the review's links. No review key moved.
+- Closing rests closed 30 drawn eighth rests, most of them the A section's
+  riff ("D-flat, rest, E-flat, rest, D-flat" in eighths, pages 10, 14, 22-
+  30): staccato a lead sheet writes. A rest is closed now only after a
+  HELD note, a half note or more (`notate.CLOSE_AFTER_BEATS`): bar 24's A,
+  three and a half beats and an eighth of breath, still becomes a whole
+  note. The half note is a choice from one example; the listener judges.
+- `--drop-faint` took bar 29's scrap, the listener's reading, and real
+  notes with it: bar 36's quick figure (three notes of 58-70 ms at 0.31-
+  0.35, 92 ms apart) and a pair in bar 38. A scrap is ISOLATED now: no
+  other faint note within 0.15 s (`notation.faint_scraps`). Still OFF.
+- The joins table (74 same-pitch joins): bar 25's lower C at 41.651 shows
+  no dip at all (frame dip 1.04, energy dip 0.7 dB) where clear tongued
+  repeats dip 7-30 dB. Five joins with an energy dip under 2 dB after a
+  note over 0.2 s look like re-triggers (24.900 A-flat 4, 28.931 F5, 41.651
+  C4, 45.427 B-flat 3, 55.256 A-flat 4). No rule until the listener marks
+  them.
+- Still open, all hearing: the trumpet's F4 at 42.094 (104 ms, touching
+  the held F4 before it) writes "F4 tied, F4" where the listener hears the
+  F held over -- a short TAIL, which the lead-in rule leaves alone on
+  purpose (docs/scoops.md); bar 28's G-flat at 43.790 (70 ms, 0.31) is a
+  semitone under the G but 46 ms before it, past the 30 ms a lead-in must
+  touch, so it is written as an eighth pickup; and the lower voice enters
+  an eighth late on pages 47 and 49.
+
 ## Open questions for the measurement
 
 - Is `literal_lag` right on the head's held chords, and does it move a note

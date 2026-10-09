@@ -48,8 +48,9 @@ def resolve(
 
     `horns` is a multi-horn head: `audible` and `added` each carry the
     `voice` they are written in -- the voices re-ordered over the edited
-    set (`voices.order`), so a note whose partner was erased is written
-    once, and then the listener's own moves (`voices`) on top. `overlap_s`
+    set (`voices.order`, then `voices.continue_voices`), so a note whose
+    partner was erased is written once, and then the listener's own moves
+    (`voices`) on top. `overlap_s`
     and `overlap_share` are the review's own TranscribeConfig values.
     """
     view = gui_erasures.HORNS if horns else gui_erasures.ALL if texture else gui_erasures.LINE
@@ -155,8 +156,9 @@ def _voiced(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any], dict[int, int]]:
     """The kept notes of a multi-horn head, each with the voice it is
     written in: ordered over the EDITED set (`voices.order` -- rule 3 alone,
-    so nothing the listener kept or switched on is pruned again), then the
-    listener's voice moves applied, matched by content against the review's
+    so nothing the listener kept or switched on is pruned again, and
+    `voices.continue_voices`, so a line's step down stays in voice 2), then
+    the listener's voice moves applied, matched by content against the review's
     notes (as the roll numbers them) and the switched-on candidates.
 
     Returns (audible, added, the moves' resolution with `upper` and `lower`
@@ -170,7 +172,16 @@ def _voiced(
         rules["overlap_s"] = overlap_s
     if overlap_share is not None:
         rules["share"] = overlap_share
-    order = horn_voices.order(combined, **rules)
+    ordered_notes = [
+        {**note, "voice": voice}
+        for note, voice in zip(combined, horn_voices.order(combined, **rules), strict=True)
+    ]
+    # ... and a partnerless note continuing a voice-2 line stays in it, as
+    # `voices.assign` left it (bar 26's step down): a legato successor
+    # touches the note it follows once that note's tail is cut, so the
+    # touch rule finds it without the review's links.
+    horn_voices.continue_voices(ordered_notes, list(range(len(combined))), {}, **rules)
+    order = [int(note["voice"]) for note in ordered_notes]
     resolved = gui_erasures.resolve_voices(moves, combined, span)
     chosen = dict.fromkeys(resolved["upper"], 1) | dict.fromkeys(resolved["lower"], 2)
     voiced = [

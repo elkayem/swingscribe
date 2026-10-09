@@ -77,6 +77,9 @@ TRIPLET_RATIO = 1.5  # written value = sounded duration * 3/2
 TRIPLET_VALUES = tuple(v / TRIPLET_RATIO for v in NOTE_VALUES)
 QUARTER = 1.0  # a beat, in quarter notes — the unit a tuplet may live inside
 TICK = 1e-6  # positions are grid-exact; this only absorbs float noise
+# `close_rests` closes a rest only after a note held this many beats or more
+# (a half note): a held note's breath, never a staccato note's rest.
+CLOSE_AFTER_BEATS = 2.0
 
 # (actual, normal) tuplets this notater can write, tried in this order. 3:2 is
 # the ordinary triplet. 5:4 and 7:4 exist for WJazzD: measured across all 456
@@ -788,7 +791,11 @@ def notated_durations(
 
     `close_rests` writes a REST of at most that many beats before the next
     note into the note before it (NotateConfig.close_rests): a two-horn
-    head's held notes run to the next note.
+    head's held notes run to the next note. Only a HELD note's, at least
+    `CLOSE_AFTER_BEATS` long: bar 24's A, three and a half beats and an
+    eighth of breath, is a whole note, but the A section's riff -- "D-flat,
+    rest, E-flat, rest" in eighths -- is staccato, and a lead sheet writes
+    those rests (Local task A5: an eighth's limit alone closed 30 of them).
 
     Jazz is written legato and played detached. Measured on the three hand
     transcriptions, **90-93% of notated notes fill the gap to the next note
@@ -856,7 +863,11 @@ def notated_durations(
                 and 1 <= whole <= hold_to_beat + TICK
             )
             silence = gap - duration
-            closes = close_rests > 0 and TICK < silence <= close_rests + TICK
+            closes = (
+                close_rests > 0
+                and TICK < silence <= close_rests + TICK
+                and duration >= CLOSE_AFTER_BEATS - TICK
+            )
             if gap > TICK and (within_cap or holds or to_beat or closes):
                 duration = gap
         out.append((bar, beat, duration, pitch))

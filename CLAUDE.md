@@ -763,13 +763,17 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   GUI's review key hashes the transcribe dump and never CACHE_VERSION:
   bump `multi_horn_version` with ANY rule change (3 since the legato
   successor). The listener's own corrections (A4; an internet page of the
-  head is NOT a reference): a head closes a rest of up to an eighth before
-  a voice's next note (`NotateConfig.close_rests` via `notation.
-  writing_of`); a note a step from the only note sounding, which ends
-  within 0.25 s, is that horn's legato successor and keeps its voice
-  (`voices.legato_successors`, `continue_voices`); faint scraps (under 80
-  ms AND confidence under 0.4 AND not a lead-in) leave the page only with
-  `drop_faint`, OFF until measured. `scripts/multi_horn_joins.py` measures
+  head is NOT a reference): a head closes a rest of up to an eighth after
+  a HELD note (a half note or more, `notate.CLOSE_AFTER_BEATS`) before the
+  voice's next note (`NotateConfig.close_rests` via `notation.writing_of`;
+  the A section's staccato riff keeps its eighth rests); a note a step
+  from the only note sounding, which ends within 0.25 s, is that horn's
+  legato successor and keeps its voice (`voices.legato_successors`,
+  `continue_voices` -- in `assign` AND over the edited set in
+  `gui/edits.py`, or the page loses it); faint scraps (under 80 ms AND
+  confidence under 0.4 AND not a lead-in AND no other such note within
+  0.15 s: bar 36's quick soft figure is real, `notation.faint_scraps`)
+  leave the page only with `drop_faint`, OFF until measured. `scripts/multi_horn_joins.py` measures
   same-pitch joins for a re-attack rule; none exists yet.
 - **The Score button and the F1 on the ground-truth bar are DIFFERENT
   QUESTIONS**, and this is the project's most expensive confusion appearing in

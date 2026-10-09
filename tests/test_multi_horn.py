@@ -15,6 +15,7 @@ from swingscribe.gui import edits, erasures
 from swingscribe.model import NotatedBar, NotatedNote, Notation, NoteEvent
 from swingscribe.notation import (
     OCTAVE,
+    faint_scraps,
     horn_lines,
     lower_phrases,
     merge_horn_voices,
@@ -642,6 +643,40 @@ def test_a_head_closes_an_eighth_rest_before_the_voices_next_note():
     assert any(rest and number == 3 and beat == 2.0 for number, beat, _d, rest in closed)
 
 
+def test_a_staccato_riff_keeps_its_rests():
+    """The A section's riff, "D-flat, rest, E-flat, rest, D-flat" in eighths
+    (Local task A5): a short note's rest is articulation a lead sheet
+    writes. Only a held note (a half note or longer) is closed to the next."""
+    beats = grid()
+    bar = beats[8]
+    riff = [horn(bar + k * BEAT, 0.5 * BEAT, pitch) for k, pitch in enumerate((73, 75, 73))]
+    held = [horn(bar + 4 * BEAT, 3.5 * BEAT, 72), horn(bar + 8 * BEAT, BEAT, 70)]
+    config = Config()
+    config = config.model_copy(
+        update={
+            "notate": config.notate.model_copy(
+                update=writing_of({"ensemble": "multi-horn"}, config)
+            )
+        }
+    )
+    page, _ = notation_for_horns(
+        "t.wav",
+        riff + held,
+        beats,
+        (beats[4], beats[24]),
+        stem="other",
+        config=config,
+        anchor=beats[4],
+    )
+    written = [
+        (b.number, round(n.beat, 3), n.duration, n.is_rest) for b in page.bars for n in b.notes
+    ]
+    for k in range(2):
+        assert (2, float(k), 0.5, False) in written  # the riff's eighths stay eighths
+        assert (2, k + 0.5, 0.5, True) in written  # ... with their rests
+    assert (3, 0.0, 4.0, False) in written  # the held note runs to the next
+
+
 def test_close_rests_is_for_heads_and_moves_no_key():
     config = Config()
     assert writing_of({"ensemble": "multi-horn"}, config)["close_rests"] == 0.5
@@ -905,6 +940,7 @@ def test_a_faint_scrap_is_listed_and_left_off_only_when_asked():
     )
     lead_in = scrap.model_copy(update={"onset": 3.0, "lead_in": True})
     line = [horn(0.0, 0.9, 72), scrap, short_but_sure, lead_in, horn(3.058, 1.0, 67)]
+    assert faint_scraps(line) == [scrap]
     kept = horn_lines(line)
     assert kept.faint == [scrap] and scrap in kept.upper
     dropped = horn_lines(line, drop_faint=True)
@@ -914,3 +950,36 @@ def test_a_faint_scrap_is_listed_and_left_off_only_when_asked():
     assert writing_of({"ensemble": "multi-horn"}, config)["drop_faint"] is False
     assert writing_of({"ensemble": "multi-horn", "drop_faint": True}, config)["drop_faint"]
     assert not writing_of({"drop_faint": True}, config)["drop_faint"]  # heads only
+
+
+def test_a_run_of_quick_soft_notes_is_a_figure_not_scraps():
+    """Bar 36 of the head: three notes of 58-70 ms at confidence 0.31-0.35,
+    92 ms apart, real (Local task A5). A scrap must be ISOLATED."""
+    figure = [
+        NoteEvent(onset=t, duration=d, pitch=p, confidence=c, source="other", voice=1)
+        for t, d, p, c in ((53.049, 0.058, 65, 0.31), (53.141, 0.07, 70, 0.35),
+                           (53.234, 0.062, 67, 0.33))
+    ]  # fmt: skip
+    lone = NoteEvent(onset=55.0, duration=0.058, pitch=66, confidence=0.33, source="other")
+    assert faint_scraps([*figure, lone]) == [lone]
+    lines = horn_lines([horn(52.0, 1.0, 72), *figure, lone], drop_faint=True)
+    assert all(n in lines.upper for n in figure) and lone not in lines.upper
+
+
+def test_bar_26_on_the_page_the_tenors_step_down_stays_in_voice_2():
+    """The review's bar 26 after `voices.assign` (Local task A5): the
+    tenor's E-flat, its tail cut where the D-flat begins, and the D-flat
+    split in two. Re-ordering the edited set alone put the D-flats in voice
+    1 as partnerless; the page must keep the voices assign gave them."""
+    notes = [
+        heard(40.955, 1.139, 65, 1),  # trumpet F4, bar 25
+        heard(41.651, 0.234, 60, 2),  # tenor C4
+        heard(41.885, 0.476, 63, 2),  # tenor Eb4, cut at the Db4
+        heard(42.094, 0.104, 65, 1),  # the trumpet's F4 again, briefly
+        heard(42.361, 0.139, 61, 2),  # tenor Db4 on 3
+        heard(42.500, 0.093, 61, 2),  # ... split
+        heard(42.628, 0.209, 65, 1),  # trumpet F4 on 4
+    ]
+    resolved = edits.resolve({}, payload(notes), (40.0, 43.0), horns=True)
+    assert [n["voice"] for n in resolved["audible"]] == [1, 2, 2, 1, 2, 2, 1]
+    assert resolved["note_voices"] == [1, 2, 2, 1, 2, 2, 1]

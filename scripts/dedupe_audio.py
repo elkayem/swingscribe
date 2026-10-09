@@ -5,9 +5,9 @@
     .venv\\Scripts\\python.exe scripts\\dedupe_audio.py benchmark --apply --trash D:\\dedupe-trash
     .venv\\Scripts\\python.exe scripts\\dedupe_audio.py --undo benchmark\\.dedupe\\manifest-....json
 
-PREPARED, NOT RUN: the listener wants to review linked sidecars before any
-duplicate audio goes (docs/multi-horn-handoff.md). Nothing is changed unless
-`--apply` is given, and the hand-off says when that is.
+Run on the benchmark library 2026-10-09 with the listener's approval (37
+copies linked, 4 left, docs/multi-horn-handoff.md B2). Nothing is changed
+unless `--apply` is given.
 
 The library holds copies of one recording in two folders (benchmark/
 Multi-Horn/Open-Sesame.m4a and Transcriptions_Other/Open-Sesame-...m4a, say).
@@ -51,6 +51,7 @@ sidecar) is left whole too. Hashing reads every audio file once.
 """
 
 import argparse
+import contextlib
 import hashlib
 import json
 import re
@@ -226,11 +227,65 @@ def default_manifest(root: Path) -> Path:
     return root / ".dedupe" / f"manifest-{datetime.now():%Y%m%d-%H%M%S}.json"
 
 
+REPLACE_ATTEMPTS = 5
+RETRY_DELAY_S = 0.2
+
+
 def write_manifest(path: Path, manifest: dict) -> None:
+    """Write the manifest, bumping its `revision`, so that a run is never
+    stopped by the manifest itself.
+
+    OneDrive holds a file it is syncing open, and replacing it then fails
+    with WinError 5: the first real run stopped that way after step 1 of
+    37. So the replace is retried (as `cache._replace` does); a manifest
+    still locked is written in place; and when that fails too, the `.tmp`
+    beside it stays, holding the later revision -- `read_manifest` takes
+    whichever of the two is newer, so `--undo` still sees every step."""
+    manifest["revision"] = int(manifest.get("revision", 0)) + 1
+    text = json.dumps(manifest, indent=2)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    temporary.replace(path)
+    try:
+        temporary.write_text(text, encoding="utf-8")
+    except PermissionError:
+        temporary = None
+    if temporary is not None:
+        for attempt in range(REPLACE_ATTEMPTS):
+            try:
+                temporary.replace(path)
+                return
+            except PermissionError:
+                time.sleep(RETRY_DELAY_S * (attempt + 1))
+    try:
+        path.write_text(text, encoding="utf-8")
+    except PermissionError:
+        if temporary is None:
+            raise
+        print(
+            f"  (manifest {path.name} is locked: revision {manifest['revision']} is in "
+            f"{temporary.name}, and --undo reads it)",
+            file=sys.stderr,
+        )
+        return
+    if temporary is not None:
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+
+
+def read_manifest(path: Path) -> tuple[Path, dict]:
+    """The manifest `write_manifest` last wrote, from `path` or the `.tmp`
+    beside it, whichever holds the later revision (either may be named),
+    and the `.json` path to write it back to."""
+    path = path.with_suffix(".json")
+    found = []
+    for candidate in (path, path.with_suffix(".tmp")):
+        try:
+            found.append(json.loads(candidate.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            continue
+    if not found:
+        raise SystemExit(f"no readable manifest at {path}")
+    return path, max(found, key=lambda manifest: int(manifest.get("revision", 0)))
 
 
 def recycle(path: Path) -> None:
@@ -393,7 +448,7 @@ def undo(manifest_path: Path, log=print) -> int:
     went, then each sidecar's previous content -- unless the sidecar was
     edited since, which is reported and left alone. Returns how many steps
     could not be fully undone."""
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_path, manifest = read_manifest(manifest_path)
     problems = 0
     for entry in reversed(manifest["steps"]):
         if entry["status"] != "done":

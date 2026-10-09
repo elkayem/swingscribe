@@ -194,3 +194,63 @@ def test_a_trash_the_walk_would_read_is_refused(tmp_path):
             [str(tmp_path), "--keep-in", "Multi-Horn", "--apply", "--trash", str(tmp_path / "t")]
         )
     assert copy.is_file()
+
+
+# ── a manifest OneDrive holds open never stops the run ──────────────────────
+
+
+def lock_manifests(monkeypatch, in_place=False):
+    """Refuse replacing (and, with `in_place`, writing) any manifest .json,
+    the way OneDrive refuses a file it is syncing (WinError 5)."""
+    monkeypatch.setattr(dedupe_audio, "RETRY_DELAY_S", 0.0)
+    replace, write_text = Path.replace, Path.write_text
+
+    def locked_replace(self, target):
+        if Path(target).name.startswith("manifest-"):
+            raise PermissionError(5, "Access is denied")
+        return replace(self, target)
+
+    def locked_write(self, *args, **kwargs):
+        if in_place and self.name.startswith("manifest-") and self.suffix == ".json":
+            raise PermissionError(5, "Access is denied")
+        return write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "replace", locked_replace)
+    monkeypatch.setattr(Path, "write_text", locked_write)
+
+
+def test_a_locked_manifest_is_written_in_place(tmp_path, monkeypatch):
+    keep, copy, own = setup(tmp_path)
+    lock_manifests(monkeypatch)
+    dedupe_audio.main([str(tmp_path), "--keep-in", "Multi-Horn", "--apply", *trash(tmp_path)])
+    assert not copy.exists()
+    manifest = json.loads(manifest_of(tmp_path).read_text())
+    assert manifest["steps"][0]["status"] == "done"
+    assert not list((tmp_path / ".dedupe").glob("manifest-*.tmp"))
+
+
+def test_a_manifest_locked_outright_leaves_its_tmp_and_undo_reads_it(tmp_path, monkeypatch):
+    keep, copy, own = setup(tmp_path)
+    before = own.read_text()
+    manifest = tmp_path / ".dedupe" / "manifest-locked.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("{}")  # the stale copy OneDrive will not let go of
+    lock_manifests(monkeypatch, in_place=True)
+    dedupe_audio.main(
+        [
+            str(tmp_path),
+            "--keep-in",
+            "Multi-Horn",
+            "--apply",
+            *trash(tmp_path),
+            "--manifest",
+            str(manifest),
+        ]
+    )
+    assert not copy.exists() and json.loads(manifest.read_text()) == {}
+    newer = json.loads(manifest.with_suffix(".tmp").read_text())
+    assert newer["steps"][0]["status"] == "done"
+    monkeypatch.undo()
+    assert dedupe_audio.main(["--undo", str(manifest)]) == 0
+    assert copy.read_bytes() == b"the same bytes" and own.read_text() == before
+    assert json.loads(manifest.read_text())["steps"][0]["status"] == "undone"
