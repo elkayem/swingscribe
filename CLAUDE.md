@@ -761,13 +761,18 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   the next note 3x longer, so a 16th run is never a chain) and the page
   folds it as a grace (`literal_lead_ins`, on for this ensemble only). The
   GUI's review key hashes the transcribe dump and never CACHE_VERSION:
-  bump `multi_horn_version` with ANY rule change (4 since rule 5b: a
-  split held note is joined where the OTHER horn sounds across the join
-  with no attack within 60 ms and the stem's energy dips under 5 dB,
-  `voices.join_held` -- the listener's five marks, A6). Notes of the two
-  voices struck within 30 ms are written from ONE onset, a lead-in's fold
-  included (`notation.one_attack`: the fold wrote one horn on the beat and
-  the other an eighth late). The listener's own corrections (A4; an internet page of the
+  bump `multi_horn_version` with ANY rule change (5 since rule 5b: a
+  split HELD note -- the first 400 ms or more, never the riff's staccato
+  repeats -- is joined where the OTHER horn sounds across the join with no
+  attack within 60 ms and the stem's energy dips under 5 dB,
+  `voices.join_held` -- the listener's five marks, A6-A7). Notes of the
+  two voices struck within half an eighth (a quarter beat, 30-60 ms) are
+  written from ONE onset, a lead-in's fold included (`notation.
+  one_attack`). A head writes a short note and its rest as a staccato
+  QUARTER (`notate.staccato_quarters`, `NotatedNote.staccato`, the Short
+  notes menu, sidecar `staccato`) and leaves a faint semitone slide off
+  the page (`notation.slide_scraps`, sidecar `drop_slides`): the
+  listener's way, A7. The listener's own corrections (A4; an internet page of the
   head is NOT a reference): a head closes a rest of up to an eighth after
   a HELD note (a half note or more, `notate.CLOSE_AFTER_BEATS`) before the
   voice's next note (`NotateConfig.close_rests` via `notation.writing_of`;

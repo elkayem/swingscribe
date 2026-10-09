@@ -624,8 +624,13 @@ The page writes both horns on one treble staff, in concert pitch:
   even where one horn leads in with a scoop or a short head.
 - A held note the model heard as two -- one horn holding while the other
   holds its note straight across, with no new attack -- is written as one
-  note. Where both horns re-attack together, the note is repeated and
-  written twice.
+  note. Where both horns re-attack together, or the note is short, the
+  note is repeated and written twice.
+- A short note with a rest after it (an eighth and an eighth rest, as
+  played) is written as a quarter with a staccato dot. The **Short notes**
+  menu beside Rhythm writes them as an eighth and a rest instead.
+- A faint, very short note a semitone from the note it slides into or
+  falls off is left off the page.
 - A held note (a half note or longer) followed by a breath of an eighth
   or less before the horn's next note is written to that note: a whole
   note, not three and a half beats and an eighth rest. A short note keeps

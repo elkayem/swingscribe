@@ -56,7 +56,8 @@ Then, in each voice:
    peak (bar 24's D5 written as a dotted half tied to a re-attacked
    quarter); CREPE follows one horn at a time, so it can vouch for a held
    note only where it is on that horn, and elsewhere nothing is joined.
-   **5b. And where the other horn sounds across the join** with no attack
+   **5b. And, for a HELD note, where the other horn sounds across the
+   join** with no attack
    of its own near it and the stem's energy barely dips (`join_held`): in
    a harmonized head both horns articulate together, so one horn's
    "re-attack" under the other's held note is Basic Pitch's re-trigger
@@ -143,8 +144,15 @@ SUCCESSOR_MAX_STEP = 2
 # away); the head's real repeats have both horns re-attacking within 12 ms
 # and dips of 8-30 dB (Local task A6, docs/multi-horn.md). `DIP_WINDOW_S`
 # and the 10 ms frames are scripts/multi_horn_joins.py's measurement.
+#
+# And only a HELD note is joined: the first note must last `HELD_MIN_S`.
+# The listener's five ran 0.64-1.31 s; the joins the rule wrongly made at
+# first were the riff's staccato repeats, 0.06-0.16 s (Local task A7). The
+# 0.31-0.34 s pairs between them (the A section's "E-flat for a beat and a
+# half, E-flat on the and") are the listener's to hear, and stay two notes.
 HELD_ONSET_S = 0.06
 HELD_MAX_DIP_DB = 5.0
+HELD_MIN_S = 0.4
 DIP_WINDOW_S = 0.03
 
 
@@ -571,9 +579,11 @@ def join_held(
     max_dip_db: float = HELD_MAX_DIP_DB,
     other_onset: float = HELD_ONSET_S,
     touch: float = TOUCH_S,
+    min_first: float = HELD_MIN_S,
 ) -> tuple[list[dict[str, Any]], list[float]]:
     """Rule 5b: a voice's two touching notes of one pitch are ONE held note
-    where the other voice sounds across the join with no onset within
+    where the first (with whatever was joined to it) lasts at least
+    `min_first`, the other voice sounds across the join with no onset within
     `other_onset` of it, and the stem's energy (`energy_dip`) falls less
     than `max_dip_db` there. Notes in, notes out, the first of a joined
     pair lasting both; returns the notes and each join's time. No energy,
@@ -592,6 +602,7 @@ def join_held(
             if (
                 previous is not None
                 and int(previous["pitch"]) == int(note["pitch"])
+                and float(previous["duration"]) >= min_first
                 and _touching(previous, note, touch)
                 and any(
                     float(o["onset"]) <= at - other_onset and _end(o) >= at + other_onset
@@ -648,6 +659,7 @@ def assign(
     energy: tuple[float, float, list[float]] | None = None,
     held_dip_db: float = HELD_MAX_DIP_DB,
     held_onset_s: float = HELD_ONSET_S,
+    held_min_s: float = HELD_MIN_S,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Every rule: (the notes the two voices hold, each with a `voice`; the
     notes neither holds, each with `dropped` saying why).
@@ -673,7 +685,7 @@ def assign(
         note["voice"] = voice
     continued = continue_voices(kept, indices, links, overlap_s, share)
     joined = rejoin_splits(kept, track, list(attacks))
-    held, held_at = join_held(joined, energy, held_dip_db, held_onset_s)
+    held, held_at = join_held(joined, energy, held_dip_db, held_onset_s, min_first=held_min_s)
     marked = mark_lead_ins(held)
     dropped = [
         {**notes[i], "dropped": GHOST if i in ghosted else THIRD} for i in sorted(ghosted | crowded)

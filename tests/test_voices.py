@@ -409,3 +409,19 @@ def test_the_energy_dip_is_the_join_against_the_two_notes_median():
         20.0
     )
     assert voices.energy_dip((10.0, 0.01, [1.0] * 10), first, second) is None
+
+
+def test_a_short_repeat_under_the_other_horn_stays_two_notes():
+    """The riff's staccato repeats (Local task A7): "E-flat, E-flat" of 0.14
+    s each under the other horn's held note is two notes. Only a held note
+    (0.4 s or more) is joined."""
+    short = [note(0.0, 0.14, 75), note(0.14, 0.14, 75), note(0.0, 0.6, 70)]
+    for n, v in zip(short, (1, 1, 2), strict=True):
+        n["voice"] = v
+    assert voices.join_held(short, flat_energy())[1] == []
+    # A held note split in three is one note, the third joined to the first two.
+    held = [note(0.0, 0.7, 75), note(0.7, 0.2, 75), note(0.9, 0.3, 75), note(0.0, 1.5, 70)]
+    for n, v in zip(held, (1, 1, 1, 2), strict=True):
+        n["voice"] = v
+    kept, held_at = voices.join_held(held, flat_energy())
+    assert held_at == [0.7, 0.9] and [n["duration"] for n in kept if n["voice"] == 1] == [1.2]

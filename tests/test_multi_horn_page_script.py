@@ -196,3 +196,21 @@ def test_a_linked_take_names_its_page(monkeypatch, tmp_path):
     assert page.name.startswith("Open_Sesame_Melody.")
     xml = page.read_text(encoding="utf-8")
     assert "Open_Sesame_Melody" in xml and "<work-title>Open_Sesame<" not in xml
+
+
+def test_the_held_ratio_bins_part_a_staccato_note_from_a_held_one():
+    from swingscribe.model import NoteEvent
+    from swingscribe.notation import HornLines
+
+    def heard(onset, duration, voice=1):
+        return NoteEvent(
+            onset=onset, duration=duration, pitch=72, confidence=0.7, source="o", voice=voice
+        )
+
+    # Two staccato notes at half their 0.24 s gap, a held one at 0.95 of it,
+    # and a note 1 s before the next: past the window, not counted.
+    upper = [heard(0.0, 0.12), heard(0.24, 0.12), heard(0.48, 0.228), heard(0.72, 0.5)]
+    lower = [heard(0.0, 0.5, 2), heard(1.5, 0.5, 2)]
+    bins = multi_horn_page.held_ratios(HornLines(upper=upper, lower=lower))
+    assert bins[1][5] == 2 and bins[1][9] == 1 and sum(bins[1]) == 3
+    assert sum(bins[2]) == 0

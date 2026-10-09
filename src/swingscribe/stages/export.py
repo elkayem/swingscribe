@@ -461,7 +461,8 @@ def _append_pitch(
     for number, value in beams or ():
         ElementTree.SubElement(element, "beam", {"number": str(number)}).text = value
     tied = (note.tie_start or note.tie_stop) and not note.is_rest
-    if tied or tuplet_mark:
+    staccato = note.staccato and not note.is_rest
+    if tied or tuplet_mark or staccato:
         notations = ElementTree.SubElement(element, "notations")
         if note.tie_stop and not note.is_rest:
             ElementTree.SubElement(notations, "tied", {"type": "stop"})
@@ -469,6 +470,11 @@ def _append_pitch(
             ElementTree.SubElement(notations, "tied", {"type": "start"})
         if tuplet_mark:
             ElementTree.SubElement(notations, "tuplet", {"type": tuplet_mark})
+        if staccato:
+            # A short note and its rest written as one quarter (notate.
+            # staccato_quarters): the dot says it is played short.
+            articulations = ElementTree.SubElement(notations, "articulations")
+            ElementTree.SubElement(articulations, "staccato")
 
 
 def voices_of(bar) -> list[tuple[int, list[NotatedNote]]]:

@@ -23,9 +23,10 @@ pair in the cached review it prints
 The listener marked the five low-dip joins on the Open Sesame head one held
 note (Local task A6): in a harmonized head both horns articulate together,
 and none of the five had the other horn attacking near it. That is rule 5b
-(`voices.join_held`, from `multi_horn_version` 4), and its column says
-which joins it takes. Once the review is re-transcribed under it, the joins
-it took are one note and no longer appear here: what is left is the repeats.
+(`voices.join_held`, from `multi_horn_version` 4; a held first note from 5),
+and its column says which joins it takes. Once the review is re-transcribed
+under it, the joins it took are one note and no longer appear here: what is
+left is the repeats.
 Read-only: needs the review cached (scripts/multi_horn_page.py or the GUI's
 Transcribe), the stems, and the ml group (Basic Pitch on onnxruntime).
 """
@@ -191,16 +192,16 @@ def main(argv=None) -> int:
     rms_times = rms_times + offset
     shift = run_config.transcribe.multi_horn_onset_shift_ms / 1000.0
 
-    from swingscribe import voices
-
     rows = []
     for first, second in joins(payload["notes"]):
         row = join_features(note_post, onset_post, times, rms, rms_times, first, second, shift)
         row |= other_voice(payload["notes"], first, second)
+        tc = run_config.transcribe
         row["rule"] = (
             row["across"]
             and not row["attack_near"]
-            and row["energy_dip_db"] < run_config.transcribe.multi_horn_held_dip_db
+            and row["first"] >= tc.multi_horn_held_min_ms / 1000.0
+            and row["energy_dip_db"] < tc.multi_horn_held_dip_db
         )
         rows.append(row)
     print(f"{len(rows)} same-pitch join(s) in {audio.name} {start}-{end} s")
@@ -217,10 +218,12 @@ def main(argv=None) -> int:
             f"{'joins' if row['rule'] else ''}"
         )
     taken = sum(1 for row in rows if row["rule"])
+    tc = run_config.transcribe
     print(
-        f"rule 5b (held under {voices.HELD_ONSET_S * 1000:.0f} ms of the other horn, dip under "
-        f"{run_config.transcribe.multi_horn_held_dip_db:g} dB) would take {taken}; a review "
-        "transcribed under it shows none of those"
+        f"rule 5b (a first note of {tc.multi_horn_held_min_ms:g} ms or more, the other horn "
+        f"across with no attack within {tc.multi_horn_held_onset_ms:g} ms, a dip under "
+        f"{tc.multi_horn_held_dip_db:g} dB) would take {taken}; a review transcribed under it "
+        "shows none of those"
     )
     if args.json:
         args.json.write_text(json.dumps(rows, indent=2), encoding="utf-8")

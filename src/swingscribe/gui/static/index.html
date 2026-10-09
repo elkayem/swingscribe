@@ -356,6 +356,11 @@
         <select id="key-select" title="Auto reads the key signature from the notes; or choose one. Concert pitch: Written for still transposes it."></select>
         <label class="picker-label" for="timing-select" title="How the rhythm is written. Swing reads the feel out: swung pairs are written as even eighths under a 'Swing' marking. Literal writes every note on the nearest 16th or 32nd, as played, with no marking.">Rhythm</label>
         <select id="timing-select" title="Swing: swung pairs written as eighths, 'Swing' above the staff. Literal: every note on the nearest 16th or 32nd, as played."></select>
+        <label class="picker-label" for="short-notes-select" id="short-notes-label" hidden title="A two-horn head's short notes: a note played short with a rest after it, written as a quarter with a staccato dot, or as an eighth and an eighth rest.">Short notes</label>
+        <select id="short-notes-select" hidden title="Staccato quarters: a short note and its rest written as one quarter with a dot. Eighth + rest: written as played.">
+          <option value="staccato">Staccato quarters</option>
+          <option value="eighths">Eighth + rest</option>
+        </select>
         <button class="chip" id="changes-toggle" title="Type the tune's chord changes, one chorus, to write chord symbols over the page. They repeat from the form start (Bar 1) through the span and move with Written for.">Changes</button>
         <button class="chip" id="score-btn" hidden title="Score this notation against the loaded hand transcription: are the notes written the way a human wrote them? A different, harder question than the pitch F1 above, and it always reads lower.">Score it</button>
         <button class="chip active" id="page-toggle" title="Show or hide the page below: the score Export would write, engraved in the app and redrawn as you edit. (P)">Page</button>

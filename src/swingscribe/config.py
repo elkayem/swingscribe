@@ -430,9 +430,13 @@ class TranscribeConfig(BaseModel):
     # are one held note where the other horn sounds across the join with no
     # attack of its own within `held_onset_ms`, and the stem's 10 ms RMS
     # dips less than `held_dip_db` there (the listener's five marks on the
-    # Open Sesame head, Local task A6). 0 dB joins nothing.
+    # Open Sesame head, Local task A6). 0 dB joins nothing. Only a HELD
+    # note: the first must last `held_min_ms` (A7: the rule's first cut
+    # joined the riff's staccato repeats, 0.06-0.16 s; the five ran
+    # 0.64-1.31 s).
     multi_horn_held_dip_db: float = 5.0
     multi_horn_held_onset_ms: float = 60.0
+    multi_horn_held_min_ms: float = 400.0
     # The voices' rules themselves (voices.py, transcribe._hear_horns), as a
     # number: the GUI's review key hashes this config's dump and never
     # transcribe.CACHE_VERSION, so a change to the rules that moves no
@@ -442,7 +446,8 @@ class TranscribeConfig(BaseModel):
     # notes joined where CREPE holds them, lead-ins marked. 3: a legato
     # successor keeps its horn's voice (voices.legato_successors). 4: a
     # split held note is joined under the other horn (voices.join_held).
-    multi_horn_version: int = 4
+    # 5: ... only after a held note (multi_horn_held_min_ms).
+    multi_horn_version: int = 5
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
@@ -980,16 +985,34 @@ class NotateConfig(BaseModel):
     # under 80 ms, confidence under 0.4, not a lead-in). OFF until measured
     # on the head; the sidecar's `drop_faint` turns it on for one.
     drop_faint: bool = False
+    # Leave a two-horn head's faint SLIDES off the page (notation.slide_scraps:
+    # a faint note a semitone from the note of its voice it touches). On for
+    # a head through notation.writing_of; the sidecar's `drop_slides` false
+    # keeps them.
+    drop_slides: bool = False
+    # Write a short note and the rest after it as ONE quarter with a
+    # staccato dot (notate.staccato_quarters): the listener's way with a
+    # two-horn head's riff (Local task A7). On for a head through
+    # notation.writing_of; the sidecar's `staccato` false writes an eighth
+    # and an eighth rest.
+    staccato_quarters: bool = False
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
-        """Leave `key`, `hold_to_beat` and `close_rests` out of the dump at
-        their defaults, so every notate key reads exactly as it did before
-        they existed."""
+        """Leave `key` and the head's writing fields (`hold_to_beat`,
+        `close_rests`, `drop_faint`, `drop_slides`, `staccato_quarters`) out
+        of the dump at their defaults, so every notate key reads exactly as
+        it did before they existed."""
         data = handler(self)
         if data.get("key") is None:
             data.pop("key", None)
-        for field in ("hold_to_beat", "close_rests", "drop_faint"):
+        for field in (
+            "hold_to_beat",
+            "close_rests",
+            "drop_faint",
+            "drop_slides",
+            "staccato_quarters",
+        ):
             if not data.get(field):
                 data.pop(field, None)
         return data

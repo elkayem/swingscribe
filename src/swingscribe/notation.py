@@ -43,6 +43,7 @@ the one derivation the roll, the Export button and the eval harness share, so
 the page the harness scores is the page the listener sees.
 """
 
+import bisect
 from dataclasses import dataclass, field
 
 from swingscribe.config import ENSEMBLE_TIMINGS, TIMINGS, Config
@@ -255,14 +256,22 @@ HEAD_CLOSE_RESTS = 0.5
 def writing_of(settings: dict, config: Config) -> dict:
     """The notate settings a page's sidecar chooses beyond the key and the
     part: for a multi-horn head, `close_rests` (an eighth, unless the
-    sidecar's `close_rests` is false) and `drop_faint` (the sidecar's,
-    off by default); for anything else the config's."""
+    sidecar's `close_rests` is false), `drop_faint` (the sidecar's, off by
+    default), `drop_slides` and `staccato_quarters` (on unless the
+    sidecar's `drop_slides` or `staccato` is false); for anything else the
+    config's."""
     horns = (settings.get("ensemble") or config.transcribe.ensemble) == "multi-horn"
     closes = horns and settings.get("close_rests", True) is not False
     return {
         "close_rests": HEAD_CLOSE_RESTS if closes else config.notate.close_rests,
         # Off until measured: only a head's sidecar turns it on.
         "drop_faint": bool(horns and settings.get("drop_faint", config.notate.drop_faint)),
+        # A head's faint slides are written as nothing (the listener, A7)
+        # unless its sidecar keeps them.
+        "drop_slides": horns and settings.get("drop_slides", True) is not False,
+        # ... and its short notes as staccato quarters, unless the sidecar's
+        # `staccato` is false: an eighth and an eighth rest.
+        "staccato_quarters": horns and settings.get("staccato", True) is not False,
     }
 
 
@@ -300,6 +309,8 @@ class HornLines:
     unisons: int = 0
     # The faint scraps (`faint_scraps`), whether or not they were left off.
     faint: list[NoteEvent] = field(default_factory=list)
+    # The faint slides (`slide_scraps`), whether or not they were left off.
+    slides: list[NoteEvent] = field(default_factory=list)
     # Notes moved onto the other horn's attack (`one_attack`).
     together: int = 0
 
@@ -433,9 +444,63 @@ def faint_scraps(notes: list[NoteEvent], near: float = FAINT_NEIGHBOUR_S) -> lis
     ]
 
 
+# A faint note (`is_faint`) a SEMITONE from the note of its own voice that
+# it touches, before or after it, is a slide into or off that note: the
+# listener heard "nothing, not even a grace note" at both of the Open Sesame
+# head's (43.790, a G-flat 46 ms before the G it slides into; 44.684, a
+# G-flat falling off the held G before it; Local task A7). Where
+# `drop_faint` took real notes with them (bar 26's last riff D-flat, a whole
+# step from its neighbour), this asks the interval.
+SLIDE_TOUCH_S = 0.05
+
+
+def slide_scraps(notes: list[NoteEvent], touch: float = SLIDE_TOUCH_S) -> list[NoteEvent]:
+    """The faint notes that are a semitone from the next or the previous
+    note of their own voice and touch it (within `touch`): slides."""
+    slides: list[NoteEvent] = []
+    for voice in (1, 2):
+        line = sorted(
+            (n for n in notes if (2 if n.voice == 2 else 1) == voice), key=lambda n: n.onset
+        )
+        for k, note in enumerate(line):
+            if not is_faint(note):
+                continue
+            before = line[k - 1] if k > 0 else None
+            after = line[k + 1] if k + 1 < len(line) else None
+            into = (
+                after is not None
+                and abs(after.pitch - note.pitch) == 1
+                and abs(after.onset - (note.onset + note.duration)) <= touch
+            )
+            off = (
+                before is not None
+                and abs(before.pitch - note.pitch) == 1
+                and abs(note.onset - (before.onset + before.duration)) <= touch
+            )
+            if into or off:
+                slides.append(note)
+    return sorted(slides, key=lambda n: n.onset)
+
+
 # Two horns attacking one chord: Basic Pitch's onsets for the two land
-# within this of each other (12 ms at page 49 of the Open Sesame head).
+# within half an eighth of each other -- a quarter of the beat, never under
+# 30 ms nor over 60 (voices.CHORD_ONSET_S: notes struck that close are one
+# chord). Page 49's pair was 12 ms apart; page 10's riff, 23, 35 and 58 ms
+# at 250 bpm (Local task A7), where a quarter beat is 60 ms.
 ONE_ATTACK_S = 0.03
+ONE_ATTACK_BEATS = 0.25
+ONE_ATTACK_MAX_S = 0.06
+
+
+def attack_window(at: float, beats: list[float] | None) -> float:
+    """How far apart two horns' onsets near `at` may be and still be one
+    attack: a quarter of the beat there, between `ONE_ATTACK_S` and
+    `ONE_ATTACK_MAX_S`; `ONE_ATTACK_S` with no grid."""
+    if not beats or len(beats) < 2:
+        return ONE_ATTACK_S
+    k = min(max(bisect.bisect_right(beats, at) - 1, 0), len(beats) - 2)
+    beat = beats[k + 1] - beats[k]
+    return min(max(ONE_ATTACK_BEATS * beat, ONE_ATTACK_S), ONE_ATTACK_MAX_S)
 
 
 def _lead_in_heads(line: list[NoteEvent]) -> dict[int, int]:
@@ -466,10 +531,11 @@ def _lead_in_heads(line: list[NoteEvent]) -> dict[int, int]:
 def one_attack(
     upper: list[NoteEvent],
     lower: list[NoteEvent],
-    window: float = ONE_ATTACK_S,
+    beats: list[float] | None = None,
     fold: bool = True,
-) -> tuple[list[NoteEvent], list[NoteEvent], int]:
-    """Notes of the two voices struck within `window` of each other are ONE
+) -> tuple[list[NoteEvent], list[NoteEvent], list[dict]]:
+    """Notes of the two voices struck within `attack_window` of each other
+    (a quarter of the beat on `beats`) are ONE
     attack, and start where the earlier of the two is WRITTEN to start:
     a note a lead-in folds into (`fold`, as `quantize.absorb_lead_ins`
     will) is written from the lead-in's onset. Without this the fold moved
@@ -478,8 +544,8 @@ def one_attack(
     tenor's G-flat, struck 12 ms from the B-flat, an eighth late (Local
     task A6). The earlier start is taken by the note itself, or by its own
     lead-in; its end stays; and never where it would land on (or within
-    `window` after) a note of its own voice. Returns both lines and how
-    many notes moved."""
+    the window after) a note of its own voice. Returns both lines and each
+    move ({onset, to, pitch, voice}, in onset order)."""
     lines = [list(upper), list(lower)]
     heads = [_lead_in_heads(line) if fold else {} for line in lines]
     led = [set(h.values()) for h in heads]
@@ -494,6 +560,7 @@ def one_attack(
     targets: dict[tuple[int, int], float] = {}
     for side, i in mains:
         onset = lines[side][i].onset
+        window = attack_window(onset, beats)
         partners = [
             (other, j)
             for other, j in mains
@@ -512,12 +579,14 @@ def one_attack(
         )
         if earliest < onset and not crowded:
             targets[first] = min(earliest, targets.get(first, earliest))
-    for (side, i), onset in targets.items():
+    moves = []
+    for (side, i), onset in sorted(targets.items(), key=lambda item: item[1]):
         note = lines[side][i]
         lines[side][i] = note.model_copy(
             update={"onset": onset, "duration": note.duration + (note.onset - onset)}
         )
-    return lines[0], lines[1], len(targets)
+        moves.append({"onset": note.onset, "to": onset, "pitch": note.pitch, "voice": side + 1})
+    return lines[0], lines[1], moves
 
 
 def horn_lines(
@@ -528,6 +597,7 @@ def horn_lines(
     rest: float = PHRASE_REST_S,
     unison_onset: float = UNISON_ONSET_S,
     drop_faint: bool = False,
+    drop_slides: bool = False,
 ) -> HornLines:
     """Two horns' heard notes (NoteEvent.voice) as one staff writes them.
 
@@ -547,12 +617,14 @@ def horn_lines(
 
     `move_octaves` and `merge_unisons` are off for two PARTS, where each
     horn plays its own notes at its own octave. `drop_faint` leaves the
-    faint scraps (`faint_scraps`) off the page; they are listed either way.
+    faint scraps (`faint_scraps`) off the page, `drop_slides` the faint
+    slides (`slide_scraps`); both are listed either way.
     """
     faint = faint_scraps(notes)
-    if drop_faint:
-        scraps = {id(n) for n in faint}
-        notes = [n for n in notes if id(n) not in scraps]
+    slides = slide_scraps(notes)
+    gone = {id(n) for n in (*(faint if drop_faint else ()), *(slides if drop_slides else ()))}
+    if gone:
+        notes = [n for n in notes if id(n) not in gone]
     upper = sorted((n for n in notes if n.voice != 2), key=lambda n: (n.onset, -n.pitch))
     lower = sorted((n for n in notes if n.voice == 2), key=lambda n: (n.onset, -n.pitch))
     moved: list[NoteEvent] = []
@@ -586,7 +658,9 @@ def horn_lines(
                 continue
             kept.append(note)
         moved = kept
-    return HornLines(upper=upper, lower=moved, phrases=phrases, unisons=unisons, faint=faint)
+    return HornLines(
+        upper=upper, lower=moved, phrases=phrases, unisons=unisons, faint=faint, slides=slides
+    )
 
 
 def span_anchor(
@@ -1082,13 +1156,15 @@ def notation_for_horns(
         move_octaves=not parts,
         merge_unisons=not parts,
         drop_faint=bool(config and config.notate.drop_faint),
+        drop_slides=bool(config and config.notate.drop_slides),
     )
     # A chord the two horns strike together starts at ONE place on the page,
     # a lead-in's fold included (quantize folds them when it reads swing,
     # or a literal page asks).
     qc = config.quantize if config is not None else None
     fold = qc is None or qc.timing == "swing" or qc.literal_lead_ins
-    upper, lower, lines.together = one_attack(lines.upper, lines.lower, fold=fold)
+    upper, lower, moves = one_attack(lines.upper, lines.lower, beats, fold=fold)
+    lines.together = len(moves)
     # Two notes struck together in ONE voice -- the listener moved one there
     # with the Voices tool -- are a chord in it, not a grid too coarse (one
     # would be pushed a 32nd late, or dropped).

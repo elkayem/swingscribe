@@ -961,3 +961,34 @@ def test_a_grace_note_is_written_on_the_first_piece_only():
     notation = build([held], [section], swing=False, transpose=0)
     pieces = [n for bar in notation.bars for n in bar.notes if not n.is_rest]
     assert [(n.pitch, n.grace) for n in pieces] == [(64, [63]), (64, [])]
+
+
+# ── staccato quarters (a two-horn head's riff, Local task A7) ───────────────
+
+
+def test_a_short_note_and_its_rest_become_a_staccato_quarter():
+    bars = notate._Bars([], 1, 2)
+    events = [
+        (1, 0.0, 0.5, 73),  # an eighth, an eighth rest: a staccato quarter
+        (1, 1.0, 0.5, 75),  # an eighth and a dotted quarter of rest: still
+        (1, 2.5, 0.5, 73),  # an eighth into the next note: no rest, stays
+        (1, 3.0, 0.25, 72),  # a 16th with rest after it, on the beat
+        (2, 0.25, 0.25, 70),  # off the eighth grid: stays
+        (2, 3.5, 0.5, 73),  # a quarter here crosses the bar line: stays
+    ]
+    out, marked = notate.staccato_quarters(events, bars)
+    assert [d for _b, _s, d, _p in out] == [1.0, 1.0, 0.5, 1.0, 0.25, 0.5]
+    assert marked == {(1, 0.0, 73), (1, 1.0, 75), (1, 3.0, 72)}
+
+
+def test_build_writes_the_staccato_on_the_note_and_not_by_default():
+    quantized = [
+        QuantizedNote(bar=1, beat=0.0, duration_beats=0.5, pitch=73, timing_residual=0.0),
+        QuantizedNote(bar=1, beat=1.0, duration_beats=0.5, pitch=75, timing_residual=0.0),
+        QuantizedNote(bar=1, beat=2.0, duration_beats=2.0, pitch=72, timing_residual=0.0),
+    ]
+    plain = notate.build(quantized, [], swing=False, transpose=0)
+    assert not any(n.staccato for b in plain.bars for n in b.notes)
+    marked = notate.build(quantized, [], swing=False, transpose=0, staccato=True)
+    notes = [(n.beat, n.duration, n.staccato) for n in marked.bars[0].notes if not n.is_rest]
+    assert notes == [(0.0, 1.0, True), (1.0, 1.0, True), (2.0, 2.0, False)]

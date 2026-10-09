@@ -1011,6 +1011,7 @@ def _hear_horns(
         energy=horn_energy(whole, rate, tc.region, shift),
         held_dip_db=tc.multi_horn_held_dip_db,
         held_onset_s=tc.multi_horn_held_onset_ms / 1000.0,
+        held_min_s=tc.multi_horn_held_min_ms / 1000.0,
     )
     # Printed always, like the voice counts after it: the GUI's review path
     # does not log, and this line is the only account of what each rule did

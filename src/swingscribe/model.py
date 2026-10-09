@@ -174,6 +174,13 @@ class NotatedNote(BaseModel):
     # staff, where a reader sees one line resting, not two. MIGRATION:
     # additive with a default, like `stem`.
     hidden: bool = False
+    # Written with a staccato dot (<articulations><staccato/>): a short
+    # note and the rest after it written as ONE quarter, the way the
+    # listener writes a two-horn head's riff (notate.staccato_quarters,
+    # Local task A7). On the first piece of a note only. MIGRATION: additive
+    # with a default, like `stem`: every cached Notation deserializes
+    # without it, and no key moves.
+    staccato: bool = False
 
 
 class ChordDegree(BaseModel):

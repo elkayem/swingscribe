@@ -11,7 +11,7 @@ merged: the listener reviews the branch first. Design and state:
 
 | Piece | State |
 | --- | --- |
-| A. Multi-horn core + `scripts/multi_horn_page.py` | measured six times (Local tasks A-A6); the listener's five joins are one held note (rule 5b joins a split held note under the other horn, `multi_horn_version` 4); a chord the horns strike together is written at one onset; the script counts heard notes the page does not write; waiting on Local task A7 |
+| A. Multi-horn core + `scripts/multi_horn_page.py` | measured seven times (Local tasks A-A7); rule 5b joins only a held note (`multi_horn_version` 5); short notes written as staccato quarters (the export bar's Short notes menu); the one-attack window is half an eighth; faint semitone slides written as nothing; waiting on Local task A8 |
 | B. Linked sidecars | done (Local tasks B, B2): 37 copies linked and in the Recycle Bin, 4 left, 313 MB; the card byte-identical before and after; the manifest write survives OneDrive now |
 | C. Two parts, GUI, guide | checked (Local task C); fixes pushed |
 
@@ -53,6 +53,13 @@ What the reports changed (2026-10-09; details in
   across the voices are one attack now (`notation.one_attack`).
   `--drop-faint` moved the reading around page 54, not its notes; the
   script now says when a heard note is not written.
+- Local task A7 (multi-horn.md, "The seventh measurement"): rule 5b
+  joined the riff's short repeats too, so it now needs a held first note
+  (400 ms). The listener writes the riff as staccato quarters (a head's
+  default now, `NotatedNote.staccato`); hears page 10's horns enter
+  together 58 ms apart (the window is half an eighth, up to 60 ms); and
+  hears nothing at the two G-flat scraps, which are semitone slides
+  (`notation.slide_scraps`, written as nothing).
 
 ## Setting up (once)
 
@@ -439,6 +446,55 @@ Report:
    G-flat at 43.790, the 44.684 G-flat scrap now in the lower voice, and
    pages 10 and 26 (the same riff, the D-flat on 3 against the and of 2).
 6. MuseScore opens both files.
+
+## Local task A8: staccato quarters, slides, and the held-note rule
+
+What landed after A7 (multi-horn.md, "The seventh measurement"):
+
+- Rule 5b joins only after a HELD note (400 ms); `multi_horn_version` 5, so
+  the first run re-transcribes (a minute or two).
+- Short notes: an eighth or less on an eighth, with at least an eighth of
+  rest after it, is a staccato quarter. The export bar's **Short notes**
+  menu (heads only) switches to "Eighth + rest"; `--no-staccato` here.
+- One attack within half an eighth (a quarter beat, 30-60 ms).
+- A faint note a semitone from the note of its voice it touches is a slide,
+  left off the page; `--keep-slides` writes them.
+- The dump adds the faint slides, every note moved onto the other horn's
+  attack, and per voice the share of the gap to the next note each note
+  sounds, in tenths.
+
+```
+set PAGE=.venv\Scripts\python.exe scripts\multi_horn_page.py AUDIO --sidecar TAKE --start 0 --end 67.308
+%PAGE% --out OUT\os8.musicxml --dump-voices OUT\os8.txt
+%PAGE% --no-staccato --out OUT\os8.eighths.musicxml --dump-voices OUT\os8.eighths.txt
+%PAGE% --keep-slides --out OUT\os8.slides.musicxml
+```
+
+Report:
+
+1. The transcribe lines: the held joins should be the listener's five and
+   the long ones (24.900, 28.931, 30.999, 41.651, 42.094, 45.427, 47.460,
+   55.256 -- the first notes over 400 ms), and none of 17.719, 20.323,
+   21.356, 21.495, 32.950, 36.854, 48.309, 50.180, 51.806, 63.190, 66.061,
+   66.200.
+2. `os8` against `os7`: page 22's "E-flat E-flat", page 52's "G-flat G-flat",
+   page 54's "F4 F4" and page 69's four C5s are back; the riff on pages 10,
+   14, 22-24, 26 and 30 in staccato quarters (`os8.eighths` keeps eighths
+   and rests); page 10 with both horns on the and of 2; pages 46 and 47
+   without the G-flat scraps; anything else that moved.
+3. The dump's share-of-gap bins per voice: where do the riff's notes and the
+   held ones fall, and is the gap between them where the quantizer puts an
+   eighth and a rest? The moves list: what the 60 ms window moves beyond
+   A7's 64, and whether any of it is two horns that really entered apart.
+4. `heard -> written` (no NOT WRITTEN) and the staccato count on the
+   summary line; MuseScore opens all three and shows the staccato dots.
+5. The GUI: the Short notes menu appears for the head only; switching it
+   rewrites the page and Export tags the file `.eighths`.
+6. For the listener: the A section's "E-flat for a beat and a half, E-flat
+   on the and" (17.719, 20.323, 36.854, 63.190) -- re-struck, or one held
+   note? Page 34's D5 between E-flats (33.067, 58 ms): a turn to keep, or
+   a slide to leave off? And any staccato quarter they would write
+   otherwise.
 
 ## Local task B: linked sidecars ("takes")
 

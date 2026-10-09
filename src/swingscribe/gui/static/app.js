@@ -82,6 +82,7 @@ const state = {
   voices: new Map(),        // note index -> 1 | 2, where the listener moved a horn's note
   carriedVoices: [],        // stored voice moves with no note in this view
   lowerTransposition: null, // a two-part head's lower part (sidecar lower_transposition)
+  staccato: null,           // a head's short notes: null = staccato quarters, false = eighth + rest
   timing: null,             // swing | literal-8 | literal-16 | literal-32; null = server default
   key: null,                // concert key signature in fifths; null = detect it
   transposition: null,      // the exported part's key; null = server default
@@ -612,6 +613,7 @@ async function loadTrack(track) {
   state.carriedVoices = Array.isArray(remembered.voices) ? remembered.voices : [];
   state.voices.clear();
   state.lowerTransposition = remembered.lower_transposition ?? null;
+  state.staccato = remembered.staccato === false ? false : null;
   state.undoStack.length = 0;
   state.redoStack.length = 0;
   setTool('inspect');
@@ -3242,6 +3244,7 @@ function settingsPayload() {
     hands: handList(),
     voices: voiceList(),
     lower_transposition: state.lowerTransposition,
+    staccato: state.staccato,
     // The Find the solos view. What the listener DID with a proposal is
     // not here: the server writes `solo_proposals` itself, under the
     // sidecar lock, and this merge leaves that key alone.
@@ -3615,6 +3618,10 @@ function renderLinePicker() {
   one.textContent = horns ? 'One staff, two voices' : 'One staff';
   two.textContent = horns ? 'Two parts (upper + lower)' : 'Two staves (treble + bass)';
   renderLowerTransposition();
+  // A head's short notes: staccato quarters, or an eighth and a rest.
+  $('short-notes-label').hidden = !horns;
+  $('short-notes-select').hidden = !horns;
+  $('short-notes-select').value = state.staccato === false ? 'eighths' : 'staccato';
 }
 
 /* The lower part's instrument: only for a head written as two parts. */
@@ -3674,6 +3681,7 @@ function exportSignature() {
     hands: twoStavesOn() ? [...state.hands].sort((x, y) => x[0] - y[0]) : [],
     voices: hornsOn() ? [...state.voices].sort((x, y) => x[0] - y[0]) : [],
     lower: twoPartsOn() ? state.lowerTransposition : null,
+    staccato: hornsOn() ? state.staccato : null,
     // Where the chart starts is read off the form start and chorus length,
     // which change the page only when there is a chart to place.
     changes: state.changes ? [state.changes, state.formStart, state.barsPerChorus] : null,
@@ -4154,6 +4162,13 @@ $('staves-select').addEventListener('change', (event) => {
   state.handSelection.clear();
   pianoRoll.setHandSelection(state.handSelection);
   applyHands();
+  renderExport();
+  persist();
+});
+
+$('short-notes-select').addEventListener('change', (event) => {
+  state.staccato = event.target.value === 'eighths' ? false : null;
+  // How the page is written: a re-export, never a re-transcription.
   renderExport();
   persist();
 });

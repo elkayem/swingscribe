@@ -24,6 +24,7 @@ from swingscribe.notation import (
     one_attack,
     phrase_interval,
     reading_of,
+    slide_scraps,
     sub_phrases,
     timing_for,
     writing_of,
@@ -71,7 +72,7 @@ def test_a_multi_horn_dump_carries_its_own_fields_and_none_of_crepes():
     assert dumped["multi_horn_min_note_ms"] == 23.0
     # The rules' own version: a change to voices.py moves the GUI's review
     # key, which hashes this dump and never transcribe.CACHE_VERSION.
-    assert dumped["multi_horn_version"] == 4
+    assert dumped["multi_horn_version"] == 5
     # The horn fill, the tuning, the lead-ins and the piano line are CREPE's
     # or the piano model's; a multi-horn head reads none of them.
     for gone in ("horn_fill_gaps", "tuning_correction", "glide_max_ms", "piano_line"):
@@ -644,10 +645,9 @@ def test_a_head_closes_an_eighth_rest_before_the_voices_next_note():
     assert any(rest and number == 3 and beat == 2.0 for number, beat, _d, rest in closed)
 
 
-def test_a_staccato_riff_keeps_its_rests():
-    """The A section's riff, "D-flat, rest, E-flat, rest, D-flat" in eighths
-    (Local task A5): a short note's rest is articulation a lead sheet
-    writes. Only a held note (a half note or longer) is closed to the next."""
+def riff_page(settings):
+    """The A section's riff, "D-flat, rest, E-flat, rest, D-flat" in eighths,
+    then a held note; the page a head's sidecar `settings` write."""
     beats = grid()
     bar = beats[8]
     riff = [horn(bar + k * BEAT, 0.5 * BEAT, pitch) for k, pitch in enumerate((73, 75, 73))]
@@ -656,7 +656,7 @@ def test_a_staccato_riff_keeps_its_rests():
     config = config.model_copy(
         update={
             "notate": config.notate.model_copy(
-                update=writing_of({"ensemble": "multi-horn"}, config)
+                update=writing_of({"ensemble": "multi-horn", **settings}, config)
             )
         }
     )
@@ -669,13 +669,37 @@ def test_a_staccato_riff_keeps_its_rests():
         config=config,
         anchor=beats[4],
     )
+    return page
+
+
+def test_a_staccato_riff_is_written_in_staccato_quarters():
+    """The listener on the riff (Local task A7): "I would have written these
+    as staccato quarter notes, not eighth notes with a rest." A head's
+    default; and closing rests never takes them (A5: only after a held
+    note)."""
+    page = riff_page({})
+    written = [
+        (b.number, round(n.beat, 3), n.duration, n.is_rest, n.staccato)
+        for b in page.bars
+        for n in b.notes
+    ]
+    for k in range(3):
+        assert (2, float(k), 1.0, False, True) in written
+    assert (3, 0.0, 4.0, False, False) in written  # the held note runs to the next
+    xml = to_musicxml(page)
+    assert xml.count("<staccato />") + xml.count("<staccato/>") == 3
+
+
+def test_the_sidecar_can_keep_the_riff_in_eighths_and_rests():
+    page = riff_page({"staccato": False})
     written = [
         (b.number, round(n.beat, 3), n.duration, n.is_rest) for b in page.bars for n in b.notes
     ]
     for k in range(2):
         assert (2, float(k), 0.5, False) in written  # the riff's eighths stay eighths
         assert (2, k + 0.5, 0.5, True) in written  # ... with their rests
-    assert (3, 0.0, 4.0, False) in written  # the held note runs to the next
+    assert not any(n.staccato for b in page.bars for n in b.notes)
+    assert (3, 0.0, 4.0, False) in written
 
 
 def test_close_rests_is_for_heads_and_moves_no_key():
@@ -1016,13 +1040,14 @@ def test_a_chord_struck_together_starts_where_its_lead_in_does():
     trumpet = horn(46.671, 1.0, 70)
     tenor = horn(46.659, 1.0, 66, voice=2)
     upper, lower, moved = one_attack([head, trumpet], [tenor])
-    assert upper == [head, trumpet] and moved == 1
+    assert upper == [head, trumpet]
+    assert moved == [{"onset": 46.659, "to": 46.578, "pitch": 66, "voice": 2}]
     assert lower[0].onset == pytest.approx(46.578)
     assert lower[0].onset + lower[0].duration == pytest.approx(47.659)
     # No fold (a literal page that keeps its lead-ins): the earlier of the
     # two struck notes is the attack.
     upper, lower, moved = one_attack([head, trumpet], [tenor], fold=False)
-    assert upper[1].onset == pytest.approx(46.659) and lower == [tenor] and moved == 1
+    assert upper[1].onset == pytest.approx(46.659) and lower == [tenor] and len(moved) == 1
 
 
 def test_a_note_is_never_moved_onto_a_note_of_its_own_voice():
@@ -1033,14 +1058,34 @@ def test_a_note_is_never_moved_onto_a_note_of_its_own_voice():
     tenor = [horn(46.4, 0.19, 63, voice=2), horn(46.59, 0.07, 64, voice=2)]
     tenor.append(horn(46.659, 1.0, 66, voice=2))
     _upper, lower, moved = one_attack([head, trumpet], tenor)
-    assert lower == tenor and moved == 0
+    assert lower == tenor and moved == []
 
 
 def test_notes_apart_are_two_attacks_and_a_voice_is_never_its_own_partner():
     upper, lower, moved = one_attack([horn(1.0, 0.5, 72)], [horn(1.04, 0.5, 67, voice=2)])
-    assert (upper[0].onset, lower[0].onset, moved) == (1.0, 1.04, 0)
+    assert (upper[0].onset, lower[0].onset, moved) == (1.0, 1.04, [])
     upper, lower, moved = one_attack([horn(1.0, 0.5, 72), horn(1.01, 0.5, 76)], [])
-    assert [n.onset for n in upper] == [1.0, 1.01] and moved == 0
+    assert [n.onset for n in upper] == [1.0, 1.01] and moved == []
+
+
+def test_the_attack_window_is_half_an_eighth_between_30_and_60_ms():
+    """Page 10's riff (Local task A7): the tenor's B-flat at 9.808 and the
+    trumpet's D-flat at 9.866, 58 ms apart at 250 bpm, are one attack."""
+    from swingscribe.notation import attack_window
+
+    def beats_at(bpm):
+        return [9.0 + k * 60.0 / bpm for k in range(16)]
+
+    assert attack_window(9.8, beats_at(250)) == pytest.approx(0.06)
+    assert attack_window(9.8, beats_at(120)) == pytest.approx(0.06)  # capped
+    assert attack_window(9.8, beats_at(300)) == pytest.approx(0.05)
+    assert attack_window(9.8, beats_at(600)) == pytest.approx(0.03)  # floored
+    assert attack_window(9.8, None) == pytest.approx(0.03)
+    tenor, trumpet = horn(9.808, 0.1, 70, voice=2), horn(9.866, 0.1, 73)
+    upper, lower, moved = one_attack([trumpet], [tenor], beats_at(250))
+    assert upper[0].onset == pytest.approx(9.808) and len(moved) == 1
+    # At 300 bpm half an eighth is 50 ms: two attacks.
+    assert one_attack([trumpet], [tenor], beats_at(300))[2] == []
 
 
 def test_the_page_writes_both_horns_of_a_folded_chord_on_the_beat():
@@ -1066,3 +1111,44 @@ def test_the_page_writes_both_horns_of_a_folded_chord_on_the_beat():
     }
     assert struck[(1, 70)] == struck[(2, 66)]  # one attack, not an eighth apart
     assert struck[(2, 66)][1] == 0.0 and lines.together == 1
+
+
+# ── a faint slide is written as nothing (notation.slide_scraps) ──────────────
+
+
+def scrap(onset, pitch, voice=1, duration=0.07, confidence=0.31):
+    return NoteEvent(
+        onset=onset, duration=duration, pitch=pitch, confidence=confidence, source="o", voice=voice
+    )
+
+
+def test_the_head_s_two_g_flat_slides_are_written_as_nothing():
+    """The listener on 43.790 and 44.684 (Local task A7): "Nothing, not even
+    a grace note." A G-flat 46 ms before the G it slides into, and a G-flat
+    falling off the held G before it -- a semitone from the note of their
+    own voice that they touch."""
+    into = scrap(43.790, 66, voice=2)
+    g = horn(43.906, 0.778, 67, voice=2)
+    off = scrap(44.684, 66, voice=2)
+    riff = scrap(25.724, 73)  # bar 26's last riff D-flat: a whole step from its E-flat
+    eflat = horn(25.85, 0.2, 75)
+    notes = [horn(43.5, 1.5, 72), into, g, off, riff, eflat]
+    assert slide_scraps(notes) == [into, off]
+    lines = horn_lines(notes, drop_slides=True)
+    assert lines.slides == [into, off]
+    assert into not in lines.lower and off not in lines.lower and riff in lines.upper
+    # A short note the model is SURE of is a note, a semitone or not.
+    sure = scrap(43.790, 66, voice=2, confidence=0.8)
+    assert slide_scraps([sure, g]) == []
+    # Apart by more than 50 ms it does not touch: not a slide.
+    assert slide_scraps([scrap(43.700, 66, voice=2), g]) == []
+
+
+def test_slides_are_left_off_a_head_unless_its_sidecar_keeps_them():
+    config = Config()
+    assert writing_of({"ensemble": "multi-horn"}, config)["drop_slides"] is True
+    assert (
+        writing_of({"ensemble": "multi-horn", "drop_slides": False}, config)["drop_slides"] is False
+    )
+    assert writing_of({}, config)["drop_slides"] is False
+    assert "drop_slides" not in config.notate.model_dump(mode="json")

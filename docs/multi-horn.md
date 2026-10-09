@@ -487,6 +487,57 @@ two beats, D-flat on 3" against "C5 a beat and a half, D-flat on the and
 of 2"): the D-flat's heard onset differs, and closing rests only made it
 visible.
 
+## The seventh measurement and the listener's answers (Local task A7, 2026-10-09)
+
+Rule 5b fixed all five of the listener's joins (page 43's lower C and page
+47's lower B-flat whole notes, page 58 one A-flat, pages 26 and 30 held),
+one attack put pages 47 and 49's lower horn on beat 1, and no heard note
+went unwritten. The listener's answers and what each became:
+
+- **Rule 5b over-joined short repeats**, and the first note being HELD is
+  what tells them apart: the five ran 0.64-1.31 s, the wrongly joined ones
+  were the riff's staccato repeats at 0.06-0.16 s (21.356, 21.495, 32.950,
+  48.309, 50.180, 51.806, 66.061, 66.200: page 22's "E-flat E-flat",
+  page 52's "G-flat G-flat", page 54's "F4 F4", page 69's closing four
+  C5s). The first note (with whatever is already joined to it) must last
+  400 ms (`multi_horn_held_min_ms`, `multi_horn_version` 5). The 0.31-0.34
+  s pairs between them (17.719, 20.323, 36.854, 63.190: the A section's
+  "E-flat for a beat and a half, E-flat on the and") stay two notes until
+  the listener says whether that E-flat is re-struck.
+- **The riff: "staccato quarter notes, not eighth notes with a rest."** A
+  short note -- an eighth or less, on an eighth -- followed by at least an
+  eighth of rest is written as ONE QUARTER with a staccato dot, where the
+  quarter stays in its bar (`notate.staccato_quarters`,
+  `NotateConfig.staccato_quarters`, `NotatedNote.staccato`, exported as
+  `<articulations><staccato/>`). A head's default; the export bar's
+  **Short notes** menu (sidecar `staccato` false) writes an eighth and an
+  eighth rest. The heard evidence: the riff's notes sound 0.4-0.6 of their
+  gap, the held notes 0.9-1.0, and the quantizer already writes the first
+  as an eighth and a rest and the second to the next note; the script's
+  dump now bins that share per voice, so the threshold can be read off the
+  head rather than one riff.
+- **Page 10: "both coming in on the and of 2."** The tenor's B-flat at 9.808
+  and the trumpet's D-flat at 9.866, 58 ms apart -- outside one attack's 30
+  ms. The window is half an eighth now: a quarter of the beat, between 30
+  and 60 ms (`notation.attack_window`; 60 ms at 250 bpm, 50 at 300). The
+  dump lists every note moved onto the other horn's attack, so what the
+  wider window moves can be read (64 moves at 30 ms).
+- **The G-flat scraps at 43.790 and 44.684: "Nothing, not even a grace
+  note."** `--drop-faint` gave that and took real notes with it (bar 26's
+  last riff D-flat, page 34's turn). Both scraps are a SEMITONE from the
+  note of their own voice they touch: a slide into the G 46 ms after it,
+  and a fall off the held G before it. A faint note a semitone from the
+  note of its voice it touches (50 ms) is a slide, left off a head's page
+  (`notation.slide_scraps`, sidecar `drop_slides` false keeps it). It
+  spares the riff's D-flat (a whole step from its E-flat) and takes page
+  34's D5 between E-flats (58 ms, 0.39): the listener's to hear.
+- **Page 44's trumpet F4: "a tied half note from the previous bar, a
+  quarter rest, then F again on 4."** We write the tied note a quarter: its
+  heard end, 42.198 s, is about beat 1.45 of the bar. A fading held note's
+  heard end is early; rounding a held note's end up to the next beat where
+  that leaves a whole beat of rest is one example's rule, so it waits for a
+  measurement of held notes' ends against the beats.
+
 ## Open questions for the measurement
 
 - Is `literal_lag` right on the head's held chords, and does it move a note

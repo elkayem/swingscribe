@@ -80,6 +80,9 @@ TICK = 1e-6  # positions are grid-exact; this only absorbs float noise
 # `close_rests` closes a rest only after a note held this many beats or more
 # (a half note): a held note's breath, never a staccato note's rest.
 CLOSE_AFTER_BEATS = 2.0
+# `staccato_quarters`: a note this short or shorter (an eighth) followed by
+# rest, written as a quarter with a staccato dot.
+STACCATO_MAX_BEATS = 0.5
 
 # (actual, normal) tuplets this notater can write, tried in this order. 3:2 is
 # the ordinary triplet. 5:4 and 7:4 exist for WJazzD: measured across all 456
@@ -874,6 +877,39 @@ def notated_durations(
     return out
 
 
+def staccato_quarters(
+    events: list[tuple[int, float, float, int]], bars_index
+) -> tuple[list[tuple[int, float, float, int]], set[tuple[int, float, int]]]:
+    """A short note and the rest after it, written as ONE QUARTER with a
+    staccato dot: an eighth or shorter (`STACCATO_MAX_BEATS`) on an eighth
+    of the beat, followed by at least an eighth of rest -- a quarter's
+    worth before the next onset -- where the quarter stays in its bar.
+
+    The listener on the Open Sesame head's riff ("D-flat, rest, E-flat,
+    rest" in eighths): "I would have written these as staccato quarter
+    notes, not eighth notes with a rest" (Local task A7). The riff's notes
+    sound 81-141 ms of onsets 210-250 ms apart, 0.4-0.6 of the gap, which
+    the quantizer writes as an eighth and an eighth rest; a held note runs
+    0.9-1.0 of its gap and is written to the next note already. Returns the
+    events and the (bar, beat, pitch) of each one marked."""
+    absolute = [bars_index.start_of(bar) + beat for bar, beat, _d, _p in events]
+    out: list[tuple[int, float, float, int]] = []
+    marked: set[tuple[int, float, int]] = set()
+    for index, (bar, beat, duration, pitch) in enumerate(events):
+        gap = absolute[index + 1] - absolute[index] if index + 1 < len(events) else math.inf
+        if (
+            duration <= STACCATO_MAX_BEATS + TICK
+            and gap >= 2 * STACCATO_MAX_BEATS - TICK
+            and _close(beat * 2, round(beat * 2))
+            and beat + 2 * STACCATO_MAX_BEATS <= bars_index.length.get(bar, 4.0) + TICK
+        ):
+            out.append((bar, beat, 2 * STACCATO_MAX_BEATS, pitch))
+            marked.add((bar, beat, pitch))
+            continue
+        out.append((bar, beat, duration, pitch))
+    return out, marked
+
+
 def build(
     quantized: list,
     sections: list[MeterSection],
@@ -886,12 +922,15 @@ def build(
     key_fifths: int | None = None,
     hold_to_beat: float = 0.0,
     close_rests: float = 0.0,
+    staccato: bool = False,
 ) -> Notation:
     """Quantized notes → bars of spelled, tied, rest-filled notation.
 
     `literal` says quantize wrote a literal timing (no triplets, a 16th or
     32nd grid); see `snap_values`. `key_fifths` is the listener's key
-    signature; None detects one from the notes, chord members included."""
+    signature; None detects one from the notes, chord members included.
+    `staccato` writes a short note and its rest as a staccato quarter
+    (`staccato_quarters`)."""
     if not quantized:
         return Notation(swing=swing, transpose=transpose, title=title, key_fifths=key_fifths or 0)
 
@@ -926,6 +965,10 @@ def build(
     # Before splitting, not after: the splitter can only pick a legal tuplet
     # group if the durations it is handed already land on the beat's grid.
     events = close_short_gaps(events, bars_index)
+    # Last: it asks what the passes above left as a note and a rest.
+    staccato_at: set[tuple[int, float, int]] = set()
+    if staccato:
+        events, staccato_at = staccato_quarters(events, bars_index)
     # NOT here: absorbing a sub-eighth tail that dribbles across a barline
     # into silence. Measured 2026-08-31 (D14): ties moved 0.078 → 0.077 on
     # the subset while readability and one hand-score value dipped — the
@@ -972,6 +1015,7 @@ def build(
                         tie_stop=not first_piece,
                         chord=chord,
                         grace=grace if first_piece else [],
+                        staccato=first_piece and (bar_number, beat, pitch) in staccato_at,
                     )
                 )
                 first_piece = False
@@ -1017,6 +1061,7 @@ def run(document: Document, config: Config) -> Document:
         key_fifths=config.notate.key,
         hold_to_beat=config.notate.hold_to_beat,
         close_rests=config.notate.close_rests,
+        staccato=config.notate.staccato_quarters,
     )
     print(
         f"notate: {len(notation.bars)} bars, key {notation.key_fifths:+d} fifths, "

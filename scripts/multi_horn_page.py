@@ -62,8 +62,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "--timing",
         choices=TIMINGS,
-        help="the rhythm (default: the sidecar's, else literal-8 for a multi-horn head; "
-        "literal-16 for 16ths)",
+        help="the rhythm (default: the sidecar's, else swing for a multi-horn head; "
+        "literal-8 or literal-16 for a head in straight eighths)",
     )
     lag = parser.add_mutually_exclusive_group()
     lag.add_argument("--lag", action="store_true", help="take the line's lag out (the default)")
@@ -76,6 +76,18 @@ def parse_args(argv=None) -> argparse.Namespace:
         action="store_true",
         help="leave faint scraps (under 80 ms, confidence under 0.4) off the page (sidecar "
         "drop_faint); the dump lists them either way",
+    )
+    parser.add_argument(
+        "--keep-slides",
+        action="store_true",
+        help="write faint slides (a faint note a semitone from the note it touches) as notes "
+        "(sidecar drop_slides false); the dump lists them either way",
+    )
+    parser.add_argument(
+        "--no-staccato",
+        action="store_true",
+        help="write a short note and its rest as an eighth and an eighth rest, not a "
+        "staccato quarter (sidecar staccato false)",
     )
     parser.add_argument(
         "--no-close-rests",
@@ -134,6 +146,10 @@ def load_settings(args: argparse.Namespace) -> dict:
         settings["close_rests"] = False
     if args.drop_faint:
         settings["drop_faint"] = True
+    if args.keep_slides:
+        settings["drop_slides"] = False
+    if args.no_staccato:
+        settings["staccato"] = False
     return settings
 
 
@@ -219,7 +235,28 @@ def accounting(lines, notation, fold: bool) -> dict[int, dict[str, int]]:
     return out
 
 
-def dump(notation, lines, edits, key: int, roll_bar: int | None) -> str:
+RATIO_GAP_S = 0.6  # a note this close to its voice's next is a candidate short note
+
+
+def held_ratios(lines) -> dict[int, list[int]]:
+    """Per voice, how much of the gap to the voice's next onset each note
+    sounds, binned in tenths (the last bin: the whole gap or more) over the
+    notes followed within `RATIO_GAP_S`: where the staccato riff's notes
+    (0.4-0.6 of the gap) part from the held ones (0.9-1.0), the threshold
+    for writing a short note and its rest as a staccato quarter."""
+    out: dict[int, list[int]] = {}
+    for voice, line in ((1, lines.upper), (2, lines.lower)):
+        bins = [0] * 11
+        ordered = sorted(line, key=lambda n: n.onset)
+        for note, after in zip(ordered, ordered[1:], strict=False):
+            gap = after.onset - note.onset
+            if 0 < gap <= RATIO_GAP_S:
+                bins[min(10, int(note.duration / gap * 10))] += 1
+        out[voice] = bins
+    return out
+
+
+def dump(notation, lines, edits, key: int, roll_bar: int | None, moves=()) -> str:
     """The heard voices and the written page, as text a person can read
     beside the score."""
     out = ["# heard (as transcribed, after the listener's edits)"]
@@ -250,6 +287,31 @@ def dump(notation, lines, edits, key: int, roll_bar: int | None) -> str:
         out.append(
             f"{n.onset:8.3f}  {n.duration:6.3f}  v{n.voice}  "
             f"{pitch_name(n.pitch, key):>4}  conf {n.confidence:.2f}"
+        )
+    out.append("")
+    out.append(
+        "# faint slides (a faint note a semitone from the note of its voice it touches; "
+        "left off unless --keep-slides)"
+    )
+    for n in lines.slides:
+        out.append(
+            f"{n.onset:8.3f}  {n.duration:6.3f}  v{n.voice}  "
+            f"{pitch_name(n.pitch, key):>4}  conf {n.confidence:.2f}"
+        )
+    out.append("")
+    out.append(
+        f"# sounding share of the gap to the voice's next note (gaps up to {RATIO_GAP_S} s), "
+        "in tenths: 0.0-0.1 ... 0.9-1.0, 1.0+"
+    )
+    for voice, bins in held_ratios(lines).items():
+        out.append(f"v{voice}: " + " ".join(f"{count:3d}" for count in bins))
+    out.append("")
+    out.append("# notes moved onto the other horn's attack (heard onset -> written from)")
+    for move in moves:
+        early = 1000 * (move["onset"] - move["to"])
+        out.append(
+            f"{move['onset']:8.3f} -> {move['to']:8.3f}  v{move['voice']}  "
+            f"{pitch_name(int(move['pitch']), key):>4}  ({early:.0f} ms)"
         )
     out.append("")
     offset = "" if roll_bar is None else f" (page bar 1 is the roll's bar {roll_bar})"
@@ -370,14 +432,24 @@ def main(argv=None) -> int:
     out.write_text(xml, encoding="utf-8")
 
     heard = [NoteEvent(source=stem, **note) for note in (*edits["audible"], *edits["added"])]
-    drops_faint = writing_of(settings, config)["drop_faint"]
+    writing = writing_of(settings, config)
+    drops_faint = writing["drop_faint"]
     parts = gui_musicxml.two_parts(settings, True)
     lines = horn_lines(
-        heard, move_octaves=not parts, merge_unisons=not parts, drop_faint=drops_faint
+        heard,
+        move_octaves=not parts,
+        merge_unisons=not parts,
+        drop_faint=drops_faint,
+        drop_slides=writing["drop_slides"],
     )
     reading = reading_of(settings, config)
     fold = reading["timing"] == "swing" or reading["literal_lead_ins"]
-    _upper, _lower, lines.together = one_attack(lines.upper, lines.lower, fold=fold)
+    # On the page's own grid (the repaired one Export lays the notes on).
+    page_beats, _anchor = gui_musicxml.bar_grid(
+        str(audio), config, settings, duration, (start, region_end), grid
+    )
+    _upper, _lower, moves = one_attack(lines.upper, lines.lower, page_beats, fold=fold)
+    lines.together = len(moves)
     upper = sum(1 for n in heard if n.voice != 2)
     lower = sum(1 for n in heard if n.voice == 2)
     described = gui_musicxml.describe(notation, config, settings, changes)
@@ -401,8 +473,9 @@ def main(argv=None) -> int:
         f"{', lead-ins folded' if reading['literal_lead_ins'] else ''}); "
         f"{len(moved)} of {len(lines.phrases)} lower phrases moved up, "
         f"{lines.unisons} unisons written once, {len(lines.faint)} faint scrap(s) "
-        f"{'left off' if drops_faint else 'written'}, {lines.together} note(s) moved onto "
-        "the other horn's attack"
+        f"{'left off' if drops_faint else 'written'}, {len(lines.slides)} faint slide(s) "
+        f"{'left off' if writing['drop_slides'] else 'written'}, {lines.together} note(s) "
+        "moved onto the other horn's attack"
     )
     counts = accounting(lines, notation, fold)
     print(
@@ -423,14 +496,15 @@ def main(argv=None) -> int:
     rests = [n for page in (notation, *notation.parts) for b in page.bars for n in b.notes]
     drawn = sum(1 for n in rests if n.is_rest and not n.hidden)
     hidden = sum(1 for n in rests if n.is_rest and n.hidden)
+    staccatos = sum(1 for n in rests if n.staccato)
     print(
         f"readability {readable['readability']:.3f}, tie rate {readable['tie_rate']:.3f}, "
-        f"rests {drawn} drawn + {hidden} hidden"
+        f"rests {drawn} drawn + {hidden} hidden, {staccatos} staccato quarter(s)"
         + (", rests up to an eighth closed" if reading_close(settings, config) else "")
         + ("" if roll_bar is None else f"; page bar 1 is the roll's bar {roll_bar}")
     )
     if args.dump_voices:
-        text = dump(notation, lines, edits, notation.key_fifths, roll_bar)
+        text = dump(notation, lines, edits, notation.key_fifths, roll_bar, moves)
         if args.dump_voices == "-":
             print(text)
         else:
