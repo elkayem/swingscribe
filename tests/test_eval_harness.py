@@ -1241,6 +1241,35 @@ def test_a_linked_take_is_keyed_by_its_own_name_and_finds_its_audio(tmp_path, mo
     assert (tmp_path / "Multi-Horn/Open_Sesame_Melody.swingscribe.json").is_file()
 
 
+def test_a_multi_horn_head_with_no_score_is_left_out(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_eval, "BENCH", tmp_path)
+    write_sidecar(tmp_path / "Multi-Horn", "Open_Sesame.m4a")
+    head = tmp_path / "Multi-Horn" / "Open_Sesame_Melody.swingscribe.json"
+    head.write_text(
+        json.dumps({"audio": "Open_Sesame.m4a", "region": [0.0, 67.3], "ensemble": "multi-horn"}),
+        encoding="utf-8",
+    )
+    said = []
+    keys = [key for key, *_ in run_eval.bench_takes(said.append)]
+    assert keys == ["Multi-Horn/Open_Sesame.m4a"]
+    assert any("multi-horn head with no score" in line for line in said)
+    # With a score it is a track like any other.
+    score = tmp_path / "Head.musicxml"
+    score.write_text("<score-partwise/>", encoding="utf-8")
+    head.write_text(
+        json.dumps(
+            {
+                "audio": "Open_Sesame.m4a",
+                "region": [0.0, 67.3],
+                "ensemble": "multi-horn",
+                "score": str(score),
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert "Multi-Horn/Open_Sesame_Melody" in [key for key, *_ in run_eval.bench_takes()]
+
+
 def test_a_take_whose_audio_is_missing_is_not_scored(tmp_path, monkeypatch):
     monkeypatch.setattr(run_eval, "BENCH", tmp_path)
     (tmp_path / "Gone.swingscribe.json").write_text(

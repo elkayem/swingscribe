@@ -180,20 +180,28 @@ def spell(pitch: int, key_fifths: int) -> tuple[str, int, int]:
     The alternative, a fixed sharps-or-flats table, gets bebop wrong: a line
     in F wants B♭ and E♮ but also the occasional A♭, and a table cannot hold
     both.
+
+    One pitch class per key sits exactly six fifths either side of the
+    centre, a tie. The natural letter wins it, then the sharp side -- the
+    leading tone of the relative minor: E♮ in A♭ major (F minor's), B♮ in
+    E♭ (C minor's), G♯ in C. The tie used to go to whichever letter the
+    table listed first, which wrote F♭ and C♭ over a C7 and a G7 in the two
+    commonest flat keys a head is in (the Open Sesame head, 2026-10-09);
+    every other key's choice is unchanged.
     """
     pitch_class = pitch % 12
     # The diatonic band sits between key_fifths - 1 and key_fifths + 5, so its
     # centre is the natural place to measure "near this key" from.
     centre = key_fifths + 2
-    best: tuple[float, str, int] | None = None
+    best: tuple[tuple[int, int, int], str, int] | None = None
     for step, natural in NATURAL_FIFTHS.items():
         for alter in (-1, 0, 1):
             if (STEP_SEMITONE[step] + alter) % 12 != pitch_class:
                 continue
             fifths = natural + 7 * alter
-            distance = abs(fifths - centre)
-            if best is None or distance < best[0]:
-                best = (distance, step, alter)
+            rank = (abs(fifths - centre), abs(alter), -alter)
+            if best is None or rank < best[0]:
+                best = (rank, step, alter)
     if best is None:  # unreachable for a real MIDI pitch, but never guess
         return "C", 0, pitch // 12 - 1
     _, step, alter = best

@@ -11,8 +11,8 @@ merged: the listener reviews the branch first. Design and state:
 
 | Piece | State |
 | --- | --- |
-| A. Multi-horn core + `scripts/multi_horn_page.py` | measured (Local task A); fixes pushed, waiting on Local task A2 |
-| B. Linked sidecars | accepted (Local task B: card byte-identical, 4768 pins); dedupe and browser fixes pushed |
+| A. Multi-horn core + `scripts/multi_horn_page.py` | measured twice (Local tasks A, A2); fixes pushed, waiting on Local task A3 and the listener |
+| B. Linked sidecars | accepted (Local task B: card byte-identical, 4768 pins); dedupe decided by sidecar, waiting on the dry run |
 | C. Two parts, GUI, guide | checked (Local task C); fixes pushed |
 
 What the reports changed (2026-10-09; details in
@@ -155,6 +155,37 @@ Report:
    notes look right.
 6. For the listener: scoops as grace notes, or nothing at all? Eighths by
    tempo on or off? Bars 24 and 32's lower third kept or dropped?
+
+## Local task A3: the head a third time, and the dedupe dry run
+
+What A2 changed is in [multi-horn.md](multi-horn.md), "The second
+measurement": the octave move stops at the excursion's end, E natural is
+no longer F-flat, the script names a take's page for the take and prints
+the per-rule counts, run_eval leaves a scoreless head out, and dedupe
+decides by sidecar. Nothing in the review key moved: the cached head
+review is reused.
+
+```
+%PAGE% --by-tempo --out OUT\os3.bytempo.musicxml --dump-voices OUT\os3.bytempo.txt
+%PAGE% --out OUT\os3.literal16.musicxml --dump-voices OUT\os3.literal16.txt
+.venv\Scripts\python.exe %MH%\scripts\dedupe_audio.py benchmark
+```
+
+Report:
+
+1. Roll bars 15-17 (page bars 23-25): 15-16 close, 17's A-flat back under
+   the C, nothing else moved.
+2. Any E-flat-major or A-flat-major spelling that now reads wrong.
+3. The default page name (no `--out`): the take's, beside its sidecar.
+4. The dedupe dry run: KEEP / DELETE / LINK / REPOINT / LEAVE counts. Every
+   copy with a sidecar should now be a LINK (Blue Train, So What, the
+   Parker copies), the Ballade a LEAVE, and Charlie-Parker-Embraceable-You
+   a LEAVE if its page is beside it by name (else say what it is paired
+   with). Do not pass `--apply`.
+5. For the next round on bars 25-31: the HEARD section's lines (onset,
+   duration, voice, pitch, confidence) from page bar 43 to 49 of
+   `os3.bytempo.txt`. Bar 26's voice order, 27's late Ab4, 29's stray Gb4
+   and 31's late Gb4 cannot be read without them.
 
 ## Local task B: linked sidecars ("takes")
 

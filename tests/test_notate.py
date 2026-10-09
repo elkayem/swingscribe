@@ -73,6 +73,33 @@ def test_the_same_sound_is_spelled_differently_in_different_keys():
     assert spell(66, -5)[:2] == ("G", -1)  # Db major: Gb
 
 
+def test_the_leading_tone_of_the_relative_minor_is_a_natural_not_a_flat():
+    # The tie six fifths either side of the key: the natural letter, then
+    # the sharp side. F minor's E natural in A-flat, C minor's B natural in
+    # E-flat -- never F-flat or C-flat over a C7 or a G7.
+    assert spell(64, -4)[:2] == ("E", 0)
+    assert spell(71, -3)[:2] == ("B", 0)
+    # Every other key's tie as it always was.
+    ties = {k: spell(60 + (k + 8) * 7 % 12, k)[:2] for k in range(-7, 8)}
+    assert ties == {
+        -7: ("G", 0),
+        -6: ("D", 0),
+        -5: ("A", 0),
+        -4: ("E", 0),
+        -3: ("B", 0),
+        -2: ("F", 1),
+        -1: ("C", 1),
+        0: ("G", 1),
+        1: ("D", 1),
+        2: ("A", 1),
+        3: ("F", 0),
+        4: ("C", 0),
+        5: ("G", 0),
+        6: ("D", 0),
+        7: ("A", 0),
+    }
+
+
 def test_octave_follows_the_spelled_letter_not_the_sounding_pitch():
     """Cb4 sounds where B3 sounds. Getting this wrong writes the note a
     seventh away on the staff while sounding correct, which is the kind of

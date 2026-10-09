@@ -325,7 +325,14 @@ def sub_phrases(
     voice changes REGIME -- an octave or more under, or less -- for at
     least `min_s` and `min_notes`. A note with no partner goes with the
     stretch it is in; a stretch too short to stand alone joins the one
-    before it (the first, the one after). One phrase in, usually one out."""
+    before it (the first, the one after). One phrase in, usually one out.
+
+    Except a CLOSE stretch at either END of the phrase: it stands, however
+    short, so a wide excursion is never carried past its end. The head's
+    excursion ran on into the next chord's held A-flat, a third under C,
+    and the A-flat went up with it, over the C (Local task A2,
+    2026-10-09). A short WIDE stretch at an end still joins its neighbour:
+    alone it would be moved note by note."""
 
     def wide(note: NoteEvent) -> bool | None:
         interval = phrase_interval([note], upper)
@@ -341,18 +348,21 @@ def sub_phrases(
         else:
             runs.append([kind, [note]])
 
-    def stands(run: list) -> bool:
+    def stands(run: list, edge: bool = False) -> bool:
         notes = run[1]
+        if edge and run[0] is False and len(runs) > 1:
+            return True
         span = max(n.onset + n.duration for n in notes) - notes[0].onset
         return len(notes) >= min_notes and span >= min_s
 
     merged: list[list] = []
-    for run in runs:
-        if merged and (not stands(run) or merged[-1][0] == run[0]):
+    for k, run in enumerate(runs):
+        edge = k == len(runs) - 1
+        if merged and (not stands(run, edge) or merged[-1][0] == run[0]):
             merged[-1][1].extend(run[1])
         else:
             merged.append(run)
-    if len(merged) > 1 and not stands(merged[0]):
+    if len(merged) > 1 and not stands(merged[0], edge=merged[0][1][0] is phrase[0]):
         merged[1][1][:0] = merged[0][1]
         merged.pop(0)
     return [run[1] for run in merged]

@@ -1132,6 +1132,10 @@ Results and limits: `docs/m6-notate.md`.
   concert pitch; a stage that silently transposed would invalidate every
   comparison. Written pitch is applied once, at export — and the key signature
   moves with it, or the part sounds right and is covered in accidentals.
+  Spelling is the line of fifths (`notate.spell`); its one tie per key
+  goes to the natural letter, then the sharp side (2026-10-09: it went to
+  table order and wrote F-flat and C-flat for the leading tones of F and C
+  minor in A-flat and E-flat). Spelling reaches no score.
 - **A tuplet is allowed inside one beat and no wider.** Quantize chooses its
   grid one beat at a time, and a third of a beat is not a note value: without
   `NotatedNote.tuplet`, 57 of Confirmation's 129 bars did not add up. The

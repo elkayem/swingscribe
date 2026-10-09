@@ -208,6 +208,32 @@ def test_a_short_excursion_stays_with_its_phrase():
     assert [n.pitch for n in horn_lines(upper + lower).lower] == pitches
 
 
+def test_an_excursion_is_never_carried_past_its_end():
+    """Local task A2: the excursion's phrase ran on into the next chord, an
+    A-flat held a third under C, and the A-flat went up with it -- over the
+    C. A close stretch at either end of a phrase stands, however short."""
+    upper = [horn(i * 0.25, 0.25, 72) for i in range(10)] + [horn(2.5, 2.0, 72)]
+    pitches = [57] * 10
+    lower = [horn(i * 0.25, 0.25, p, voice=2) for i, p in enumerate(pitches)]
+    lower.append(horn(2.5, 2.0, 68, voice=2))  # the held chord's A-flat
+    assert [len(part) for part in sub_phrases(lower, upper)] == [10, 1]
+    written = horn_lines(upper + lower).lower
+    assert [n.pitch for n in written] == [69] * 10 + [68]
+    # ... and at the start, the same.
+    head = [horn(-2.0, 2.0, 68, voice=2)]
+    over = [horn(-2.0, 2.0, 72)]
+    written = horn_lines(over + upper[:10] + head + lower[:10]).lower
+    assert [n.pitch for n in written] == [68] + [69] * 10
+
+
+def test_a_short_wide_stretch_at_an_end_is_not_moved_alone():
+    upper = [horn(i * 0.25, 0.25, 72) for i in range(12)]
+    pitches = [67] * 10 + [57] * 2
+    lower = [horn(i * 0.25, 0.25, p, voice=2) for i, p in enumerate(pitches)]
+    assert len(sub_phrases(lower, upper)) == 1
+    assert [n.pitch for n in horn_lines(upper + lower).lower] == pitches
+
+
 def test_a_lone_note_goes_with_the_stretch_it_is_in():
     upper = [horn(i * 0.25, 0.25, 72) for i in range(1, 9)]
     lower = [horn(i * 0.25, 0.25, 57, voice=2) for i in range(9)]  # the first has no partner

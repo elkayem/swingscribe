@@ -166,6 +166,12 @@ def bench_takes(log=print) -> list[tuple[str, Path, Path, dict]]:
     pinned anywhere else), and for a linked take its own name, so two takes
     of one recording are two rows. Its audio is the take's `audio`, which a
     linked take may keep in another folder.
+
+    A multi-horn head with no `score` is left out: a head is in no set but
+    the hand scores (WJazzD and the Omnibook are solos), so nothing would
+    score it, and it was transcribed and tracked on every run whose
+    fingerprint moved (Local task A2, 2026-10-09). One with a score is a
+    track like any other.
     """
     from swingscribe.gui import library
 
@@ -177,6 +183,9 @@ def bench_takes(log=print) -> list[tuple[str, Path, Path, dict]]:
             # Keyed by the sidecar's own name since takes existed; before,
             # by this field. Say so, rather than score a different file.
             log(f"  {key}: sidecar names {named!r} as its file; keyed by the sidecar's name")
+        if sidecar.get("ensemble") == "multi-horn" and not sidecar.get("score"):
+            log(f"  {key}: a multi-horn head with no score -- not transcribed, not scored")
+            continue
         if audio.is_file():
             found.append((key, sidecar_path, audio, sidecar))
     return found

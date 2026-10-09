@@ -23,12 +23,17 @@ copy kept the modification time), else the first by path, unless
    on it do not move, and its caches are the kept file's already;
 2. the copy is deleted.
 
-A group is LEFT whole and reported when its file names say two recordings
-(neither name, letters and digits only, begins the other: Coleman-Hawkins-
-Ballade.m4a and Charlie-Parker-Ballade.m4a, one file under two players, is
-a mislabelled download to look at, not a copy to delete), and a copy whose
-sidecars cannot be rewritten (an unreadable sidecar) is left whole too.
-Hashing reads every audio file once.
+A copy is decided by its SIDECARS, never by its name: a sidecar carries
+the solo's identity (Curtis_Fuller_Blue_Train and Lee_Morgan_Blue_Train are
+one recording and two solos, each keyed by its own sidecar), so a copy with
+one becomes a linked take whatever it is called. Only a copy with NO
+sidecar is judged by name, and LEFT whole and reported when its name says
+another recording (neither name, letters and digits only, begins the
+other: Coleman-Hawkins-Ballade.m4a beside Charlie-Parker-Ballade.m4a, one
+download under two players, is to be checked by ear) or a page is paired
+with it by name (a PDF or MusicXML of its base name beside it or in
+`musicxml/`). A copy whose sidecars cannot be rewritten (an unreadable
+sidecar) is left whole too. Hashing reads every audio file once.
 """
 
 import argparse
@@ -116,6 +121,34 @@ def same_name(a: Path, b: Path) -> bool:
     return bool(first) and second.startswith(first)
 
 
+PAGE_SUFFIXES = {".pdf", ".musicxml", ".mxl", ".xml", ".mscz"}
+
+
+def paired_page(audio: Path) -> Path | None:
+    """A transcription paired with this recording by NAME -- beside it, or
+    in the `musicxml/` folder beside it, with its base name (the PDF pages'
+    set pairs a recording with its page that way)."""
+    for folder in (audio.parent, audio.parent / "musicxml"):
+        for suffix in PAGE_SUFFIXES:
+            candidate = folder / f"{audio.stem}{suffix}"
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def unsidecared_refusal(copy: Path, kept: Path) -> str | None:
+    """Why a copy with NO sidecar is left whole, or None to delete it."""
+    if not same_name(copy, kept):
+        return (
+            "no sidecar, and its name says another recording: "
+            "one file under two names? check by ear"
+        )
+    page = paired_page(copy)
+    if page is not None:
+        return f"no sidecar, and {page.name} is paired with it by name"
+    return None
+
+
 def sidecars(root: Path) -> list[Path]:
     """Every sidecar under `root` outside hidden folders."""
     from swingscribe.gui import library
@@ -154,18 +187,17 @@ def plan(root: Path, keep_in: str | None) -> list[dict]:
         for copy in paths:
             if copy == kept:
                 continue
-            if not same_name(copy, kept):
-                steps.append(
-                    {
-                        "copy": copy,
-                        "kept": kept,
-                        "refused": "the names say two recordings: one file under two names? "
-                        "check by ear",
-                    }
-                )
-                continue
+            about = sidecars_of(copy, every)
+            if not about:
+                # No sidecar carries this copy's identity, so its NAME is all
+                # there is: a different name, or a page paired with it by
+                # name, is the listener's to look at.
+                why = unsidecared_refusal(copy, kept)
+                if why:
+                    steps.append({"copy": copy, "kept": kept, "refused": why})
+                    continue
             relinks = []
-            for sidecar, linked in sidecars_of(copy, every):
+            for sidecar, linked in about:
                 try:
                     json.loads(sidecar.read_text(encoding="utf-8"))
                 except (OSError, ValueError) as exc:

@@ -139,3 +139,21 @@ def test_a_console_that_cannot_print_a_flat_does_not_kill_the_summary(monkeypatc
     print("key B♭ major")
     console.flush()
     assert raw.getvalue() == b"key B? major\n"
+
+
+def test_a_linked_take_names_its_page(monkeypatch, tmp_path):
+    """--sidecar on a linked take: the page is named for the take and lands
+    beside its sidecar, as the GUI's Export writes it -- not for the audio."""
+    audio, _seen = stand_in(monkeypatch, tmp_path)
+    takes = tmp_path / "Multi-Horn"
+    takes.mkdir()
+    sidecar = takes / "Open_Sesame_Melody.swingscribe.json"
+    sidecar.write_text(json.dumps({"audio": "../Open_Sesame.m4a", "anchor": 2.0}))
+    code = multi_horn_page.main(
+        [str(audio), "--start", "1.5", "--end", "18.5", "--sidecar", str(sidecar)]
+    )
+    assert code == 0
+    (page,) = takes.glob("*.musicxml")
+    assert page.name.startswith("Open_Sesame_Melody.")
+    xml = page.read_text(encoding="utf-8")
+    assert "Open_Sesame_Melody" in xml and "<work-title>Open_Sesame<" not in xml

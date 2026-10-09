@@ -243,6 +243,47 @@ beat (upper) and 0.49, 0.68, 1.11 (lower), which no thirds rule reads
 -- a hearing question, not a writing one. `--thirds` changed nothing on
 the page, byte for byte.
 
+## The second measurement (Local task A2, 2026-10-09)
+
+On eb618ae, Windows: 2094 tests pass, the run_eval card is byte-identical to
+master's (all 4768 pins), MuseScore opens all six pages, and the graces
+render as slashed graces before the chord in both voices. The head's
+counts: voices 178 / 154, 12 candidates, 10 lead-ins, 1 of 10 lower phrases
+moved, 3 unisons. Pages: literal 16ths 456 notes (readability 0.942, ties
+0.300); `--by-tempo` 380 (1.000, 0.161), far the closest to the
+screenshot.
+
+Mended on the beat with `--by-tempo`: bar 23 (both scoops as graces on
+whole notes), 24 and 28 exactly (28's lower G4 back), 31-32 exactly (the
+join), 33-34. Still off, all hearing: bar 25's merged C4 re-attack, bar
+26's voice order (the upper F4 held over the bar line still puts the next
+chord's Eb4 under it), the lower Ab4 of bar 27 on the "and", a stray Gb4
+eighth before bar 29's Eb4, bar 31's lower Gb4 an eighth late, and no
+triplets in bars 36 and 38 even with `--thirds` (their onsets are not on
+thirds; the figure is read from the phrase, as D28 found for the
+quarter-note triplet -- left to the listener's mark, the gate not
+loosened).
+
+What it changed (2026-10-09):
+
+- The octave move overshot: the excursion's phrase ran on into roll bar
+  17's chord, and its held A-flat, a third under C, was moved over the C.
+  A close stretch at either END of a phrase now stands alone however short
+  (`sub_phrases`); a short wide one at an end still joins its neighbour.
+- E natural was written F-flat (and B natural would have been C-flat in
+  E-flat): `notate.spell`'s tie six fifths from the key went to whichever
+  letter its table listed first. The natural letter wins it now, then the
+  sharp side, the relative minor's leading tone; every other key's choice
+  is unchanged (a test pins all fifteen). Spelling reaches no score, so no
+  pin moves.
+- The script named a linked take's page for the audio; it names it for
+  the take and writes it beside the take's sidecar, as Export does.
+- The per-rule count line is printed on every transcription, not only
+  when the stage logs (the GUI's path does not).
+- run_eval transcribed and tracked the head on every run although nothing
+  scores it: a multi-horn sidecar with no `score` is left out of the
+  harness walk now, and says so.
+
 ## Open questions for the measurement
 
 - Is `literal_lag` right on the head's held chords, and does it move a note

@@ -221,6 +221,13 @@ def main(argv=None) -> int:
     if not audio.is_file():
         sys.exit(f"no such file: {audio}")
     settings = load_settings(args)
+    # A linked take names its page, and places it, as the GUI's Export does
+    # (gui/musicxml.take_name); the audio's own sidecar names it for the audio.
+    take = (
+        str(args.sidecar)
+        if args.sidecar is not None and library.is_linked(args.sidecar, audio)
+        else None
+    )
     start, end = span_of(args, settings)
     settings["region"] = [start, end]
     model = settings.get("model") or config.separate.model
@@ -281,9 +288,16 @@ def main(argv=None) -> int:
         grid = gui_musicxml.cached_grid(audio, config, settings)
 
     notation, xml, changes = gui_musicxml.page_of(
-        document, config, run_config, str(audio), edits["audible"], settings, added=edits["added"]
+        document,
+        config,
+        run_config,
+        str(audio),
+        edits["audible"],
+        settings,
+        added=edits["added"],
+        take=take,
     )
-    out = args.out or gui_musicxml.page_path(config, run_config, audio, settings)
+    out = args.out or gui_musicxml.page_path(config, run_config, audio, settings, take=take)
     out.write_text(xml, encoding="utf-8")
 
     heard = [NoteEvent(source=stem, **note) for note in (*edits["audible"], *edits["added"])]

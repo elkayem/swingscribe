@@ -937,7 +937,6 @@ def _hear_horns(
     rate: int,
     tc: TranscribeConfig,
     *,
-    log: bool = False,
     track: tuple[float, float, list[float | None]] | None = None,
     attacks: list[float] = (),
 ) -> tuple[list[NoteEvent], list[dict]]:
@@ -983,13 +982,15 @@ def _hear_horns(
         attacks=attacks,
         stats=stats,
     )
-    if log:
-        print(
-            f"transcribe: Basic Pitch heard {len(heard)} notes; {stats['ghosts']} overtone "
-            f"ghost(s) and {stats['thirds']} third note(s) left out of the voices, "
-            f"{stats['tails']} tail(s) cut at a new chord, {stats['rejoined']} split held "
-            f"note(s) joined, {stats['lead_ins']} lead-in(s) marked"
-        )
+    # Printed always, like the voice counts after it: the GUI's review path
+    # does not log, and this line is the only account of what each rule did
+    # to a head (Local task A2 looked for it and it was not there).
+    print(
+        f"transcribe: Basic Pitch heard {len(heard)} notes; {stats['ghosts']} overtone "
+        f"ghost(s) and {stats['thirds']} third note(s) left out of the voices, "
+        f"{stats['tails']} tail(s) cut at a new chord, {stats['rejoined']} split held "
+        f"note(s) joined, {stats['lead_ins']} lead-in(s) marked"
+    )
     notes = [
         NoteEvent(
             onset=n["onset"],
@@ -1210,7 +1211,6 @@ def analyze(
             whole,
             rate,
             tc,
-            log=log,
             track=(region_offset, hop_s, pitches),
             attacks=[region_offset + f * hop_s for f in sorted(onset_frames)],
         )

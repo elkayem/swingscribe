@@ -66,7 +66,7 @@ def test_one_file_under_two_players_names_is_left_alone(tmp_path, capsys):
         path.write_bytes(b"one download, two labels")
     dedupe_audio.main([str(tmp_path), "--apply"])
     printed = capsys.readouterr().out
-    assert "LEAVE" in printed and "two recordings" in printed
+    assert "LEAVE" in printed and "another recording" in printed
     assert "DELETE" not in printed
     assert parker.is_file() and hawkins.is_file()
 
@@ -88,3 +88,38 @@ def test_a_linked_take_naming_the_deleted_copy_is_repointed(tmp_path, capsys):
     assert json.loads(take.read_text())["anchor"] == 8.46
     keys = {key for key, *_ in library.discover(tmp_path)}
     assert "Multi-Horn/Open_Sesame_Melody" in keys
+
+
+def test_two_solos_of_one_recording_are_linked_whatever_their_names(tmp_path, capsys):
+    """Local task A2: the name rule left every WJazzD multi-solo recording
+    and every Parker copy. A sidecar carries a solo's identity, so a copy
+    with one is linked however differently it is named."""
+    folder = tmp_path / "wjazzd"
+    folder.mkdir()
+    fuller = folder / "Curtis_Fuller_Blue_Train.wav"
+    morgan = folder / "Lee_Morgan_Blue_Train.wav"
+    for path, region in ((fuller, [100, 160]), (morgan, [40, 100])):
+        path.write_bytes(b"one side, three solos")
+        library.settings_path(path).write_text(json.dumps({"region": region}))
+    dedupe_audio.main([str(tmp_path), "--apply"])
+    printed = capsys.readouterr().out
+    assert "LEAVE" not in printed
+    assert "DELETE wjazzd/Lee_Morgan_Blue_Train.wav" in printed
+    own = library.settings_path(morgan)
+    assert library.audio_of(own) == fuller
+    assert json.loads(own.read_text())["region"] == [40, 100]
+
+
+def test_a_copy_with_no_sidecar_paired_with_a_page_by_name_is_left(tmp_path, capsys):
+    kept = tmp_path / "wjazzd" / "CharlieParker_EmbraceableYou.wav"
+    copy = tmp_path / "Transcriptions_Other" / "CharlieParker-EmbraceableYou-take.wav"
+    for path in (kept, copy):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"the same take")
+    (copy.parent / "musicxml").mkdir()
+    (copy.parent / "musicxml" / f"{copy.stem}.musicxml").write_text("<score-partwise/>")
+    dedupe_audio.main([str(tmp_path), "--keep-in", "wjazzd", "--apply"])
+    printed = capsys.readouterr().out
+    assert "LEAVE Transcriptions_Other/CharlieParker-EmbraceableYou-take.wav" in printed
+    assert "paired with it by name" in printed
+    assert copy.is_file()
