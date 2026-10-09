@@ -21,13 +21,14 @@ is the page the GUI would write for the same sidecar.
 
 The sidecar is READ, never written. It supplies the anchor, form start,
 meter, model and stem; the ensemble is forced to "multi-horn" in memory.
-Flags choose the rhythm without touching it: `--timing` (literal-16 is the
-multi-horn default), `--lag` (take the held chords' lag behind the beat out,
-read once over both horns), `--thirds` (write a beat that fits thirds as
-a triplet) and `--by-tempo` (write a beat faster than 160 bpm on eighths,
-finer only where eighths cannot keep its notes apart). All three are off by
-default; the listener decides them. A head folds each scoop into the note
-it leads into, written as a grace note (`--no-fold` writes them as notes).
+Flags choose the rhythm without touching it: `--timing` (literal-8 is the
+multi-horn default: eighths at 160 bpm and over, finer only where eighths
+cannot keep a beat's notes apart; `--timing literal-16` writes 16ths),
+`--lag` (take the held chords' lag behind the beat out, read once over both
+horns) and `--thirds` (write a beat that fits thirds as a triplet). Both
+are off by default; the listener decides them. A head folds each scoop
+into the note it leads into, written as a grace note (`--no-fold` writes
+them as notes).
 
 Needs the ml group (Basic Pitch runs on onnxruntime; CREPE on torch) and the
 stems already separated -- `--separate` runs the separation first, in this
@@ -42,6 +43,8 @@ from pathlib import Path
 
 
 def parse_args(argv=None) -> argparse.Namespace:
+    from swingscribe.config import TIMINGS
+
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("audio", type=Path, help="the recording")
     parser.add_argument("--start", type=float, help="span start, seconds (else the sidecar's)")
@@ -58,16 +61,12 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--out", type=Path, help="MusicXML to write (default: Export's name)")
     parser.add_argument(
         "--timing",
-        choices=("literal-16", "literal-32", "swing"),
-        help="the rhythm (default: the sidecar's, else literal-16 for a multi-horn head)",
+        choices=TIMINGS,
+        help="the rhythm (default: the sidecar's, else literal-8 for a multi-horn head; "
+        "literal-16 for 16ths)",
     )
     parser.add_argument("--lag", action="store_true", help="take the line's lag out")
     parser.add_argument("--thirds", action="store_true", help="read triplets in literal time")
-    parser.add_argument(
-        "--by-tempo",
-        action="store_true",
-        help="write a literal beat faster than 160 bpm on eighths (sidecar literal_tempo)",
-    )
     parser.add_argument(
         "--no-fold",
         action="store_true",
@@ -111,8 +110,6 @@ def load_settings(args: argparse.Namespace) -> dict:
         settings["literal_lag"] = True
     if args.thirds:
         settings["literal_thirds"] = True
-    if args.by_tempo:
-        settings["literal_tempo"] = True
     if args.no_fold:
         settings["literal_lead_ins"] = False
     return settings
@@ -323,7 +320,6 @@ def main(argv=None) -> int:
         f"{described['key']} ({described['timing']}"
         f"{', lag out' if settings.get('literal_lag') else ''}"
         f"{', thirds' if settings.get('literal_thirds') else ''}"
-        f"{', eighths by tempo' if reading['literal_eighths_beat_s'] else ''}"
         f"{', lead-ins folded' if reading['literal_lead_ins'] else ''}); "
         f"{len(moved)} of {len(lines.phrases)} lower phrases moved up, "
         f"{lines.unisons} unisons written once"

@@ -151,7 +151,7 @@ def page_tags(
     """The filename tags for this page's choices away from their defaults:
     "all" or "2staves" for a piano texture, "2parts" for a two-horn head
     written as two parts, "literal16"/"literal32", and a literal page's
-    "lag", "thirds" and "bytempo" readings."""
+    "lag" and "thirds" readings."""
     tags = []
     if texture:
         tags.append("2staves" if two_staves(settings, texture) else "all")
@@ -161,8 +161,6 @@ def page_tags(
     if reading["timing"] != "swing":
         tags.append(reading["timing"].replace("-", ""))
         tags.extend(name for name in ("lag", "thirds") if reading[f"literal_{name}"])
-        if reading["literal_eighths_beat_s"]:
-            tags.append("bytempo")
     return tags
 
 

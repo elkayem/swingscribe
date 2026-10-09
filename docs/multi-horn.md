@@ -132,15 +132,19 @@ button, the page view, the Score button, `run_eval` and
     beats of mean snap error -- the bridge's eighth-note triplet chords.
     Notate reads a literal page's beat as ternary only when an onset sits
     EXACTLY on a third (`notate.exact_thirds`), which nothing else writes.
-- A third, also off: `literal_tempo` (sidecar; `QuantizeConfig.
-  literal_eighths_beat_s`, 0.375 s when on) writes a literal beat faster
-  than 160 bpm on EIGHTHS, refined to 16ths and 32nds only where a coarser
-  grid cannot keep its onsets apart or pushes one onto the next beat's own
-  note -- the running value set by tempo (D11). At 250 bpm a 16th is 60 ms
-  and Basic Pitch's attacks spread to 0.19 of a beat behind it, so the
-  nearest 16th split one chord's attacks across two grid points. The
-  listener asked for the rhythm as played, so it is theirs to turn on.
-  Export's file name carries `bytempo`.
+- The default rhythm is `literal-8` (config.TIMINGS, the Rhythm menu's
+  "Literal 8ths (16ths under 160 bpm)"), the listener's decision after the
+  second measurement (2026-10-09): a beat of 160 bpm or faster
+  (`quantize.LITERAL_EIGHTHS_BEAT_S`, 0.375 s) is written on EIGHTHS,
+  refined to 16ths and 32nds only where a coarser grid cannot keep its
+  onsets apart or pushes one onto the next beat's own note -- the running
+  value set by tempo (D11); a slower beat is written on 16ths. At 250 bpm a
+  16th is 60 ms and Basic Pitch's attacks spread to 0.19 of a beat behind
+  it, so the nearest 16th split one chord's attacks across two grid
+  points. "Literal 16ths" stays in the menu for a melody that uses them.
+  Export's file name carries `literal8` (it was a sidecar flag,
+  `literal_tempo`, and a `bytempo` tag, for the second and third
+  measurements).
 
 New model fields, all additive with defaults (no cached artifact or key
 moved): `NoteEvent.voice`, `NotatedNote.stem`, `NotatedNote.hidden`,
@@ -185,7 +189,7 @@ Upper and Lower):
 
 - The Ensemble menu offers "Two horns (a head)" (built from
   config.ENSEMBLES), with its own hint, and the Rhythm menu shows literal
-  16ths for it until the listener picks another (`/api/config`
+  8ths for it until the listener picks another (`/api/config`
   `ensemble_timings`).
 - The roll colours the upper voice like the line and the lower like the left
   hand (`review.js` `setHands` with no split line); the legend says so, and
@@ -201,8 +205,9 @@ Upper and Lower):
 - The ear test plays both voices (the render synthesises every kept note).
 - The Staves menu reads "One staff, two voices" / "Two parts (upper +
   lower)", and "Lower part" appears beside "Written for" in two-parts mode.
-- Export's file name carries `2parts` for two parts, `literal16` for the
-  default rhythm, and `lag`/`thirds` for the readings.
+- Export's file name carries `2parts` for two parts, `literal8` for the
+  default rhythm (`literal16` for 16ths), and `lag`/`thirds` for the
+  readings.
 
 A smoke test in headless Chromium against a stubbed server (cloud session,
 2026-10-08): the folder browser grouped takes, a linked take opened, the
@@ -284,6 +289,48 @@ What it changed (2026-10-09):
   scores it: a multi-horn sidecar with no `score` is left out of the
   harness walk now, and says so.
 
+## The third measurement and the listener's decisions (Local task A3, 2026-10-09)
+
+The listener decided:
+
+- Scoops: "obvious grace notes should be kept" -- the fold stays as it is.
+- Eighths: "make eighth notes default, recognizing that some melodies do
+  use 16th notes so we need an option to enable 16ths" -- `literal-8` is
+  the head's default, "Literal 16ths" a menu choice (`--timing literal-16`
+  in the script).
+- Bars 24 and 32's lower note: the page DOES have the tenor's half step on
+  the downbeat (the local session misread the screenshot). On eighths it
+  came an eighth late in bar 24; with `--lag` it is on the downbeat.
+
+`--lag` on top of the eighths changes 6 bars of the head: it mends three
+(bar 24's A4, bar 27's A-flat whole note, the B-flat halves of page bars
+51-52), puts a 16th into one (page 70, "D5:0.5 Eb5:0.5" -> "D5:0.25
+Eb5:0.75") and shortens a rest; readability 1.000 either way, ties 0.161
+-> 0.156. The local session recommends lag ON with eighths for a head; it
+stays off until the listener says so.
+
+Fixed by A2's round and confirmed: roll bars 15-16 move, 17's A-flat stays
+under the C; E natural is E. Still wrong in A3, fixed now: B natural was
+C-flat in A-flat major (the G4/B4 chord over G7 at page bar 10, a C-flat 4
+in page bar 54): `notate.spell` writes C-flat, F-flat, E-sharp and B-sharp
+only in a key that comes near them (C-flat from five flats, F-flat from
+six, E-sharp from four sharps, B-sharp from five), else the natural
+letter. Over every key and pitch class that moves A-flat's B and D-flat's
+E, and nothing else; a test pins it.
+
+The heard notes of bars 25-31 (A3's item 5) say why the rest is hearing:
+bar 25's beat-2 C4 was never heard (Basic Pitch merged it into the first,
+0.685 s long); bar 26's lower D-flat on beat 1 was never heard either, so
+the upper F4 still ringing 230 ms into the bar sat over the next note, an
+E-flat, and put it in the lower voice -- and the D-flat pair on beat 3
+then took the other voice from it; bar 29's stray G-flat is a 58 ms scrap
+at confidence 0.33 on the bar line. The Voices tool and the Edit tool
+mend these on the roll. A rule to drop a short, faint scrap (under 80 ms
+and 0.4 confidence: the two G-flats of page bar 46 here) waits for the
+listener's erasures on the head to measure it against: CLAUDE.md's
+"never filter notes by duration" was measured on CREPE's line, not on
+this, and two notes are not a measurement.
+
 ## Open questions for the measurement
 
 - Is `literal_lag` right on the head's held chords, and does it move a note
@@ -298,5 +345,3 @@ What it changed (2026-10-09):
 - Does rule 2 cut a held note when the other horn and a stray (bleed) note
   strike together? Two horns cannot sound three notes, so it reads that as
   a new chord; rule 3 used to drop the stray instead.
-- `literal_tempo`: does eighths-by-tempo read the head better, and does it
-  lose a 16th the listener wrote?

@@ -52,10 +52,8 @@ def test_no_existing_transcribe_key_moved():
 def test_no_existing_quantize_key_moved():
     assert dump_hash(QuantizeConfig()) == "762afca5be68d378"
     assert dump_hash(QuantizeConfig(timing="literal-16")) == "80e64cc1d39a542e"
-    chosen = QuantizeConfig(
-        timing="literal-16", literal_eighths_beat_s=0.375, literal_lead_ins=True
-    ).model_dump(mode="json")
-    assert chosen["literal_eighths_beat_s"] == 0.375 and chosen["literal_lead_ins"] is True
+    chosen = QuantizeConfig(timing="literal-8", literal_lead_ins=True).model_dump(mode="json")
+    assert chosen["timing"] == "literal-8" and chosen["literal_lead_ins"] is True
 
 
 def test_a_horn_led_dump_carries_no_multi_horn_field():
@@ -88,27 +86,27 @@ def test_multi_horn_is_offered_and_never_routes_to_the_piano_model():
 
 def test_a_multi_horn_page_is_literal_unless_the_sidecar_says_otherwise():
     config = Config()
-    assert timing_for({"ensemble": "multi-horn"}, config) == "literal-16"
+    # Eighths, the listener's default for a head (2026-10-09); 16ths a choice.
+    assert timing_for({"ensemble": "multi-horn"}, config) == "literal-8"
+    assert timing_for({"ensemble": "multi-horn", "timing": "literal-16"}, config) == "literal-16"
     assert timing_for({"ensemble": "multi-horn", "timing": "swing"}, config) == "swing"
     assert timing_for({}, config) == "swing"
     assert timing_for({"ensemble": "trio"}, config) == "swing"
     # A hand-edited value this build does not know is the default, not an error.
-    assert timing_for({"ensemble": "multi-horn", "timing": "rubato"}, config) == "literal-16"
+    assert timing_for({"ensemble": "multi-horn", "timing": "rubato"}, config) == "literal-8"
 
 
 def test_the_literal_readings_are_off_unless_the_sidecar_turns_them_on():
     config = Config()
     assert reading_of({"ensemble": "multi-horn"}, config) == {
-        "timing": "literal-16",
+        "timing": "literal-8",
         "literal_lag": False,
         "literal_thirds": False,
-        "literal_eighths_beat_s": 0.0,
         # A multi-horn head folds its scoops into their notes by default.
         "literal_lead_ins": True,
     }
-    on = reading_of({"literal_lag": True, "literal_thirds": True, "literal_tempo": True}, config)
+    on = reading_of({"literal_lag": True, "literal_thirds": True}, config)
     assert on["literal_lag"] and on["literal_thirds"]
-    assert on["literal_eighths_beat_s"] == 0.375
     assert not on["literal_lead_ins"]  # not a multi-horn head
     off = reading_of({"ensemble": "multi-horn", "literal_lead_ins": False}, config)
     assert not off["literal_lead_ins"]
@@ -487,12 +485,12 @@ def fast_literal(onsets, **kwargs):
     return [round(n.beat, 6) for n in notes]
 
 
-def test_a_fast_literal_beat_is_written_on_eighths_when_the_listener_asks():
+def test_literal_eighths_write_a_fast_beat_on_eighths():
     """At 250 bpm a 16th is 60 ms; an attack 0.2 of a beat behind (48 ms)
     is the "e" on 16ths and the beat on eighths."""
     onsets = [(4 + i) * FAST + 0.2 * FAST for i in range(4)]
     assert fast_literal(onsets, timing="literal-16") == [4.25, 5.25, 6.25, 7.25]
-    assert fast_literal(onsets, timing="literal-16", literal_eighths_beat_s=0.375) == [
+    assert fast_literal(onsets, timing="literal-8") == [
         4.0,
         5.0,
         6.0,
@@ -500,23 +498,26 @@ def test_a_fast_literal_beat_is_written_on_eighths_when_the_listener_asks():
     ]
 
 
-def test_eighths_by_tempo_refine_where_they_cannot_keep_onsets_apart():
+def test_literal_eighths_refine_where_they_cannot_keep_onsets_apart():
     sixteenths = [4 * FAST + f * FAST for f in (0.0, 0.25, 0.5)]
-    assert fast_literal(sixteenths, timing="literal-16", literal_eighths_beat_s=0.375) == [
+    assert fast_literal(sixteenths, timing="literal-8") == [
         4.0,
         4.25,
         4.5,
     ]
 
 
-def test_eighths_by_tempo_leave_a_slower_beat_on_sixteenths():
+def test_literal_eighths_leave_a_beat_under_160_bpm_on_sixteenths():
     onsets = [(4 + i) * BEAT + 0.2 * BEAT for i in range(4)]
-    assert [
-        round(n.beat, 6) for n in literal(onsets, timing="literal-16", literal_eighths_beat_s=0.375)
-    ] == [4.25, 5.25, 6.25, 7.25]
+    assert [round(n.beat, 6) for n in literal(onsets, timing="literal-8")] == [
+        4.25,
+        5.25,
+        6.25,
+        7.25,
+    ]
 
 
-def test_a_literal_grid_is_unchanged_without_the_tempo_reading():
+def test_the_sixteenth_and_thirty_second_grids_are_unchanged():
     # literal-32 never refines; literal-16 refines once, to 32nds.
     crowded = [4 * BEAT + f * BEAT for f in (0.0, 0.1, 0.2)]
     assert [round(n.beat, 6) for n in literal(crowded, timing="literal-16")] == [

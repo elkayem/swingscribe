@@ -679,7 +679,6 @@ def quantize_notes(
     reranker="",
     literal_lag: bool = False,
     literal_thirds: bool = False,
-    literal_eighths_beat_s: float = 0.0,
     literal_lead_ins: bool = False,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
@@ -693,9 +692,9 @@ def quantize_notes(
     A literal `timing` bypasses all of it for `literal_notes`, which takes
     the line's lag out first when `literal_lag` asks (`literal_lags`, with
     the lag window above), offers thirds when `literal_thirds` does, writes
-    a beat shorter than `literal_eighths_beat_s` on eighths, and carries
-    `graces` (the run folds lead-ins on a literal page when
-    `literal_lead_ins` asks; the flag itself is read there).
+    a beat shorter than `LITERAL_EIGHTHS_BEAT_S` on eighths for
+    "literal-8", and carries `graces` (the run folds lead-ins on a literal
+    page when `literal_lead_ins` asks; the flag itself is read there).
     `polyphonic`
     folds notes the grid puts on one position into a chord (`merge_chords`)
     rather than losing one of them.
@@ -732,7 +731,7 @@ def quantize_notes(
             thirds=literal_thirds,
             min_onsets_for_thirds=min_onsets_for_tuplet,
             graces=graces,
-            eighths_beat_s=literal_eighths_beat_s,
+            eighths_beat_s=LITERAL_EIGHTHS_BEAT_S if timing == "literal-8" else 0.0,
         )
     by_beat, _track = pooled_phase(spans, straight_bur_ceiling)
     finest = max(1, resolution // 4)  # grid steps per beat at full resolution
@@ -988,7 +987,17 @@ def quantize_notes(
 
 
 # Grid points per beat for each literal timing (QuantizeConfig.timing).
-LITERAL_DIVISIONS = {"literal-16": 4, "literal-32": 8}
+# "literal-8" is a 16th grid whose fast beats are written on eighths
+# (`LITERAL_EIGHTHS_BEAT_S`).
+LITERAL_DIVISIONS = {"literal-8": 4, "literal-16": 4, "literal-32": 8}
+
+# A "literal-8" beat shorter than this (160 bpm) is written on EIGHTHS: the
+# running value a human writes over 160 bpm is the eighth (D11). The Open
+# Sesame head at 250 bpm put a 16th at 60 ms, and Basic Pitch's attacks a
+# median 15 ms behind the beat with a spread to 0.19 of it, so nearest-16th
+# split one chord's attacks across two grid points (Local task A); on
+# eighths the page went to readability 1.000 and ties 0.30 -> 0.16 (A2).
+LITERAL_EIGHTHS_BEAT_S = 0.375
 
 # In a piano texture, onsets closer than this many BEATS are one chord: half
 # a 32nd, the finest step the page can write, so no grid could honestly put
@@ -1122,7 +1131,7 @@ def literal_notes(
     beat of at least `min_onsets_for_thirds` onsets that fits thirds
     (`_fits_thirds`) be written in them -- the bridge's triplet chords.
     `eighths_beat_s` writes a beat shorter than that many seconds on
-    EIGHTHS (QuantizeConfig.literal_eighths_beat_s), refined to 16ths and
+    EIGHTHS ("literal-8", `LITERAL_EIGHTHS_BEAT_S`), refined to 16ths and
     then 32nds only where a coarser grid cannot keep its onsets apart or
     pushes one onto the next beat's own note. `graces` rides beside
     `chords` (QuantizedNote.grace).
@@ -1517,7 +1526,6 @@ def settings(qc: QuantizeConfig) -> dict:
         "reranker": qc.reranker,
         "literal_lag": qc.literal_lag,
         "literal_thirds": qc.literal_thirds,
-        "literal_eighths_beat_s": qc.literal_eighths_beat_s,
         "literal_lead_ins": qc.literal_lead_ins,
     }
 

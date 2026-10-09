@@ -38,12 +38,18 @@ TRANSPOSITIONS: tuple[str, ...] = get_args(Transposition)
 # The rhythm a page is written in when the sidecar has chosen none
 # (QuantizeConfig.timing), where it is not the config's: horns playing in
 # harmony play the rhythm that is written, so a multi-horn head is LITERAL
-# by default (docs/multi-horn.md). Read through `notation.timing_for`.
-ENSEMBLE_TIMINGS: dict[str, str] = {"multi-horn": "literal-16"}
+# by default (docs/multi-horn.md), on EIGHTHS (the listener's decision,
+# 2026-10-09; 16ths stay a choice for a melody that uses them). Read
+# through `notation.timing_for`.
+ENSEMBLE_TIMINGS: dict[str, str] = {"multi-horn": "literal-8"}
 # How quantize writes rhythm (QuantizeConfig.timing): "swing" reads the feel
 # out and writes swung eighths as eighths under a "Swing" marking; the
-# literal ones snap every onset to the nearest 16th or 32nd, feel and all.
-Timing = Literal["swing", "literal-16", "literal-32"]
+# literal ones snap every onset to the nearest grid point, feel and all --
+# 16ths or 32nds, or "literal-8": eighths at a tempo of 160 bpm and over,
+# where a human writes the running value as the eighth (D11), and 16ths
+# under it; any grid refined only where it cannot keep a beat's onsets
+# apart (`quantize.literal_notes`).
+Timing = Literal["swing", "literal-8", "literal-16", "literal-32"]
 TIMINGS: tuple[str, ...] = get_args(Timing)
 # The key signatures a listener may choose instead of the detected one
 # (NotateConfig.key), by fifths: sharps positive, flats negative. Each names
@@ -866,15 +872,6 @@ class QuantizeConfig(BaseModel):
     # better than the literal grid by `LITERAL_THIRDS_MARGIN` beats of mean
     # snap error (quantize.literal_notes).
     literal_thirds: bool = False
-    # A literal beat SHORTER than this many seconds is written on EIGHTHS,
-    # finer only where eighths cannot keep its onsets apart -- the running
-    # value set by tempo (D11: an eighth over 160 bpm, which is 0.375 s).
-    # The Open Sesame head at 250 bpm put a 16th at 60 ms and Basic Pitch's
-    # attacks a median 15 ms behind the beat with a spread to 0.19 of it,
-    # so nearest-16th split one chord's attacks across two grid points
-    # (Local task A, 2026-10-09). OFF (0.0) until the listener chooses it:
-    # they asked for the rhythm as played.
-    literal_eighths_beat_s: float = 0.0
     # Fold the notes the transcriber marked as leading into the next
     # (NoteEvent.lead_in) into it on a LITERAL page too, a scoop as its
     # grace note -- what `absorb_lead_ins` does on a swing page. A solo's
@@ -904,7 +901,6 @@ class QuantizeConfig(BaseModel):
             "reranker",
             "literal_lag",
             "literal_thirds",
-            "literal_eighths_beat_s",
             "literal_lead_ins",
         ):
             if not data.get(field):

@@ -82,7 +82,7 @@ const state = {
   voices: new Map(),        // note index -> 1 | 2, where the listener moved a horn's note
   carriedVoices: [],        // stored voice moves with no note in this view
   lowerTransposition: null, // a two-part head's lower part (sidecar lower_transposition)
-  timing: null,             // swing | literal-16 | literal-32; null = server default
+  timing: null,             // swing | literal-8 | literal-16 | literal-32; null = server default
   key: null,                // concert key signature in fifths; null = detect it
   transposition: null,      // the exported part's key; null = server default
   changes: '',              // one chorus of chord symbols, typed (chords.py)
@@ -3291,6 +3291,7 @@ const LABELS = {
   'Bb-tenor': 'B♭ tenor — written +9th',
   Eb: 'E♭ — alto, baritone',
   swing: 'Swing — eighths',
+  'literal-8': 'Literal 8ths (16ths under 160 bpm)',
   'literal-16': 'Literal 16ths',
   'literal-32': 'Literal 32nds',
   line: 'Melody line',

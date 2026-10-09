@@ -100,6 +100,46 @@ def test_the_leading_tone_of_the_relative_minor_is_a_natural_not_a_flat():
     }
 
 
+def test_a_white_key_enharmonic_only_in_a_key_that_comes_near_it():
+    # A-flat major: B natural over a G7 (the Open Sesame head's bar 10), not
+    # C-flat; D-flat major: E natural, not F-flat.
+    assert spell(71, -4)[:2] == ("B", 0)
+    assert spell(64, -5)[:2] == ("E", 0)
+    # ... but a key that comes near one keeps it: D-flat7's seventh, G-flat's
+    # own C-flat and its seventh's F-flat, C-sharp7's third in E, G-sharp7's
+    # in B.
+    assert spell(71, -5)[:2] == ("C", -1)
+    assert spell(71, -6)[:2] == ("C", -1)
+    assert spell(64, -6)[:2] == ("F", -1)
+    assert spell(65, 4)[:2] == ("E", 1)
+    assert spell(72, 5)[:2] == ("B", 1)
+    # Nothing else moved: every key's spelling of every pitch class but
+    # those two is the line of fifths' as before.
+    changed = {
+        (k, pc)
+        for k in range(-7, 8)
+        for pc in range(12)
+        if spell(60 + pc, k)[:2] != _line_of_fifths(60 + pc, k)
+    }
+    assert changed == {(-4, 11), (-5, 4), (-4, 4), (-3, 11)}
+
+
+def _line_of_fifths(pitch, key):
+    """The spelling before 2026-10-09: nearest the key on the line of
+    fifths, ties to table order."""
+    from swingscribe.stages.notate import NATURAL_FIFTHS, STEP_SEMITONE
+
+    best = None
+    for step, natural in NATURAL_FIFTHS.items():
+        for alter in (-1, 0, 1):
+            if (STEP_SEMITONE[step] + alter) % 12 != pitch % 12:
+                continue
+            distance = abs(natural + 7 * alter - (key + 2))
+            if best is None or distance < best[0]:
+                best = (distance, step, alter)
+    return best[1], best[2]
+
+
 def test_octave_follows_the_spelled_letter_not_the_sounding_pitch():
     """Cb4 sounds where B3 sounds. Getting this wrong writes the note a
     seventh away on the staff while sounding correct, which is the kind of

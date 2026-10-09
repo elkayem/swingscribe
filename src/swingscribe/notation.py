@@ -244,33 +244,19 @@ def timing_for(settings: dict, config: Config) -> str:
     return ENSEMBLE_TIMINGS.get(ensemble, config.quantize.timing)
 
 
-# The sidecar's `literal_tempo` writes a literal beat shorter than this on
-# eighths (QuantizeConfig.literal_eighths_beat_s): 160 bpm, where the
-# running value a human writes becomes the eighth (D11).
-TEMPO_EIGHTHS_BEAT_S = 0.375
-
-
 def reading_of(settings: dict, config: Config) -> dict:
     """The quantize settings a page's sidecar chooses: its rhythm
     (`timing_for`), and for a literal page the readings a written head may
-    take -- `literal_lag`, `literal_thirds` and `literal_tempo` (eighths
-    over 160 bpm), all off unless the sidecar turns them on -- and whether
-    lead-ins fold into their notes (`literal_lead_ins`: on for a multi-horn
-    head unless its sidecar says otherwise, off for anything else)."""
+    take -- `literal_lag` and `literal_thirds`, both off unless the sidecar
+    turns them on -- and whether lead-ins fold into their notes
+    (`literal_lead_ins`: on for a multi-horn head unless its sidecar says
+    otherwise, off for anything else)."""
     qc = config.quantize
     horns = (settings.get("ensemble") or config.transcribe.ensemble) == "multi-horn"
-    tempo = settings.get("literal_tempo")
     return {
         "timing": timing_for(settings, config),
         "literal_lag": bool(settings.get("literal_lag", qc.literal_lag)),
         "literal_thirds": bool(settings.get("literal_thirds", qc.literal_thirds)),
-        "literal_eighths_beat_s": (
-            TEMPO_EIGHTHS_BEAT_S
-            if tempo
-            else 0.0
-            if tempo is not None
-            else qc.literal_eighths_beat_s
-        ),
         "literal_lead_ins": bool(settings.get("literal_lead_ins", horns or qc.literal_lead_ins)),
     }
 

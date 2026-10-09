@@ -736,7 +736,10 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   written once, each voice quantized on one grid and merged
   (`merge_horn_voices`: stems up/down where both sound, voice-2 rests
   `print-object="no"`, no voice-2 rests in a bar of voice 1 alone). Literal
-  16ths by default (`config.ENSEMBLE_TIMINGS`, `notation.timing_for`);
+  EIGHTHS by default (`literal-8`, the listener's decision 2026-10-09:
+  eighths at 160 bpm and over, 16ths under, any beat refined where it
+  cannot keep its onsets apart; `config.ENSEMBLE_TIMINGS`,
+  `notation.timing_for`; "Literal 16ths" stays a menu choice);
   `literal_lag` (read once over both horns) and `literal_thirds` are off
   until measured on the real head. Sidecar `staves: 2` is TWO PARTS
   (`merge_horn_parts`, `Notation.parts`): no octave move, no unison merge,
@@ -751,8 +754,9 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   the next note 3x longer, so a 16th run is never a chain) and the page
   folds it as a grace (`literal_lead_ins`, on for this ensemble only). The
   GUI's review key hashes the transcribe dump and never CACHE_VERSION:
-  bump `multi_horn_version` with ANY rule change. Eighths over 160 bpm on a
-  literal page (`literal_tempo`) is OFF: the listener's call.
+  bump `multi_horn_version` with ANY rule change. `literal_lag` on top of
+  the eighths mends three bars of the head and adds one 16th: still OFF,
+  the listener's call.
 - **The Score button and the F1 on the ground-truth bar are DIFFERENT
   QUESTIONS**, and this is the project's most expensive confusion appearing in
   the UI. The bar's F1 is time-free and pitch-only (`gui/ground_truth.py`):
@@ -1133,9 +1137,11 @@ Results and limits: `docs/m6-notate.md`.
   comparison. Written pitch is applied once, at export — and the key signature
   moves with it, or the part sounds right and is covered in accidentals.
   Spelling is the line of fifths (`notate.spell`); its one tie per key
-  goes to the natural letter, then the sharp side (2026-10-09: it went to
-  table order and wrote F-flat and C-flat for the leading tones of F and C
-  minor in A-flat and E-flat). Spelling reaches no score.
+  goes to the natural letter, then the sharp side, and C-flat, F-flat,
+  E-sharp and B-sharp are written only in a key that comes near them (C-flat
+  from five flats, F-flat six, E-sharp four sharps, B-sharp five)
+  (2026-10-09: it wrote F-flat, and C-flat for B natural over a G7, in
+  A-flat). Spelling reaches no score.
 - **A tuplet is allowed inside one beat and no wider.** Quantize chooses its
   grid one beat at a time, and a third of a beat is not a note value: without
   `NotatedNote.tuplet`, 57 of Confirmation's 129 bars did not add up. The

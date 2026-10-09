@@ -47,6 +47,9 @@ MINOR_PROFILE = (6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.3
 # question on this line, which is why it is the representation used here.
 NATURAL_FIFTHS = {"F": -1, "C": 0, "G": 1, "D": 2, "A": 3, "E": 4, "B": 5}
 STEP_SEMITONE = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+# An accidental on a letter with no black key beside it: C-flat, F-flat,
+# E-sharp, B-sharp. `spell` writes one only in a key that comes near it.
+WHITE_KEY_ENHARMONICS = {("C", -1), ("F", -1), ("E", 1), ("B", 1)}
 
 # Durations a single notehead can express, in quarter notes, longest first.
 # Dotted values included; double dots deliberately not — they are rare in
@@ -186,8 +189,17 @@ def spell(pitch: int, key_fifths: int) -> tuple[str, int, int]:
     leading tone of the relative minor: E♮ in A♭ major (F minor's), B♮ in
     E♭ (C minor's), G♯ in C. The tie used to go to whichever letter the
     table listed first, which wrote F♭ and C♭ over a C7 and a G7 in the two
-    commonest flat keys a head is in (the Open Sesame head, 2026-10-09);
-    every other key's choice is unchanged.
+    commonest flat keys a head is in (the Open Sesame head, 2026-10-09).
+
+    And C♭, F♭, E♯ and B♯ -- an accidental on a letter with no black key
+    beside it -- are written only in a key that comes near them: C♭ from
+    five flats (D♭7's seventh), F♭ from six, E♯ from four sharps (C♯7's
+    third in E), B♯ from five; that is, within two fifths flat of the key's
+    band or two sharp of it. Elsewhere the natural letter: B♮ over a G7 in
+    A♭ major, not the C♭ the line of fifths finds a fifth nearer (the same
+    head's bar 10). Two keys change, A♭ (B♮) and D♭ (E♮); a reader of
+    either key writes the white-key enharmonic only for a chord that
+    spells it.
     """
     pitch_class = pitch % 12
     # The diatonic band sits between key_fifths - 1 and key_fifths + 5, so its
@@ -199,6 +211,10 @@ def spell(pitch: int, key_fifths: int) -> tuple[str, int, int]:
             if (STEP_SEMITONE[step] + alter) % 12 != pitch_class:
                 continue
             fifths = natural + 7 * alter
+            if (step, alter) in WHITE_KEY_ENHARMONICS and not (
+                key_fifths - 2 <= fifths <= key_fifths + 7
+            ):
+                continue  # the natural letter is always a candidate too
             rank = (abs(fifths - centre), abs(alter), -alter)
             if best is None or rank < best[0]:
                 best = (rank, step, alter)

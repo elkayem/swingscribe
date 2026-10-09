@@ -98,7 +98,7 @@ def test_the_script_writes_a_two_horn_page_from_the_sidecar(monkeypatch, tmp_pat
     assert "bar   1 v2:" in text or "bar   2 v2:" in text
     printed = capsys.readouterr().out
     assert "1 candidates" in printed
-    assert "literal-16" in printed
+    assert "literal-8" in printed
 
 
 def test_the_flags_are_laid_over_the_sidecar_in_memory(tmp_path):
@@ -115,15 +115,15 @@ def test_the_flags_are_laid_over_the_sidecar_in_memory(tmp_path):
     assert multi_horn_page.span_of(args, settings) == (0.0, 67.308)
 
 
-def test_the_tempo_and_fold_flags_are_sidecar_keys(tmp_path):
+def test_the_rhythm_and_fold_flags_are_sidecar_keys(tmp_path):
     args = multi_horn_page.parse_args(["x.m4a", "--sidecar", str(tmp_path / "none.json")])
     settings = multi_horn_page.load_settings(args)
-    assert "literal_tempo" not in settings and "literal_lead_ins" not in settings
+    assert "timing" not in settings and "literal_lead_ins" not in settings
     args = multi_horn_page.parse_args(
-        ["x.m4a", "--sidecar", str(tmp_path / "none.json"), "--by-tempo", "--no-fold"]
+        ["x.m4a", "--sidecar", str(tmp_path / "none.json"), "--timing", "literal-16", "--no-fold"]
     )
     settings = multi_horn_page.load_settings(args)
-    assert settings["literal_tempo"] is True
+    assert settings["timing"] == "literal-16"
     assert settings["literal_lead_ins"] is False
 
 

@@ -613,8 +613,9 @@ The page writes both horns on one treble staff, in concert pitch:
 - A scoop into a held note (a short note a semitone under it) is written
   as a grace note on the note it leads into, and a note re-attacked with a
   short "head" is written as one note.
-- The rhythm is **literal 16ths** unless you pick another one in the
+- The rhythm is **literal 8ths** unless you pick another one in the
   **Rhythm** menu: horns playing a written head play the written rhythm.
+  Pick **Literal 16ths** for a melody that moves in sixteenths.
 
 Set **Staves** to **Two parts (upper + lower)** to write the horns as two
 separate parts instead. Each part plays its own notes, so nothing is moved
@@ -774,14 +775,20 @@ transposes it for a horn.
   from the semitone below, is written as a small grace note before it, and
   the note starts where the scoop did. The piano roll still shows the scoop
   as the separate note it sounded as.
+- **Literal 8ths** writes every note on the nearest eighth when the tempo
+  is 160 bpm or faster, and on the nearest sixteenth below that. Where
+  two notes in one beat would land on the same eighth, that beat is
+  written in sixteenths (or thirty-seconds), so no note is lost. It is
+  the default for a two-horn head.
 - **Literal 16ths** writes every note on the nearest sixteenth, exactly as
   played, with no "Swing" marking, scoops included as notes. A swung pair usually comes out as a
   dotted eighth and a sixteenth. A beat whose notes are too close together
   for sixteenths is written in thirty-seconds.
 - **Literal 32nds** writes every note on the nearest thirty-second.
 
-Literal pages have no triplets, and a literal export gets `.literal16` or
-`.literal32` in its file name, so it never overwrites the swing page. An
+Literal pages have no triplets, and a literal export gets `.literal8`,
+`.literal16` or `.literal32` in its file name, so it never overwrites the
+swing page. An
 All-notes export gets `.all`, and a two-staff one `.2staves`.
 
 Bars are numbered from 1 within your span, the way a solo transcription is
