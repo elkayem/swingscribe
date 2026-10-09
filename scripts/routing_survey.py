@@ -100,8 +100,11 @@ def floor_of(seconds: float):
         routing.MIN_ACTIVE_S = saved
 
 
-def resolve(audio: Path, model: str, region):
-    """(stems, cache) for this sidecar's span, or None. Read-only."""
+def resolve(audio: Path | None, model: str, region):
+    """(stems, cache) for this sidecar's span, or None (and None for audio
+    that is not on disk). Read-only."""
+    if audio is None or not Path(audio).is_file():
+        return None
     for cache in CACHES:
         base = Config(cache_dir=cache)
         config = base.model_copy(
@@ -219,10 +222,10 @@ def survey(model_override: str | None) -> dict:
     skipped = []
     powers = {}
     by_dir = defaultdict(list)
-    for side in sorted(BENCH.rglob("*.swingscribe.json")):
+    # library.discover: a linked take's audio is its sidecar's, wherever the
+    # copy it was keyed by has gone.
+    for name, side, audio in library.discover(BENCH):
         sidecar = json.loads(side.read_text(encoding="utf-8"))
-        audio = side.with_name(side.name[: -len(".swingscribe.json")])
-        name = audio.relative_to(BENCH).as_posix()
         model = model_override or sidecar.get("model") or "bsroformer_sw"
         region = sidecar.get("region")
         found = resolve(audio, model, region) if region else None
@@ -318,7 +321,7 @@ def survey(model_override: str | None) -> dict:
         if r["stems_dir"] in seen_files or "@" in r["stems_dir"]:
             continue  # a span-scoped set is digital zero outside its span
         seen_files.add(r["stems_dir"])
-        found = resolve(BENCH / r["name"], r["model"], None)
+        found = resolve(library.audio_for_key(BENCH, r["name"]), r["model"], None)
         if found is None:
             continue
         s = routing.suggest(routing.measure(found[0], None), r["model"])
@@ -342,7 +345,7 @@ def survey(model_override: str | None) -> dict:
                 inside = [x for x in group if lo < x["region"][0] < hi and x not in (p, h)]
                 if inside:
                     continue  # only adjacent solos: horn straight into piano
-                stems = resolve(BENCH / h["name"], h["model"], (lo, hi))
+                stems = resolve(library.audio_for_key(BENCH, h["name"]), h["model"], (lo, hi))
                 if stems is None:
                     continue
                 pair_power = routing.window_power(stems[0], (lo, hi))
@@ -378,7 +381,7 @@ def survey(model_override: str | None) -> dict:
         if r["stems_dir"] in horn_dirs or r["stems_dir"] in seen_files or "@" in r["stems_dir"]:
             continue
         seen_files.add(r["stems_dir"])
-        found = resolve(BENCH / r["name"], r["model"], None)
+        found = resolve(library.audio_for_key(BENCH, r["name"]), r["model"], None)
         if found is None:
             continue
         s = routing.suggest(routing.measure(found[0], None), r["model"])

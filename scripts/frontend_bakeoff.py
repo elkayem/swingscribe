@@ -129,11 +129,9 @@ def live_runs(db_path: Path | None, log=print) -> dict:
     runs = json.loads(NOTES_CACHE.read_text(encoding="utf-8"))
     live = {}
     stale = []
-    for sidecar_path in sorted(run_eval.BENCH.rglob("*.swingscribe.json")):
-        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        name = run_eval.sidecar_name(sidecar_path, sidecar)
-        if not (run_eval.BENCH / name).is_file():
-            continue
+    # Through run_eval's walk (library.discover): a linked take's audio is
+    # its sidecar's, wherever the copy it was keyed by has gone.
+    for name, _sidecar_path, _audio, sidecar in run_eval.bench_takes(lambda _message: None):
         run = runs.get(name)
         if run is None:
             continue
@@ -163,7 +161,7 @@ def manifest(args) -> None:
                 "transcribe": settings,
             }
         )
-        document = library.ingested_document(run_eval.BENCH / key, config)
+        document = library.ingested_document(library.audio_for_key(run_eval.BENCH, key), config)
         stem = library.resolve_stem(document, config, sidecar["model"], settings.stem)
         if stem is None:
             print(f"  {key}: no {settings.stem!r} stem for {sidecar['model']} -- skipped")

@@ -123,22 +123,28 @@ def stems_dir(source_digest: str, model: str) -> Path | None:
 
 
 def recordings(db) -> list[dict]:
-    """The benchmark's WJazzD recordings: one entry per distinct audio file."""
-    groups: dict[str, list[Path]] = defaultdict(list)
-    for path in sorted(WJAZZD.glob("*.m4a")):
-        if melid_of(path) is not None:
-            groups[digest(path)].append(path)
+    """The benchmark's WJazzD recordings: one entry per distinct audio file,
+    with every take on it as (the take's name as a path, its sidecar).
+    Through library.discover: a solo whose copy became a linked take of
+    another file is still that solo, on that file's audio."""
+    from swingscribe.gui import library
+
+    groups: dict[str, list[tuple[Path, Path]]] = defaultdict(list)
+    for key, sidecar, audio in library.discover(WJAZZD):
+        named = Path(key)
+        if audio.is_file() and melid_of(named) is not None:
+            groups[digest(audio)].append((named, sidecar))
     out = []
-    for source, paths in sorted(groups.items(), key=lambda item: item[1][0].name):
+    for source, paths in sorted(groups.items(), key=lambda item: item[1][0][0].name):
         tracks = {
             row[0]
-            for p in paths
+            for p, _sidecar in paths
             for row in db.execute("select trackid from solo_info where melid=?", (melid_of(p),))
         }
         out.append(
             {
-                "name": paths[0].name,
-                "key": f"wjazzd/{paths[0].name}",
+                "name": paths[0][0].name,
+                "key": f"wjazzd/{paths[0][0].as_posix()}",
                 "source": source,
                 "paths": paths,
                 "trackids": sorted(tracks),
@@ -166,8 +172,8 @@ def annotated_solos(db, rec: dict) -> list[dict]:
         f"join transcription_info t on s.melid=t.melid where s.trackid in ({q})"
     ).fetchall()
     sidecars = {}
-    for path in rec["paths"]:
-        side = json.loads(Path(str(path) + ".swingscribe.json").read_text(encoding="utf-8"))
+    for path, sidecar in rec["paths"]:
+        side = json.loads(sidecar.read_text(encoding="utf-8"))
         if side.get("region") and side.get("melid") == melid_of(path):
             sidecars[side["melid"]] = side
     solos = []
@@ -579,16 +585,18 @@ def wjazz_chorus_seconds(db, melid: int) -> float | None:
 
 def omnibook_sides(wjazz_sources: set[str]) -> list[dict]:
     sides = []
-    for sidecar in sorted(OMNIBOOK.glob("*.m4a.swingscribe.json")):
-        audio = sidecar.with_name(sidecar.name[: -len(".swingscribe.json")])
+    from swingscribe.gui import library
+
+    # library.discover: a linked take's audio is its sidecar's.
+    for key, sidecar, audio in library.discover(OMNIBOOK):
         settings = json.loads(sidecar.read_text(encoding="utf-8"))
         if not audio.is_file() or not settings.get("region"):
             continue
         source = digest(audio)
         sides.append(
             {
-                "name": audio.name,
-                "key": f"Omnibook/{audio.name}",
+                "name": Path(key).name,
+                "key": f"Omnibook/{key}",
                 "source": source,
                 "region": settings["region"],
                 "also_in_wjazzd": source in wjazz_sources,

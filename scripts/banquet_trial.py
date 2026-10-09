@@ -131,12 +131,14 @@ def trial_melids(ordinary: int) -> list[tuple[int, str]]:
 
 
 def sidecars_by_melid() -> dict[int, tuple[str, dict]]:
+    from swingscribe.gui import library
+
     out = {}
-    for path in sorted(run_eval.BENCH.rglob("*.swingscribe.json")):
+    for name, path, _audio in library.discover(run_eval.BENCH):
         sidecar = json.loads(path.read_text(encoding="utf-8"))
         melids = sidecar.get("melids") or ([sidecar["melid"]] if sidecar.get("melid") else [])
         if len(melids) == 1:
-            out[int(melids[0])] = (run_eval.sidecar_name(path, sidecar), sidecar)
+            out[int(melids[0])] = (name, sidecar)
     return out
 
 
@@ -240,7 +242,7 @@ def manifest(args) -> None:
         if settings.uses_piano_oracle:
             print(f"  {key}: routed to the piano oracle, not a horn -- skipped")
             continue
-        document = library.ingested_document(run_eval.BENCH / key, config)
+        document = library.ingested_document(library.audio_for_key(run_eval.BENCH, key), config)
         stem = library.resolve_stem(document, config, sidecar["model"], settings.stem)
         if stem is None:
             print(f"  {key}: no {settings.stem!r} stem for {sidecar['model']} -- skipped")

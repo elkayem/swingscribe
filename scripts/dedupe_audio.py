@@ -46,8 +46,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-AUDIO_SUFFIXES = {".wav", ".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wma", ".aiff", ".aif"}
-
 
 def digest(path: Path) -> str:
     hasher = hashlib.sha256()
@@ -60,14 +58,7 @@ def digest(path: Path) -> str:
 def audio_files(root: Path) -> list[Path]:
     from swingscribe.gui import library
 
-    return sorted(
-        p
-        for p in root.rglob("*")
-        if p.is_file()
-        and p.suffix.lower() in AUDIO_SUFFIXES
-        and not library.is_derived_output(p)
-        and not any(part.startswith(".") for part in p.relative_to(root).parts)
-    )
+    return library.audio_files(root, recursive=True)
 
 
 def groups(root: Path) -> list[list[Path]]:
@@ -153,11 +144,11 @@ def sidecars(root: Path) -> list[Path]:
     """Every sidecar under `root` outside hidden folders."""
     from swingscribe.gui import library
 
-    return sorted(
-        p
-        for p in root.rglob(f"*{library.SETTINGS_SUFFIX}")
-        if not any(part.startswith(".") for part in p.relative_to(root).parts)
-    )
+    return [
+        sidecar
+        for _key, sidecar, _audio in library.discover(root)
+        if not any(part.startswith(".") for part in sidecar.relative_to(root).parts)
+    ]
 
 
 def sidecars_of(audio: Path, every: list[Path]) -> list[tuple[Path, bool]]:

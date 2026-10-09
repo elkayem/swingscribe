@@ -726,6 +726,49 @@ def discover(root: str | Path) -> list[tuple[str, Path, Path]]:
     return found
 
 
+def audio_files(folder: str | Path, recursive: bool = False) -> list[Path]:
+    """Every source audio file in `folder` (with `recursive`, under it),
+    sorted: the library's suffixes, never a wav this tool wrote beside a
+    track, never inside a hidden folder (a cache). The one audio listing the
+    scripts share, so none globs its own suffix list
+    (tests/test_script_audio.py)."""
+    base = Path(folder)
+    paths = base.rglob("*") if recursive else base.glob("*")
+    return sorted(
+        p
+        for p in paths
+        if p.is_file()
+        and p.suffix.lower() in AUDIO_SUFFIXES
+        and not is_derived_output(p)
+        and not any(part.startswith(".") for part in p.relative_to(base).parts)
+    )
+
+
+def sidecar_for_key(root: str | Path, key: str) -> Path:
+    """The sidecar a `discover` key names under `root`."""
+    return Path(root) / f"{key}{SETTINGS_SUFFIX}"
+
+
+def audio_for_key(root: str | Path, key: str) -> Path | None:
+    """The audio of the take keyed `key` under `root` (`discover`'s keys):
+    its sidecar's `audio` for a linked take, the file the key names for an
+    audio's own sidecar (or an audio with none yet). None when it is not on
+    disk.
+
+    The ONE way a script finds a track's audio from its key. Building
+    `root / key` by hand finds nothing once a copy has become a linked take
+    of another (scripts/dedupe_audio.py), and the track drops out of the
+    run without a word; tests/test_script_audio.py holds every script to
+    this."""
+    sidecar = sidecar_for_key(root, key)
+    if sidecar.is_file():
+        audio = audio_of(sidecar)
+        if audio.is_file():
+            return audio
+    plain = Path(root) / key
+    return plain if plain.is_file() else None
+
+
 def _legacy_path(config: Config, track_id: str) -> Path:
     """Where settings lived before they moved out of the cache."""
     return Path(config.cache_dir) / "gui" / f"{track_id}.json"

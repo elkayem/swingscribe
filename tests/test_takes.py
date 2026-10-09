@@ -210,3 +210,44 @@ def test_the_cache_panel_says_which_takes_share_a_recording(tmp_path, folder):
     (track,) = listing["tracks"]
     assert track["id"] == digest
     assert [t["name"] for t in track["takes"]] == ["Open_Sesame.m4a", "Melody"]
+
+
+# ── a take's audio from its key (library.audio_for_key, audio_files) ─────────
+
+
+def test_a_key_finds_its_audio_whether_own_or_linked(tmp_path):
+    folder = tmp_path / "wjazzd"
+    folder.mkdir()
+    kept = folder / "Curtis_Fuller_Blue_Train_solo_1.m4a"
+    kept.write_bytes(b"one side")
+    write(library.settings_path(kept), {"region": [1, 2]})
+    # The copy was deleted and its own sidecar became a linked take of the
+    # kept file (scripts/dedupe_audio.py): its key is unchanged.
+    write(
+        folder / "Lee_Morgan_Blue_Train_solo_2.m4a.swingscribe.json",
+        {"audio": kept.name, "region": [3, 4]},
+    )
+    assert library.audio_for_key(tmp_path, "wjazzd/Curtis_Fuller_Blue_Train_solo_1.m4a") == kept
+    assert library.audio_for_key(tmp_path, "wjazzd/Lee_Morgan_Blue_Train_solo_2.m4a") == kept
+    # An audio with no sidecar yet is found by its own name; nothing is None.
+    loose = folder / "New_solo_3.m4a"
+    loose.write_bytes(b"new")
+    assert library.audio_for_key(tmp_path, "wjazzd/New_solo_3.m4a") == loose
+    assert library.audio_for_key(tmp_path, "wjazzd/Gone_solo_4.m4a") is None
+    assert library.sidecar_for_key(tmp_path, "wjazzd/New_solo_3.m4a") == library.settings_path(
+        loose
+    )
+
+
+def test_audio_files_skips_derived_wavs_and_hidden_folders(tmp_path):
+    (tmp_path / "a.m4a").write_bytes(b"a")
+    (tmp_path / "a.other.wav").write_bytes(b"derived")
+    (tmp_path / "notes.txt").write_text("x")
+    hidden = tmp_path / ".swingscribe-cache"
+    hidden.mkdir()
+    (hidden / "b.wav").write_bytes(b"cache")
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "c.flac").write_bytes(b"c")
+    assert [p.name for p in library.audio_files(tmp_path)] == ["a.m4a"]
+    assert [p.name for p in library.audio_files(tmp_path, recursive=True)] == ["a.m4a", "c.flac"]

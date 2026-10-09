@@ -72,10 +72,10 @@ def main() -> None:
     runs = json.loads(notes_path.read_text(encoding="utf-8")) if notes_path.is_file() else {}
 
     computed = present = 0
-    for sidecar_path in sorted(run_eval.BENCH.rglob("*.swingscribe.json")):
-        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        name = run_eval.sidecar_name(sidecar_path, sidecar)
-        if not name.startswith(f"{args.folder}/") or not (run_eval.BENCH / name).is_file():
+    # Through run_eval's walk (library.discover): a linked take's audio is
+    # its sidecar's, wherever the copy it was keyed by has gone.
+    for name, _sidecar_path, audio, sidecar in run_eval.bench_takes(lambda _message: None):
+        if not name.startswith(f"{args.folder}/"):
             continue
         # The same config, document and span config `error_taxonomy.load_evidence`
         # builds, so the key this writes under is the key it reads from.
@@ -87,7 +87,7 @@ def main() -> None:
                 "transcribe": settings,
             }
         )
-        document = library.ingested_document(run_eval.BENCH / name, config)
+        document = library.ingested_document(audio, config)
         cfg = review.span_config(
             config, settings.stem, settings.region[0], settings.region[1], settings.ensemble
         )

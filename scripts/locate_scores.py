@@ -56,7 +56,6 @@ DEFAULT_CACHE_DIR = BENCH_DIR / ".swingscribe-cache"
 
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-AUDIO_SUFFIXES = {".m4a", ".mp3", ".wav", ".flac"}
 SCORE_SUFFIXES = (".xml", ".musicxml", ".mscz", ".mscx")
 
 
@@ -250,10 +249,7 @@ def main() -> None:
     from swingscribe.gui import library
 
     folder = BENCH_DIR / args.folder if args.folder else BENCH_DIR
-    files = sorted(
-        (p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES),
-        key=lambda p: p.name.lower(),
-    )
+    files = sorted(library.audio_files(folder), key=lambda p: p.name.lower())
     # Every audio file (its own sidecar), and every LINKED take in the folder
     # (library.discover), whose score is named like the take.
     work: list[tuple[str, Path, Path | None]] = [(p.name, p, None) for p in files]

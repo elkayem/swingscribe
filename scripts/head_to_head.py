@@ -466,7 +466,7 @@ def _stem_path(entry: dict, cache_dir: Path, run: dict | None = None) -> Path:
             "transcribe": settings,
         }
     )
-    document = library.ingested_document(BENCH / entry["track"], config)
+    document = library.ingested_document(library.audio_for_key(BENCH, entry["track"]), config)
     stem = library.resolve_stem(document, config, sidecar["model"], settings.stem)
     if stem is None:
         raise SystemExit(
@@ -487,6 +487,8 @@ def export_audio(
     """Cut every span to a wav, and write the manifest and settings sheet."""
     import soundfile
 
+    from swingscribe.gui import library
+
     out = []
     for entry in entries:
         if source == "stem":
@@ -494,7 +496,7 @@ def export_audio(
             data, rate = soundfile.read(str(stem), dtype="float32", always_2d=True)
             how = f"stem {stem.parent.name}/{stem.name} in {cache_dir}"
         else:
-            data, rate, how = _decode(BENCH / entry["track"], cache_dir)
+            data, rate, how = _decode(library.audio_for_key(BENCH, entry["track"]), cache_dir)
         low, high = entry["window"]
         clip = data[int(round(low * rate)) : int(round(high * rate))]
         target = folder / AUDIO_DIR / entry["set"] / f"{entry['name']}.wav"
@@ -574,7 +576,7 @@ def our_page(entry: dict, run: dict, grid: dict, region, drop_anchor: bool):
         sidecar.get("time_signature"), sidecar.get("pulses_per_bar"), config
     )
     notation = notation_for_span(
-        str(BENCH / track),
+        str(BENCH / track),  # a name for the page's title, not audio
         [
             NoteEvent(
                 onset=n["onset"],
@@ -1598,8 +1600,8 @@ def gui_exports(entries: list[dict]) -> dict[str, Path]:
         base = f"{stem}.{low:.0f}-{high:.0f}s"
         # The oracle line has been the pianists' default since 2026-09-18.
         for name in (f"{base}.oracle.musicxml", f"{base}.musicxml"):
-            if (BENCH / name).is_file():
-                found[entry["name"]] = BENCH / name
+            if (BENCH / name).is_file():  # a page Export wrote, not audio
+                found[entry["name"]] = BENCH / name  # the page, not audio
                 break
     return found
 

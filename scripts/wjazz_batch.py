@@ -200,7 +200,6 @@ SHEET_PATH = BENCH_DIR / "wjazzd_benchmark_test.xlsx"
 sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # for wjazz_score.score_name
 
-AUDIO_GLOBS = ("*.m4a", "*.mp3", "*.wav", "*.flac")
 # The trailing digits in a wjazzd filename ARE the melid — confirmed against
 # every file in the folder (59 of 60; one has no number and is skipped, see
 # `melid_from_filename`). Deliberately not "_solo_(\d+)$": some files carry
@@ -411,8 +410,13 @@ def process_file(
     fresh: bool = False,
     separation_model: str | None = None,
     reuse_span: bool = False,
+    sidecar_path: Path | None = None,
 ) -> dict:
     """Run the GUI workflow end to end for one wjazzd audio file.
+
+    `sidecar_path` is the take's: the audio's own (None, the default), or a
+    linked take's whose audio is another file's -- its NAME then carries
+    the melid, and its page is named for it and written beside it.
 
     `separation_model` overrides `auto_settings`' choice for HORN soloists
     only (a pianist keeps plain htdemucs, D3) — how the Roformer trial is
@@ -432,7 +436,11 @@ def process_file(
     """
     row: dict = dict.fromkeys(FIELDS, "")
 
-    melid = melid_from_filename(audio_path)
+    from swingscribe.gui import library
+
+    sidecar_path = Path(sidecar_path) if sidecar_path else library.settings_path(audio_path)
+    linked = library.is_linked(sidecar_path, audio_path)
+    melid = melid_from_filename(Path(library.take_key(sidecar_path)))
     if melid is None:
         row["status"] = "no melid number in filename — skipped (name it, or process by hand)"
         return row
@@ -556,9 +564,8 @@ def process_file(
 
     reused = None
     if reuse_span and not fresh:
-        # The audio's own sidecar (gui/library.py): a WJazzD file is one solo,
-        # so the batch never makes a linked take of it.
-        sidecar_path = library.settings_path(audio_path)
+        # The take's sidecar (gui/library.py): a WJazzD file is one solo, so
+        # the batch never MAKES a linked take, but it keeps one it finds.
         if sidecar_path.is_file():
             stored = json.loads(sidecar_path.read_text(encoding="utf-8"))
             if stored.get("melid") == melid and stored.get("region"):
@@ -746,11 +753,17 @@ def process_file(
             "melid": melid,
         },
         base,
+        sidecar=sidecar_path,
     )
-    settings = library.load_settings(str(audio_path), base, library.file_digest(str(audio_path)))
+    settings = library.load_settings(
+        str(audio_path), base, library.file_digest(str(audio_path)), sidecar=sidecar_path
+    )
+    take = str(sidecar_path) if linked else None
 
     try:
-        exported = export_span(prepared, base, run_config, str(audio_path), note_dicts, settings)
+        exported = export_span(
+            prepared, base, run_config, str(audio_path), note_dicts, settings, take=take
+        )
     except NotReady as exc:
         row["status"] = f"export failed: {exc}"
         return row
@@ -855,17 +868,28 @@ def write_row(ws, index: dict[int, int], row: dict) -> None:
 # ── file selection & CLI ─────────────────────────────────────────────────────
 
 
-def all_audio_files() -> list[Path]:
-    found: set[Path] = set()
-    for pattern in AUDIO_GLOBS:
-        found.update(BENCH_DIR.glob(pattern))
-    return sorted(found)
+def all_takes() -> list[tuple[str, Path, Path]]:
+    """Every solo in benchmark/wjazzd as (name, audio, sidecar): each sidecar
+    there through `library.discover` -- a linked take, whose audio is another
+    file's (scripts/dedupe_audio.py), is processed in place rather than
+    missed or given a second sidecar -- and each audio file with no sidecar
+    yet, under its own. The name is the take's: the file name every pin and
+    `--file` uses."""
+    from swingscribe.gui import library
+
+    takes: dict[str, tuple[Path, Path]] = {}
+    for key, sidecar, audio in library.discover(BENCH_DIR):
+        if "/" not in key and audio.is_file():
+            takes[key] = (audio, sidecar)
+    for audio in library.audio_files(BENCH_DIR):
+        takes.setdefault(audio.name, (audio, library.settings_path(audio)))
+    return [(name, *takes[name]) for name in sorted(takes)]
 
 
-def select_files(args) -> list[Path]:
-    available = all_audio_files()
+def select_files(args) -> list[tuple[str, Path, Path]]:
+    available = all_takes()
     if args.file:
-        by_name = {p.name: p for p in available}
+        by_name = {take[0]: take for take in available}
         chosen = []
         for name in args.file:
             if name in by_name:
@@ -944,13 +968,13 @@ def main() -> None:
         print("Nothing to do — no matching audio in benchmark/wjazzd.")
         return
 
-    print(f"Processing {len(files)} file(s): {', '.join(p.name for p in files)}")
+    print(f"Processing {len(files)} file(s): {', '.join(name for name, *_ in files)}")
     print(f"Cache: {cache_dir}   (running from {Path.cwd()})")
     wb, ws = load_or_create_sheet(db)
     index = melid_row_index(ws)
 
-    for audio_path in files:
-        print(f"\n== {audio_path.name} ==")
+    for name, audio_path, sidecar_path in files:
+        print(f"\n== {name} ==")
         row = process_file(
             db,
             audio_path,
@@ -958,6 +982,7 @@ def main() -> None:
             fresh=args.fresh,
             separation_model=args.separation_model,
             reuse_span=args.reuse_span,
+            sidecar_path=sidecar_path,
         )
         write_row(ws, index, row)
         save_sheet(wb, ws)  # after every file: a crash mid-batch loses nothing already done

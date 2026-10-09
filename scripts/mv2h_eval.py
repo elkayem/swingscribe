@@ -88,11 +88,9 @@ def cached_runs(notes_path: Path, log=print) -> dict:
     pins were computed on."""
     runs = json.loads(notes_path.read_text(encoding="utf-8"))
     live, stale = {}, []
-    for sidecar_path in sorted(run_eval.BENCH.rglob("*.swingscribe.json")):
-        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        name = run_eval.sidecar_name(sidecar_path, sidecar)
-        if not (run_eval.BENCH / name).is_file():
-            continue
+    # Through run_eval's walk (library.discover): a linked take's audio is
+    # its sidecar's, wherever the copy it was keyed by has gone.
+    for name, _sidecar_path, _audio, sidecar in run_eval.bench_takes(lambda _message: None):
         takes = [(name, None)]
         if run_eval.transcribe_settings(sidecar, 0.2, 0.0).uses_piano_oracle:
             takes.append((run_eval.second_key(name), run_eval.SECOND_LINE))

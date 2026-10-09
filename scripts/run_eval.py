@@ -927,11 +927,19 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
             update={"quantize": config.quantize.model_copy(update=reading_of(sidecar, config))}
         )
         page, _lines = notation_for_horns(
-            str(BENCH / track), notes, beats, region or tuple(run["region"]), **common
+            str(BENCH / track),  # a name for the page's title, not audio
+            notes,
+            beats,
+            region or tuple(run["region"]),
+            **common,
         )
         return page
     return notation_for_span(
-        str(BENCH / track), notes, beats, region or tuple(run["region"]), **common
+        str(BENCH / track),  # a name for the page's title, not audio
+        notes,
+        beats,
+        region or tuple(run["region"]),
+        **common,
     )
 
 

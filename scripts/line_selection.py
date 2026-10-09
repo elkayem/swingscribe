@@ -43,24 +43,26 @@ HEAD = 220  # transposition search head, mirroring gui/ground_truth
 # The piano spans with references: the six hand-scored tracks and the four
 # WJazzD pianos. Derived from sidecars at run time — a track qualifies when
 # its sidecar routes to the piano oracle and names a score.
-def piano_tracks() -> list[Path]:
+def piano_tracks() -> list[tuple[Path, Path]]:
+    """(sidecar, audio) for each, through library.discover: a linked take's
+    audio is its sidecar's, wherever the copy it was keyed by has gone."""
     from swingscribe.config import Config
+    from swingscribe.gui import library
 
     out = []
-    for sidecar_path in sorted(BENCH_DIR.rglob("*.swingscribe.json")):
+    for _key, sidecar_path, audio in library.discover(BENCH_DIR):
         sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        audio = sidecar_path.with_name(sidecar_path.name.removesuffix(".swingscribe.json"))
         if not audio.is_file() or not sidecar.get("score"):
             continue
         ensemble = sidecar.get("ensemble")
         config = Config()
         routed = config.transcribe.model_copy(update={"ensemble": ensemble or "horn-led"})
         if routed.uses_piano_oracle:
-            out.append(audio)
+            out.append((sidecar_path, audio))
     return out
 
 
-def extract(tracks: list[Path]) -> None:
+def extract(tracks: list[tuple[Path, Path]]) -> None:
     """One slow oracle pass per track; JSONs land in the cache."""
     import soundfile
 
@@ -71,12 +73,12 @@ def extract(tracks: list[Path]) -> None:
     from swingscribe.stages.transcribe import crop_region
 
     ORACLE_DIR.mkdir(parents=True, exist_ok=True)
-    for audio in tracks:
+    for sidecar_path, audio in tracks:
         out_path = ORACLE_DIR / (audio.stem + ".oracle.json")
         if out_path.exists():
             print(f"cached: {out_path.name}")
             continue
-        sidecar = json.loads((audio.parent / f"{audio.name}.swingscribe.json").read_text("utf-8"))
+        sidecar = json.loads(sidecar_path.read_text("utf-8"))
         model = sidecar["model"]
         base = Config.from_yaml()
         base = base.model_copy(
@@ -150,16 +152,16 @@ def shipped_line(audio: Path, sidecar: dict) -> list[dict]:
     return payload["notes"]
 
 
-def score(tracks: list[Path]) -> None:
+def score(tracks: list[tuple[Path, Path]]) -> None:
     from swingscribe import mscz
 
     rows = []
-    for audio in tracks:
+    for sidecar_path, audio in tracks:
         oracle_path = ORACLE_DIR / (audio.stem + ".oracle.json")
         if not oracle_path.exists():
             print(f"no oracle notes for {audio.name} — run --extract first; skipped")
             continue
-        sidecar = json.loads((audio.parent / f"{audio.name}.swingscribe.json").read_text("utf-8"))
+        sidecar = json.loads(sidecar_path.read_text("utf-8"))
         reference = [n.pitch for n in mscz.parse_any(sidecar["score"]).melody]
         notes = normalize_velocities(json.loads(oracle_path.read_text())["notes"])
         clusters = clusters_of(notes)

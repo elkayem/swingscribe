@@ -335,7 +335,9 @@ def load_evidence(name, run, sidecar, lo, hi, cache_dir, log=print):
             "transcribe": settings,
         }
     )
-    document = library.ingested_document(run_eval.BENCH / name, config)
+    document = library.ingested_document(
+        library.audio_for_key(run_eval.BENCH, run_eval.track_of(name)), config
+    )
     diagnostics = None
     try:
         cfg = review.span_config(
@@ -461,10 +463,10 @@ def discover(db, runs, log=print):
     from score_wjazz import identify_all
 
     out = []
-    for sidecar_path in sorted(run_eval.BENCH.rglob("*.swingscribe.json")):
-        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        name = run_eval.sidecar_name(sidecar_path, sidecar)
-        if name not in runs or not (run_eval.BENCH / name).is_file():
+    # Through run_eval's walk (library.discover): a linked take's audio is
+    # its sidecar's, wherever the copy it was keyed by has gone.
+    for name, _sidecar_path, _audio, sidecar in run_eval.bench_takes(lambda _message: None):
+        if name not in runs:
             continue
         # The Omnibook set and the PDF pages stay out of the WJazzD
         # identification, as they do in run_eval (is_located): several of their
@@ -697,6 +699,7 @@ def classify_omnibook(runs, cache_dir, with_audio=True, limit=None, log=print):
     import run_eval
 
     from swingscribe import mscz
+    from swingscribe.gui import library
 
     real = Path("tests/regression/real-audio-baselines.json")
     pinned_f1 = json.loads(real.read_text(encoding="utf-8")) if real.is_file() else {}
@@ -705,7 +708,7 @@ def classify_omnibook(runs, cache_dir, with_audio=True, limit=None, log=print):
         for name in runs
         if run_eval.is_omnibook(name)
         and run_eval.take_of(name) is None
-        and (run_eval.BENCH / name).is_file()
+        and library.audio_for_key(run_eval.BENCH, name) is not None
     )
     if limit:
         names = names[:limit]
@@ -714,7 +717,7 @@ def classify_omnibook(runs, cache_dir, with_audio=True, limit=None, log=print):
     for name in names:
         started = time.time()
         run = runs[name]
-        sidecar_path = run_eval.BENCH / (name + ".swingscribe.json")
+        sidecar_path = library.sidecar_for_key(run_eval.BENCH, name)
         sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
         if not sidecar.get("score") or not Path(sidecar["score"]).is_file():
             log(f"  {name}: skipped - the sidecar names no score on disk")
