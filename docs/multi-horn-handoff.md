@@ -11,7 +11,7 @@ merged: the listener reviews the branch first. Design and state:
 
 | Piece | State |
 | --- | --- |
-| A. Multi-horn core + `scripts/multi_horn_page.py` | measured five times (Local tasks A-A5); swing is the head's default, lag read once over both horns; bar 26 fixed on the page, rests closed only after a held note, faint scraps must be isolated; waiting on Local task A6 and the listener's marks |
+| A. Multi-horn core + `scripts/multi_horn_page.py` | measured six times (Local tasks A-A6); the listener's five joins are one held note (rule 5b joins a split held note under the other horn, `multi_horn_version` 4); a chord the horns strike together is written at one onset; the script counts heard notes the page does not write; waiting on Local task A7 |
 | B. Linked sidecars | done (Local tasks B, B2): 37 copies linked and in the Recycle Bin, 4 left, 313 MB; the card byte-identical before and after; the manifest write survives OneDrive now |
 | C. Two parts, GUI, guide | checked (Local task C); fixes pushed |
 
@@ -44,6 +44,15 @@ What the reports changed (2026-10-09; details in
   `benchmark/Omnibook/` holds sidecars and MusicXML only: its recordings
   are linked to their identical copies in `wjazzd/` (the copy made first),
   and the user guide says so.
+- Local task A6 (multi-horn.md, "The sixth measurement"): the listener
+  marked all five low-dip joins one held note, and the table showed why:
+  the other horn sounds straight across them with no attack near, where
+  at a real repeat both horns re-attack together (rule 5b,
+  `voices.join_held`). A lead-in's fold wrote one horn on the beat and
+  left the other an eighth late (pages 47, 49): notes struck within 30 ms
+  across the voices are one attack now (`notation.one_attack`).
+  `--drop-faint` moved the reading around page 54, not its notes; the
+  script now says when a heard note is not written.
 
 ## Setting up (once)
 
@@ -381,6 +390,55 @@ Report:
    - pages 47 and 49: does the lower horn really come in an eighth late?
 6. Optional, B2's fix: the scratch-folder rehearsal again, under OneDrive
    and with the DEFAULT manifest path; it must complete.
+
+## Local task A7: the head under rule 5b, and the listener's ear on its joins
+
+What landed after A6 (multi-horn.md, "The sixth measurement"):
+
+- Rule 5b (`voices.join_held`): a voice's two touching notes of one pitch
+  are one held note where the other horn sounds straight across the join,
+  has no attack within 60 ms of it, and the stem's energy dips under 5 dB.
+  `multi_horn_version` is 4: the first run re-transcribes (Basic Pitch and
+  CREPE, a minute or two), and the transcribe line prints how many it
+  joined and where.
+- One attack (`notation.one_attack`): notes of the two voices struck within
+  30 ms are written from one onset, the earlier written start, a lead-in's
+  fold included. Pages 47 and 49's lower horn should be on beat 1.
+- The summary prints `heard -> written` per voice, and NOT WRITTEN if the
+  quantizer left a heard note off. `scripts/multi_horn_joins.py` shows the
+  other voice's nearest attack, whether it sounds across, and whether rule
+  5b takes the join.
+
+```
+set PAGE=.venv\Scripts\python.exe scripts\multi_horn_page.py AUDIO --sidecar TAKE --start 0 --end 67.308
+%PAGE% --out OUT\os7.musicxml --dump-voices OUT\os7.txt
+%PAGE% --drop-faint --out OUT\os7.faint.musicxml --dump-voices OUT\os7.faint.txt
+.venv\Scripts\python.exe scripts\multi_horn_joins.py AUDIO --sidecar TAKE --json OUT\joins7.json
+```
+
+Report:
+
+1. The transcribe lines: the held joins' count and times. Expected: the
+   listener's five (24.900, 28.931, 41.651, 45.427, 55.256) and the nine
+   below, and none of the repeats (12.121, 17.046, 20.845, 23.598, 32.428,
+   36.204, 62.494; 11.644, 44.115, 48.982, 52.770).
+2. `os7` against `os6`: the five are one note each on pages 26, 30, 43
+   (L25's lower C a whole note), 47 (L29's lower B-flat a whole note) and
+   58 (L40: no second A-flat); page 44's trumpet F4 tied over, no
+   re-attack; pages 47 and 49 with the lower horn on beat 1, struck with
+   the upper. Anything else that moved.
+3. The `heard -> written` lines of both runs. If either says NOT WRITTEN,
+   the heard notes (the dump's first list) and the written bars around it,
+   with the two runs side by side -- page 54 (52.8-53.6 s) above all.
+4. `joins7.json`: what is left should be the repeats, and rule 5b's column
+   empty.
+5. The listener's ear on the nine joins the rule also takes -- one held
+   note each, or a re-attack? 17.719 E-flat 5, 20.323 G4, 21.495 E-flat 5,
+   30.999 D-flat 5, 36.854 E-flat 5, 42.094 F4, 47.460 G-flat 4, 63.190
+   E-flat 5, 66.061 C5. And still: the riff's eighth rests, bar 28's
+   G-flat at 43.790, the 44.684 G-flat scrap now in the lower voice, and
+   pages 10 and 26 (the same riff, the D-flat on 3 against the and of 2).
+6. MuseScore opens both files.
 
 ## Local task B: linked sidecars ("takes")
 

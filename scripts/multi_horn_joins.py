@@ -16,12 +16,18 @@ pair in the cached review it prints
 - `frame dip`: the lowest note posteriorgram at the pitch within two frames
   of the join, as a share of its median over the two notes (1.0: no dip);
 - `energy dip`: how far the stem's 10 ms RMS falls within 30 ms of the join
-  below its median over the two notes, in dB.
+  below its median over the two notes, in dB (`voices.energy_dip`);
+- `other`: how far the OTHER voice's nearest attack is from the join, in
+  ms, and `across` whether it sounds straight across the join.
 
-The listener marks which joins are re-attacks and which are one note; the
-feature that separates them, if one does, is the rule. Read-only: needs the
-review cached (scripts/multi_horn_page.py or the GUI's Transcribe), the
-stems, and the ml group (Basic Pitch on onnxruntime).
+The listener marked the five low-dip joins on the Open Sesame head one held
+note (Local task A6): in a harmonized head both horns articulate together,
+and none of the five had the other horn attacking near it. That is rule 5b
+(`voices.join_held`, from `multi_horn_version` 4), and its column says
+which joins it takes. Once the review is re-transcribed under it, the joins
+it took are one note and no longer appear here: what is left is the repeats.
+Read-only: needs the review cached (scripts/multi_horn_page.py or the GUI's
+Transcribe), the stems, and the ml group (Basic Pitch on onnxruntime).
 """
 
 import argparse
@@ -35,7 +41,6 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 TOUCH_S = 0.03  # a join: the next note starts within this of the last one's end
 WINDOW_FRAMES = 2  # Basic Pitch frames either side of the join (11.6 ms each)
 RMS_S = 0.01
-DIP_WINDOW_S = 0.03
 
 
 def joins(notes: list[dict], touch: float = TOUCH_S) -> list[tuple[dict, dict]]:
@@ -72,6 +77,8 @@ def join_features(
     shift the review's notes carry (TranscribeConfig.multi_horn_onset_shift_ms)."""
     import numpy as np
 
+    from swingscribe import voices
+
     pitch_bin = int(first["pitch"]) - midi_offset
     join = float(second["onset"]) - shift
     begin = float(first["onset"]) - shift
@@ -83,14 +90,10 @@ def join_features(
     typical = float(np.median(note_post[span, pitch_bin])) if span.any() else 0.0
     trough = float(note_post[low:high, pitch_bin].min())
     frame_dip = trough / typical if typical > 0 else 1.0
-    around = np.abs(rms_times - join) <= DIP_WINDOW_S
-    level = (rms_times >= begin) & (rms_times <= end)
-    energy_dip = 0.0
-    if around.any() and level.any():
-        floor = 1e-9
-        energy_dip = float(
-            20 * np.log10(max(np.median(rms[level]), floor) / max(rms[around].min(), floor))
-        )
+    # The rule's own measurement, on the notes' time base.
+    hop = float(rms_times[1] - rms_times[0]) if len(rms_times) > 1 else RMS_S
+    energy = (float(rms_times[0]) + shift, hop, [float(v) for v in rms])
+    energy_dip = voices.energy_dip(energy, first, second)
     return {
         "time": round(join + shift, 3),
         "pitch": int(first["pitch"]),
@@ -99,7 +102,30 @@ def join_features(
         "second": round(float(second["duration"]), 3),
         "onset": round(onset_peak, 3),
         "frame_dip": round(frame_dip, 3),
-        "energy_dip_db": round(energy_dip, 1),
+        "energy_dip_db": 0.0 if energy_dip is None else round(energy_dip, 1),
+    }
+
+
+def other_voice(notes: list[dict], first: dict, second: dict) -> dict:
+    """What the OTHER voice does at the join: its nearest attack, in ms
+    (None when it has none), whether it sounds straight across, and
+    whether rule 5b (`voices.join_held`) would take the join given its
+    energy dip."""
+    from swingscribe import voices
+
+    at = float(second["onset"])
+    voice = int(first.get("voice", 1))
+    others = [n for n in notes if int(n.get("voice", 1)) != voice]
+    nearest = min((abs(float(n["onset"]) - at) for n in others), default=None)
+    across = any(
+        float(n["onset"]) <= at - voices.HELD_ONSET_S
+        and float(n["onset"]) + float(n["duration"]) >= at + voices.HELD_ONSET_S
+        for n in others
+    )
+    return {
+        "other_ms": None if nearest is None else round(1000 * nearest),
+        "across": across,
+        "attack_near": nearest is not None and nearest <= voices.HELD_ONSET_S,
     }
 
 
@@ -165,21 +191,37 @@ def main(argv=None) -> int:
     rms_times = rms_times + offset
     shift = run_config.transcribe.multi_horn_onset_shift_ms / 1000.0
 
-    rows = [
-        join_features(note_post, onset_post, times, rms, rms_times, first, second, shift)
-        for first, second in joins(payload["notes"])
-    ]
+    from swingscribe import voices
+
+    rows = []
+    for first, second in joins(payload["notes"]):
+        row = join_features(note_post, onset_post, times, rms, rms_times, first, second, shift)
+        row |= other_voice(payload["notes"], first, second)
+        row["rule"] = (
+            row["across"]
+            and not row["attack_near"]
+            and row["energy_dip_db"] < run_config.transcribe.multi_horn_held_dip_db
+        )
+        rows.append(row)
     print(f"{len(rows)} same-pitch join(s) in {audio.name} {start}-{end} s")
     print(
         f"{'time':>9} {'pitch':>5} {'v':>2} {'first':>6} {'second':>6} "
-        f"{'onset':>6} {'f.dip':>6} {'e.dip':>6}"
+        f"{'onset':>6} {'f.dip':>6} {'e.dip':>6} {'other':>6} {'across':>6}  rule 5b"
     )
     for row in rows:
+        other = "-" if row["other_ms"] is None else f"{row['other_ms']}ms"
         print(
             f"{row['time']:9.3f} {row['pitch']:5d} {row['voice']:2d} {row['first']:6.3f} "
             f"{row['second']:6.3f} {row['onset']:6.3f} {row['frame_dip']:6.3f} "
-            f"{row['energy_dip_db']:6.1f}"
+            f"{row['energy_dip_db']:6.1f} {other:>6} {'yes' if row['across'] else 'no':>6}  "
+            f"{'joins' if row['rule'] else ''}"
         )
+    taken = sum(1 for row in rows if row["rule"])
+    print(
+        f"rule 5b (held under {voices.HELD_ONSET_S * 1000:.0f} ms of the other horn, dip under "
+        f"{run_config.transcribe.multi_horn_held_dip_db:g} dB) would take {taken}; a review "
+        "transcribed under it shows none of those"
+    )
     if args.json:
         args.json.write_text(json.dumps(rows, indent=2), encoding="utf-8")
     return 0

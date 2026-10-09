@@ -426,6 +426,13 @@ class TranscribeConfig(BaseModel):
     multi_horn_overlap_ms: float = 60.0
     multi_horn_overlap_share: float = 0.3
     multi_horn_ghost_ratio: float = 0.6
+    # Rule 5b (voices.join_held): a voice's two touching notes of one pitch
+    # are one held note where the other horn sounds across the join with no
+    # attack of its own within `held_onset_ms`, and the stem's 10 ms RMS
+    # dips less than `held_dip_db` there (the listener's five marks on the
+    # Open Sesame head, Local task A6). 0 dB joins nothing.
+    multi_horn_held_dip_db: float = 5.0
+    multi_horn_held_onset_ms: float = 60.0
     # The voices' rules themselves (voices.py, transcribe._hear_horns), as a
     # number: the GUI's review key hashes this config's dump and never
     # transcribe.CACHE_VERSION, so a change to the rules that moves no
@@ -433,8 +440,9 @@ class TranscribeConfig(BaseModel):
     # with any such change; like every field above it dumps only for a
     # multi-horn head. 2 (2026-10-09): tails cut at a new chord, split held
     # notes joined where CREPE holds them, lead-ins marked. 3: a legato
-    # successor keeps its horn's voice (voices.legato_successors).
-    multi_horn_version: int = 3
+    # successor keeps its horn's voice (voices.legato_successors). 4: a
+    # split held note is joined under the other horn (voices.join_held).
+    multi_horn_version: int = 4
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):

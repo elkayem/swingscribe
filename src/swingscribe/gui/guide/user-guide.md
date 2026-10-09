@@ -620,6 +620,12 @@ The page writes both horns on one treble staff, in concert pitch:
 - A scoop into a held note (a short note a semitone under it) is written
   as a grace note on the note it leads into, and a note re-attacked with a
   short "head" is written as one note.
+- A chord both horns strike together starts at one place on the page,
+  even where one horn leads in with a scoop or a short head.
+- A held note the model heard as two -- one horn holding while the other
+  holds its note straight across, with no new attack -- is written as one
+  note. Where both horns re-attack together, the note is repeated and
+  written twice.
 - A held note (a half note or longer) followed by a breath of an eighth
   or less before the horn's next note is written to that note: a whole
   note, not three and a half beats and an eighth rest. A short note keeps

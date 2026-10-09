@@ -300,6 +300,8 @@ class HornLines:
     unisons: int = 0
     # The faint scraps (`faint_scraps`), whether or not they were left off.
     faint: list[NoteEvent] = field(default_factory=list)
+    # Notes moved onto the other horn's attack (`one_attack`).
+    together: int = 0
 
 
 def _weighted_median(pairs: list[tuple[float, float]]) -> float | None:
@@ -429,6 +431,93 @@ def faint_scraps(notes: list[NoteEvent], near: float = FAINT_NEIGHBOUR_S) -> lis
         for k, n in enumerate(faint)
         if not any(abs(m.onset - n.onset) <= near for j, m in enumerate(faint) if j != k)
     ]
+
+
+# Two horns attacking one chord: Basic Pitch's onsets for the two land
+# within this of each other (12 ms at page 49 of the Open Sesame head).
+ONE_ATTACK_S = 0.03
+
+
+def _lead_in_heads(line: list[NoteEvent]) -> dict[int, int]:
+    """Which note of one voice's line each lead-in folds into, as
+    `quantize.absorb_lead_ins` pairs them: main note's index -> its
+    lead-in's index."""
+    from swingscribe.stages import quantize
+
+    ordered = sorted(range(len(line)), key=lambda i: line[i].onset)
+    heads: dict[int, int] = {}
+    k = 0
+    while k < len(ordered):
+        note = line[ordered[k]]
+        after = ordered[k + 1] if k + 1 < len(ordered) else None
+        if (
+            note.lead_in
+            and after is not None
+            and line[after].pitch - note.pitch in (0, 1)
+            and abs(note.onset + note.duration - line[after].onset) <= quantize.LEAD_IN_TOUCH_S
+        ):
+            heads[after] = ordered[k]
+            k += 2
+            continue
+        k += 1
+    return heads
+
+
+def one_attack(
+    upper: list[NoteEvent],
+    lower: list[NoteEvent],
+    window: float = ONE_ATTACK_S,
+    fold: bool = True,
+) -> tuple[list[NoteEvent], list[NoteEvent], int]:
+    """Notes of the two voices struck within `window` of each other are ONE
+    attack, and start where the earlier of the two is WRITTEN to start:
+    a note a lead-in folds into (`fold`, as `quantize.absorb_lead_ins`
+    will) is written from the lead-in's onset. Without this the fold moved
+    one horn and left the other: page 49 of the Open Sesame head, the
+    trumpet's B-flat after a 93 ms re-attack head written on beat 1 and the
+    tenor's G-flat, struck 12 ms from the B-flat, an eighth late (Local
+    task A6). The earlier start is taken by the note itself, or by its own
+    lead-in; its end stays; and never where it would land on (or within
+    `window` after) a note of its own voice. Returns both lines and how
+    many notes moved."""
+    lines = [list(upper), list(lower)]
+    heads = [_lead_in_heads(line) if fold else {} for line in lines]
+    led = [set(h.values()) for h in heads]
+
+    def written(side: int, i: int) -> int:
+        return heads[side].get(i, i)
+
+    mains = [
+        (side, i) for side, line in enumerate(lines) for i in range(len(line)) if i not in led[side]
+    ]
+    starts = {(side, i): lines[side][written(side, i)].onset for side, i in mains}
+    targets: dict[tuple[int, int], float] = {}
+    for side, i in mains:
+        onset = lines[side][i].onset
+        partners = [
+            (other, j)
+            for other, j in mains
+            if other != side and abs(lines[other][j].onset - onset) <= window
+        ]
+        if not partners:
+            continue
+        earliest = min(starts[key] for key in [(side, i), *partners])
+        first = (side, written(side, i))
+        onset = lines[side][first[1]].onset
+        # Never onto a note of its own voice: the quantizer would have two
+        # onsets on one grid point there, and drop one.
+        crowded = any(
+            k not in (i, first[1]) and earliest - window <= note.onset < onset
+            for k, note in enumerate(lines[side])
+        )
+        if earliest < onset and not crowded:
+            targets[first] = min(earliest, targets.get(first, earliest))
+    for (side, i), onset in targets.items():
+        note = lines[side][i]
+        lines[side][i] = note.model_copy(
+            update={"onset": onset, "duration": note.duration + (note.onset - onset)}
+        )
+    return lines[0], lines[1], len(targets)
 
 
 def horn_lines(
@@ -994,15 +1083,21 @@ def notation_for_horns(
         merge_unisons=not parts,
         drop_faint=bool(config and config.notate.drop_faint),
     )
+    # A chord the two horns strike together starts at ONE place on the page,
+    # a lead-in's fold included (quantize folds them when it reads swing,
+    # or a literal page asks).
+    qc = config.quantize if config is not None else None
+    fold = qc is None or qc.timing == "swing" or qc.literal_lead_ins
+    upper, lower, lines.together = one_attack(lines.upper, lines.lower, fold=fold)
     # Two notes struck together in ONE voice -- the listener moved one there
     # with the Voices tool -- are a chord in it, not a grid too coarse (one
     # would be pushed a 32nd late, or dropped).
     notation = notation_for_span(
         audio_path,
-        with_chords([], lines.upper),
+        with_chords([], upper),
         beats,
         region,
-        lower_voice=with_chords([], lines.lower),
+        lower_voice=with_chords([], lower),
         horn_parts=parts,
         lower_transpose=lower_transpose,
         **kwargs,

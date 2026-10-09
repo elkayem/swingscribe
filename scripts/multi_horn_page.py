@@ -193,6 +193,32 @@ def written(note, key: int) -> str:
     return text
 
 
+def accounting(lines, notation, fold: bool) -> dict[int, dict[str, int]]:
+    """Per voice: the notes the writing kept (`horn_lines`: scraps left off
+    and unisons written once are gone already), the re-attack heads the
+    fold writes into their note, and the notes the page WRITES -- struck
+    notes, their chord members and grace notes. What is left over is a
+    heard note the quantizer did not write: there should be none."""
+    from swingscribe.notation import _lead_in_heads
+
+    out: dict[int, dict[str, int]] = {}
+    for voice, line in ((1, lines.upper), (2, lines.lower)):
+        heads = _lead_in_heads(line) if fold else {}
+        reattacks = sum(1 for main, head in heads.items() if line[main].pitch == line[head].pitch)
+        out[voice] = {"kept": len(line), "heads": reattacks, "written": 0}
+    pages = [(notation, None), *((part, 2) for part in notation.parts)]
+    for page, part_voice in pages:
+        for bar in page.bars:
+            for note in bar.notes:
+                if note.is_rest or note.tie_stop:
+                    continue
+                voice = part_voice or (2 if note.voice == 2 else 1)
+                out[voice]["written"] += 1 + len(note.chord) + len(note.grace)
+    for counts in out.values():
+        counts["lost"] = counts["kept"] - counts["heads"] - counts["written"]
+    return out
+
+
 def dump(notation, lines, edits, key: int, roll_bar: int | None) -> str:
     """The heard voices and the written page, as text a person can read
     beside the score."""
@@ -251,6 +277,7 @@ def main(argv=None) -> int:
         form_bar_of_page,
         grid_config,
         horn_lines,
+        one_attack,
         reading_of,
         writing_of,
     )
@@ -344,7 +371,13 @@ def main(argv=None) -> int:
 
     heard = [NoteEvent(source=stem, **note) for note in (*edits["audible"], *edits["added"])]
     drops_faint = writing_of(settings, config)["drop_faint"]
-    lines = horn_lines(heard, drop_faint=drops_faint)
+    parts = gui_musicxml.two_parts(settings, True)
+    lines = horn_lines(
+        heard, move_octaves=not parts, merge_unisons=not parts, drop_faint=drops_faint
+    )
+    reading = reading_of(settings, config)
+    fold = reading["timing"] == "swing" or reading["literal_lead_ins"]
+    _upper, _lower, lines.together = one_attack(lines.upper, lines.lower, fold=fold)
     upper = sum(1 for n in heard if n.voice != 2)
     lower = sum(1 for n in heard if n.voice == 2)
     described = gui_musicxml.describe(notation, config, settings, changes)
@@ -360,7 +393,6 @@ def main(argv=None) -> int:
         f"{lead_ins} lead-ins"
     )
     moved = [p for p in lines.phrases if p["moved"]]
-    reading = reading_of(settings, config)
     print(
         f"written: {described['bars']} bars, {described['notes']} notes, key "
         f"{described['key']} ({described['timing']}"
@@ -369,8 +401,23 @@ def main(argv=None) -> int:
         f"{', lead-ins folded' if reading['literal_lead_ins'] else ''}); "
         f"{len(moved)} of {len(lines.phrases)} lower phrases moved up, "
         f"{lines.unisons} unisons written once, {len(lines.faint)} faint scrap(s) "
-        f"{'left off' if drops_faint else 'written'}"
+        f"{'left off' if drops_faint else 'written'}, {lines.together} note(s) moved onto "
+        "the other horn's attack"
     )
+    counts = accounting(lines, notation, fold)
+    print(
+        "heard -> written: "
+        + "; ".join(
+            f"voice {voice} {c['kept']} kept, {c['heads']} re-attack heads folded, "
+            f"{c['written']} written" + (f", {c['lost']} NOT WRITTEN" if c["lost"] else "")
+            for voice, c in counts.items()
+        )
+    )
+    if any(c["lost"] for c in counts.values()):
+        print(
+            "  the quantizer left heard notes off the page: compare the dump's "
+            "'heard' list with 'written, bar by bar' (--dump-voices)"
+        )
     # Rests on the page, drawn (voice 1) and hidden (voice 2): run with and
     # without --no-close-rests and the difference is what closing took.
     rests = [n for page in (notation, *notation.parts) for b in page.bars for n in b.notes]

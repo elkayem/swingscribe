@@ -56,6 +56,11 @@ Then, in each voice:
    peak (bar 24's D5 written as a dotted half tied to a re-attacked
    quarter); CREPE follows one horn at a time, so it can vouch for a held
    note only where it is on that horn, and elsewhere nothing is joined.
+   **5b. And where the other horn sounds across the join** with no attack
+   of its own near it and the stem's energy barely dips (`join_held`): in
+   a harmonized head both horns articulate together, so one horn's
+   "re-attack" under the other's held note is Basic Pitch's re-trigger
+   (the listener marked all five on the Open Sesame head one held note).
 6. **A lead-in is marked** (`mark_lead_ins`, NoteEvent.lead_in, docs/
    scoops.md): a note of at most `LEAD_IN_MAX_S` a semitone under the next
    note in its voice, or at its pitch, and touching it -- the scoop into a
@@ -64,10 +69,13 @@ Then, in each voice:
 
 Pure arithmetic on note dicts ({onset, duration, pitch, confidence}), so all
 of it runs in CI. The transcriber (`stages/transcribe.py`) applies them all;
-the GUI re-orders a listener's EDITED set with `order` alone, because a
-candidate the listener switched on must never be pruned again.
+the GUI re-orders a listener's EDITED set with `order` and `continue_voices`
+alone, because a candidate the listener switched on must never be pruned
+again.
 """
 
+import math
+import statistics
 from typing import Any
 
 # Semitones from a fundamental to its 2nd..8th harmonics, rounded: the
@@ -124,6 +132,20 @@ LEAD_IN_TARGET_RATIO = 3.0
 # other horn coming in under it.
 SUCCESSOR_TAIL_S = 0.25
 SUCCESSOR_MAX_STEP = 2
+
+# Rule 5b: in a HARMONIZED head both horns articulate together, so a voice's
+# two touching notes of one pitch are one held note where the OTHER horn
+# sounds straight across the join (from `HELD_ONSET_S` before it to
+# `HELD_ONSET_S` after) with no attack of its own within `HELD_ONSET_S`,
+# and the stem's energy dips less than `HELD_MAX_DIP_DB` there. The
+# listener marked all five such joins on the Open Sesame head one held note
+# (energy dip -1.3 to 3.1 dB, the other horn's nearest attack 127-443 ms
+# away); the head's real repeats have both horns re-attacking within 12 ms
+# and dips of 8-30 dB (Local task A6, docs/multi-horn.md). `DIP_WINDOW_S`
+# and the 10 ms frames are scripts/multi_horn_joins.py's measurement.
+HELD_ONSET_S = 0.06
+HELD_MAX_DIP_DB = 5.0
+DIP_WINDOW_S = 0.03
 
 
 def _end(note: dict[str, Any]) -> float:
@@ -516,6 +538,80 @@ def rejoin_splits(
     return out
 
 
+def energy_dip(
+    energy: tuple[float, float, list[float]],
+    first: dict[str, Any],
+    second: dict[str, Any],
+    window: float = DIP_WINDOW_S,
+) -> float | None:
+    """How far the stem's short-time RMS falls at the join of `first` and
+    `second` below its median over the two notes, in dB: the lowest frame
+    within `window` of the join against the median frame from `first`'s
+    onset to `second`'s end. `energy` is (time of frame 0's centre, hop,
+    RMS per frame); None where the frames do not cover the join."""
+    start, hop, rms = energy
+
+    def frames(low: float, high: float) -> list[float]:
+        first_frame = max(0, math.ceil((low - start) / hop))
+        last_frame = min(len(rms) - 1, math.floor((high - start) / hop))
+        return list(rms[first_frame : last_frame + 1]) if last_frame >= first_frame else []
+
+    join = float(second["onset"])
+    around = frames(join - window, join + window)
+    level = frames(float(first["onset"]), _end(second))
+    if not around or not level:
+        return None
+    floor = 1e-9
+    return 20.0 * math.log10(max(statistics.median(level), floor) / max(min(around), floor))
+
+
+def join_held(
+    notes: list[dict[str, Any]],
+    energy: tuple[float, float, list[float]] | None,
+    max_dip_db: float = HELD_MAX_DIP_DB,
+    other_onset: float = HELD_ONSET_S,
+    touch: float = TOUCH_S,
+) -> tuple[list[dict[str, Any]], list[float]]:
+    """Rule 5b: a voice's two touching notes of one pitch are ONE held note
+    where the other voice sounds across the join with no onset within
+    `other_onset` of it, and the stem's energy (`energy_dip`) falls less
+    than `max_dip_db` there. Notes in, notes out, the first of a joined
+    pair lasting both; returns the notes and each join's time. No energy,
+    or a `max_dip_db` of 0, joins nothing."""
+    if energy is None or max_dip_db <= 0:
+        return notes, []
+    out: list[dict[str, Any]] = []
+    joined: list[float] = []
+    runs = _voice_runs(notes)
+    for voice, run in runs.items():
+        others = [n for v, other in runs.items() if v != voice for n in other]
+        merged: list[dict[str, Any]] = []
+        for note in run:
+            previous = merged[-1] if merged else None
+            at = float(note["onset"])
+            if (
+                previous is not None
+                and int(previous["pitch"]) == int(note["pitch"])
+                and _touching(previous, note, touch)
+                and any(
+                    float(o["onset"]) <= at - other_onset and _end(o) >= at + other_onset
+                    for o in others
+                )
+                and not any(abs(float(o["onset"]) - at) <= other_onset for o in others)
+            ):
+                dip = energy_dip(energy, previous, note)
+                if dip is not None and dip < max_dip_db:
+                    previous["duration"] = _end(note) - float(previous["onset"])
+                    previous["confidence"] = max(
+                        float(previous["confidence"]), float(note["confidence"])
+                    )
+                    joined.append(at)
+                    continue
+            merged.append(dict(note))
+        out.extend(merged)
+    return out, sorted(joined)
+
+
 def mark_lead_ins(
     notes: list[dict[str, Any]], max_s: float = LEAD_IN_MAX_S
 ) -> list[dict[str, Any]]:
@@ -548,14 +644,18 @@ def assign(
     ghost_ratio: float = GHOST_RATIO,
     track: tuple[float, float, list[float | None]] | None = None,
     attacks: list[float] = (),
-    stats: dict[str, int] | None = None,
+    stats: dict[str, Any] | None = None,
+    energy: tuple[float, float, list[float]] | None = None,
+    held_dip_db: float = HELD_MAX_DIP_DB,
+    held_onset_s: float = HELD_ONSET_S,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Every rule: (the notes the two voices hold, each with a `voice`; the
     notes neither holds, each with `dropped` saying why).
 
     `track` and `attacks` are CREPE's frame trace and corroborated onsets
-    for rule 5 (`rejoin_splits`); without them nothing is joined. `stats`,
-    when given, is filled with what each rule did.
+    for rule 5 (`rejoin_splits`), `energy` the stem's short-time RMS for
+    rule 5b (`join_held`); without them nothing is joined. `stats`, when
+    given, is filled with what each rule did (`held_at`: rule 5b's joins).
 
     Both lists are copies, in onset order (the higher pitch first at one
     onset). The dropped notes are what a listener may switch back on."""
@@ -573,7 +673,8 @@ def assign(
         note["voice"] = voice
     continued = continue_voices(kept, indices, links, overlap_s, share)
     joined = rejoin_splits(kept, track, list(attacks))
-    marked = mark_lead_ins(joined)
+    held, held_at = join_held(joined, energy, held_dip_db, held_onset_s)
+    marked = mark_lead_ins(held)
     dropped = [
         {**notes[i], "dropped": GHOST if i in ghosted else THIRD} for i in sorted(ghosted | crowded)
     ]
@@ -585,6 +686,8 @@ def assign(
             continued=continued,
             thirds=len(crowded),
             rejoined=len(kept) - len(joined),
+            held=len(held_at),
+            held_at=held_at,
             lead_ins=sum(1 for n in marked if n.get("lead_in")),
         )
 

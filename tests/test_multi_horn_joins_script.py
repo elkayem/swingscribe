@@ -58,3 +58,16 @@ def test_a_re_attack_shows_an_onset_peak_and_a_dip():
     assert attacked["onset"] == 0.9
     assert attacked["frame_dip"] == pytest.approx(0.25)
     assert attacked["energy_dip_db"] == pytest.approx(20.0)
+
+
+def test_the_other_voice_says_whether_rule_5b_takes_the_join():
+    first, second = note(0.0, 1.0, 68), note(1.0, 1.0, 68)
+    held_over = [first, second, note(0.0, 2.0, 65, 2)]
+    assert multi_horn_joins.other_voice(held_over, first, second) == {
+        "other_ms": 1000,
+        "across": True,
+        "attack_near": False,
+    }
+    together = [first, second, note(0.0, 1.0, 65, 2), note(1.012, 1.0, 65, 2)]
+    found = multi_horn_joins.other_voice(together, first, second)
+    assert found["attack_near"] and not found["across"] and found["other_ms"] == 12

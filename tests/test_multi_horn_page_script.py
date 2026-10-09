@@ -99,6 +99,41 @@ def test_the_script_writes_a_two_horn_page_from_the_sidecar(monkeypatch, tmp_pat
     printed = capsys.readouterr().out
     assert "1 candidates" in printed
     assert "(swing" in printed
+    # Every heard note is on the page.
+    assert "voice 1 32 kept, 0 re-attack heads folded, 32 written" in printed
+    assert "voice 2 32 kept, 0 re-attack heads folded, 32 written" in printed
+    assert "NOT WRITTEN" not in printed
+
+
+def test_the_accounting_names_a_heard_note_the_page_did_not_write():
+    from swingscribe.model import NotatedBar, NotatedNote, Notation, NoteEvent
+    from swingscribe.notation import HornLines
+
+    def heard(onset, pitch, voice=1, lead_in=False, duration=0.5):
+        return NoteEvent(
+            onset=onset, duration=duration, pitch=pitch, confidence=0.7, source="o",
+            voice=voice, lead_in=lead_in,
+        )  # fmt: skip
+
+    lines = HornLines(
+        upper=[heard(0.0, 72, lead_in=True, duration=0.08), heard(0.08, 72), heard(1.0, 74)],
+        lower=[heard(0.0, 67, 2), heard(1.0, 65, 2), heard(1.1, 64, 2)],
+    )
+    bar = NotatedBar(
+        number=1,
+        time_signature=(4, 4),
+        notes=[
+            NotatedNote(beat=0.0, duration=2.0, pitch=72),
+            NotatedNote(beat=2.0, duration=2.0, pitch=74),
+            NotatedNote(beat=0.0, duration=2.0, pitch=67, voice=2),
+            NotatedNote(beat=2.0, duration=1.0, pitch=65, voice=2, chord=[64]),
+        ],
+    )
+    counts = multi_horn_page.accounting(lines, Notation(bars=[bar]), fold=True)
+    assert counts[1] == {"kept": 3, "heads": 1, "written": 2, "lost": 0}
+    assert counts[2] == {"kept": 3, "heads": 0, "written": 3, "lost": 0}
+    bar.notes.pop(1)  # the quantizer left the D off
+    assert multi_horn_page.accounting(lines, Notation(bars=[bar]), fold=True)[1]["lost"] == 1
 
 
 def test_the_flags_are_laid_over_the_sidecar_in_memory(tmp_path):

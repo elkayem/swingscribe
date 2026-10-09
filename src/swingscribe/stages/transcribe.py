@@ -932,6 +932,33 @@ def _consult_piano_oracle(
     return line, extra, oracle
 
 
+ENERGY_HOP_S = 0.01
+
+
+def horn_energy(
+    whole, rate: int, region: tuple[float, float | None] | None, shift: float = 0.0
+) -> tuple[float, float, list[float]] | None:
+    """The stem's short-time RMS over what Basic Pitch hears of the region,
+    in `ENERGY_HOP_S` frames, as `voices.energy_dip` reads it: (time of
+    frame 0's centre, hop, RMS per frame), moved `shift` late with the
+    notes (TranscribeConfig.multi_horn_onset_shift_ms). None without a
+    signal."""
+    if whole is None:
+        return None
+    import numpy as np
+
+    from swingscribe import basic_pitch
+
+    segment, start = basic_pitch.region_audio(whole, rate, region)
+    hop = max(1, int(round(rate * ENERGY_HOP_S)))
+    frames = len(segment) // hop
+    if frames == 0:
+        return None
+    shaped = np.asarray(segment[: frames * hop], dtype=np.float64).reshape(frames, hop)
+    rms = np.sqrt((shaped**2).mean(axis=1))
+    return (start + 0.5 * hop / rate + shift, hop / rate, rms.tolist())
+
+
 def _hear_horns(
     whole,
     rate: int,
@@ -972,7 +999,7 @@ def _hear_horns(
         ) from exc
     shift = tc.multi_horn_onset_shift_ms / 1000.0
     heard = [{**n, "onset": n["onset"] + shift} for n in heard]
-    stats: dict[str, int] = {}
+    stats: dict = {}
     kept, dropped = voices.assign(
         heard,
         overlap_s=tc.multi_horn_overlap_ms / 1000.0,
@@ -981,6 +1008,9 @@ def _hear_horns(
         track=track,
         attacks=attacks,
         stats=stats,
+        energy=horn_energy(whole, rate, tc.region, shift),
+        held_dip_db=tc.multi_horn_held_dip_db,
+        held_onset_s=tc.multi_horn_held_onset_ms / 1000.0,
     )
     # Printed always, like the voice counts after it: the GUI's review path
     # does not log, and this line is the only account of what each rule did
@@ -990,8 +1020,15 @@ def _hear_horns(
         f"ghost(s) and {stats['thirds']} third note(s) left out of the voices, "
         f"{stats['tails']} tail(s) cut at a new chord, {stats['successors']} legato "
         f"successor(s) kept in their voice, {stats['rejoined']} split held "
-        f"note(s) joined, {stats['lead_ins']} lead-in(s) marked"
+        f"note(s) joined where CREPE holds them and {stats['held']} under the other "
+        f"horn, {stats['lead_ins']} lead-in(s) marked"
     )
+    if stats["held_at"]:
+        print(
+            "transcribe: held notes joined under the other horn at "
+            + ", ".join(f"{t:.3f}" for t in stats["held_at"])
+            + " s"
+        )
     notes = [
         NoteEvent(
             onset=n["onset"],

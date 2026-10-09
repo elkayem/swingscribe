@@ -431,6 +431,62 @@ them; bar 24's lower A is a whole note. What it found, and what changed:
   touch, so it is written as an eighth pickup; and the lower voice enters
   an eighth late on pages 47 and 49.
 
+## The sixth measurement and the listener's marks (Local task A6, 2026-10-09)
+
+Bar 26 is right on the page now (the D-flats in the lower voice), Export
+writes the same page as the script, and closing rests took 4 rests where
+A5 took 30: the riff's eighth rests are back. The listener's marks and the
+local session's two cues changed three things:
+
+- **The five low-dip joins are ONE held note, all five** ("not a new
+  attack", "no extra attack", "one whole note", "should be a whole note",
+  "that new A-flat attack is not there"). What separates them from the
+  head's real repeats is the OTHER horn: in a harmonized head both horns
+  articulate together. At the five, the other horn's nearest attack is
+  127-443 ms away and it sounds straight across the join, and the stem's
+  energy dips -1.3 to 3.1 dB; at the repeats (12.121, 17.046, 20.845,
+  23.598, 32.428, 36.204, 62.494 s) both horns re-attack within 0-12 ms and
+  the energy dips 8-30 dB. That is rule 5b, `voices.join_held`: a voice's
+  touching notes of one pitch are joined where the other voice sounds from
+  60 ms before the join to 60 ms after it, has no attack within 60 ms of
+  it, and the stem's 10 ms RMS dips under 5 dB (`multi_horn_held_dip_db`,
+  `multi_horn_held_onset_ms`; `multi_horn_version` 4, so the head
+  re-transcribes once). Rows with the other horn sounding and a dip of 5
+  dB or more (11.644 5.9, 44.115 7.5, 48.982 7.2, 52.770 10.4) stay
+  repeats. On this head it also joins nine the listener has not heard yet:
+  17.719 E-flat 5, 20.323 G4, 21.495 E-flat 5, 30.999 D-flat 5, 36.854
+  E-flat 5, 42.094 F4 (bar 26's trumpet F, the listener's "tied over"),
+  47.460 G-flat 4, 63.190 E-flat 5, 66.061 C5 -- long held notes by the
+  table, to be confirmed by ear.
+- **A lead-in's fold split a chord** (pages 47 and 49, the lower horn an
+  eighth late). Page 49: the trumpet's B-flat after a 93 ms re-attack head
+  (46.578) and the tenor's G-flat struck 12 ms before the B-flat (46.659 and
+  46.671). The fold wrote the trumpet from the head, on beat 1, and left
+  the tenor where it was heard, an eighth late. Notes of the two voices
+  struck within 30 ms of each other are now ONE attack, written from the
+  earlier of their written starts, a fold's included (`notation.
+  one_attack`, in `notation_for_horns`, both on one staff and in two
+  parts); a note never moves onto a note of its own voice.
+- **`--drop-faint` changed page 54 although its notes were not scraps.**
+  The scrap list is the same for the page and the dump (one function, the
+  same notes), so the figure was not dropped as a scrap: leaving the other
+  scraps off moved the READING around it -- the line's lag is a median over
+  a window of four beats, and the swing reading pools the onsets -- and on
+  that page two of the figure's notes were not written. A heard note the
+  quantizer leaves off is a bug (CLAUDE.md, D37), so the script now counts,
+  per voice, the notes the writing kept, the re-attack heads the fold
+  writes into their notes, and the notes the page writes, and says NOT
+  WRITTEN when they do not add up.
+
+Still with the listener: the riff's eighth rests (staccato as written?);
+bar 28's G-flat at 43.790 (a scoop 46 ms before the G, past the 30 ms a
+lead-in must touch); the 44.684 G-flat scrap, which now sits in the lower
+voice as a pickup (re-ordered over the edited set, it touches the lower
+horn's G); and pages 10 and 26, the same riff read differently ("C5 for
+two beats, D-flat on 3" against "C5 a beat and a half, D-flat on the and
+of 2"): the D-flat's heard onset differs, and closing rests only made it
+visible.
+
 ## Open questions for the measurement
 
 - Is `literal_lag` right on the head's held chords, and does it move a note

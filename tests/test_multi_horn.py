@@ -21,6 +21,7 @@ from swingscribe.notation import (
     merge_horn_voices,
     notation_for_horns,
     notation_for_span,
+    one_attack,
     phrase_interval,
     reading_of,
     sub_phrases,
@@ -70,7 +71,7 @@ def test_a_multi_horn_dump_carries_its_own_fields_and_none_of_crepes():
     assert dumped["multi_horn_min_note_ms"] == 23.0
     # The rules' own version: a change to voices.py moves the GUI's review
     # key, which hashes this dump and never transcribe.CACHE_VERSION.
-    assert dumped["multi_horn_version"] == 3
+    assert dumped["multi_horn_version"] == 4
     # The horn fill, the tuning, the lead-ins and the piano line are CREPE's
     # or the piano model's; a multi-horn head reads none of them.
     for gone in ("horn_fill_gaps", "tuning_correction", "glide_max_ms", "piano_line"):
@@ -827,6 +828,22 @@ def test_the_stage_hears_both_horns_and_offers_what_neither_voice_holds(monkeypa
     assert [(c["pitch"], c["dropped"]) for c in candidates] == [(82, "ghost")]
 
 
+def test_the_stage_s_energy_frames_sit_on_the_notes_time_base():
+    """Rule 5b's energy (voices.join_held): 10 ms RMS frames over what Basic
+    Pitch hears, centred, moved late with the notes."""
+    np = pytest.importorskip("numpy")
+    from swingscribe.stages import transcribe
+
+    rate = 1000
+    whole = np.zeros(5000)
+    whole[2000:3000] = 0.5  # loud from 2.0 to 3.0 s
+    start, hop, rms = transcribe.horn_energy(whole, rate, (2.0, 3.0), shift=0.004)
+    assert hop == pytest.approx(0.01) and start == pytest.approx(1.0 + 0.005 + 0.004)
+    frame = round((2.5 - start) / hop)
+    assert rms[frame] == pytest.approx(0.5) and rms[round((1.5 - start) / hop)] == 0.0
+    assert transcribe.horn_energy(None, rate, (2.0, 3.0)) is None
+
+
 def test_the_stage_refuses_a_multi_horn_head_without_basic_pitch(monkeypatch):
     from swingscribe import basic_pitch
     from swingscribe.stages import transcribe
@@ -983,3 +1000,69 @@ def test_bar_26_on_the_page_the_tenors_step_down_stays_in_voice_2():
     resolved = edits.resolve({}, payload(notes), (40.0, 43.0), horns=True)
     assert [n["voice"] for n in resolved["audible"]] == [1, 2, 2, 1, 2, 2, 1]
     assert resolved["note_voices"] == [1, 2, 2, 1, 2, 2, 1]
+
+
+# ── one attack: a chord the horns strike together starts at one place ──────
+
+
+def test_a_chord_struck_together_starts_where_its_lead_in_does():
+    """Page 49 of the Open Sesame head (Local task A6): the trumpet's
+    B-flat after a 93 ms re-attack head, the tenor's G-flat struck 12 ms
+    before the B-flat. The fold writes the trumpet from the head; the
+    tenor starts there too, its end where it was."""
+    head = NoteEvent(
+        onset=46.578, duration=0.093, pitch=70, confidence=0.4, source="o", lead_in=True
+    )
+    trumpet = horn(46.671, 1.0, 70)
+    tenor = horn(46.659, 1.0, 66, voice=2)
+    upper, lower, moved = one_attack([head, trumpet], [tenor])
+    assert upper == [head, trumpet] and moved == 1
+    assert lower[0].onset == pytest.approx(46.578)
+    assert lower[0].onset + lower[0].duration == pytest.approx(47.659)
+    # No fold (a literal page that keeps its lead-ins): the earlier of the
+    # two struck notes is the attack.
+    upper, lower, moved = one_attack([head, trumpet], [tenor], fold=False)
+    assert upper[1].onset == pytest.approx(46.659) and lower == [tenor] and moved == 1
+
+
+def test_a_note_is_never_moved_onto_a_note_of_its_own_voice():
+    head = NoteEvent(
+        onset=46.578, duration=0.093, pitch=70, confidence=0.4, source="o", lead_in=True
+    )
+    trumpet = horn(46.671, 1.0, 70)
+    tenor = [horn(46.4, 0.19, 63, voice=2), horn(46.59, 0.07, 64, voice=2)]
+    tenor.append(horn(46.659, 1.0, 66, voice=2))
+    _upper, lower, moved = one_attack([head, trumpet], tenor)
+    assert lower == tenor and moved == 0
+
+
+def test_notes_apart_are_two_attacks_and_a_voice_is_never_its_own_partner():
+    upper, lower, moved = one_attack([horn(1.0, 0.5, 72)], [horn(1.04, 0.5, 67, voice=2)])
+    assert (upper[0].onset, lower[0].onset, moved) == (1.0, 1.04, 0)
+    upper, lower, moved = one_attack([horn(1.0, 0.5, 72), horn(1.01, 0.5, 76)], [])
+    assert [n.onset for n in upper] == [1.0, 1.01] and moved == 0
+
+
+def test_the_page_writes_both_horns_of_a_folded_chord_on_the_beat():
+    beat = 0.25  # 240 bpm: a 93 ms head is over a third of a beat
+    beats = [round(10.0 + i * beat, 6) for i in range(96)]
+    notes = []
+    for k in [*range(8, 40, 4), *range(48, 80, 4)]:
+        notes += [horn(beats[k], 2 * beat * 0.95, 72), horn(beats[k], 2 * beat * 0.95, 67, voice=2)]
+    t = beats[44]
+    notes += [
+        NoteEvent(onset=t, duration=0.093, pitch=70, confidence=0.4, source="o", lead_in=True),
+        horn(t + 0.093, 3 * beat, 70),
+        horn(t + 0.081, 3 * beat, 66, voice=2),
+    ]
+    page, lines = notation_for_horns(
+        "t.wav", notes, beats, (beats[4], beats[84]), stem="other", config=Config(), anchor=beats[4]
+    )
+    struck = {
+        (n.voice, n.pitch): (b.number, n.beat)
+        for b in page.bars
+        for n in b.notes
+        if n.pitch in (70, 66) and not n.is_rest and not n.tie_stop
+    }
+    assert struck[(1, 70)] == struck[(2, 66)]  # one attack, not an eighth apart
+    assert struck[(2, 66)][1] == 0.0 and lines.together == 1

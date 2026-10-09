@@ -347,3 +347,65 @@ def test_a_lone_horn_after_a_rest_is_voice_1():
     notes = [note(0.0, 1.0, 72), note(0.0, 1.0, 64), note(1.6, 0.5, 63)]
     kept, _ = voices.assign(notes)
     assert [(n["pitch"], n["voice"]) for n in kept] == [(72, 1), (64, 2), (63, 1)]
+
+
+# ── rule 5b: a split held note under the other horn (voices.join_held) ──────
+
+
+def flat_energy(seconds=4.0, dips=(), depth=0.3):
+    """10 ms RMS frames at 1.0, falling to `depth` within 30 ms of each dip."""
+    hop = 0.01
+    frames = [1.0] * int(seconds / hop)
+    for at in dips:
+        for k in range(len(frames)):
+            if abs(0.005 + k * hop - at) <= 0.03:
+                frames[k] = depth
+    return (0.005, hop, frames)
+
+
+def test_a_split_held_note_under_the_other_horn_is_one_note():
+    """The listener's five marks on the Open Sesame head (Local task A6):
+    one horn's held A-flat heard as two notes while the other horn holds
+    its note straight across, no attack and no dip at the join."""
+    notes = [note(0.0, 1.0, 68), note(1.0, 1.0, 68), note(0.0, 2.0, 65)]
+    stats = {}
+    kept, _ = voices.assign(notes, energy=flat_energy(), stats=stats)
+    assert [(n["pitch"], n["voice"], n["duration"]) for n in kept] == [(68, 1, 2.0), (65, 2, 2.0)]
+    assert stats["held"] == 1 and stats["held_at"] == [1.0]
+
+
+def test_both_horns_re_attacking_together_is_a_repeat():
+    """The A section's repeats: both horns re-attack within 12 ms."""
+    notes = [note(0.0, 1.0, 72), note(1.0, 1.0, 72), note(0.0, 1.0, 67), note(1.012, 1.0, 67)]
+    kept, held_at = voices.join_held(voices.assign(notes)[0], flat_energy(), voices.HELD_MAX_DIP_DB)
+    assert held_at == [] and len(kept) == 4
+
+
+def test_a_dip_in_the_stem_is_a_re_attack_even_under_the_other_horn():
+    notes = [note(0.0, 1.0, 68, 0.7), note(1.0, 1.0, 68), note(0.0, 2.0, 65)]
+    for n, v in zip(notes, (1, 1, 2), strict=True):
+        n["voice"] = v
+    _kept, held_at = voices.join_held(notes, flat_energy(dips=[1.0]))
+    assert held_at == []  # 10.5 dB down at the join
+    _kept, held_at = voices.join_held(notes, flat_energy(dips=[1.0], depth=0.8))
+    assert held_at == [1.0]  # 1.9 dB: a re-trigger
+
+
+def test_a_horn_alone_is_not_joined_by_this_rule():
+    notes = [note(0.0, 1.0, 68), note(1.0, 1.0, 68)]
+    for n in notes:
+        n["voice"] = 1
+    assert voices.join_held(notes, flat_energy())[1] == []
+    # ... nor with the other horn stopping at the join, nor without energy.
+    other = [*notes, {**note(0.0, 1.02, 65), "voice": 2}]
+    assert voices.join_held(other, flat_energy())[1] == []
+    assert voices.join_held([*notes, {**note(0.0, 2.0, 65), "voice": 2}], None)[1] == []
+
+
+def test_the_energy_dip_is_the_join_against_the_two_notes_median():
+    first, second = note(0.0, 1.0, 68), note(1.0, 1.0, 68)
+    assert voices.energy_dip(flat_energy(), first, second) == pytest.approx(0.0)
+    assert voices.energy_dip(flat_energy(dips=[1.0], depth=0.1), first, second) == pytest.approx(
+        20.0
+    )
+    assert voices.energy_dip((10.0, 0.01, [1.0] * 10), first, second) is None
