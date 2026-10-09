@@ -247,6 +247,10 @@ select:disabled, .chip-select:disabled { opacity: 0.38; cursor: default; box-sha
 /* Takes (linked sidecars): listed under their recording, indented, by take name. */
 .track-list li.take { padding-left: 28px; }
 .track-list li.take .name::before { content: "↳ "; color: var(--muted); }
+/* A take of a recording in another folder is a row of its own, not nested
+   under whatever file this folder holds (a copy of the same bytes, say). */
+.track-list li.take.remote { padding-left: 10px; }
+.track-list li.take.remote .name::before { content: ""; }
 .track-list li.take.missing { cursor: default; opacity: 0.55; }
 .track-list li.take.missing:hover { background: none; }
 

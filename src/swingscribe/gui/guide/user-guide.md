@@ -610,6 +610,9 @@ The page writes both horns on one treble staff, in concert pitch:
   close on the staff. This is decided phrase by phrase, never note by
   note. A phrase doubled at the octave is written once.
 - A unison is written once, in the upper voice.
+- A scoop into a held note (a short note a semitone under it) is written
+  as a grace note on the note it leads into, and a note re-attacked with a
+  short "head" is written as one note.
 - The rhythm is **literal 16ths** unless you pick another one in the
   **Rhythm** menu: horns playing a written head play the written rhythm.
 
@@ -617,7 +620,13 @@ Set **Staves** to **Two parts (upper + lower)** to write the horns as two
 separate parts instead. Each part plays its own notes, so nothing is moved
 an octave and a unison is written in both. **Written for** sets the upper
 part's instrument and **Lower part** the lower part's. Each part gets the
-clef its register needs.
+clef its register needs. The page summary shows each part's interval,
+upper first.
+
+A transposed lower part can sit ABOVE the upper part on the page and still
+be right: a B♭ tenor is written a ninth above concert pitch and a B♭
+trumpet only a tone above, so a tenor a third under the trumpet reads a
+sixth over it.
 
 ### Inspect, Edit and Hands
 

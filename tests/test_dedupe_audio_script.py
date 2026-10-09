@@ -44,3 +44,47 @@ def test_apply_links_the_copy_s_sidecar_to_the_kept_file(tmp_path):
     # Its key -- the sidecar's own path -- did not move.
     keys = {key for key, *_ in library.discover(tmp_path)}
     assert "Transcriptions_Other/Open-Sesame-copy.m4a" in keys
+
+
+def test_the_original_is_kept_by_default(tmp_path, monkeypatch, capsys):
+    """The listener copied INTO Multi-Horn: the file created first stays."""
+    keep, copy, own = setup(tmp_path)
+    times = {keep: 2.0, copy: 1.0}
+    monkeypatch.setattr(dedupe_audio, "created", lambda path: times.get(path, 0.0))
+    dedupe_audio.main([str(tmp_path)])
+    printed = capsys.readouterr().out
+    assert "KEEP Transcriptions_Other/Open-Sesame-copy.m4a" in printed
+    assert "DELETE Multi-Horn/Open_Sesame.m4a" in printed
+
+
+def test_one_file_under_two_players_names_is_left_alone(tmp_path, capsys):
+    folder = tmp_path / "Transcriptions_Other"
+    folder.mkdir()
+    parker = folder / "Charlie-Parker-Ballade.m4a"
+    hawkins = folder / "Coleman-Hawkins-Ballade.m4a"
+    for path in (parker, hawkins):
+        path.write_bytes(b"one download, two labels")
+    dedupe_audio.main([str(tmp_path), "--apply"])
+    printed = capsys.readouterr().out
+    assert "LEAVE" in printed and "two recordings" in printed
+    assert "DELETE" not in printed
+    assert parker.is_file() and hawkins.is_file()
+
+
+def test_a_linked_take_naming_the_deleted_copy_is_repointed(tmp_path, capsys):
+    keep, copy, own = setup(tmp_path)
+    take = tmp_path / "Multi-Horn" / "Open_Sesame_Melody.swingscribe.json"
+    take.write_text(
+        json.dumps({"audio": "../Transcriptions_Other/Open-Sesame-copy.m4a", "anchor": 8.46})
+    )
+    dedupe_audio.main([str(tmp_path), "--keep-in", "Multi-Horn"])
+    printed = capsys.readouterr().out
+    assert "REPOINT Multi-Horn/Open_Sesame_Melody.swingscribe.json -> audio Open_Sesame.m4a" in (
+        printed
+    )
+    assert "LINK Transcriptions_Other/Open-Sesame-copy.m4a.swingscribe.json" in printed
+    dedupe_audio.main([str(tmp_path), "--keep-in", "Multi-Horn", "--apply"])
+    assert library.audio_of(take) == keep
+    assert json.loads(take.read_text())["anchor"] == 8.46
+    keys = {key for key, *_ in library.discover(tmp_path)}
+    assert "Multi-Horn/Open_Sesame_Melody" in keys

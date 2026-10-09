@@ -426,20 +426,22 @@ function renderBrowse(data) {
     }
   }
   // Takes whose recording is in another folder, or missing: listed here, in
-  // their own folder, with where the audio is. A missing one is shown, never
-  // dropped, and opens nothing.
+  // their own folder, with where the audio is -- as rows of their own, NOT
+  // indented under a file of this folder: a take belongs to the file its
+  // `audio` names, even where this folder holds a byte-identical copy. A
+  // missing one is shown, never dropped, and opens nothing.
   if (!scoring) {
     for (const take of data.takes ?? []) {
       node.appendChild(take.missing
-        ? takeItem(take, `audio missing: ${take.relative}`, true)
-        : takeItem(take, `→ ${take.relative}`));
+        ? takeItem(take, `audio missing: ${take.relative}`, true, true)
+        : takeItem(take, `take of → ${take.relative}`, false, true));
     }
   }
 }
 
-function takeItem(take, meta, missing = false) {
+function takeItem(take, meta, missing = false, remote = false) {
   const li = document.createElement('li');
-  li.className = missing ? 'take missing' : 'take';
+  li.className = ['take', missing ? 'missing' : '', remote ? 'remote' : ''].filter(Boolean).join(' ');
   li.innerHTML = '<span class="name"></span><span class="meta"></span>';
   li.querySelector('.name').textContent = take.name;
   li.querySelector('.meta').textContent = meta;
@@ -2722,11 +2724,14 @@ function voiceList() {
   return [...state.carriedVoices, ...made].sort((a, b) => a.onset - b.onset);
 }
 
-/* A horn's note's voice: the listener's move, else the server's order over
-   the edited notes, else the voice it was heard in. */
+/* A horn's note's voice: the listener's move, else `heardVoice`. */
 function voiceOf(index) {
-  const chosen = state.voices.get(index);
-  if (chosen) return chosen;
+  return state.voices.get(index) ?? heardVoice(index);
+}
+
+/* A horn's note's voice with no move: the server's order over the edited
+   notes, else the voice it was heard in. */
+function heardVoice(index) {
   const ordered = state.review?.note_voices?.[index];
   if (ordered) return ordered;
   return state.review?.notes[index]?.voice ?? 1;
@@ -2795,10 +2800,13 @@ function assignHands(hand) {
   const notes = `${n} note${n === 1 ? '' : 's'}`;
   if (hornsOn()) {
     // Two horns: up is the upper voice, down the lower; "as heard" forgets
-    // the move. The page writes them where they are put.
+    // the move. The page writes them where they are put. Only a REAL move is
+    // stored: a note sent to the voice the server's order already gives it
+    // keeps no record (a box over a passage used to store every note in it).
     for (const index of state.handSelection) {
-      if (hand === 'guess') state.voices.delete(index);
-      else state.voices.set(index, hand === 'right' ? 1 : 2);
+      const voice = hand === 'right' ? 1 : 2;
+      if (hand === 'guess' || voice === heardVoice(index)) state.voices.delete(index);
+      else state.voices.set(index, voice);
     }
     afterEdit();
     toast(
@@ -3720,9 +3728,12 @@ async function startNotationScore() {
 /* What a page holds, said the one way both the export line and the page view
    say it: from gui/musicxml.describe, which both endpoints return. */
 function pageSummary(written) {
-  const key = written.transpose
-    ? ` · written ${written.transpose > 0 ? '+' : ''}${written.transpose}`
-    : '';
+  const signed = (n) => `${n > 0 ? '+' : ''}${n}`;
+  // Two parts: each part's own interval, upper first ("written +2 / +14").
+  const transposes = written.parts > 1 ? (written.part_transposes ?? []) : [];
+  const key = transposes.some(Boolean)
+    ? ` · written ${transposes.map(signed).join(' / ')}`
+    : written.transpose ? ` · written ${signed(written.transpose)}` : '';
   const literal = written.timing && written.timing !== 'swing'
     ? ` · ${(LABELS[written.timing] ?? written.timing).toLowerCase()}`
     : '';

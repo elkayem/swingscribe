@@ -744,6 +744,15 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   VIEW (`erasures.split_by_view`, records tagged `view: "horns"`), re-ordered
   over the edited set with `voices.order` (never pruned again), plus the
   listener's `voices` moves (the Voices tool, the Hands tool's gestures).
+  Since the first measurement (2026-10-09): a new chord, or a note
+  starting against one ending, cuts the tail (`trim_tails`); a split held
+  note is joined only where CREPE's trace holds it with no attack
+  (`rejoin_splits`); a scoop or re-attack head is MARKED (`mark_lead_ins`,
+  the next note 3x longer, so a 16th run is never a chain) and the page
+  folds it as a grace (`literal_lead_ins`, on for this ensemble only). The
+  GUI's review key hashes the transcribe dump and never CACHE_VERSION:
+  bump `multi_horn_version` with ANY rule change. Eighths over 160 bpm on a
+  literal page (`literal_tempo`) is OFF: the listener's call.
 - **The Score button and the F1 on the ground-truth bar are DIFFERENT
   QUESTIONS**, and this is the project's most expensive confusion appearing in
   the UI. The bar's F1 is time-free and pitch-only (`gui/ground_truth.py`):

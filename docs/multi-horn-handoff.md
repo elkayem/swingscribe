@@ -11,9 +11,28 @@ merged: the listener reviews the branch first. Design and state:
 
 | Piece | State |
 | --- | --- |
-| A. Multi-horn core + `scripts/multi_horn_page.py` | pushed, waiting on Local task A |
-| B. Linked sidecars | pushed, waiting on Local task B |
-| C. Two parts, GUI, guide | pushed, waiting on Local task C |
+| A. Multi-horn core + `scripts/multi_horn_page.py` | measured (Local task A); fixes pushed, waiting on Local task A2 |
+| B. Linked sidecars | accepted (Local task B: card byte-identical, 4768 pins); dedupe and browser fixes pushed |
+| C. Two parts, GUI, guide | checked (Local task C); fixes pushed |
+
+What the reports changed (2026-10-09; details in
+[multi-horn.md](multi-horn.md), "The first measurement"):
+
+- Local task A: tails cut at a new chord and a note ending loses to a note
+  starting (the listener's bars 26, 28); split held notes joined where
+  CREPE holds them (24, 28, 31-32); scoops marked and folded as grace notes
+  (23); a two-bar excursion inside a long phrase moved up on its own (roll
+  bars 15-16); the script's cp1252 crash. The review key moved
+  (`multi_horn_version` 2), so the head re-transcribes once.
+- Local task B: `dedupe_audio.py` prints forward slashes (the Windows test
+  failure), keeps the ORIGINAL by default (the copy created first), leaves
+  a group whose names say two recordings (the Hawkins/Parker Ballade), and
+  re-points every linked take anywhere under the root that names a deleted
+  copy (REPOINT lines). The folder browser lists a take of a recording in
+  another folder as a row of its own, not under a copy of the same bytes.
+- Local task C: the page summary gives both parts' intervals ("written
+  +2 / +14"); the Voices tool stores only real moves; the guide says a
+  tenor part can sit above the trumpet's on the page.
 
 ## Setting up (once)
 
@@ -102,6 +121,41 @@ What to report back (SendMessage to this session):
 5. Any overtone ghost kept, or real note dropped as a ghost or a third
    (the dump's heard section and the review's candidates).
 
+## Local task A2: the head again, after the fixes
+
+From the main checkout with the worktree updated (`git -C %MH% checkout
+--detach origin/multi-horn`). The first run re-transcribes (the rules moved
+the review key); the rest read the cache.
+
+```
+%PAGE% --out OUT\os2.literal16.musicxml --dump-voices OUT\os2.literal16.txt
+%PAGE% --lag --out OUT\os2.lag.musicxml --dump-voices OUT\os2.lag.txt
+%PAGE% --by-tempo --out OUT\os2.bytempo.musicxml --dump-voices OUT\os2.bytempo.txt
+%PAGE% --lag --by-tempo --out OUT\os2.lag-bytempo.musicxml --dump-voices OUT\os2.lag-bytempo.txt
+%PAGE% --no-fold --out OUT\os2.nofold.musicxml --dump-voices OUT\os2.nofold.txt
+```
+
+The transcribe log now says what each rule did ("N tail(s) cut at a new
+chord, N split held note(s) joined, N lead-in(s) marked"), and the dump
+marks lead-ins in the heard section and writes a grace as `(Db5)D5:4`.
+
+Report:
+
+1. Each rule's count from the log, and the summary lines.
+2. The listener's bars 23-38 (page bars 41-56) again, against the
+   screenshot, from `os2.literal16.txt` and the best of the `--by-tempo`
+   pages: what the fixes mended (23, 24, 26, 28, 31-32), what they broke,
+   and whether `--by-tempo` reads the chords on the beat without losing a
+   16th the screenshot has.
+3. Roll bars 15-16: moved up, and nothing around them moved with them?
+4. Any real note now lost: a held note cut by rule 2 where only one horn
+   moved and a stray note struck with it, a repeated note joined that the
+   horn really re-attacked, a short note folded that was a real note.
+5. MuseScore opens each file (`.\pdf2musicxml render OUT`), and the grace
+   notes look right.
+6. For the listener: scoops as grace notes, or nothing at all? Eighths by
+   tempo on or off? Bars 24 and 32's lower third kept or dropped?
+
 ## Local task B: linked sidecars ("takes")
 
 What landed (gui/library.py, docs/multi-horn.md has the multi-horn half):
@@ -163,10 +217,15 @@ Commands (from the main checkout, `PYTHONPATH=%MH%\src` as above):
    ... as its file" lines. Report any such line and any moved pin.
 2. The dedupe dry run, to see what it WOULD do (it changes nothing):
    ```
-   .venv\Scripts\python.exe %MH%\scripts\dedupe_audio.py benchmark --keep-in Multi-Horn
+   .venv\Scripts\python.exe %MH%\scripts\dedupe_audio.py benchmark
    ```
-   Report the KEEP/DELETE/LINK lines (or the group count, if long). Do not
-   pass `--apply`.
+   It keeps the original of each group (the copy created first) unless
+   `--keep-in` names a folder. Report the KEEP/DELETE/LINK/REPOINT/LEAVE
+   lines (or the counts, if long). Do not pass `--apply`. (Done once on
+   9f73970 with `--keep-in Multi-Horn`: 41 DELETE, 40 LINK, 338 MB; re-run
+   it on the fixed script: the Ballade pair should now be a LEAVE, and
+   Open_Sesame_Melody a REPOINT or nothing, depending on which copy is
+   kept.)
 3. In the GUI from the worktree (`set PYTHONPATH=%MH%\src` then
    `.venv\Scripts\python.exe -m swingscribe gui`, or the base-interpreter
    route): open `Open_Sesame.m4a`, press New take..., name it
