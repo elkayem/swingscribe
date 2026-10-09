@@ -214,3 +214,27 @@ def test_the_held_ratio_bins_part_a_staccato_note_from_a_held_one():
     bins = multi_horn_page.held_ratios(HornLines(upper=upper, lower=lower))
     assert bins[1][5] == 2 and bins[1][9] == 1 and sum(bins[1]) == 3
     assert sum(bins[2]) == 0
+
+
+def test_the_dump_names_the_half_bars_written_as_quarter_note_triplets():
+    from swingscribe.model import NotatedBar, NotatedNote, Notation
+
+    def note(beat, voice=1, tuplet=(3, 2)):
+        return NotatedNote(beat=beat, duration=2 / 3, pitch=79, voice=voice, tuplet=tuplet)
+
+    bar = NotatedBar(
+        number=23,
+        time_signature=(4, 4),
+        notes=[
+            note(0.0),
+            note(2 / 3),
+            note(4 / 3),
+            note(2.0, 2),
+            note(2 + 2 / 3, 2),
+            note(2 + 4 / 3, 2),
+            # A beat-level triplet is not a half bar's.
+            note(0.0, 2, (3, 2)),
+            note(1 / 3, 2, (3, 2)),
+        ],
+    )
+    assert multi_horn_page.triplet_halves(Notation(bars=[bar])) == [(23, 1, 1), (23, 2, 2)]

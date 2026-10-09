@@ -1593,3 +1593,22 @@ def test_a_reattack_folds_into_its_note_with_no_grace():
     assert [(n.onset, n.pitch) for n in folded] == [(1.0, 64)]
     assert folded[0].duration == pytest.approx(0.48)
     assert graces == [[]]
+
+
+# ── a half bar the page read as a quarter-note triplet ───────────────────────
+
+
+def test_forced_thirds_places_a_half_s_onsets_on_its_thirds_in_order():
+    from swingscribe.stages.quantize import forced_thirds
+
+    # Page 23's upper voice: the first onset 0.04 early, in the beat before.
+    positions = [7.5, 9.96, 10.66, 11.36, 12.2]
+    assert forced_thirds(positions, [10]) == {
+        1: (10, 0.0),
+        2: (10, pytest.approx(2 / 3)),
+        3: (11, pytest.approx(1 / 3)),
+    }
+    # Two onsets take the two nearest thirds; one, or four, are left alone.
+    assert forced_thirds([10.02, 11.3], [10]) == {0: (10, 0.0), 1: (11, pytest.approx(1 / 3))}
+    assert forced_thirds([10.0], [10]) == {}
+    assert forced_thirds([10.0, 10.5, 11.0, 11.5], [10]) == {}

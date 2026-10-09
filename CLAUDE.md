@@ -1187,8 +1187,14 @@ Results and limits: `docs/m6-notate.md`.
   onsets those sit at 0.15, 0.80, 1.43 of the unit, inside the spread of
   the "one, and, and-of-two" figures around them; every lattice and
   interval rule reads precision 0.00-0.02. The figure is read from
-  harmony and phrase, not timing; the flag stays off for good unless the
-  listener marks the half on the roll. The earlier claim that our
+  harmony and phrase, not timing; the flag stays off for good on a single
+  line. A two-horn HEAD is the exception (2026-10-09, docs/multi-horn.md):
+  both horns play the written figure, and a half bar where BOTH voices
+  hold three onsets on its thirds (`notation.head_triplet_units`, 0.07
+  beat, twice as near as eighths; one voice alone tighter) is written as
+  one -- the listener's bars 23-24 and nothing else on that head --
+  placed by `QuantizeConfig.triplet_halves`; the Voices tool's Triplet
+  mark (sidecar `triplets`) overrides it either way. The earlier claim that our
   dotted-eighth pairs WERE unread quarter-note triplets is withdrawn: at
   the human's figures we write eighths with an eighth rest, and the
   dotted pairs (17 on the twelve pages) are elsewhere. **And a ternary reading

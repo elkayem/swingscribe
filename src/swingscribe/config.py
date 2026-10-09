@@ -895,6 +895,19 @@ class QuantizeConfig(BaseModel):
     # into a held chord are not notes on the listener's page
     # (`notation.reading_of` turns this on for that ensemble).
     literal_lead_ins: bool = False
+    # A two-horn HEAD's quarter-note triplets (notation.head_triplet_units):
+    # a half bar where both horns play three onsets on its thirds is the
+    # figure -- the listener's bars 23-24 of the Open Sesame head (Local
+    # task A8). D28 found the figure unidentifiable from ONE line's timing;
+    # two horns playing the written figure together are another matter.
+    # On for that ensemble through `notation.reading_of`; `triplet_marks`
+    # are the listener's own, (onset, on or off) for the half bar holding
+    # the onset, over the rule; `triplet_halves` are the half bars' start
+    # times the page decided on, which `quantize_notes` places on the
+    # half's thirds. Swing timing only; all dump nothing at their defaults.
+    head_triplets: bool = False
+    triplet_marks: list[tuple[float, bool]] = []
+    triplet_halves: list[float] = []
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
@@ -910,6 +923,9 @@ class QuantizeConfig(BaseModel):
         if data.get("absorb_lead_ins"):
             data.pop("absorb_lead_ins", None)
         for field in (
+            "head_triplets",
+            "triplet_marks",
+            "triplet_halves",
             "polyphonic",
             "late_downbeat_max_onsets",
             "isolated_lag_max_onsets",

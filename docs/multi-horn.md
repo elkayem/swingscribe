@@ -538,6 +538,53 @@ went unwritten. The listener's answers and what each became:
   that leaves a whole beat of rest is one example's rule, so it waits for a
   measurement of held notes' ends against the beats.
 
+## Quarter-note triplets in a head (the listener's request, Local task A8)
+
+"On bars 23-24 [page bars, roll bars 15-16], they are obviously quarter
+note triplets": G G F | G G F over E E D-flat | E E D-flat, a 3 under each
+half bar. D28 settled that ONE line's timing cannot tell the figure from
+eighths (WJazzD's annotators' own onsets sat at 0.15, 0.80, 1.43 of the
+unit; every rule read precision 0.00-0.02). A harmonized head is two horns
+playing the written figure together, and the local session's scan of every
+half bar of the head bears that out:
+
+- On pages 23-24, all four halves, both voices hold exactly three onsets
+  near the half's thirds. Each fits (0, 2/3, 4/3) within 0.012-0.052 beat on
+  average (each grid at its own best lag up to 0.15), and 2.2-10 times
+  nearer than to the eighth grid (`notation.triplet_fit`).
+- The only other half where a voice fits better than eighths is page 48's
+  first, the upper voice alone (0.072, 1.9 times; its first onset 0.3 late),
+  and there the lower voice is eighths.
+
+The rule (`notation.head_triplet_units`, on for a head through
+`notation.reading_of`, sidecar `head_triplets` false turns it off):
+
+- A half bar is a quarter-note triplet where both voices hold exactly
+  three onsets and each fits within 0.07 beat and at least twice as near
+  as eighths.
+- Where one voice has three onsets and the other none (silent, or merged
+  as a unison), the one that sounds must fit within 0.045 and three times
+  as near.
+- On this head that takes pages 23-24's four halves and nothing else.
+
+Plain, swung and dotted eighth figures all fail it.
+
+The page decides once over both horns; each voice's quantizer then places
+that half's onsets on its thirds in order (`QuantizeConfig.triplet_halves`,
+`quantize.forced_thirds`), and notate writes the 3:2 over the half
+(`quarter_triplet_halves`) with each voice's own bracket. A lead-in folds
+first, so the reading sees the notes the quantizer will. Swing timing only:
+a literal page writes no triplets by design.
+
+**The listener's mark** is the override either way: select notes with the
+Voices tool and press **Triplet ³** or **Not triplet**. The sidecar's
+`triplets` list keeps one {onset, triplet} per selected note, and the half
+bar holding each onset takes it, the newest mark for a half winning; **As
+heard** forgets the marks in the selection. With two onsets in a marked
+half they take the two nearest thirds (a quarter-note triplet with a tie);
+any other count is left as read. The voice moves and the marks are in the
+undo history now (voice moves never were).
+
 ## Open questions for the measurement
 
 - Is `literal_lag` right on the head's held chords, and does it move a note

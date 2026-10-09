@@ -83,6 +83,7 @@ const state = {
   carriedVoices: [],        // stored voice moves with no note in this view
   lowerTransposition: null, // a two-part head's lower part (sidecar lower_transposition)
   staccato: null,           // a head's short notes: null = staccato quarters, false = eighth + rest
+  triplets: [],             // a head's quarter-note-triplet marks, {onset, triplet}, newest last
   timing: null,             // swing | literal-8 | literal-16 | literal-32; null = server default
   key: null,                // concert key signature in fifths; null = detect it
   transposition: null,      // the exported part's key; null = server default
@@ -614,6 +615,7 @@ async function loadTrack(track) {
   state.voices.clear();
   state.lowerTransposition = remembered.lower_transposition ?? null;
   state.staccato = remembered.staccato === false ? false : null;
+  state.triplets = Array.isArray(remembered.triplets) ? remembered.triplets : [];
   state.undoStack.length = 0;
   state.redoStack.length = 0;
   setTool('inspect');
@@ -2529,6 +2531,8 @@ function editSnapshot() {
     added: [...state.added],
     carriedAdditions: state.carriedAdditions.map((e) => ({ ...e })),
     hands: [...state.hands],
+    voices: [...state.voices],
+    triplets: state.triplets.map((m) => ({ ...m })),
   };
 }
 
@@ -2544,6 +2548,8 @@ function applyEditSnapshot(snapshot) {
   state.added = new Set(snapshot.added ?? []);
   state.carriedAdditions = snapshot.carriedAdditions ?? state.carriedAdditions;
   state.hands = new Map(snapshot.hands ?? []);
+  state.voices = new Map(snapshot.voices ?? []);
+  state.triplets = snapshot.triplets ?? state.triplets;
   state.unmatchedAdditions = state.carriedAdditions.filter((e) => inSpan(e) && !textureOn());
   state.unmatched = state.carried.filter((e) => inView(e));
   // Undo restores labels, not the server's classification of them, so keep
@@ -2775,6 +2781,42 @@ function renderHandControls() {
     ? `${count} note${count === 1 ? '' : 's'} selected`
     : 'nothing selected';
   for (const id of ['to-right', 'to-left', 'to-guess']) $(id).disabled = !count;
+  // A head's quarter-note triplets: marked on the half bars the selection holds.
+  for (const id of ['to-triplet', 'to-straight']) {
+    $(id).hidden = !hornsOn();
+    $(id).disabled = !count;
+  }
+}
+
+/* The selected notes' time range, or null: what a triplet mark covers. */
+function selectionRange() {
+  const onsets = [...state.handSelection]
+    .map((index) => state.review?.notes[index]?.onset)
+    .filter((onset) => typeof onset === 'number');
+  return onsets.length ? [Math.min(...onsets), Math.max(...onsets)] : null;
+}
+
+/* Mark the half bars holding the selected notes as quarter-note triplets
+   (`on`), or as never one; `null` forgets the marks in the selection. A
+   mark is the selected note's onset: the server writes the half bar that
+   holds it (notation.head_triplet_units), the newest mark for a half
+   winning, so the list keeps the order the marks were made in. */
+function markTriplets(on) {
+  const range = selectionRange();
+  if (!range || !hornsOn()) return;
+  pushHistory();
+  const [low, high] = range;
+  state.triplets = state.triplets.filter((m) => m.onset < low - 0.001 || m.onset > high + 0.001);
+  if (on !== null) {
+    const onsets = new Set(
+      [...state.handSelection].map((index) => round3(state.review.notes[index].onset)),
+    );
+    for (const onset of [...onsets].sort((a, b) => a - b)) state.triplets.push({ onset, triplet: on });
+  }
+  afterEdit();
+  if (on !== null) {
+    toast(on ? 'Marked as quarter-note triplets' : 'Marked as not triplets');
+  }
 }
 
 /* The Hands tool's selection: a rubber band or a click, replacing what was
@@ -2809,6 +2851,15 @@ function assignHands(hand) {
       const voice = hand === 'right' ? 1 : 2;
       if (hand === 'guess' || voice === heardVoice(index)) state.voices.delete(index);
       else state.voices.set(index, voice);
+    }
+    if (hand === 'guess') {
+      // "As heard" forgets every call on these notes, a triplet mark too.
+      const range = selectionRange();
+      if (range) {
+        state.triplets = state.triplets.filter(
+          (m) => m.onset < range[0] - 0.001 || m.onset > range[1] + 0.001,
+        );
+      }
     }
     afterEdit();
     toast(
@@ -3245,6 +3296,7 @@ function settingsPayload() {
     voices: voiceList(),
     lower_transposition: state.lowerTransposition,
     staccato: state.staccato,
+    triplets: state.triplets,
     // The Find the solos view. What the listener DID with a proposal is
     // not here: the server writes `solo_proposals` itself, under the
     // sidecar lock, and this merge leaves that key alone.
@@ -3682,6 +3734,7 @@ function exportSignature() {
     voices: hornsOn() ? [...state.voices].sort((x, y) => x[0] - y[0]) : [],
     lower: twoPartsOn() ? state.lowerTransposition : null,
     staccato: hornsOn() ? state.staccato : null,
+    triplets: hornsOn() ? state.triplets : [],
     // Where the chart starts is read off the form start and chorus length,
     // which change the page only when there is a chart to place.
     changes: state.changes ? [state.changes, state.formStart, state.barsPerChorus] : null,
@@ -4183,6 +4236,8 @@ $('lower-transpose-select').addEventListener('change', (event) => {
 $('to-right').addEventListener('click', () => assignHands('right'));
 $('to-left').addEventListener('click', () => assignHands('left'));
 $('to-guess').addEventListener('click', () => assignHands('guess'));
+$('to-triplet').addEventListener('click', () => markTriplets(true));
+$('to-straight').addEventListener('click', () => markTriplets(false));
 
 $('ensemble-select').addEventListener('change', async (event) => {
   // The ensemble decides whether the All-notes view exists: fold the edits

@@ -599,6 +599,11 @@ upper voice, so it is written once. The piano model is never consulted.
   Hands tool: drag a box or click to select, then **Upper voice ↑** or
   **Lower voice ↓**, or press <kbd>↑</kbd> or <kbd>↓</kbd>. **As heard**
   gives the selected notes back. <kbd>H</kbd> switches to it and back.
+- With notes selected, **Triplet ³** writes the half bars holding them as
+  quarter-note triplets, and **Not triplet** never does. The page finds
+  them by itself where both horns play three notes on a half bar's
+  thirds; the buttons are for where it misses or should not have fired.
+  **As heard** forgets these marks too.
 - Silencing a note of a pair leaves its partner alone, and the partner is
   then written once, in the upper voice.
 - The ear test plays both voices.
@@ -631,6 +636,8 @@ The page writes both horns on one treble staff, in concert pitch:
   menu beside Rhythm writes them as an eighth and a rest instead.
 - A faint, very short note a semitone from the note it slides into or
   falls off is left off the page.
+- A half bar where both horns play three even notes is written as a
+  quarter-note triplet in both voices.
 - A held note (a half note or longer) followed by a breath of an eighth
   or less before the horn's next note is written to that note: a whole
   note, not three and a half beats and an eighth rest. A short note keeps

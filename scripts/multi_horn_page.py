@@ -78,6 +78,12 @@ def parse_args(argv=None) -> argparse.Namespace:
         "drop_faint); the dump lists them either way",
     )
     parser.add_argument(
+        "--no-triplets",
+        action="store_true",
+        help="do not read quarter-note triplets over both horns (sidecar head_triplets "
+        "false); the listener's marks still apply",
+    )
+    parser.add_argument(
         "--keep-slides",
         action="store_true",
         help="write faint slides (a faint note a semitone from the note it touches) as notes "
@@ -148,6 +154,8 @@ def load_settings(args: argparse.Namespace) -> dict:
         settings["drop_faint"] = True
     if args.keep_slides:
         settings["drop_slides"] = False
+    if args.no_triplets:
+        settings["head_triplets"] = False
     if args.no_staccato:
         settings["staccato"] = False
     return settings
@@ -238,6 +246,23 @@ def accounting(lines, notation, fold: bool) -> dict[int, dict[str, int]]:
 RATIO_GAP_S = 0.6  # a note this close to its voice's next is a candidate short note
 
 
+def triplet_halves(notation) -> list[tuple[int, int, int]]:
+    """(bar, half, voice) of every half bar the page writes as a quarter-note
+    triplet: a note on its 2/3 or 4/3 under a 3:2."""
+    found = set()
+    pages = [(notation, None), *((part, 2) for part in notation.parts)]
+    for page, part_voice in pages:
+        for bar in page.bars:
+            for note in bar.notes:
+                if note.is_rest or note.tuplet != (3, 2):
+                    continue
+                within = note.beat % 2.0
+                if min(abs(within - 2 / 3), abs(within - 4 / 3)) < 1e-6:
+                    voice = part_voice or (2 if note.voice == 2 else 1)
+                    found.add((bar.number, int(note.beat // 2.0) + 1, voice))
+    return sorted(found)
+
+
 def held_ratios(lines) -> dict[int, list[int]]:
     """Per voice, how much of the gap to the voice's next onset each note
     sounds, binned in tenths (the last bin: the whole gap or more) over the
@@ -305,6 +330,13 @@ def dump(notation, lines, edits, key: int, roll_bar: int | None, moves=()) -> st
     )
     for voice, bins in held_ratios(lines).items():
         out.append(f"v{voice}: " + " ".join(f"{count:3d}" for count in bins))
+    out.append("")
+    out.append(
+        "# half bars written as quarter-note triplets (read over both horns, or marked "
+        "with the Voices tool's Triplet)"
+    )
+    for bar, half, voice in triplet_halves(notation):
+        out.append(f"bar {bar:3d} half {half} v{voice}")
     out.append("")
     out.append("# notes moved onto the other horn's attack (heard onset -> written from)")
     for move in moves:
@@ -497,9 +529,12 @@ def main(argv=None) -> int:
     drawn = sum(1 for n in rests if n.is_rest and not n.hidden)
     hidden = sum(1 for n in rests if n.is_rest and n.hidden)
     staccatos = sum(1 for n in rests if n.staccato)
+    triplets = {(bar, half) for bar, half, _voice in triplet_halves(notation)}
+    marks = len(settings.get("triplets") or [])
     print(
         f"readability {readable['readability']:.3f}, tie rate {readable['tie_rate']:.3f}, "
-        f"rests {drawn} drawn + {hidden} hidden, {staccatos} staccato quarter(s)"
+        f"rests {drawn} drawn + {hidden} hidden, {staccatos} staccato quarter(s), "
+        f"{len(triplets)} half bar(s) of quarter-note triplets ({marks} mark(s))"
         + (", rests up to an eighth closed" if reading_close(settings, config) else "")
         + ("" if roll_bar is None else f"; page bar 1 is the roll's bar {roll_bar}")
     )

@@ -27,6 +27,7 @@ from swingscribe.notation import (
     slide_scraps,
     sub_phrases,
     timing_for,
+    triplet_fit,
     writing_of,
 )
 from swingscribe.stages.export import to_musicxml
@@ -110,6 +111,9 @@ def test_a_head_takes_the_lag_out_and_folds_its_scoops_by_default():
         "literal_thirds": False,
         # ... and folds its scoops into their notes by default.
         "literal_lead_ins": True,
+        # ... and reads its quarter-note triplets over both horns.
+        "head_triplets": True,
+        "triplet_marks": [],
     }
     on = reading_of({"literal_lag": True, "literal_thirds": True}, config)
     assert on["literal_lag"] and on["literal_thirds"]
@@ -1152,3 +1156,124 @@ def test_slides_are_left_off_a_head_unless_its_sidecar_keeps_them():
     )
     assert writing_of({}, config)["drop_slides"] is False
     assert "drop_slides" not in config.notate.model_dump(mode="json")
+
+
+# ── a head's quarter-note triplets, read over both horns ─────────────────────
+
+# The local session's measurement of the Open Sesame head (Local task A8):
+# each half bar's three onsets per voice, in beats from the half's start.
+PAGE_23 = [((-0.04, 0.66, 1.36), (0.01, 0.80, 1.36)), ((0.01, 0.66, 1.31), (0.06, 0.80, 1.40))]
+PAGE_24 = [((0.10, 0.75, 1.40), (0.14, 0.89, 1.40)), ((0.10, 0.82, 1.50), (0.05, 0.82, 1.45))]
+PAGE_48 = ((0.30, 0.84, 1.44), (0.0, 0.5, 1.0))  # v1 alone looks it; v2 is eighths
+
+
+def triplet_head(halves, beat=0.25, triplets=True, marks=()):
+    """Chords on the beat, then `halves` -- (upper offsets, lower offsets)
+    per half bar from bar 10 -- then chords again; the page."""
+    beats = [round(10.0 + i * beat, 6) for i in range(96)]
+    notes = []
+    for k in [*range(8, 40, 4), *range(48, 80, 4)]:
+        notes += [horn(beats[k], 2 * beat * 0.95, 72), horn(beats[k], 2 * beat * 0.95, 67, 2)]
+    for half, (upper, lower) in enumerate(halves):
+        start = beats[40 + 2 * half]
+        notes += [
+            horn(start + o * beat, 0.6 * beat, p) for o, p in zip(upper, (79, 79, 77), strict=True)
+        ]
+        notes += [
+            horn(start + o * beat, 0.6 * beat, p, 2)
+            for o, p in zip(lower, (76, 76, 73), strict=True)
+        ]
+    config = Config()
+    update = {"head_triplets": triplets, "triplet_marks": list(marks)}
+    config = config.model_copy(update={"quantize": config.quantize.model_copy(update=update)})
+    page, _lines = notation_for_horns(
+        "t.wav", notes, beats, (beats[4], beats[84]), stem="other", config=config, anchor=beats[4]
+    )
+    return beats, page
+
+
+def figure_notes(page):
+    return [
+        (b.number, n.voice, round(n.beat, 3), n.tuplet)
+        for b in page.bars
+        for n in b.notes
+        if n.pitch in (79, 77, 76, 73) and not n.is_rest
+    ]
+
+
+def test_the_measured_halves_fit_the_thirds_and_page_48_does_not():
+    for upper, lower in [*PAGE_23, *PAGE_24]:
+        for offsets in (upper, lower):
+            triplet, eighths = triplet_fit(list(offsets))
+            assert triplet <= 0.07 and eighths >= 2 * triplet
+    triplet, eighths = triplet_fit(list(PAGE_48[0]))
+    assert triplet > 0.07 or eighths < 2 * triplet
+    for straight in ((0.0, 0.5, 1.0), (0.0, 0.62, 1.0), (0.0, 0.75, 1.5)):
+        triplet, eighths = triplet_fit(list(straight))
+        assert eighths < 2 * triplet  # eighths, swung eighths, a dotted figure
+
+
+def test_pages_23_and_24_are_written_as_quarter_note_triplets_in_both_voices():
+    _beats, page = triplet_head([*PAGE_23, *PAGE_24])
+    written = figure_notes(page)
+    assert len(written) == 24
+    assert all(tuplet == (3, 2) for *_rest, tuplet in written)
+    for voice in (1, 2):
+        beats_in = sorted({b for _n, v, b, _t in written if v == voice})
+        assert beats_in == [0.0, 0.667, 1.333, 2.0, 2.667, 3.333]
+    xml = to_musicxml(page)
+    assert xml.count('<tuplet type="start"') == 8  # one bracket per half, per voice
+
+
+def test_without_the_rule_or_with_one_voice_off_the_thirds_they_stay_eighths():
+    _beats, plain = triplet_head(PAGE_23, triplets=False)
+    assert not any(t for *_rest, t in figure_notes(plain))
+    _beats, page = triplet_head([PAGE_48])
+    assert not any(t for *_rest, t in figure_notes(page))
+
+
+def test_the_listener_marks_a_half_on_or_off():
+    """The roll's mark (sidecar `triplets`): on for page 48's shape, which
+    the rule leaves; off over the rule. The half holding the onset, the
+    last mark for a half winning."""
+    first_half = 10.0 + 40 * 0.25
+    _beats, page = triplet_head([PAGE_48], marks=[(first_half + 0.1, True)])
+    assert figure_notes(page) and all(t == (3, 2) for *_rest, t in figure_notes(page))
+    second_half = first_half + 2 * 0.25
+    _beats, page = triplet_head(PAGE_23, marks=[(second_half, True), (second_half + 0.05, False)])
+    written = figure_notes(page)
+    assert {t for _n, _v, b, t in written if b < 2} == {(3, 2)}
+    assert {t for _n, _v, b, t in written if b >= 2} == {None}
+
+
+def test_one_horn_alone_must_fit_tighter():
+    from swingscribe.notation import head_triplet_units, section_for
+
+    beats = [round(10.0 + i * 0.25, 6) for i in range(40)]
+    section = section_for(beats, beats[4], (4, 4), 4)
+    tight = [horn(beats[16] + o * 0.25, 0.15, 79) for o in (0.0, 0.67, 1.33)]
+    # Page 24's lower voice, second half: 2.7 times nearer the thirds than
+    # the eighths -- enough beside a partner that fits, not alone.
+    loose = [horn(beats[16] + o * 0.25, 0.15, 79) for o in (0.05, 0.82, 1.45)]
+    found = head_triplet_units(tight, [], beats, section)
+    assert [u["start"] for u in found] == [beats[16]] and found[0]["by"] == "rule"
+    assert head_triplet_units(loose, [], beats, section) == []
+    partner = [horn(beats[16] + o * 0.25, 0.15, 76, 2) for o in (0.10, 0.82, 1.50)]
+    assert len(head_triplet_units(loose, partner, beats, section)) == 1
+
+
+def test_a_head_reads_its_triplets_unless_the_sidecar_says_not():
+    config = Config()
+    head = reading_of({"ensemble": "multi-horn"}, config)
+    assert head["head_triplets"] is True and head["triplet_marks"] == []
+    marks = [{"onset": 33.0, "triplet": True}, {"onset": "x"}]
+    assert reading_of({"ensemble": "multi-horn", "triplets": marks}, config)["triplet_marks"] == [
+        (33.0, True)
+    ]
+    assert (
+        reading_of({"ensemble": "multi-horn", "head_triplets": False}, config)["head_triplets"]
+        is False
+    )
+    assert reading_of({}, config)["head_triplets"] is False
+    dumped = config.quantize.model_dump(mode="json")
+    assert not {"head_triplets", "triplet_marks", "triplet_halves"} & set(dumped)

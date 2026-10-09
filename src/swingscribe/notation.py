@@ -284,7 +284,9 @@ def reading_of(settings: dict, config: Config) -> dict:
     are ON unless its sidecar says otherwise (the lag is the listener's
     decision of 2026-10-09: three bars of the head's bridge onto the
     downbeat, one 16th more); thirds, and all three for anything else,
-    are off unless the sidecar turns them on."""
+    are off unless the sidecar turns them on. A head also reads its
+    quarter-note triplets (`head_triplet_units`) under the listener's
+    marks."""
     qc = config.quantize
     horns = (settings.get("ensemble") or config.transcribe.ensemble) == "multi-horn"
     return {
@@ -292,7 +294,25 @@ def reading_of(settings: dict, config: Config) -> dict:
         "literal_lag": bool(settings.get("literal_lag", horns or qc.literal_lag)),
         "literal_thirds": bool(settings.get("literal_thirds", qc.literal_thirds)),
         "literal_lead_ins": bool(settings.get("literal_lead_ins", horns or qc.literal_lead_ins)),
+        # A head's quarter-note triplets: read over both horns unless its
+        # sidecar's `head_triplets` is false, and the listener's marks.
+        "head_triplets": bool(
+            horns and settings.get("head_triplets", True) is not False or qc.head_triplets
+        ),
+        "triplet_marks": triplet_marks_of(settings) if horns else list(qc.triplet_marks),
     }
+
+
+def triplet_marks_of(settings: dict) -> list[tuple[float, bool]]:
+    """The listener's quarter-note-triplet marks (sidecar `triplets`, each
+    {onset, triplet}) as (onset, on) pairs, in the order they were made."""
+    marks = []
+    for mark in settings.get("triplets") or []:
+        try:
+            marks.append((float(mark["onset"]), bool(mark["triplet"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return marks
 
 
 @dataclass
@@ -480,6 +500,125 @@ def slide_scraps(notes: list[NoteEvent], touch: float = SLIDE_TOUCH_S) -> list[N
             if into or off:
                 slides.append(note)
     return sorted(slides, key=lambda n: n.onset)
+
+
+# A two-horn HEAD's quarter-note triplet (head_triplet_units). D28 settled
+# that ONE line's timing cannot tell the figure from eighths (WJazzD's
+# annotators' own onsets sat at 0.15, 0.80, 1.43 of the unit; every rule
+# read precision 0.00-0.02). A harmonized head is two horns playing the
+# written figure together: on the Open Sesame head the listener's bars 23-24
+# ("obviously quarter-note triplets") are the only half bars where BOTH
+# horns hold three onsets on the half's thirds -- every voice within 0.052
+# beat on average after a lag, 2.2-10 times nearer than to the eighth grid
+# -- and the one other half where a single voice fits (page 48, 0.072, 1.9
+# times) fails both gates (Local task A8). One horn alone, or the two in
+# unison written once, must fit tighter.
+HEAD_TRIPLET_EARLY = 0.15  # beats: an onset this early in the half is its own
+HEAD_TRIPLET_LAG = 0.15  # beats: the figure may sit this late, as a whole
+HEAD_TRIPLET_FIT = 0.07  # mean distance to (0, 2/3, 4/3), in beats
+HEAD_TRIPLET_BETTER = 2.0  # ... and this many times nearer than to eighths
+HEAD_TRIPLET_ALONE_FIT = 0.045
+HEAD_TRIPLET_ALONE_BETTER = 3.0
+_LAGS = tuple(k * 0.005 for k in range(int(round(HEAD_TRIPLET_LAG / 0.005)) + 1))
+
+
+def triplet_fit(offsets: list[float]) -> tuple[float, float]:
+    """(triplet error, eighth error) of three onsets, in beats from a half
+    bar's start: the mean distance to (0, 2/3, 4/3), and to the nearest
+    eighths, each at its own best lag from 0 to `HEAD_TRIPLET_LAG`."""
+    thirds = (0.0, 2.0 / 3.0, 4.0 / 3.0)
+
+    def triplet(lag: float) -> float:
+        return sum(abs(o - lag - t) for o, t in zip(offsets, thirds, strict=True)) / 3
+
+    def eighths(lag: float) -> float:
+        return sum(abs((o - lag) - 0.5 * round((o - lag) / 0.5)) for o in offsets) / 3
+
+    return min(map(triplet, _LAGS)), min(map(eighths, _LAGS))
+
+
+def _reads_as_triplet(counts: list[int], fits: list[tuple[float, float] | None]) -> bool:
+    def fits_within(fit: tuple[float, float] | None, most: float, better: float) -> bool:
+        return fit is not None and fit[0] <= most and fit[1] >= better * fit[0]
+
+    if counts == [3, 3]:
+        return all(fits_within(f, HEAD_TRIPLET_FIT, HEAD_TRIPLET_BETTER) for f in fits)
+    if sorted(counts) == [0, 3]:
+        alone = fits[counts.index(3)]
+        return fits_within(alone, HEAD_TRIPLET_ALONE_FIT, HEAD_TRIPLET_ALONE_BETTER)
+    return False
+
+
+def head_triplet_units(
+    upper: list[NoteEvent],
+    lower: list[NoteEvent],
+    beats: list[float],
+    section: MeterSection,
+    rule: bool = True,
+    marks: list[tuple[float, bool]] = (),
+) -> list[dict]:
+    """The half bars of a two-horn head written as quarter-note triplets:
+    [{start (seconds), by ("rule" or "mark"), counts, fits}] in time order.
+
+    A half bar is the first or second two beats of a bar with half units
+    (`quantize.has_half_units`), on `section`'s bar lines; its notes are
+    those from `HEAD_TRIPLET_EARLY` before it to as much before its end.
+    The rule (`rule`): both voices hold exactly three onsets and each fits
+    the half's thirds (`triplet_fit`) within `HEAD_TRIPLET_FIT`, at least
+    `HEAD_TRIPLET_BETTER` times nearer than to eighths; one voice with
+    three and the other with none must fit within the ALONE gates. The
+    listener's `marks` -- (onset, on) for the half holding the onset, the
+    last for a half winning -- override it either way."""
+    from swingscribe.stages import quantize
+
+    pulses = max(1, section.pulses_per_bar)
+    if len(beats) < 3 or not quantize.has_half_units(pulses):
+        return []
+    starts = []
+    for index in range(len(beats) - 2):
+        if not section.start - 1e-9 <= beats[index] <= section.end + 1e-9:
+            continue
+        _bar, beat_in_bar = quantize.bar_and_beat(float(index), beats, [section])
+        first = int(round(beat_in_bar))
+        if first % 2 == 0 and first + 2 <= pulses:
+            starts.append(index)
+
+    def half_of(position: float | None) -> int | None:
+        if position is None:
+            return None
+        for start in starts:
+            if start - HEAD_TRIPLET_EARLY <= position < start + 2 - HEAD_TRIPLET_EARLY:
+                return start
+        return None
+
+    voices = [
+        [p for p in (quantize.beat_position(n.onset, beats) for n in line) if p is not None]
+        for line in (upper, lower)
+    ]
+    marked: dict[int, bool] = {}
+    for onset, on in marks:
+        half = half_of(quantize.beat_position(onset, beats))
+        if half is not None:
+            marked[half] = on
+    found = []
+    for start in starts:
+        offsets = [
+            sorted(
+                p - start
+                for p in voice
+                if start - HEAD_TRIPLET_EARLY <= p < start + 2 - HEAD_TRIPLET_EARLY
+            )
+            for voice in voices
+        ]
+        counts = [len(o) for o in offsets]
+        fits = [triplet_fit(o) if len(o) == 3 else None for o in offsets]
+        if start in marked:
+            by = "mark" if marked[start] else None
+        else:
+            by = "rule" if rule and _reads_as_triplet(counts, fits) else None
+        if by is not None:
+            found.append({"start": beats[start], "by": by, "counts": counts, "fits": fits})
+    return found
 
 
 # Two horns attacking one chord: Basic Pitch's onsets for the two land
@@ -1068,6 +1207,24 @@ def notation_for_span(
         right, lower = _unlag_together(right, lower, kept, run_config)
         run_config = run_config.model_copy(
             update={"quantize": run_config.quantize.model_copy(update={"lag_window_beats": 0})}
+        )
+    qc = run_config.quantize
+    if horns and qc.timing == "swing" and (qc.head_triplets or qc.triplet_marks):
+        # A head's quarter-note triplets, read over BOTH horns (one line's
+        # timing cannot tell them, D28) and placed by the quantizer on the
+        # half's thirds in each voice. On the notes the quantizer will see:
+        # a folded lead-in starts its note.
+        def folded(line: list[NoteEvent]) -> list[NoteEvent]:
+            return quantize.absorb_lead_ins(line)[0] if qc.absorb_lead_ins else line
+
+        section = section_for(kept, anchor, time_signature, pulses_per_bar)
+        found = head_triplet_units(
+            folded(right), folded(lower), kept, section, qc.head_triplets, qc.triplet_marks
+        )
+        run_config = run_config.model_copy(
+            update={
+                "quantize": qc.model_copy(update={"triplet_halves": [u["start"] for u in found]})
+            }
         )
     lead = left if lead_is_left else lower if lead_is_lower else right
 

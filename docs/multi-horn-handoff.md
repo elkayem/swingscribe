@@ -11,7 +11,7 @@ merged: the listener reviews the branch first. Design and state:
 
 | Piece | State |
 | --- | --- |
-| A. Multi-horn core + `scripts/multi_horn_page.py` | measured seven times (Local tasks A-A7); rule 5b joins only a held note (`multi_horn_version` 5); short notes written as staccato quarters (the export bar's Short notes menu); the one-attack window is half an eighth; faint semitone slides written as nothing; waiting on Local task A8 |
+| A. Multi-horn core + `scripts/multi_horn_page.py` | measured seven times (Local tasks A-A7); rule 5b joins only a held note (`multi_horn_version` 5); staccato quarters (Short notes menu); one attack within half an eighth; faint semitone slides written as nothing; quarter-note triplets read over both horns, with the Voices tool's Triplet mark; waiting on Local task A8 (both parts) |
 | B. Linked sidecars | done (Local tasks B, B2): 37 copies linked and in the Recycle Bin, 4 left, 313 MB; the card byte-identical before and after; the manifest write survives OneDrive now |
 | C. Two parts, GUI, guide | checked (Local task C); fixes pushed |
 
@@ -495,6 +495,37 @@ Report:
    note? Page 34's D5 between E-flats (33.067, 58 ms): a turn to keep, or
    a slide to leave off? And any staccato quarter they would write
    otherwise.
+
+### A8, part 2: quarter-note triplets (the listener's bars 23-24)
+
+Landed with A8 (multi-horn.md, "Quarter-note triplets in a head"):
+
+- A half bar where both horns play three onsets on its thirds is written
+  as a quarter-note triplet in both voices.
+- The Voices tool's **Triplet ³** and **Not triplet** buttons mark the
+  half bars the selection holds; **As heard** clears the marks.
+- `--no-triplets` turns the rule off for a comparison; the listener's
+  marks still apply.
+
+```
+%PAGE% --no-triplets --out OUT\os8.notriplets.musicxml --dump-voices OUT\os8.notriplets.txt
+```
+
+Report, beside the A8 report above:
+
+1. The summary line's "half bar(s) of quarter-note triplets": 4 expected
+   (pages 23-24, both halves of each), 0 with `--no-triplets`.
+2. The dump's "half bars written as quarter-note triplets": pages 23 and
+   24, halves 1 and 2, in v1 AND v2, and nothing else. Diff `os8` against
+   `os8.notriplets`: only those two bars should differ.
+3. MuseScore and the page view: the brackets read cleanly with two voices
+   on one staff (voice 1's bracket above, voice 2's below), and the bars
+   add up.
+4. In the GUI: select a note in page 48's first half with the Voices tool,
+   press **Triplet ³**, and the page writes that half as a triplet; **As
+   heard** puts it back. Undo restores both a voice move and a mark.
+5. Page 48: the rule leaves it alone (the lower voice is eighths). If the
+   listener hears it as a triplet, the mark is the way.
 
 ## Local task B: linked sidecars ("takes")
 

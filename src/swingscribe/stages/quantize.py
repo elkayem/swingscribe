@@ -42,6 +42,7 @@ Pure arithmetic, no heavy imports — the whole stage runs in CI.
 
 import bisect
 import functools
+import itertools
 import json
 import math
 import statistics
@@ -82,6 +83,57 @@ QUARTER_TRIPLET_INTERVAL = (0.58, 0.80)  # beats, each of the figure's two gaps
 QUARTER_TRIPLET_RATIO_MAX = 1.25  # longer gap over shorter: equal spacing
 QUARTER_TRIPLET_FIRST_MAX = 0.25  # how late the figure may start, in beats
 QUARTER_TRIPLET_NEXT = 1.8  # from here on an onset is the next downbeat, early
+# A half bar the PAGE has decided is a quarter-note triplet
+# (QuantizeConfig.triplet_halves: a two-horn head's reading, or the
+# listener's mark): its onsets from this early to two beats less this are
+# its own, and are placed in order on the half's thirds (`forced_thirds`).
+TRIPLET_HALF_EARLY = 0.15
+
+
+def _beat_at(time: float, beats: list[float]) -> int | None:
+    """The beat index at `time`, within a quarter of a beat; else None."""
+    if len(beats) < 2:
+        return None
+    k = bisect.bisect_left(beats, time)
+    best = min((i for i in (k - 1, k) if 0 <= i < len(beats)), key=lambda i: abs(beats[i] - time))
+    length = _beat_length(beats, min(best, len(beats) - 2))
+    return best if abs(beats[best] - time) <= 0.25 * length else None
+
+
+def forced_thirds(positions: list[float], units: list[int]) -> dict[int, tuple[int, float]]:
+    """note number -> (beat index, offset in the beat) for the notes of each
+    half-bar `units` start (a beat index): three onsets in
+    [u - TRIPLET_HALF_EARLY, u + 2 - TRIPLET_HALF_EARLY) on 0, 2/3 and 4/3
+    of the half in order, two on whichever two thirds are nearest. Any other
+    count is left to the ordinary reading. `positions` are continuous beat
+    positions."""
+    thirds = (0.0, 2.0 / 3.0, 4.0 / 3.0)
+    out: dict[int, tuple[int, float]] = {}
+    for unit in units:
+        members = sorted(
+            (
+                k
+                for k, p in enumerate(positions)
+                if unit - TRIPLET_HALF_EARLY <= p < unit + 2 - TRIPLET_HALF_EARLY
+            ),
+            key=positions.__getitem__,
+        )
+        if len(members) == 3:
+            slots = thirds
+        elif len(members) == 2:
+            slots = min(
+                itertools.combinations(thirds, 2),
+                key=lambda pair: sum(
+                    abs(positions[k] - unit - t) for k, t in zip(members, pair, strict=True)
+                ),
+            )
+        else:
+            continue
+        for k, third in zip(members, slots, strict=True):
+            whole = int(third + 1e-9)
+            out[k] = (unit + whole, third - whole)
+    return out
+
 
 # How sharply the no-swing floor relaxes as confidence rises. Cubic, not
 # linear: real solos read at confidence 0.25-0.32, which is precisely where
@@ -660,6 +712,7 @@ def quantize_notes(
     chords: list[list[int]] | None = None,
     graces: list[list[int]] | None = None,
     quarter_triplets: bool = False,
+    triplet_halves: list[float] | None = None,
     min_onsets_for_sixteenth: int = 3,
     offbeat_pair_tuplet_fit: float = 0.0,
     tuplet_needs_onsets_inside: bool = False,
@@ -926,6 +979,15 @@ def quantize_notes(
         # unit's thirds (notate.quarter_triplet_halves).
         for index in quarter_triplet_pairs(per_beat_raw, beats, sections):
             grids[index] = grids[index + 1] = 3
+    # The half bars the PAGE read as quarter-note triplets (a two-horn
+    # head's, or the listener's mark): their notes go on the half's thirds
+    # whatever the beat-by-beat reading said, which cannot see the figure.
+    forced: dict[int, tuple[int, float]] = {}
+    if allow_triplets and triplet_halves:
+        units = sorted({u for u in (_beat_at(t, beats) for t in triplet_halves) if u is not None})
+        forced = forced_thirds([index + raw for index, raw, *_rest in placed], units)
+        for index, _offset in forced.values():
+            grids[index] = 3
 
     def written_offsets(index: int) -> list[float]:
         """A beat's notated offsets, snapped exactly as the loop below snaps
@@ -942,7 +1004,14 @@ def quantize_notes(
     )
 
     out, positions = [], []
-    for index, position, duration, pitch, raw, chord, original, star, star_l, lag, grace in warped:
+    for number, entry in enumerate(warped):
+        index, position, duration, pitch, raw, chord, original, star, star_l, lag, grace = entry
+        if number in forced:
+            # On the half's thirds (`forced_thirds`), the beat it lands in
+            # possibly the next: an onset early for the half is its own.
+            index, third = forced[number]
+            star, lag = by_beat.get(index, STRAIGHT_PHASE), lags.get(index, 0.0)
+            raw = third
         grid = grids.get(index, finest)
         # The NOTATION is the lag-corrected position snapped: in raw time
         # for a ternary beat or a binary beat read STRAIGHT (a performed
@@ -956,6 +1025,8 @@ def quantize_notes(
         # (original - replay)) is the raw position.
         straight = grid % 3 == 0 or readings.get(index) == "raw"
         notated_offset, _ = snap(raw if straight else position - index, grid)
+        if number in forced:
+            notated_offset = raw
         if index in moved and abs(notated_offset - 0.25) < 1e-9:
             notated_offset = 0.0  # the beat's late downbeat (late_downbeats)
         if straight:
@@ -1517,6 +1588,7 @@ def settings(qc: QuantizeConfig) -> dict:
         "slow_beat_s": qc.slow_beat_s,
         "slow_beat_grids": qc.slow_beat_grids,
         "quarter_triplets": qc.quarter_triplets,
+        "triplet_halves": list(qc.triplet_halves),
         "figure_prior_weight": qc.figure_prior_weight,
         "timing": qc.timing,
         "polyphonic": qc.polyphonic,
