@@ -1,7 +1,9 @@
 """Find byte-identical recordings and propose keeping one, linking the rest.
 
     .venv\\Scripts\\python.exe scripts\\dedupe_audio.py benchmark             (dry run)
-    .venv\\Scripts\\python.exe scripts\\dedupe_audio.py benchmark --apply     (not yet)
+    .venv\\Scripts\\python.exe scripts\\dedupe_audio.py benchmark --apply     (Recycle Bin)
+    .venv\\Scripts\\python.exe scripts\\dedupe_audio.py benchmark --apply --trash D:\\dedupe-trash
+    .venv\\Scripts\\python.exe scripts\\dedupe_audio.py --undo benchmark\\.dedupe\\manifest-....json
 
 PREPARED, NOT RUN: the listener wants to review linked sidecars before any
 duplicate audio goes (docs/multi-horn-handoff.md). Nothing is changed unless
@@ -21,7 +23,19 @@ copy kept the modification time), else the first by path, unless
    A sidecar's name, its folder and everything else in it stay exactly as
    they are, so its harness key (the sidecar's path) and every pin keyed
    on it do not move, and its caches are the kept file's already;
-2. the copy is deleted.
+2. the copy goes: never deleted outright. On Windows it is sent to the
+   Recycle Bin (SHFileOperationW, FOF_ALLOWUNDO), where the listener can
+   empty it or restore it; with `--trash DIR` it is MOVED there instead,
+   under its path relative to the root (required where there is no Recycle
+   Bin).
+
+Every change is written to a MANIFEST first (`--manifest`, default
+`<root>/.dedupe/manifest-<time>.json`, a hidden folder no walk reads): each
+copy, where it went, and every sidecar it rewrote WITH ITS PREVIOUS
+CONTENT, step by step as each lands. `--undo MANIFEST` puts it all back --
+the audio from the trash or the Recycle Bin, then each sidecar's previous
+content, unless the sidecar was edited since (then it is reported and left
+as it is; its previous content is in the manifest).
 
 A copy is decided by its SIDECARS, never by its name: a sidecar carries
 the solo's identity (Curtis_Fuller_Blue_Train and Lee_Morgan_Blue_Train are
@@ -40,7 +54,11 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
+import subprocess
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -201,29 +219,236 @@ def plan(root: Path, keep_in: str | None) -> list[dict]:
     return steps
 
 
-def apply(steps: list[dict]) -> None:
+MANIFEST_VERSION = 1
+
+
+def default_manifest(root: Path) -> Path:
+    return root / ".dedupe" / f"manifest-{datetime.now():%Y%m%d-%H%M%S}.json"
+
+
+def write_manifest(path: Path, manifest: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    temporary.replace(path)
+
+
+def recycle(path: Path) -> None:
+    """Send a file to the Windows Recycle Bin (SHFileOperationW with
+    FOF_ALLOWUNDO), silently. Raises OSError if it is still there."""
+    import ctypes
+    from ctypes import wintypes
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", wintypes.HWND),
+            ("wFunc", wintypes.UINT),
+            ("pFrom", wintypes.LPCWSTR),
+            ("pTo", wintypes.LPCWSTR),
+            ("fFlags", ctypes.c_uint16),
+            ("fAnyOperationsAborted", wintypes.BOOL),
+            ("hNameMappings", ctypes.c_void_p),
+            ("lpszProgressTitle", wintypes.LPCWSTR),
+        ]
+
+    fo_delete = 3
+    flags = 0x40 | 0x10 | 0x4 | 0x400  # ALLOWUNDO, NOCONFIRMATION, SILENT, NOERRORUI
+    # pFrom is a list of paths ending in an empty one: two NULs.
+    operation = SHFILEOPSTRUCTW(
+        None, fo_delete, str(path.resolve()) + "\0", None, flags, False, None, None
+    )
+    result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(operation))
+    if result != 0 or operation.fAnyOperationsAborted or path.exists():
+        raise OSError(f"could not send {path} to the Recycle Bin (code {result})")
+
+
+RESTORE_SCRIPT = r"""
+$target = $args[0]
+$folder = [IO.Path]::GetDirectoryName($target)
+$name = [IO.Path]::GetFileName($target)
+$stem = [IO.Path]::GetFileNameWithoutExtension($target)
+$shell = New-Object -ComObject Shell.Application
+$bin = $shell.Namespace(10)
+foreach ($item in $bin.Items()) {
+  if ($item.ExtendedProperty("System.Recycle.DeletedFrom") -ne $folder) { continue }
+  if ($item.Name -ne $name -and $item.Name -ne $stem) { continue }
+  $shell.Namespace($folder).MoveHere($item)
+  exit 0
+}
+exit 2
+"""
+
+
+def restore_recycled(path: Path) -> None:
+    """Bring a file this script recycled back from the Recycle Bin to where
+    it was (Shell.Application, matched by its original folder and name).
+    Raises OSError when it cannot, saying how to do it by hand."""
+    quoted = str(path).replace("'", "''")
+    command = f"& {{ {RESTORE_SCRIPT} }} '{quoted}'"
+    subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    for _ in range(50):  # the shell moves it back asynchronously
+        if path.exists():
+            return
+        time.sleep(0.1)
+    raise OSError(
+        f"{path} is not back: restore it from the Recycle Bin by hand (right-click, Restore)"
+    )
+
+
+def trash_path(trash: Path, root: Path, copy: Path) -> Path:
+    """Where `--trash` keeps a copy: its path under the root, kept apart from
+    any earlier copy of the same name."""
+    target = trash / copy.relative_to(root)
+    n = 1
+    while target.exists():
+        target = target.with_name(f"{copy.stem}.{n}{copy.suffix}")
+        n += 1
+    return target
+
+
+def apply(
+    steps: list[dict], root: Path, manifest_path: Path, trash: Path | None = None, log=print
+) -> dict:
+    """Do the plan, never deleting anything: each copy to `trash`, or the
+    Recycle Bin when there is none. The manifest is written before the first
+    change and after every step, so an interrupted run can still be undone."""
+    if not any("relink" in step for step in steps):
+        log("nothing to apply: every group is left as it is")
+        return {}
+    if trash is None and sys.platform != "win32":
+        raise SystemExit("there is no Recycle Bin here: pass --trash DIR to keep the copies")
+    if trash is not None and trash.is_relative_to(root):
+        inside = trash.relative_to(root).parts
+        if not any(part.startswith(".") for part in inside):
+            # A walk would find the moved copies there and plan them again.
+            raise SystemExit("--trash inside the root must be under a hidden folder (.dedupe/)")
+    manifest = {
+        "version": MANIFEST_VERSION,
+        "root": str(root),
+        "created": datetime.now().isoformat(timespec="seconds"),
+        "trash": None if trash is None else str(trash),
+        "steps": [],
+    }
     for step in steps:
         if "refused" in step:
             continue
-        for sidecar, relative, _linked in step["relink"]:
-            data = json.loads(sidecar.read_text(encoding="utf-8"))
+        sidecars = []
+        for sidecar, relative, linked in step["relink"]:
+            before = sidecar.read_text(encoding="utf-8")
+            data = json.loads(before)
             data["audio"] = relative
             data["file"] = step["kept"].name
-            sidecar.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-        step["copy"].unlink()
+            sidecars.append(
+                {
+                    "path": str(sidecar),
+                    "verb": "REPOINT" if linked else "LINK",
+                    "before": before,
+                    "after": json.dumps(data, indent=2, sort_keys=True),
+                }
+            )
+        manifest["steps"].append(
+            {
+                "copy": str(step["copy"]),
+                "kept": str(step["kept"]),
+                "sidecars": sidecars,
+                "went_to": None,
+                "status": "planned",
+            }
+        )
+    write_manifest(manifest_path, manifest)
+    for entry in manifest["steps"]:
+        copy = Path(entry["copy"])
+        for sidecar in entry["sidecars"]:
+            Path(sidecar["path"]).write_text(sidecar["after"], encoding="utf-8")
+        try:
+            if trash is not None:
+                target = trash_path(trash, root, copy)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(copy), str(target))
+                entry["went_to"] = str(target)
+            else:
+                recycle(copy)
+                entry["went_to"] = "recycle-bin"
+        except OSError as exc:
+            # This step's sidecars go back; the steps before it stand, and the
+            # manifest says which.
+            for sidecar in entry["sidecars"]:
+                Path(sidecar["path"]).write_text(sidecar["before"], encoding="utf-8")
+            entry["status"] = f"failed: {exc}"
+            write_manifest(manifest_path, manifest)
+            raise SystemExit(f"stopped at {copy}: {exc} (manifest {manifest_path})") from exc
+        entry["status"] = "done"
+        write_manifest(manifest_path, manifest)
+    log(f"manifest: {manifest_path} (undo with --undo)")
+    return manifest
+
+
+def undo(manifest_path: Path, log=print) -> int:
+    """Put back what `apply` did, newest first: the audio from wherever it
+    went, then each sidecar's previous content -- unless the sidecar was
+    edited since, which is reported and left alone. Returns how many steps
+    could not be fully undone."""
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    problems = 0
+    for entry in reversed(manifest["steps"]):
+        if entry["status"] != "done":
+            continue
+        copy = Path(entry["copy"])
+        try:
+            if copy.exists():
+                raise OSError(f"{copy} is already there; nothing moved back")
+            if entry["went_to"] == "recycle-bin":
+                restore_recycled(copy)
+            else:
+                copy.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(entry["went_to"], str(copy))
+        except OSError as exc:
+            log(f"  AUDIO {copy}: {exc}")
+            problems += 1
+            continue
+        for sidecar in entry["sidecars"]:
+            path = Path(sidecar["path"])
+            now = path.read_text(encoding="utf-8") if path.is_file() else None
+            if now != sidecar["after"]:
+                log(f"  SIDECAR {path}: edited since the clean-up; left as it is")
+                problems += 1
+                continue
+            path.write_text(sidecar["before"], encoding="utf-8")
+        entry["status"] = "undone"
+        log(f"RESTORED {copy}")
+        write_manifest(manifest_path, manifest)
+    return problems
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("root", type=Path, help="the folder to search (e.g. benchmark)")
+    parser.add_argument("root", type=Path, nargs="?", help="the folder to search (e.g. benchmark)")
     parser.add_argument(
         "--keep-in",
         help="keep the copy under this folder name when there is one (default: the original)",
     )
     parser.add_argument(
-        "--apply", action="store_true", help="rewrite the sidecars and delete the copies"
+        "--apply",
+        action="store_true",
+        help="rewrite the sidecars and send the copies to the Recycle Bin (or --trash)",
     )
+    parser.add_argument(
+        "--trash", type=Path, help="move the copies here instead of the Recycle Bin"
+    )
+    parser.add_argument("--manifest", type=Path, help="where --apply writes its manifest")
+    parser.add_argument("--undo", type=Path, metavar="MANIFEST", help="put an --apply back")
     args = parser.parse_args(argv)
+    if args.undo is not None:
+        problems = undo(args.undo)
+        print("undone" if not problems else f"undone, {problems} step(s) need a hand (above)")
+        return 1 if problems else 0
+    if args.root is None:
+        parser.error("a root folder is needed (or --undo MANIFEST)")
     root = args.root.resolve()
     steps = plan(root, args.keep_in)
     if not steps:
@@ -243,7 +468,8 @@ def main(argv=None) -> int:
             verb = "REPOINT" if linked else "LINK"
             print(f"  {verb} {shown(sidecar)} -> audio {relative}")
     if args.apply:
-        apply(steps)
+        trash = args.trash.resolve() if args.trash else None
+        apply(steps, root, (args.manifest or default_manifest(root)).resolve(), trash)
         print("applied")
     else:
         print("dry run: nothing changed (--apply to do it)")

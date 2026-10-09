@@ -230,3 +230,26 @@ def test_a_head_heard_an_octave_low_sets_the_clock_and_is_not_a_hit():
     assert placement["octave_anchors"] == 32
     # ...but it is placed on the clock it was played on, not the solo's.
     assert reference[10]["onset"] == pytest.approx(5.0 + 0.4 * 5.0)
+
+
+def test_a_linked_take_is_still_a_solo_after_the_clean_up(tmp_path, monkeypatch):
+    """After dedupe_audio --apply a deleted copy's own sidecar names the kept
+    file: the taxonomy finds that solo through it, by the same key."""
+    import run_eval
+
+    monkeypatch.setattr(run_eval, "BENCH", tmp_path)
+    folder = tmp_path / "wjazzd"
+    folder.mkdir()
+    kept = folder / "Curtis_Fuller_Blue_Train_solo_1.m4a"
+    kept.write_bytes(b"one side")
+    base = {"region": [0.0, 10.0], "model": "htdemucs", "stem": "other"}
+    (folder / f"{kept.name}.swingscribe.json").write_text(json.dumps(base))
+    (folder / "Lee_Morgan_Blue_Train_solo_2.m4a.swingscribe.json").write_text(
+        json.dumps(base | {"audio": kept.name})
+    )
+    runs = {
+        "wjazzd/Curtis_Fuller_Blue_Train_solo_1.m4a": {},
+        "wjazzd/Lee_Morgan_Blue_Train_solo_2.m4a": {},
+    }
+    names = [name for name, _sidecar in error_taxonomy.wjazzd_candidates(runs)]
+    assert names == sorted(runs)

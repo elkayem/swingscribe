@@ -455,26 +455,49 @@ def solo_info(db, melid):
     }
 
 
-def discover(db, runs, log=print):
-    """(name, run, sidecar, solo) for every identified solo, as run_eval
-    would score it."""
-    import numpy as np
+def wjazzd_candidates(runs) -> list[tuple[str, dict]]:
+    """(name, sidecar) for every take the WJazzD set may identify: cached in
+    `runs`, its audio on disk -- through run_eval's walk (library.discover),
+    so a linked take's audio is its sidecar's, wherever the copy it was
+    keyed by has gone -- and not a located set's. `--count` lists these."""
     import run_eval
-    from score_wjazz import identify_all
 
     out = []
-    # Through run_eval's walk (library.discover): a linked take's audio is
-    # its sidecar's, wherever the copy it was keyed by has gone.
     for name, _sidecar_path, _audio, sidecar in run_eval.bench_takes(lambda _message: None):
-        if name not in runs:
-            continue
         # The Omnibook set and the PDF pages stay out of the WJazzD
         # identification, as they do in run_eval (is_located): several of their
         # recordings are in the database too -- a page's audio is often a copy
         # of a WJazzD track -- and are already scored from benchmark/wjazzd/
         # under their own names.
-        if run_eval.is_located(name):
-            continue
+        if name in runs and not run_eval.is_located(name):
+            out.append((name, sidecar))
+    return out
+
+
+def omnibook_names(runs) -> list[str]:
+    """The Omnibook sides `classify_omnibook` reads: cached, the default take,
+    and their audio found through library (`--count` lists these)."""
+    import run_eval
+
+    from swingscribe.gui import library
+
+    return sorted(
+        name
+        for name in runs
+        if run_eval.is_omnibook(name)
+        and run_eval.take_of(name) is None
+        and library.audio_for_key(run_eval.BENCH, name) is not None
+    )
+
+
+def discover(db, runs, log=print):
+    """(name, run, sidecar, solo) for every identified solo, as run_eval
+    would score it."""
+    import numpy as np
+    from score_wjazz import identify_all
+
+    out = []
+    for name, sidecar in wjazzd_candidates(runs):
         run = runs[name]
         onsets = np.array([n["onset"] for n in run["notes"]])
         pitches = np.array([int(n["pitch"]) for n in run["notes"]])
@@ -703,13 +726,7 @@ def classify_omnibook(runs, cache_dir, with_audio=True, limit=None, log=print):
 
     real = Path("tests/regression/real-audio-baselines.json")
     pinned_f1 = json.loads(real.read_text(encoding="utf-8")) if real.is_file() else {}
-    names = sorted(
-        name
-        for name in runs
-        if run_eval.is_omnibook(name)
-        and run_eval.take_of(name) is None
-        and library.audio_for_key(run_eval.BENCH, name) is not None
-    )
+    names = omnibook_names(runs)
     if limit:
         names = names[:limit]
     results = []
@@ -1169,6 +1186,11 @@ def main():
     parser.add_argument("--limit", type=int, default=None, help="first N solos only (dev)")
     parser.add_argument("--json", type=Path, default=None, help="also write the aggregate here")
     parser.add_argument("--pin", action="store_true", help="rewrite the baseline from this run")
+    parser.add_argument(
+        "--count",
+        action="store_true",
+        help="only list and count the solos each set would read (before/after a clean-up)",
+    )
     args = parser.parse_args()
     sets = {name.strip() for name in args.sets.split(",") if name.strip()}
     unknown = sorted(sets - {"wjazzd", "omnibook"})
@@ -1183,6 +1205,16 @@ def main():
     run_eval.CACHE_DIR = CACHE_DIR
     notes = args.notes or run_eval.notes_cache(0.2, 0.0)
     runs = json.loads(notes.read_text(encoding="utf-8"))
+    if args.count:
+        for label, names in (
+            ("wjazzd", [name for name, _sidecar in wjazzd_candidates(runs)]),
+            ("omnibook", omnibook_names(runs)),
+        ):
+            if label in sets:
+                for name in names:
+                    print(f"  {label}: {name}")
+                print(f"{label}: {len(names)} solo(s) found")
+        return
 
     # section of the baseline -> this run's aggregate; None is WJazzD, the
     # file's own top level, where it has been since the first pin.

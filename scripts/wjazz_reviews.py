@@ -54,6 +54,11 @@ def main() -> None:
     )
     parser.add_argument("--dry", action="store_true", help="say what is missing, compute nothing")
     parser.add_argument(
+        "--count",
+        action="store_true",
+        help="only list and count the solos found, with their audio (before/after a clean-up)",
+    )
+    parser.add_argument(
         "--redo",
         action="append",
         default=[],
@@ -71,11 +76,15 @@ def main() -> None:
     notes_path = run_eval.notes_cache(args.step_cost, args.dip_db)
     runs = json.loads(notes_path.read_text(encoding="utf-8")) if notes_path.is_file() else {}
 
-    computed = present = 0
+    computed = present = found = 0
     # Through run_eval's walk (library.discover): a linked take's audio is
     # its sidecar's, wherever the copy it was keyed by has gone.
     for name, _sidecar_path, audio, sidecar in run_eval.bench_takes(lambda _message: None):
         if not name.startswith(f"{args.folder}/"):
+            continue
+        if args.count:
+            found += 1
+            print(f"  {name} <- {audio}")
             continue
         # The same config, document and span config `error_taxonomy.load_evidence`
         # builds, so the key this writes under is the key it reads from.
@@ -114,6 +123,9 @@ def main() -> None:
         computed += 1
         if args.limit and computed >= args.limit:
             break
+    if args.count:
+        print(f"{found} solo(s) found under {args.folder}/")
+        return
     print(f"{computed} computed, {present} already present")
 
 
