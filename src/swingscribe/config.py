@@ -432,8 +432,9 @@ class TranscribeConfig(BaseModel):
     # field would serve every cached multi-horn review unchanged. Bump it
     # with any such change; like every field above it dumps only for a
     # multi-horn head. 2 (2026-10-09): tails cut at a new chord, split held
-    # notes joined where CREPE holds them, lead-ins marked.
-    multi_horn_version: int = 2
+    # notes joined where CREPE holds them, lead-ins marked. 3: a legato
+    # successor keeps its horn's voice (voices.legato_successors).
+    multi_horn_version: int = 3
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
@@ -956,16 +957,30 @@ class NotateConfig(BaseModel):
     # page has, or the next note anticipated -- so our eighth and rest was
     # right. 0 is off.
     hold_to_beat: float = 0.0
+    # A REST no longer than this, in beats, before the voice's next note is
+    # written into the note before it (notate.notated_durations): silence,
+    # not the onset-to-onset gap `legato_cap` asks about. 0 is off. A two-
+    # horn head takes an eighth (notation.writing_of; sidecar `close_rests`
+    # false keeps the rests): the listener heard the head's held notes as
+    # held to the next note -- bar 24's lower A a whole note where we wrote
+    # three and a half beats and an eighth rest (Local task A4, 2026-10-09).
+    close_rests: float = 0.0
+    # Leave a two-horn head's faint scraps off the page (notation.is_faint:
+    # under 80 ms, confidence under 0.4, not a lead-in). OFF until measured
+    # on the head; the sidecar's `drop_faint` turns it on for one.
+    drop_faint: bool = False
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
-        """Leave `key` and `hold_to_beat` out of the dump at their defaults,
-        so every notate key reads exactly as it did before they existed."""
+        """Leave `key`, `hold_to_beat` and `close_rests` out of the dump at
+        their defaults, so every notate key reads exactly as it did before
+        they existed."""
         data = handler(self)
         if data.get("key") is None:
             data.pop("key", None)
-        if not data.get("hold_to_beat"):
-            data.pop("hold_to_beat", None)
+        for field in ("hold_to_beat", "close_rests", "drop_faint"):
+            if not data.get(field):
+                data.pop(field, None)
         return data
 
     @property

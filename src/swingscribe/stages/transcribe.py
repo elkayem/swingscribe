@@ -988,7 +988,8 @@ def _hear_horns(
     print(
         f"transcribe: Basic Pitch heard {len(heard)} notes; {stats['ghosts']} overtone "
         f"ghost(s) and {stats['thirds']} third note(s) left out of the voices, "
-        f"{stats['tails']} tail(s) cut at a new chord, {stats['rejoined']} split held "
+        f"{stats['tails']} tail(s) cut at a new chord, {stats['successors']} legato "
+        f"successor(s) kept in their voice, {stats['rejoined']} split held "
         f"note(s) joined, {stats['lead_ins']} lead-in(s) marked"
     )
     notes = [

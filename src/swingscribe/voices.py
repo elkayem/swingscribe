@@ -26,7 +26,11 @@ The rules, in order:
    in the listener's numbering: the upper horn's F4 still ringing put the
    next chord's Eb4 in the lower voice) and, as a third note, cost a chord
    one of its own (bar 28's G4, under a held C5 as the A-flat before it
-   rang on).
+   rang on). And a note a step or two from the ONLY note sounding, which
+   ends within 0.25 s, is that horn's legato SUCCESSOR, not the other horn
+   entering (`legato_successors`): the old note is cut, and after rule 4
+   the successor keeps its horn's voice (`continue_voices`) -- bar 26's
+   tenor E-flat into D stays in voice 2.
 3. **Where three sound at once, the two most confident stay.** Two horns
    cannot sound three notes; a third is a ghost the first rule could not
    name, or bleed.
@@ -113,6 +117,13 @@ REJOIN_ONSET_S = 0.04
 # gives no frames, so the held note is the evidence here.
 LEAD_IN_MAX_S = 0.1
 LEAD_IN_TARGET_RATIO = 3.0
+
+# Rule 2's legato successor: a note a step or two from the ONLY note
+# sounding when it starts, which ends within this of its start, is that
+# horn moving on -- the old note's release overlapping the new -- not the
+# other horn coming in under it.
+SUCCESSOR_TAIL_S = 0.25
+SUCCESSOR_MAX_STEP = 2
 
 
 def _end(note: dict[str, Any]) -> float:
@@ -360,6 +371,92 @@ def trim_tails(
     return cut
 
 
+def legato_successors(
+    notes: list[dict[str, Any]],
+    alive: set[int],
+    tail: float = SUCCESSOR_TAIL_S,
+    max_step: int = SUCCESSOR_MAX_STEP,
+    chord_onset: float = CHORD_ONSET_S,
+) -> dict[int, int]:
+    """Rule 2's third pass, in place on `notes`: a note of `alive` that
+    starts while exactly ONE other sounds -- begun more than `chord_onset`
+    before it, ending at most `tail` after it, 1 to `max_step` semitones
+    away -- and with no other note struck with it, is that note's legato
+    SUCCESSOR: the same horn moving on, its old note's release overlapping
+    the new. The old note is cut where the new begins, so the two are never
+    read as two horns. Returns {successor: predecessor} (indices into
+    `notes`), for `continue_voices`.
+
+    The Open Sesame head's bar 26: the tenor's E-flat on 1 into D on 3,
+    the E-flat ringing 190 ms on. Read as two horns, the D was put in the
+    upper voice over it."""
+    ordered = sorted(alive, key=lambda i: float(notes[i]["onset"]))
+    links: dict[int, int] = {}
+    for i in ordered:
+        start = float(notes[i]["onset"])
+        struck_with = any(
+            j != i and abs(float(notes[j]["onset"]) - start) <= chord_onset for j in alive
+        )
+        if struck_with:
+            continue
+        sounding = [
+            j
+            for j in alive
+            if j != i and float(notes[j]["onset"]) < start - chord_onset and _end(notes[j]) > start
+        ]
+        if len(sounding) != 1:
+            continue
+        (j,) = sounding
+        step = abs(int(notes[i]["pitch"]) - int(notes[j]["pitch"]))
+        if 1 <= step <= max_step and _end(notes[j]) - start <= tail:
+            notes[j]["duration"] = start - float(notes[j]["onset"])
+            links[i] = j
+    return links
+
+
+def continue_voices(
+    kept: list[dict[str, Any]],
+    indices: list[int],
+    links: dict[int, int],
+    overlap_s: float = OVERLAP_S,
+    share: float = OVERLAP_SHARE,
+    touch: float = TOUCH_S,
+    max_step: int = SUCCESSOR_MAX_STEP,
+) -> int:
+    """After ordering, in place: a note with NO partner of its own -- which
+    rule 4 puts in voice 1 -- stays in voice 2 when every note it continues
+    is in voice 2: its legato predecessor (`legato_successors`, `links`
+    over the original indices `indices` name), or a note of at most
+    `max_step` semitones away ending within `touch` of its start. In onset
+    order, so a line carries its voice on. A lone horn after a rest, or one
+    continuing anything in voice 1, is voice 1 as before. Returns how many
+    moved."""
+    position = {index: k for k, index in enumerate(indices)}
+    partnered = set()
+    for a, b, _shared in overlapping_pairs(kept):
+        if meaningful(kept[a], kept[b], overlap_s, share):
+            partnered.update((a, b))
+    moved = 0
+    for k in sorted(range(len(kept)), key=lambda k: float(kept[k]["onset"])):
+        if k in partnered or int(kept[k].get("voice", 1)) == 2:
+            continue
+        start = float(kept[k]["onset"])
+        before = [
+            j
+            for j, other in enumerate(kept)
+            if j != k
+            and abs(_end(other) - start) <= touch
+            and abs(int(other["pitch"]) - int(kept[k]["pitch"])) <= max_step
+        ]
+        predecessor = links.get(indices[k])
+        if predecessor in position:
+            before.append(position[predecessor])
+        if before and all(int(kept[j].get("voice", 1)) == 2 for j in before):
+            kept[k]["voice"] = 2
+            moved += 1
+    return moved
+
+
 def _voice_runs(notes: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
     """Each voice's notes in onset order."""
     runs: dict[int, list[dict[str, Any]]] = {}
@@ -467,11 +564,14 @@ def assign(
     alive = set(range(len(notes))) - ghosted
     work = [dict(n) for n in notes]
     tails = trim_tails(work, alive, overlap_s=overlap_s, share=share)
+    links = legato_successors(work, alive)
     crowded = thirds(work, alive, overlap_s, share)
     alive -= crowded
-    kept = [work[i] for i in sorted(alive)]
+    indices = sorted(alive)
+    kept = [work[i] for i in indices]
     for note, voice in zip(kept, order(kept, overlap_s, share), strict=True):
         note["voice"] = voice
+    continued = continue_voices(kept, indices, links, overlap_s, share)
     joined = rejoin_splits(kept, track, list(attacks))
     marked = mark_lead_ins(joined)
     dropped = [
@@ -481,6 +581,8 @@ def assign(
         stats.update(
             ghosts=len(ghosted),
             tails=tails,
+            successors=len(links),
+            continued=continued,
             thirds=len(crowded),
             rejoined=len(kept) - len(joined),
             lead_ins=sum(1 for n in marked if n.get("lead_in")),

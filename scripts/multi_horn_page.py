@@ -72,6 +72,17 @@ def parse_args(argv=None) -> argparse.Namespace:
     )
     parser.add_argument("--thirds", action="store_true", help="read triplets in literal time")
     parser.add_argument(
+        "--drop-faint",
+        action="store_true",
+        help="leave faint scraps (under 80 ms, confidence under 0.4) off the page (sidecar "
+        "drop_faint); the dump lists them either way",
+    )
+    parser.add_argument(
+        "--no-close-rests",
+        action="store_true",
+        help="keep a rest of an eighth or less before a voice's next note (sidecar close_rests)",
+    )
+    parser.add_argument(
         "--no-fold",
         action="store_true",
         help="write scoops and re-attack heads as notes, not folded (sidecar literal_lead_ins)",
@@ -118,7 +129,18 @@ def load_settings(args: argparse.Namespace) -> dict:
         settings["literal_thirds"] = True
     if args.no_fold:
         settings["literal_lead_ins"] = False
+    if args.no_close_rests:
+        settings["close_rests"] = False
+    if args.drop_faint:
+        settings["drop_faint"] = True
     return settings
+
+
+def reading_close(settings: dict, config) -> bool:
+    """Does this page close short rests (notation.writing_of)?"""
+    from swingscribe.notation import writing_of
+
+    return writing_of(settings, config)["close_rests"] > 0
 
 
 def tolerant_console() -> None:
@@ -193,6 +215,16 @@ def dump(notation, lines, edits, key: int, roll_bar: int | None) -> str:
         )
     out.append(f"unisons written once: {lines.unisons}")
     out.append("")
+    out.append(
+        "# faint scraps (under 80 ms, confidence under 0.4, not a lead-in; "
+        "--drop-faint leaves them off)"
+    )
+    for n in lines.faint:
+        out.append(
+            f"{n.onset:8.3f}  {n.duration:6.3f}  v{n.voice}  "
+            f"{pitch_name(n.pitch, key):>4}  conf {n.confidence:.2f}"
+        )
+    out.append("")
     offset = "" if roll_bar is None else f" (page bar 1 is the roll's bar {roll_bar})"
     out.append(f"# written, bar by bar{offset}")
     for bar in notation.bars:
@@ -214,7 +246,13 @@ def main(argv=None) -> int:
     from swingscribe.gui import library, review
     from swingscribe.gui import musicxml as gui_musicxml
     from swingscribe.model import NoteEvent
-    from swingscribe.notation import form_bar_of_page, grid_config, horn_lines, reading_of
+    from swingscribe.notation import (
+        form_bar_of_page,
+        grid_config,
+        horn_lines,
+        reading_of,
+        writing_of,
+    )
     from swingscribe.stages import beats, ingest, separate
 
     config = Config.from_yaml(args.config or DEFAULT_CONFIG_PATH)
@@ -304,7 +342,8 @@ def main(argv=None) -> int:
     out.write_text(xml, encoding="utf-8")
 
     heard = [NoteEvent(source=stem, **note) for note in (*edits["audible"], *edits["added"])]
-    lines = horn_lines(heard)
+    drops_faint = writing_of(settings, config)["drop_faint"]
+    lines = horn_lines(heard, drop_faint=drops_faint)
     upper = sum(1 for n in heard if n.voice != 2)
     lower = sum(1 for n in heard if n.voice == 2)
     described = gui_musicxml.describe(notation, config, settings, changes)
@@ -328,10 +367,18 @@ def main(argv=None) -> int:
         f"{', thirds' if settings.get('literal_thirds') else ''}"
         f"{', lead-ins folded' if reading['literal_lead_ins'] else ''}); "
         f"{len(moved)} of {len(lines.phrases)} lower phrases moved up, "
-        f"{lines.unisons} unisons written once"
+        f"{lines.unisons} unisons written once, {len(lines.faint)} faint scrap(s) "
+        f"{'left off' if drops_faint else 'written'}"
     )
+    # Rests on the page, drawn (voice 1) and hidden (voice 2): run with and
+    # without --no-close-rests and the difference is what closing took.
+    rests = [n for page in (notation, *notation.parts) for b in page.bars for n in b.notes]
+    drawn = sum(1 for n in rests if n.is_rest and not n.hidden)
+    hidden = sum(1 for n in rests if n.is_rest and n.hidden)
     print(
-        f"readability {readable['readability']:.3f}, tie rate {readable['tie_rate']:.3f}"
+        f"readability {readable['readability']:.3f}, tie rate {readable['tie_rate']:.3f}, "
+        f"rests {drawn} drawn + {hidden} hidden"
+        + (", rests up to an eighth closed" if reading_close(settings, config) else "")
         + ("" if roll_bar is None else f"; page bar 1 is the roll's bar {roll_bar}")
     )
     if args.dump_voices:

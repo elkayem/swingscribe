@@ -24,6 +24,7 @@ from swingscribe.notation import (
     reading_of,
     sub_phrases,
     timing_for,
+    writing_of,
 )
 from swingscribe.stages.export import to_musicxml
 from swingscribe.stages.quantize import literal_lags, quantize_notes
@@ -68,7 +69,7 @@ def test_a_multi_horn_dump_carries_its_own_fields_and_none_of_crepes():
     assert dumped["multi_horn_min_note_ms"] == 23.0
     # The rules' own version: a change to voices.py moves the GUI's review
     # key, which hashes this dump and never transcribe.CACHE_VERSION.
-    assert dumped["multi_horn_version"] == 2
+    assert dumped["multi_horn_version"] == 3
     # The horn fill, the tuning, the lead-ins and the piano line are CREPE's
     # or the piano model's; a multi-horn head reads none of them.
     for gone in ("horn_fill_gaps", "tuning_correction", "glide_max_ms", "piano_line"):
@@ -604,6 +605,50 @@ def test_a_swing_page_reads_the_lag_once_over_both_horns():
     assert lower_attacks and lower_attacks <= upper_attacks
 
 
+def test_a_head_closes_an_eighth_rest_before_the_voices_next_note():
+    """Bar 24: the lower A held three and a half beats, then an eighth of
+    silence before the next lower note on the downbeat. The listener heard
+    a whole note; a head writes one. A longer rest stays a rest."""
+    beats = grid()
+    bar = beats[8]
+    upper = [horn(bar, 4 * BEAT * 0.98, 74), horn(bar + 4 * BEAT, 4 * BEAT * 0.98, 72)]
+    lower = [
+        horn(bar, 3.5 * BEAT, 69, voice=2),
+        horn(bar + 4 * BEAT, 2 * BEAT, 67, voice=2),
+        horn(bar + 8 * BEAT, BEAT, 62, voice=2),
+    ]
+    region = (beats[4], beats[24])
+
+    def lower_line(settings):
+        config = Config()
+        config = config.model_copy(
+            update={"notate": config.notate.model_copy(update=writing_of(settings, config))}
+        )
+        page, _ = notation_for_horns(
+            "t.wav", upper + lower, beats, region, stem="other", config=config, anchor=beats[4]
+        )
+        return [
+            (b.number, round(n.beat, 3), n.duration, n.is_rest)
+            for b in page.bars
+            for n in b.notes
+            if n.voice == 2
+        ]
+
+    closed = lower_line({"ensemble": "multi-horn"})
+    assert (2, 0.0, 4.0, False) in closed  # the A, a whole note
+    kept = lower_line({"ensemble": "multi-horn", "close_rests": False})
+    assert (2, 3.5, 0.5, True) in kept  # the eighth rest, kept when asked
+    # Two beats of silence after the G are a rest either way.
+    assert any(rest and number == 3 and beat == 2.0 for number, beat, _d, rest in closed)
+
+
+def test_close_rests_is_for_heads_and_moves_no_key():
+    config = Config()
+    assert writing_of({"ensemble": "multi-horn"}, config)["close_rests"] == 0.5
+    assert writing_of({}, config)["close_rests"] == 0.0
+    assert "close_rests" not in config.notate.model_dump(mode="json")
+
+
 def test_a_literal_page_in_thirds_is_written_as_a_triplet():
     beats = grid()
     notes = []
@@ -849,3 +894,23 @@ def test_two_notes_put_in_one_voice_are_a_chord_in_it():
     struck = [n for b in page.bars for n in b.notes if not n.is_rest and not n.tie_stop]
     assert len(struck) == 8
     assert all(n.pitch == 72 and n.chord == [67] for n in struck)
+
+
+def test_a_faint_scrap_is_listed_and_left_off_only_when_asked():
+    """Bar 29: a 58 ms G-flat at confidence 0.33 on the bar line. Short AND
+    unsure AND not a lead-in -- never one alone."""
+    scrap = NoteEvent(onset=1.0, duration=0.058, pitch=66, confidence=0.33, source="other", voice=1)
+    short_but_sure = NoteEvent(
+        onset=2.0, duration=0.058, pitch=66, confidence=0.8, source="other", voice=1
+    )
+    lead_in = scrap.model_copy(update={"onset": 3.0, "lead_in": True})
+    line = [horn(0.0, 0.9, 72), scrap, short_but_sure, lead_in, horn(3.058, 1.0, 67)]
+    kept = horn_lines(line)
+    assert kept.faint == [scrap] and scrap in kept.upper
+    dropped = horn_lines(line, drop_faint=True)
+    assert dropped.faint == [scrap] and scrap not in dropped.upper
+    assert short_but_sure in dropped.upper and lead_in in dropped.upper
+    config = Config()
+    assert writing_of({"ensemble": "multi-horn"}, config)["drop_faint"] is False
+    assert writing_of({"ensemble": "multi-horn", "drop_faint": True}, config)["drop_faint"]
+    assert not writing_of({"drop_faint": True}, config)["drop_faint"]  # heads only

@@ -782,8 +782,13 @@ def notated_durations(
     legato_fill: float,
     legato_cap: float = 0.0,
     hold_to_beat: float = 0.0,
+    close_rests: float = 0.0,
 ) -> list[tuple[int, float, float, int]]:
     """Played lengths → written lengths.
+
+    `close_rests` writes a REST of at most that many beats before the next
+    note into the note before it (NotateConfig.close_rests): a two-horn
+    head's held notes run to the next note.
 
     Jazz is written legato and played detached. Measured on the three hand
     transcriptions, **90-93% of notated notes fill the gap to the next note
@@ -832,7 +837,9 @@ def notated_durations(
     not a beat -- a note only the page has, or the next note anticipated --
     and there our eighth and rest was the page's eighth.
     """
-    if len(events) < 2 or (legato_fill <= 0 and legato_cap <= 0 and hold_to_beat <= 0):
+    if len(events) < 2 or (
+        legato_fill <= 0 and legato_cap <= 0 and hold_to_beat <= 0 and close_rests <= 0
+    ):
         return events
     absolute = [bars_index.start_of(bar) + beat for bar, beat, _d, _p in events]
     out = []
@@ -848,7 +855,9 @@ def notated_durations(
                 and _close(gap, whole)
                 and 1 <= whole <= hold_to_beat + TICK
             )
-            if gap > TICK and (within_cap or holds or to_beat):
+            silence = gap - duration
+            closes = close_rests > 0 and TICK < silence <= close_rests + TICK
+            if gap > TICK and (within_cap or holds or to_beat or closes):
                 duration = gap
         out.append((bar, beat, duration, pitch))
     return out
@@ -865,6 +874,7 @@ def build(
     literal: bool = False,
     key_fifths: int | None = None,
     hold_to_beat: float = 0.0,
+    close_rests: float = 0.0,
 ) -> Notation:
     """Quantized notes → bars of spelled, tied, rest-filled notation.
 
@@ -890,7 +900,12 @@ def build(
     last_bar = max(n.bar for n in quantized)
     bars_index = _Bars(sections, first_bar, last_bar + 4)
     events = notated_durations(
-        without_overlap(quantized, bars_index), bars_index, legato_fill, legato_cap, hold_to_beat
+        without_overlap(quantized, bars_index),
+        bars_index,
+        legato_fill,
+        legato_cap,
+        hold_to_beat,
+        close_rests,
     )
     # Values before gaps. `close_short_gaps` extends a note to the NEXT ONSET,
     # which is already on the grid, so what it produces is grid-aligned by
@@ -990,6 +1005,7 @@ def run(document: Document, config: Config) -> Document:
         literal=config.quantize.timing != "swing",
         key_fifths=config.notate.key,
         hold_to_beat=config.notate.hold_to_beat,
+        close_rests=config.notate.close_rests,
     )
     print(
         f"notate: {len(notation.bars)} bars, key {notation.key_fifths:+d} fifths, "

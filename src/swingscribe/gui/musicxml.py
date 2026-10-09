@@ -54,6 +54,7 @@ from swingscribe.notation import (
     reading_of,
     timing_for,
     with_chords,
+    writing_of,
 )
 
 
@@ -245,7 +246,12 @@ def notate_config(
     return config.model_copy(
         update={
             "notate": config.notate.model_copy(
-                update={"transposition": transposition, "title": title, "key": key_of(settings)}
+                update={
+                    "transposition": transposition,
+                    "title": title,
+                    "key": key_of(settings),
+                    **writing_of(settings, config),
+                }
             ),
             "quantize": config.quantize.model_copy(
                 update={**reading_of(settings, config), "polyphonic": texture}

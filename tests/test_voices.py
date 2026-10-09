@@ -290,3 +290,60 @@ def test_both_horns_scoop_into_a_chord_each_in_its_own_voice():
     marks = {(n["pitch"], n["voice"]): bool(n.get("lead_in")) for n in kept}
     assert marks == {(64, 1): True, (59, 2): True, (65, 1): False, (60, 2): False}
     assert stats["lead_ins"] == 2
+
+
+# ── a legato successor keeps its horn's voice (rule 2, voices.legato_successors) ─
+
+
+def test_bar_26_the_tenors_step_down_stays_in_the_lower_voice():
+    """The head's bar 26 as Basic Pitch heard it (Local task A4): the
+    trumpet's F4 rings over the bar line and comes back on beat 4; the
+    tenor plays E-flat on 1 into D on 3 (heard as D-flat, split in two),
+    the E-flat ringing 190 ms into it. The tenor's line is voice 2."""
+    notes = [
+        note(40.955, 1.139, 65, 0.79),  # trumpet F4, bar 25
+        note(40.966, 0.685, 60, 0.66),  # tenor C4
+        note(41.651, 0.280, 60, 0.71),  # tenor C4
+        note(41.885, 0.662, 63, 0.61),  # tenor Eb4, beat 1 of bar 26
+        note(42.094, 0.104, 65, 0.61),  # the trumpet's F4 again, briefly
+        note(42.361, 0.139, 61, 0.43),  # tenor Db4/D on 3
+        note(42.500, 0.093, 61, 0.46),  # ... split
+        note(42.628, 0.209, 65, 0.67),  # trumpet F4 on 4
+    ]
+    stats = {}
+    kept, dropped = voices.assign(notes, stats=stats)
+    assert dropped == []
+    voice_of = {(round(n["onset"], 3), n["pitch"]): n["voice"] for n in kept}
+    assert voice_of[(41.885, 63)] == 2
+    assert voice_of[(42.361, 61)] == 2 and voice_of[(42.5, 61)] == 2
+    assert voice_of[(40.955, 65)] == 1 and voice_of[(42.628, 65)] == 1
+    assert stats["successors"] == 1
+    eb = next(n for n in kept if n["pitch"] == 63)
+    assert eb["duration"] == pytest.approx(42.361 - 41.885)  # its tail cut
+
+
+def test_a_note_struck_with_another_is_a_chord_not_a_successor():
+    notes = [note(0.0, 1.1, 64), note(1.0, 1.0, 62), note(1.0, 1.0, 55)]
+    work = [dict(n) for n in notes]
+    assert voices.legato_successors(work, {0, 1, 2}) == {}
+
+
+def test_a_held_note_the_other_horn_enters_under_is_its_partner():
+    # The upper horn holds on: the new note a step under it is the other
+    # horn coming in, a partner, never a successor.
+    notes = [note(0.0, 2.0, 67), note(0.5, 1.0, 65)]
+    kept, _ = voices.assign(notes)
+    assert [(n["pitch"], n["voice"]) for n in kept] == [(67, 1), (65, 2)]
+
+
+def test_a_leap_is_not_a_legato_successor():
+    work = [note(0.0, 1.1, 67), note(1.0, 1.0, 60)]
+    assert voices.legato_successors(work, {0, 1}) == {}
+
+
+def test_a_lone_horn_after_a_rest_is_voice_1():
+    # The lower horn's line ends; after a rest one horn alone is voice 1,
+    # as it always was.
+    notes = [note(0.0, 1.0, 72), note(0.0, 1.0, 64), note(1.6, 0.5, 63)]
+    kept, _ = voices.assign(notes)
+    assert [(n["pitch"], n["voice"]) for n in kept] == [(72, 1), (64, 2), (63, 1)]

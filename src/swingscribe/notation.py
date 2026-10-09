@@ -244,6 +244,27 @@ def timing_for(settings: dict, config: Config) -> str:
     return ENSEMBLE_TIMINGS.get(ensemble, config.quantize.timing)
 
 
+# A two-horn head's rest of up to an EIGHTH before the voice's next note is
+# written into the note before it (NotateConfig.close_rests): the listener
+# heard bar 24's lower A held to the next note, a whole note, where the
+# page wrote three and a half beats and an eighth rest (Local task A4).
+HEAD_CLOSE_RESTS = 0.5
+
+
+def writing_of(settings: dict, config: Config) -> dict:
+    """The notate settings a page's sidecar chooses beyond the key and the
+    part: for a multi-horn head, `close_rests` (an eighth, unless the
+    sidecar's `close_rests` is false) and `drop_faint` (the sidecar's,
+    off by default); for anything else the config's."""
+    horns = (settings.get("ensemble") or config.transcribe.ensemble) == "multi-horn"
+    closes = horns and settings.get("close_rests", True) is not False
+    return {
+        "close_rests": HEAD_CLOSE_RESTS if closes else config.notate.close_rests,
+        # Off until measured: only a head's sidecar turns it on.
+        "drop_faint": bool(horns and settings.get("drop_faint", config.notate.drop_faint)),
+    }
+
+
 def reading_of(settings: dict, config: Config) -> dict:
     """The quantize settings a page's sidecar chooses: its rhythm
     (`timing_for`), and for a literal page the readings a written head may
@@ -276,6 +297,8 @@ class HornLines:
     phrases: list[dict] = field(default_factory=list)
     # Lower notes written once, in voice 1, as a unison.
     unisons: int = 0
+    # The faint scraps (`is_faint`), whether or not they were left off.
+    faint: list[NoteEvent] = field(default_factory=list)
 
 
 def _weighted_median(pairs: list[tuple[float, float]]) -> float | None:
@@ -372,6 +395,22 @@ def phrase_interval(phrase: list[NoteEvent], upper: list[NoteEvent]) -> float | 
     return _weighted_median(pairs)
 
 
+# A heard note this short AND this unsure, and not a lead-in, is a faint
+# scrap a person would not write down: the head's 58 ms G-flat at
+# confidence 0.33 on bar 29's bar line ("too short to write down. I would
+# ignore it", the listener). Never one condition alone -- CLAUDE.md's
+# "never filter notes by duration" was measured on solos -- and OFF until
+# measured on the head (NotateConfig.drop_faint, sidecar `drop_faint`):
+# `horn_lines` lists the scraps either way, and the script's dump says
+# what the rule would take.
+FAINT_MAX_S = 0.08
+FAINT_CONFIDENCE = 0.4
+
+
+def is_faint(note: NoteEvent) -> bool:
+    return note.duration < FAINT_MAX_S and note.confidence < FAINT_CONFIDENCE and not note.lead_in
+
+
 def horn_lines(
     notes: list[NoteEvent],
     *,
@@ -379,6 +418,7 @@ def horn_lines(
     merge_unisons: bool = True,
     rest: float = PHRASE_REST_S,
     unison_onset: float = UNISON_ONSET_S,
+    drop_faint: bool = False,
 ) -> HornLines:
     """Two horns' heard notes (NoteEvent.voice) as one staff writes them.
 
@@ -397,8 +437,12 @@ def horn_lines(
       -- is written ONCE, in voice 1.
 
     `move_octaves` and `merge_unisons` are off for two PARTS, where each
-    horn plays its own notes at its own octave.
+    horn plays its own notes at its own octave. `drop_faint` leaves the
+    faint scraps (`is_faint`) off the page; they are listed either way.
     """
+    faint = [n for n in notes if is_faint(n)]
+    if drop_faint:
+        notes = [n for n in notes if not is_faint(n)]
     upper = sorted((n for n in notes if n.voice != 2), key=lambda n: (n.onset, -n.pitch))
     lower = sorted((n for n in notes if n.voice == 2), key=lambda n: (n.onset, -n.pitch))
     moved: list[NoteEvent] = []
@@ -432,7 +476,7 @@ def horn_lines(
                 continue
             kept.append(note)
         moved = kept
-    return HornLines(upper=upper, lower=moved, phrases=phrases, unisons=unisons)
+    return HornLines(upper=upper, lower=moved, phrases=phrases, unisons=unisons, faint=faint)
 
 
 def span_anchor(
@@ -922,7 +966,13 @@ def notation_for_horns(
     `parts` writes TWO PARTS instead, upper and lower, the lower at its own
     `lower_transpose`: each part plays its own notes, so nothing is moved an
     octave and no unison is merged."""
-    lines = horn_lines(notes, move_octaves=not parts, merge_unisons=not parts)
+    config = kwargs.get("config")
+    lines = horn_lines(
+        notes,
+        move_octaves=not parts,
+        merge_unisons=not parts,
+        drop_faint=bool(config and config.notate.drop_faint),
+    )
     # Two notes struck together in ONE voice -- the listener moved one there
     # with the Voices tool -- are a chord in it, not a grid too coarse (one
     # would be pushed a 32nd late, or dropped).

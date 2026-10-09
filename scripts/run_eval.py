@@ -886,6 +886,7 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
         notation_for_horns,
         notation_for_span,
         reading_of,
+        writing_of,
     )
 
     track = track_of(name)  # the key may carry a take; the sidecar is the track's
@@ -924,7 +925,10 @@ def notate_run(name: str, run: dict, grid: dict, region: tuple[float, float] | N
         # a multi-horn head). Every other page keeps the default reading the
         # pins were made on, whatever its sidecar's Rhythm menu says.
         common["config"] = config.model_copy(
-            update={"quantize": config.quantize.model_copy(update=reading_of(sidecar, config))}
+            update={
+                "quantize": config.quantize.model_copy(update=reading_of(sidecar, config)),
+                "notate": config.notate.model_copy(update=writing_of(sidecar, config)),
+            }
         )
         page, _lines = notation_for_horns(
             str(BENCH / track),  # a name for the page's title, not audio
