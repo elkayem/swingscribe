@@ -84,22 +84,23 @@ def test_multi_horn_is_offered_and_never_routes_to_the_piano_model():
     assert not tc.crepe_line
 
 
-def test_a_multi_horn_page_is_literal_unless_the_sidecar_says_otherwise():
+def test_a_multi_horn_page_is_swing_unless_the_sidecar_says_otherwise():
     config = Config()
-    # Eighths, the listener's default for a head (2026-10-09); 16ths a choice.
-    assert timing_for({"ensemble": "multi-horn"}, config) == "literal-8"
+    # Swing, the listener's default for a head (2026-10-09); the literal
+    # timings stay choices for a straight-eighth head.
+    assert timing_for({"ensemble": "multi-horn"}, config) == "swing"
     assert timing_for({"ensemble": "multi-horn", "timing": "literal-16"}, config) == "literal-16"
-    assert timing_for({"ensemble": "multi-horn", "timing": "swing"}, config) == "swing"
+    assert timing_for({"ensemble": "multi-horn", "timing": "literal-8"}, config) == "literal-8"
     assert timing_for({}, config) == "swing"
     assert timing_for({"ensemble": "trio"}, config) == "swing"
     # A hand-edited value this build does not know is the default, not an error.
-    assert timing_for({"ensemble": "multi-horn", "timing": "rubato"}, config) == "literal-8"
+    assert timing_for({"ensemble": "multi-horn", "timing": "rubato"}, config) == "swing"
 
 
 def test_a_head_takes_the_lag_out_and_folds_its_scoops_by_default():
     config = Config()
     assert reading_of({"ensemble": "multi-horn"}, config) == {
-        "timing": "literal-8",
+        "timing": "swing",
         # A head takes the lag out (the listener's decision, 2026-10-09) ...
         "literal_lag": True,
         "literal_thirds": False,
@@ -577,6 +578,30 @@ def test_a_multi_horn_page_folds_both_horns_scoops_into_the_chord():
     assert sorted(folded) == [(1, 0.0, 72, [71]), (2, 0.0, 67, [66])]
     as_heard = sounding(literal_config())
     assert sorted(p for _, _, p, _ in as_heard) == [66, 67, 71, 72]
+
+
+def test_a_swing_page_reads_the_lag_once_over_both_horns():
+    """The upper horn plays a line 0.3 of a beat behind; the lower enters
+    for two chords with it. Read per voice, the lower horn has too few
+    downbeats to read a lag from, and was written off the beat under an
+    upper horn moved onto it. Read once over both, the chords stay chords."""
+    beats = grid()
+    late = 0.3 * BEAT
+    upper = [horn(t + late, BEAT * 0.9, 72) for t in beats[4:20]]
+    lower = [horn(t + late, BEAT * 0.9, 67, voice=2) for t in beats[10:12]]
+    region = (beats[4], beats[20])
+    page, _ = notation_for_horns(
+        "t.wav", upper + lower, beats, region, stem="other", config=Config(), anchor=beats[4]
+    )
+    attacks = {
+        (n.voice, b.number, round(n.beat, 3))
+        for b in page.bars
+        for n in b.notes
+        if not n.is_rest and not n.tie_stop
+    }
+    lower_attacks = {(bar, beat) for voice, bar, beat in attacks if voice == 2}
+    upper_attacks = {(bar, beat) for voice, bar, beat in attacks if voice == 1}
+    assert lower_attacks and lower_attacks <= upper_attacks
 
 
 def test_a_literal_page_in_thirds_is_written_as_a_triplet():

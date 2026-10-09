@@ -98,7 +98,7 @@ def test_the_script_writes_a_two_horn_page_from_the_sidecar(monkeypatch, tmp_pat
     assert "bar   1 v2:" in text or "bar   2 v2:" in text
     printed = capsys.readouterr().out
     assert "1 candidates" in printed
-    assert "literal-8" in printed and "lag out" in printed
+    assert "(swing" in printed
 
 
 def test_the_flags_are_laid_over_the_sidecar_in_memory(tmp_path):

@@ -766,9 +766,10 @@ def notation_for_span(
     is the upper horn and this the lower (`horn_lines` has already written
     them), each quantized on its own on the same grid under the upper's
     swing reading, and merged as voices 1 and 2 of one staff
-    (`merge_horn_voices`). A literal page that takes out the line's lag
-    (QuantizeConfig.literal_lag) reads it ONCE over both horns and moves
-    them together, so a chord struck behind the beat stays one chord. With
+    (`merge_horn_voices`). The line's lag -- a swing page's always (R29),
+    a literal page's when QuantizeConfig.literal_lag asks -- is read ONCE
+    over both horns and moves them together, so a chord struck behind the
+    beat stays one chord. With
     `horn_parts` the two horns are two PARTS instead (`horn_parts`), the
     lower one written at `lower_transpose` semitones (the upper part's own
     when None).
@@ -827,6 +828,18 @@ def notation_for_span(
         right, lower = _unlag_together(right, lower, kept, run_config)
         run_config = run_config.model_copy(
             update={"quantize": run_config.quantize.model_copy(update={"literal_lag": False})}
+        )
+    elif horns and run_config.quantize.timing == "swing" and run_config.quantize.lag_window_beats:
+        # Swing takes the line's lag out too (R29), but per CALL, so each
+        # horn would read its own: a lower horn entering for two chords has
+        # too few downbeats in its window to read any, and was written late
+        # under an upper horn moved onto the beat. Read once over both,
+        # before the swing reading (which then measures the corrected
+        # offbeats, as quantize's own warp does under phi* less the lag),
+        # and the quantizer's own per-voice lag is switched off.
+        right, lower = _unlag_together(right, lower, kept, run_config)
+        run_config = run_config.model_copy(
+            update={"quantize": run_config.quantize.model_copy(update={"lag_window_beats": 0})}
         )
     lead = left if lead_is_left else lower if lead_is_lower else right
 

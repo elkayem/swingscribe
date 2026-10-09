@@ -613,9 +613,11 @@ The page writes both horns on one treble staff, in concert pitch:
 - A scoop into a held note (a short note a semitone under it) is written
   as a grace note on the note it leads into, and a note re-attacked with a
   short "head" is written as one note.
-- The rhythm is **literal 8ths** unless you pick another one in the
-  **Rhythm** menu: horns playing a written head play the written rhythm.
-  Pick **Literal 16ths** for a melody that moves in sixteenths.
+- The rhythm is **Swing** unless you pick another one in the **Rhythm**
+  menu: eighths where a beat shows no more, sixteenths where one does,
+  triplets, and "Swing" over the staff. For a head played in straight
+  eighths (a bossa, a Latin tune), pick **Literal 8ths**, or **Literal
+  16ths** for a melody that moves in sixteenths.
 - Horns that sit a little behind the beat are written on it: how far
   behind they play is read over both horns together and taken out before
   the notes are placed, so a chord they attack together stays together.
@@ -781,8 +783,7 @@ transposes it for a horn.
 - **Literal 8ths** writes every note on the nearest eighth when the tempo
   is 160 bpm or faster, and on the nearest sixteenth below that. Where
   two notes in one beat would land on the same eighth, that beat is
-  written in sixteenths (or thirty-seconds), so no note is lost. It is
-  the default for a two-horn head.
+  written in sixteenths (or thirty-seconds), so no note is lost.
 - **Literal 16ths** writes every note on the nearest sixteenth, exactly as
   played, with no "Swing" marking, scoops included as notes. A swung pair usually comes out as a
   dotted eighth and a sixteenth. A beat whose notes are too close together

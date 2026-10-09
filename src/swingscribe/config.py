@@ -36,12 +36,14 @@ ENSEMBLES: tuple[str, ...] = get_args(Ensemble)
 LINES: tuple[str, ...] = ("crepe", "oracle")
 TRANSPOSITIONS: tuple[str, ...] = get_args(Transposition)
 # The rhythm a page is written in when the sidecar has chosen none
-# (QuantizeConfig.timing), where it is not the config's: horns playing in
-# harmony play the rhythm that is written, so a multi-horn head is LITERAL
-# by default (docs/multi-horn.md), on EIGHTHS (the listener's decision,
-# 2026-10-09; 16ths stay a choice for a melody that uses them). Read
-# through `notation.timing_for`.
-ENSEMBLE_TIMINGS: dict[str, str] = {"multi-horn": "literal-8"}
+# (QuantizeConfig.timing), per ensemble. A multi-horn head is SWING, the
+# listener's decision of 2026-10-09 after the head measured level with
+# literal eighths: it writes eighths where a beat shows no more, 16ths
+# where one does, triplets, and the "Swing" marking, with the lag read
+# once over both horns (`notation.notation_for_span`). "Literal 8ths" and
+# "Literal 16ths" stay in the menu for a straight-eighth head (bossa,
+# Latin, even eighths). Read through `notation.timing_for`.
+ENSEMBLE_TIMINGS: dict[str, str] = {"multi-horn": "swing"}
 # How quantize writes rhythm (QuantizeConfig.timing): "swing" reads the feel
 # out and writes swung eighths as eighths under a "Swing" marking; the
 # literal ones snap every onset to the nearest grid point, feel and all --
