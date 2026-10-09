@@ -418,6 +418,14 @@ class TranscribeConfig(BaseModel):
     multi_horn_overlap_ms: float = 60.0
     multi_horn_overlap_share: float = 0.3
     multi_horn_ghost_ratio: float = 0.6
+    # The voices' rules themselves (voices.py, transcribe._hear_horns), as a
+    # number: the GUI's review key hashes this config's dump and never
+    # transcribe.CACHE_VERSION, so a change to the rules that moves no
+    # field would serve every cached multi-horn review unchanged. Bump it
+    # with any such change; like every field above it dumps only for a
+    # multi-horn head. 2 (2026-10-09): tails cut at a new chord, split held
+    # notes joined where CREPE holds them, lead-ins marked.
+    multi_horn_version: int = 2
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
@@ -858,6 +866,22 @@ class QuantizeConfig(BaseModel):
     # better than the literal grid by `LITERAL_THIRDS_MARGIN` beats of mean
     # snap error (quantize.literal_notes).
     literal_thirds: bool = False
+    # A literal beat SHORTER than this many seconds is written on EIGHTHS,
+    # finer only where eighths cannot keep its onsets apart -- the running
+    # value set by tempo (D11: an eighth over 160 bpm, which is 0.375 s).
+    # The Open Sesame head at 250 bpm put a 16th at 60 ms and Basic Pitch's
+    # attacks a median 15 ms behind the beat with a spread to 0.19 of it,
+    # so nearest-16th split one chord's attacks across two grid points
+    # (Local task A, 2026-10-09). OFF (0.0) until the listener chooses it:
+    # they asked for the rhythm as played.
+    literal_eighths_beat_s: float = 0.0
+    # Fold the notes the transcriber marked as leading into the next
+    # (NoteEvent.lead_in) into it on a LITERAL page too, a scoop as its
+    # grace note -- what `absorb_lead_ins` does on a swing page. A solo's
+    # literal page writes every heard note; a multi-horn head's scoops
+    # into a held chord are not notes on the listener's page
+    # (`notation.reading_of` turns this on for that ensemble).
+    literal_lead_ins: bool = False
 
     @model_serializer(mode="wrap")
     def _key_stable_dump(self, handler):
@@ -880,6 +904,8 @@ class QuantizeConfig(BaseModel):
             "reranker",
             "literal_lag",
             "literal_thirds",
+            "literal_eighths_beat_s",
+            "literal_lead_ins",
         ):
             if not data.get(field):
                 data.pop(field, None)

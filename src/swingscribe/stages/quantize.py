@@ -679,6 +679,8 @@ def quantize_notes(
     reranker="",
     literal_lag: bool = False,
     literal_thirds: bool = False,
+    literal_eighths_beat_s: float = 0.0,
+    literal_lead_ins: bool = False,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Warp, snap, and place notes in bars. See the module docstring.
 
@@ -690,7 +692,10 @@ def quantize_notes(
 
     A literal `timing` bypasses all of it for `literal_notes`, which takes
     the line's lag out first when `literal_lag` asks (`literal_lags`, with
-    the lag window above) and offers thirds when `literal_thirds` does.
+    the lag window above), offers thirds when `literal_thirds` does, writes
+    a beat shorter than `literal_eighths_beat_s` on eighths, and carries
+    `graces` (the run folds lead-ins on a literal page when
+    `literal_lead_ins` asks; the flag itself is read there).
     `polyphonic`
     folds notes the grid puts on one position into a chord (`merge_chords`)
     rather than losing one of them.
@@ -726,6 +731,8 @@ def quantize_notes(
             ),
             thirds=literal_thirds,
             min_onsets_for_thirds=min_onsets_for_tuplet,
+            graces=graces,
+            eighths_beat_s=literal_eighths_beat_s,
         )
     by_beat, _track = pooled_phase(spans, straight_bur_ceiling)
     finest = max(1, resolution // 4)  # grid steps per beat at full resolution
@@ -1087,6 +1094,8 @@ def literal_notes(
     lags: dict[int, float] | None = None,
     thirds: bool = False,
     min_onsets_for_thirds: int = 3,
+    graces: list[list[int]] | None = None,
+    eighths_beat_s: float = 0.0,
 ) -> tuple[list[QuantizedNote], list[float]]:
     """Every onset on the NEAREST point of a fixed grid: the literal page.
 
@@ -1112,6 +1121,11 @@ def literal_notes(
     the snap (`literal_lags`; a note keeps its length), and `thirds` lets a
     beat of at least `min_onsets_for_thirds` onsets that fits thirds
     (`_fits_thirds`) be written in them -- the bridge's triplet chords.
+    `eighths_beat_s` writes a beat shorter than that many seconds on
+    EIGHTHS (QuantizeConfig.literal_eighths_beat_s), refined to 16ths and
+    then 32nds only where a coarser grid cannot keep its onsets apart or
+    pushes one onto the next beat's own note. `graces` rides beside
+    `chords` (QuantizedNote.grace).
 
     Returns (notes, snapped positions in absolute beats), like
     `quantize_notes`. The positions are raw beat time -- there is no warp
@@ -1120,8 +1134,11 @@ def literal_notes(
     if len(beats) < 2:
         return [], []
     extras = chords if chords is not None else [[] for _ in onsets]
+    ornaments = graces if graces is not None else [[] for _ in onsets]
     placed = []
-    for onset, duration, pitch, chord in zip(onsets, durations, pitches, extras, strict=True):
+    for onset, duration, pitch, chord, grace in zip(
+        onsets, durations, pitches, extras, ornaments, strict=True
+    ):
         position = beat_position(onset, beats)
         if position is None:
             continue
@@ -1131,22 +1148,28 @@ def literal_notes(
         )
         if lags:
             position = unlag_position(position, lags)
-        placed.append((position, max(0.0, length), pitch, list(chord)))
+        placed.append((position, max(0.0, length), pitch, list(chord), list(grace)))
     placed.sort(key=lambda note: (note[0], note[2]))
 
     by_beat: dict[int, list[float]] = {}
     for position, *_rest in placed:
         by_beat.setdefault(int(position), []).append(position - int(position))
     grids: dict[int, int] = {}
+    finest = LITERAL_DIVISIONS["literal-32"]
+
+    def pushes(offsets: list[float], index: int, grid: int) -> bool:
+        """Would this grid push the beat's last onset onto the next beat's
+        own note?"""
+        return any(snap(o, grid)[0] >= 1.0 - 1e-9 for o in offsets) and any(
+            snap(o, grid)[0] <= 1e-9 for o in by_beat.get(index + 1, [])
+        )
+
     for index, offsets in by_beat.items():
         grid = divisions
-        if divisions == LITERAL_DIVISIONS["literal-16"]:
-            snapped = [snap(o, grid)[0] for o in offsets]
-            pushed = any(s >= 1.0 - 1e-9 for s in snapped) and any(
-                snap(o, grid)[0] <= 1e-9 for o in by_beat.get(index + 1, [])
-            )
-            if not _keeps_apart(offsets, grid) or pushed:
-                grid = divisions * 2
+        if eighths_beat_s > 0 and _beat_length(beats, index) < eighths_beat_s:
+            grid = 2
+        while grid < finest and (not _keeps_apart(offsets, grid) or pushes(offsets, index, grid)):
+            grid *= 2
         if thirds and _fits_thirds(offsets, grid, min_onsets_for_thirds):
             grid = 3
         grids[index] = grid
@@ -1154,7 +1177,7 @@ def literal_notes(
     out: list[QuantizedNote] = []
     positions: list[float] = []
     previous = -math.inf
-    for position, length, pitch, chord in placed:
+    for position, length, pitch, chord, grace in placed:
         index = int(position)
         grid = grids[index]
         slot = index + snap(position - index, grid)[0]
@@ -1172,6 +1195,7 @@ def literal_notes(
                 pitch=pitch,
                 timing_residual=position - slot,
                 chord=chord,
+                grace=grace,
             )
         )
         positions.append(slot)
@@ -1493,6 +1517,8 @@ def settings(qc: QuantizeConfig) -> dict:
         "reranker": qc.reranker,
         "literal_lag": qc.literal_lag,
         "literal_thirds": qc.literal_thirds,
+        "literal_eighths_beat_s": qc.literal_eighths_beat_s,
+        "literal_lead_ins": qc.literal_lead_ins,
     }
 
 
@@ -1553,7 +1579,10 @@ def run(document: Document, config: Config) -> Document:
         raise ValueError(f"quantize needs notes for the {stem!r} stem; available: {available}")
 
     graces = None
-    if qc.absorb_lead_ins and qc.timing == "swing" and not qc.polyphonic:
+    # A literal page writes every heard note unless it is asked to fold the
+    # lead-ins too (QuantizeConfig.literal_lead_ins: a multi-horn head).
+    folds = qc.timing == "swing" or qc.literal_lead_ins
+    if qc.absorb_lead_ins and folds and not qc.polyphonic:
         notes, graces = absorb_lead_ins(notes)
     quantized, _positions = quantize_notes(
         [n.onset for n in notes],

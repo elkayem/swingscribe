@@ -113,3 +113,29 @@ def test_the_flags_are_laid_over_the_sidecar_in_memory(tmp_path):
     assert settings["literal_lag"] is True and settings["literal_thirds"] is True
     assert settings["anchor"] == 8.46
     assert multi_horn_page.span_of(args, settings) == (0.0, 67.308)
+
+
+def test_the_tempo_and_fold_flags_are_sidecar_keys(tmp_path):
+    args = multi_horn_page.parse_args(["x.m4a", "--sidecar", str(tmp_path / "none.json")])
+    settings = multi_horn_page.load_settings(args)
+    assert "literal_tempo" not in settings and "literal_lead_ins" not in settings
+    args = multi_horn_page.parse_args(
+        ["x.m4a", "--sidecar", str(tmp_path / "none.json"), "--by-tempo", "--no-fold"]
+    )
+    settings = multi_horn_page.load_settings(args)
+    assert settings["literal_tempo"] is True
+    assert settings["literal_lead_ins"] is False
+
+
+def test_a_console_that_cannot_print_a_flat_does_not_kill_the_summary(monkeypatch):
+    """The Windows console in cp1252: the page was written and the summary
+    line naming the key died on its flat sign."""
+    import io
+
+    raw = io.BytesIO()
+    console = io.TextIOWrapper(raw, encoding="cp1252", newline="\n")
+    monkeypatch.setattr(sys, "stdout", console)
+    multi_horn_page.tolerant_console()
+    print("key B♭ major")
+    console.flush()
+    assert raw.getvalue() == b"key B? major\n"

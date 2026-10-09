@@ -46,13 +46,29 @@ the page applies the writing conventions.
   1. an overtone ghost (12, 19, 24, 28 ... semitones over a note that holds
      it for half its length or more, with at most 0.6 of its confidence) is
      dropped;
-  2. where three sound at once, the two most confident stay;
-  3. notes that overlap meaningfully (60 ms, or 30% of the shorter) are
+  2. a NEW CHORD -- two notes of different pitches struck within 60 ms --
+     ends whatever was still sounding when it starts (`trim_tails`): two
+     horns attacking together leave nothing else held, so what rings on is
+     a release tail;
+  3. where three sound at once, the two most confident stay;
+  4. notes that overlap meaningfully (60 ms, or 30% of the shorter) are
      ordered by pitch, the higher in voice 1 -- over the whole overlap graph,
      so continuity keeps a horn in its voice through a brief crossing and
      the lower horn moving under a held note is caught by the overlaps with
      it. A note with no partner (one horn alone, a unison heard as one note)
-     is voice 1, written once.
+     is voice 1, written once;
+  5. in each voice, two touching notes of one pitch are joined where
+     CREPE's frame trace holds that pitch across the join (50 ms either
+     side, within half a semitone) and none of its corroborated onsets is
+     within 40 ms (`rejoin_splits`) -- Basic Pitch re-attacks a held note on
+     a stray onset peak. CREPE follows one horn at a time, so it vouches
+     only where it is on that horn; elsewhere a split stays;
+  6. in each voice, a note of at most 100 ms touching the next, a semitone
+     under it (a scoop) or at its pitch (a re-attack's head), where the next
+     is at least three times as long, is marked `lead_in` (`mark_lead_ins`).
+     The length ratio is what keeps a chromatic or repeated 16th run at 250
+     bpm (60 ms a note) from reading as a chain of lead-ins; CREPE's line
+     tells a scoop by its frames never settling, which Basic Pitch cannot.
 - What neither voice holds -- the ghosts and the thirds -- is the review's
   `candidates`, which the Edit tool can switch on (`dropped` says why each
   was left out).
@@ -62,6 +78,10 @@ the page applies the writing conventions.
 - Every `multi_horn_*` field enters a cache key only for a multi-horn head
   (`TranscribeConfig`'s serializer); no other key moved, and a test pins the
   horn-led, trio and solo-piano dumps as they were.
+- `multi_horn_version` is the rules' own number. The GUI's review key hashes
+  the transcribe dump, never `transcribe.CACHE_VERSION`, so a change to
+  `voices.py` that moves no field would serve every cached head unchanged:
+  bump it with any such change (2 since 2026-10-09: rules 2, 5 and 6).
 
 ### Writing (`notation.py`)
 
@@ -76,6 +96,12 @@ button, the page view, the Score button, `run_eval` and
     upper voice, weighted by time together, is an octave or more. Never note
     by note. An octave and a third becomes a third; a phrase doubled at the
     octave becomes a unison;
+  - a phrase is CUT where its distance from the upper voice changes regime
+    (an octave or more under, or less) for at least a second and three
+    notes (`sub_phrases`): the head's bars 15-16, two bars an octave and a
+    third under inside a 46-note phrase whose median is a fourth, were
+    left wide apart in the first measurement. A shorter excursion stays
+    with its phrase, so nothing is decided note by note;
   - a unison (same pitch, onsets within 50 ms) is written ONCE, in voice 1.
 - Each voice is quantized on its own, on ONE grid, under the upper voice's
   swing reading (the piano overlay's precedent, `_notate_only`), and the two
@@ -87,6 +113,12 @@ button, the page view, the Score button, `run_eval` and
 - The rhythm is LITERAL by default (`config.ENSEMBLE_TIMINGS`,
   `notation.timing_for`): horns playing in harmony play the rhythm that is
   written. The sidecar's `timing` still wins when the listener picks one.
+- A lead-in is FOLDED into its note on a head's page, literal or not
+  (`QuantizeConfig.literal_lead_ins`, which `notation.reading_of` turns on
+  for a multi-horn head; sidecar `literal_lead_ins: false` writes them as
+  notes): the pair is one note from the lead-in's onset, a scoop written as
+  its grace note (`quantize.absorb_lead_ins`, the solo pages' rule). A
+  solo's literal page still writes every heard note.
 - Two readings a literal page may take, both OFF until measured on the real
   head (`QuantizeConfig.literal_lag`, `literal_thirds`; sidecar keys of the
   same names):
@@ -100,6 +132,15 @@ button, the page view, the Score button, `run_eval` and
     beats of mean snap error -- the bridge's eighth-note triplet chords.
     Notate reads a literal page's beat as ternary only when an onset sits
     EXACTLY on a third (`notate.exact_thirds`), which nothing else writes.
+- A third, also off: `literal_tempo` (sidecar; `QuantizeConfig.
+  literal_eighths_beat_s`, 0.375 s when on) writes a literal beat faster
+  than 160 bpm on EIGHTHS, refined to 16ths and 32nds only where a coarser
+  grid cannot keep its onsets apart or pushes one onto the next beat's own
+  note -- the running value set by tempo (D11). At 250 bpm a 16th is 60 ms
+  and Basic Pitch's attacks spread to 0.19 of a beat behind it, so the
+  nearest 16th split one chord's attacks across two grid points. The
+  listener asked for the rhythm as played, so it is theirs to turn on.
+  Export's file name carries `bytempo`.
 
 New model fields, all additive with defaults (no cached artifact or key
 moved): `NoteEvent.voice`, `NotatedNote.stem`, `NotatedNote.hidden`,
@@ -170,6 +211,38 @@ take's sidecar), the Staves and Lower part menus, and Export in both modes
 (the page named for the take, beside its sidecar) all worked with no
 script error.
 
+## The first measurement (Local task A, 2026-10-09)
+
+The local session wrote the Open Sesame head four ways (branch 9f73970) and
+set the dump against the listener's bars 23-38 (page bars 41-56; the page's
+bar 1 is the roll's bar -7). Bar numbers below are the LISTENER'S, except
+the octave move's, which are the roll's. What it changed:
+
+- Bar 26 (the upper horn's F4 tail put the next chord's Eb4 in the lower
+  voice) and bar 28 (the lower G4 lost as a third to the A-flat ringing on
+  under a held C5): rule 2, both passes.
+- Bars 24, 28 and 31-32 (a held note written tied to a re-attack, Bb4 cut
+  in four): rule 5, wherever CREPE was on that horn.
+- Bar 23 (both horns' scoops written as 16ths before the chord): rule 6 and
+  the fold.
+- Roll bars 15-16 not moved up (one 46-note phrase, median a fourth):
+  `sub_phrases`.
+- The script died printing a flat sign on a cp1252 console, after the page
+  was written: it replaces what the console cannot encode now.
+- The rhythm: Basic Pitch's attacks near a beat sit a median 0.06 of it
+  late with a spread to 0.19, and at 250 bpm the nearest 16th splits that
+  spread across two grid points. `literal_tempo` writes such a beat on
+  eighths; it is OFF, the listener's call.
+
+Left as heard, for the listener: bars 24 and 32's lower voice moving a half
+step to the third and holding under the upper quarters (the listener's page
+drops it), bar 25's merged C4 re-attack (no onset to split on), and the
+triplets of bars 36 and 38: their onsets sit at 0.15, 0.68 and 0.97 of the
+beat (upper) and 0.49, 0.68, 1.11 (lower), which no thirds rule reads
+(spacing about 0.5, and with the lag out 0, 0.53, 0.82 collide on thirds)
+-- a hearing question, not a writing one. `--thirds` changed nothing on
+the page, byte for byte.
+
 ## Open questions for the measurement
 
 - Is `literal_lag` right on the head's held chords, and does it move a note
@@ -179,3 +252,10 @@ script error.
   where the listener wants it -- an octave doubling written once?
 - Does the ghost rule drop a real upper note at the octave (a real octave
   doubling with the upper horn under 0.6 of the lower's confidence)?
+- A scoop folded as a GRACE note, or dropped outright? The solo pages write
+  it as a grace; the listener's head page may want nothing there.
+- Does rule 2 cut a held note when the other horn and a stray (bleed) note
+  strike together? Two horns cannot sound three notes, so it reads that as
+  a new chord; rule 3 used to drop the stray instead.
+- `literal_tempo`: does eighths-by-tempo read the head better, and does it
+  lose a 16th the listener wrote?

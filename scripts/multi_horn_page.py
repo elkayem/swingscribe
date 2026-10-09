@@ -23,8 +23,11 @@ The sidecar is READ, never written. It supplies the anchor, form start,
 meter, model and stem; the ensemble is forced to "multi-horn" in memory.
 Flags choose the rhythm without touching it: `--timing` (literal-16 is the
 multi-horn default), `--lag` (take the held chords' lag behind the beat out,
-read once over both horns) and `--thirds` (write a beat that fits thirds as
-a triplet). Both are off by default; the local measurement decides them.
+read once over both horns), `--thirds` (write a beat that fits thirds as
+a triplet) and `--by-tempo` (write a beat faster than 160 bpm on eighths,
+finer only where eighths cannot keep its notes apart). All three are off by
+default; the listener decides them. A head folds each scoop into the note
+it leads into, written as a grace note (`--no-fold` writes them as notes).
 
 Needs the ml group (Basic Pitch runs on onnxruntime; CREPE on torch) and the
 stems already separated -- `--separate` runs the separation first, in this
@@ -32,6 +35,7 @@ process, as the GUI's Separate button would over the span.
 """
 
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -59,6 +63,16 @@ def parse_args(argv=None) -> argparse.Namespace:
     )
     parser.add_argument("--lag", action="store_true", help="take the line's lag out")
     parser.add_argument("--thirds", action="store_true", help="read triplets in literal time")
+    parser.add_argument(
+        "--by-tempo",
+        action="store_true",
+        help="write a literal beat faster than 160 bpm on eighths (sidecar literal_tempo)",
+    )
+    parser.add_argument(
+        "--no-fold",
+        action="store_true",
+        help="write scoops and re-attack heads as notes, not folded (sidecar literal_lead_ins)",
+    )
     parser.add_argument(
         "--dump-voices",
         nargs="?",
@@ -97,7 +111,21 @@ def load_settings(args: argparse.Namespace) -> dict:
         settings["literal_lag"] = True
     if args.thirds:
         settings["literal_thirds"] = True
+    if args.by_tempo:
+        settings["literal_tempo"] = True
+    if args.no_fold:
+        settings["literal_lead_ins"] = False
     return settings
+
+
+def tolerant_console() -> None:
+    """A Windows console in cp1252 cannot print a flat sign (the key, "B♭
+    major"), and the summary died on it AFTER the page was written. Replace
+    what the console cannot encode; files are written in UTF-8 regardless."""
+    for stream in (sys.stdout, sys.stderr):
+        # Not a text stream that can be reconfigured: leave it as it is.
+        with contextlib.suppress(AttributeError, ValueError):
+            stream.reconfigure(errors="replace")
 
 
 def span_of(args: argparse.Namespace, settings: dict) -> tuple[float, float | None]:
@@ -117,9 +145,11 @@ def pitch_name(pitch: int, key: int) -> str:
 
 
 def written(note, key: int) -> str:
-    """One notated note as text: pitch (or rest), value in quarters, ties,
-    tuplet, stem and hidden marks."""
+    """One notated note as text: grace notes in parentheses, pitch (or
+    rest), value in quarters, ties, tuplet, stem and hidden marks."""
     head = "r" if note.is_rest else pitch_name(note.pitch, key)
+    if note.grace:
+        head = "(" + " ".join(pitch_name(p, key) for p in note.grace) + ")" + head
     if note.chord:
         head += "+" + "+".join(pitch_name(p, key) for p in note.chord)
     marks = ""
@@ -148,6 +178,7 @@ def dump(notation, lines, edits, key: int, roll_bar: int | None) -> str:
         out.append(
             f"{n['onset']:8.3f}  {n['duration']:6.3f}  v{n.get('voice', 1)}  "
             f"{pitch_name(int(n['pitch']), key):>4}  conf {n.get('confidence', 0.0):.2f}"
+            + ("  lead-in" if n.get("lead_in") else "")
         )
     out.append("")
     out.append("# lower-voice phrases (start, end, notes, median interval, moved)")
@@ -172,6 +203,7 @@ def dump(notation, lines, edits, key: int, roll_bar: int | None) -> str:
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    tolerant_console()
     from swingscribe import pipeline
     from swingscribe.benchmark import readability
     from swingscribe.config import DEFAULT_CONFIG_PATH, Config
@@ -179,7 +211,7 @@ def main(argv=None) -> int:
     from swingscribe.gui import library, review
     from swingscribe.gui import musicxml as gui_musicxml
     from swingscribe.model import NoteEvent
-    from swingscribe.notation import form_bar_of_page, grid_config, horn_lines
+    from swingscribe.notation import form_bar_of_page, grid_config, horn_lines, reading_of
     from swingscribe.stages import beats, ingest, separate
 
     config = Config.from_yaml(args.config or DEFAULT_CONFIG_PATH)
@@ -264,16 +296,21 @@ def main(argv=None) -> int:
         grid.beats, grid.downbeats, settings, config, duration, (start, end)
     )
     print(f"wrote {out}")
+    lead_ins = sum(1 for n in heard if n.lead_in)
     print(
         f"heard: {upper} notes in voice 1, {lower} in voice 2, "
-        f"{len(edits['candidates'])} candidates (ghosts and thirds) offered"
+        f"{len(edits['candidates'])} candidates (ghosts and thirds) offered, "
+        f"{lead_ins} lead-ins"
     )
     moved = [p for p in lines.phrases if p["moved"]]
+    reading = reading_of(settings, config)
     print(
         f"written: {described['bars']} bars, {described['notes']} notes, key "
         f"{described['key']} ({described['timing']}"
         f"{', lag out' if settings.get('literal_lag') else ''}"
-        f"{', thirds' if settings.get('literal_thirds') else ''}); "
+        f"{', thirds' if settings.get('literal_thirds') else ''}"
+        f"{', eighths by tempo' if reading['literal_eighths_beat_s'] else ''}"
+        f"{', lead-ins folded' if reading['literal_lead_ins'] else ''}); "
         f"{len(moved)} of {len(lines.phrases)} lower phrases moved up, "
         f"{lines.unisons} unisons written once"
     )

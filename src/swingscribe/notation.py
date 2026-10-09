@@ -101,6 +101,15 @@ PHRASE_REST_S = 0.25
 # The same pitch in both voices struck this close together is a unison, and
 # is written once, in voice 1.
 UNISON_ONSET_S = 0.05
+# Inside a phrase, a stretch whose every note sits an octave or more under
+# the upper voice (or every note less) is decided on its own when it lasts
+# at least this long and holds this many notes (`sub_phrases`): the Open
+# Sesame head's bars 15-16, the tenor an octave and a third under for two
+# bars inside a 46-note phrase whose median is a fourth, were left wide
+# apart (Local task A, 2026-10-09). About a bar at 250 bpm; a shorter
+# excursion stays with its phrase, so nothing is decided note by note.
+REGIME_MIN_S = 1.0
+REGIME_MIN_NOTES = 3
 
 
 def span_beats(
@@ -235,15 +244,34 @@ def timing_for(settings: dict, config: Config) -> str:
     return ENSEMBLE_TIMINGS.get(ensemble, config.quantize.timing)
 
 
+# The sidecar's `literal_tempo` writes a literal beat shorter than this on
+# eighths (QuantizeConfig.literal_eighths_beat_s): 160 bpm, where the
+# running value a human writes becomes the eighth (D11).
+TEMPO_EIGHTHS_BEAT_S = 0.375
+
+
 def reading_of(settings: dict, config: Config) -> dict:
     """The quantize settings a page's sidecar chooses: its rhythm
-    (`timing_for`), and for a literal page the two readings a written head
-    may take, `literal_lag` and `literal_thirds` (QuantizeConfig), both off
-    unless the sidecar turns them on."""
+    (`timing_for`), and for a literal page the readings a written head may
+    take -- `literal_lag`, `literal_thirds` and `literal_tempo` (eighths
+    over 160 bpm), all off unless the sidecar turns them on -- and whether
+    lead-ins fold into their notes (`literal_lead_ins`: on for a multi-horn
+    head unless its sidecar says otherwise, off for anything else)."""
+    qc = config.quantize
+    horns = (settings.get("ensemble") or config.transcribe.ensemble) == "multi-horn"
+    tempo = settings.get("literal_tempo")
     return {
         "timing": timing_for(settings, config),
-        "literal_lag": bool(settings.get("literal_lag", config.quantize.literal_lag)),
-        "literal_thirds": bool(settings.get("literal_thirds", config.quantize.literal_thirds)),
+        "literal_lag": bool(settings.get("literal_lag", qc.literal_lag)),
+        "literal_thirds": bool(settings.get("literal_thirds", qc.literal_thirds)),
+        "literal_eighths_beat_s": (
+            TEMPO_EIGHTHS_BEAT_S
+            if tempo
+            else 0.0
+            if tempo is not None
+            else qc.literal_eighths_beat_s
+        ),
+        "literal_lead_ins": bool(settings.get("literal_lead_ins", horns or qc.literal_lead_ins)),
     }
 
 
@@ -287,6 +315,49 @@ def lower_phrases(lower: list[NoteEvent], rest: float = PHRASE_REST_S) -> list[l
     return phrases
 
 
+def sub_phrases(
+    phrase: list[NoteEvent],
+    upper: list[NoteEvent],
+    min_s: float = REGIME_MIN_S,
+    min_notes: int = REGIME_MIN_NOTES,
+) -> list[list[NoteEvent]]:
+    """A phrase of the lower voice cut where its distance from the upper
+    voice changes REGIME -- an octave or more under, or less -- for at
+    least `min_s` and `min_notes`. A note with no partner goes with the
+    stretch it is in; a stretch too short to stand alone joins the one
+    before it (the first, the one after). One phrase in, usually one out."""
+
+    def wide(note: NoteEvent) -> bool | None:
+        interval = phrase_interval([note], upper)
+        return None if interval is None else interval >= OCTAVE
+
+    runs: list[list] = []  # [wide or None, notes]
+    for note in phrase:
+        kind = wide(note)
+        if runs and (kind is None or runs[-1][0] is None or runs[-1][0] == kind):
+            if runs[-1][0] is None:
+                runs[-1][0] = kind
+            runs[-1][1].append(note)
+        else:
+            runs.append([kind, [note]])
+
+    def stands(run: list) -> bool:
+        notes = run[1]
+        span = max(n.onset + n.duration for n in notes) - notes[0].onset
+        return len(notes) >= min_notes and span >= min_s
+
+    merged: list[list] = []
+    for run in runs:
+        if merged and (not stands(run) or merged[-1][0] == run[0]):
+            merged[-1][1].extend(run[1])
+        else:
+            merged.append(run)
+    if len(merged) > 1 and not stands(merged[0]):
+        merged[1][1][:0] = merged[0][1]
+        merged.pop(0)
+    return [run[1] for run in merged]
+
+
 def phrase_interval(phrase: list[NoteEvent], upper: list[NoteEvent]) -> float | None:
     """How far a phrase of the lower voice sits under the upper voice: the
     median interval to the upper notes sounding over it, weighted by how
@@ -319,7 +390,10 @@ def horn_lines(
     - The lower voice is moved up by whole octaves PER PHRASE, wherever the
       phrase's median interval under the upper voice is an octave or more:
       an octave and a third becomes a third (the Open Sesame head's bars
-      15-16), and a phrase doubled at the octave becomes a unison.
+      15-16), and a phrase doubled at the octave becomes a unison. A
+      phrase is cut where its distance changes regime for a bar or so
+      (`sub_phrases`), so a two-bar excursion inside a long phrase is
+      decided on its own.
     - A unison -- the same pitch struck within `unison_onset` in both voices
       -- is written ONCE, in voice 1.
 
@@ -330,7 +404,9 @@ def horn_lines(
     lower = sorted((n for n in notes if n.voice == 2), key=lambda n: (n.onset, -n.pitch))
     moved: list[NoteEvent] = []
     phrases = []
-    for phrase in lower_phrases(lower, rest):
+    for phrase in (
+        sub for whole in lower_phrases(lower, rest) for sub in sub_phrases(whole, upper)
+    ):
         interval = phrase_interval(phrase, upper)
         shift = 0
         if move_octaves and interval is not None and interval >= OCTAVE:

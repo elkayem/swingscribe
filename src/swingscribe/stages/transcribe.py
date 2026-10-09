@@ -933,7 +933,13 @@ def _consult_piano_oracle(
 
 
 def _hear_horns(
-    whole, rate: int, tc: TranscribeConfig, *, log: bool = False
+    whole,
+    rate: int,
+    tc: TranscribeConfig,
+    *,
+    log: bool = False,
+    track: tuple[float, float, list[float | None]] | None = None,
+    attacks: list[float] = (),
 ) -> tuple[list[NoteEvent], list[dict]]:
     """A multi-horn head: Basic Pitch's notes over the region, each in a
     voice (`voices.assign`), and the heard notes neither voice holds --
@@ -941,7 +947,9 @@ def _hear_horns(
     switch on (docs/multi-horn.md).
 
     `whole` is the whole stem; Basic Pitch hears the region plus a second
-    either side, as the horn fill does. Unlike the fill this is not an
+    either side, as the horn fill does. `track` and `attacks` are CREPE's
+    frame trace (time of frame 0, hop, pitch per frame) and corroborated
+    onsets, which vouch for a held note Basic Pitch split. Unlike the fill this is not an
     improvement to a line that already exists -- it IS the transcription --
     so a missing onnxruntime is an error with its remedy, never a silent
     fall back to CREPE's single line cached under the multi-horn key.
@@ -965,17 +973,22 @@ def _hear_horns(
         ) from exc
     shift = tc.multi_horn_onset_shift_ms / 1000.0
     heard = [{**n, "onset": n["onset"] + shift} for n in heard]
+    stats: dict[str, int] = {}
     kept, dropped = voices.assign(
         heard,
         overlap_s=tc.multi_horn_overlap_ms / 1000.0,
         share=tc.multi_horn_overlap_share,
         ghost_ratio=tc.multi_horn_ghost_ratio,
+        track=track,
+        attacks=attacks,
+        stats=stats,
     )
     if log:
-        ghosts = sum(1 for n in dropped if n["dropped"] == voices.GHOST)
         print(
-            f"transcribe: Basic Pitch heard {len(heard)} notes; {ghosts} overtone ghost(s) "
-            f"and {len(dropped) - ghosts} third note(s) left out of the voices"
+            f"transcribe: Basic Pitch heard {len(heard)} notes; {stats['ghosts']} overtone "
+            f"ghost(s) and {stats['thirds']} third note(s) left out of the voices, "
+            f"{stats['tails']} tail(s) cut at a new chord, {stats['rejoined']} split held "
+            f"note(s) joined, {stats['lead_ins']} lead-in(s) marked"
         )
     notes = [
         NoteEvent(
@@ -985,6 +998,7 @@ def _hear_horns(
             confidence=n["confidence"],
             source=f"{tc.stem}:basic-pitch",
             voice=n["voice"],
+            lead_in=bool(n.get("lead_in")),
         )
         for n in kept
     ]
@@ -1189,7 +1203,17 @@ def analyze(
         # the lower one. Nothing below applies: the line floors, the fill and
         # the lead-ins are all CREPE's (TranscribeConfig.crepe_line).
         crepe_count = len(notes)
-        notes, candidates = _hear_horns(whole, rate, tc, log=log)
+        # CREPE's trace vouches for a held note Basic Pitch split
+        # (voices.rejoin_splits): its smoothed pitch and corroborated onsets,
+        # in whole-track time.
+        notes, candidates = _hear_horns(
+            whole,
+            rate,
+            tc,
+            log=log,
+            track=(region_offset, hop_s, pitches),
+            attacks=[region_offset + f * hop_s for f in sorted(onset_frames)],
+        )
         print(
             f"transcribe: two voices of {sum(n.voice == 1 for n in notes)} and "
             f"{sum(n.voice == 2 for n in notes)} notes, {len(candidates)} heard notes in "

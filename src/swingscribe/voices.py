@@ -10,16 +10,27 @@ heard at. The page's writing conventions -- the lower horn moved up an
 octave by phrase, a unison written once -- are `notation.horn_lines`', and
 nothing here knows about them.
 
-Three rules, in order:
+The rules, in order:
 
 1. **An overtone ghost is dropped.** A note 12, 19, 24, 28 (... up to the
    eighth harmonic) semitones over a note that holds it -- the ghost lives
    inside its fundamental -- with clearly lower confidence is the louder
    note's partial, not a horn: Bb5 0.30 over Bb4 0.69 on the Open Sesame head.
-2. **Where three sound at once, the two most confident stay.** Two horns
+2. **A new chord ends what was sounding, and a note starting beats a note
+   ending.** Two notes of different pitches struck together are both horns
+   attacking, so a note still sounding when they start is a release tail,
+   and it is cut there. And where three still sound at once and one of
+   them is ENDING -- it began well before the newest and stops before both
+   others -- it is cut where the newest starts. Without this a held tail
+   decided the voices of the chord after it (the Open Sesame head's bar 26,
+   in the listener's numbering: the upper horn's F4 still ringing put the
+   next chord's Eb4 in the lower voice) and, as a third note, cost a chord
+   one of its own (bar 28's G4, under a held C5 as the A-flat before it
+   rang on).
+3. **Where three sound at once, the two most confident stay.** Two horns
    cannot sound three notes; a third is a ghost the first rule could not
    name, or bleed.
-3. **Notes that overlap meaningfully are ordered by pitch**: the higher is
+4. **Notes that overlap meaningfully are ordered by pitch**: the higher is
    voice 1. Meaningfully: at least `OVERLAP_S` shared, or `OVERLAP_SHARE` of
    the shorter note -- a release tail running into the next note is not two
    horns. A note with no partner -- one horn alone, or a unison heard as one
@@ -33,9 +44,23 @@ side of it, and a brief crossing keeps each horn in its voice. The graph is
 connected stretch takes the orientation that most of its overlaps, weighted
 by how long they last, agree with: higher is voice 1.
 
+Then, in each voice:
+
+5. **A held note Basic Pitch split is joined again** where CREPE's frame
+   trace holds that pitch across the join with no attack of its own
+   (`rejoin_splits`). Basic Pitch re-attacks a held note on a stray onset
+   peak (bar 24's D5 written as a dotted half tied to a re-attacked
+   quarter); CREPE follows one horn at a time, so it can vouch for a held
+   note only where it is on that horn, and elsewhere nothing is joined.
+6. **A lead-in is marked** (`mark_lead_ins`, NoteEvent.lead_in, docs/
+   scoops.md): a note of at most `LEAD_IN_MAX_S` a semitone under the next
+   note in its voice, or at its pitch, and touching it -- the scoop into a
+   held chord (both horns open bar 23 with one) and the head of a
+   re-attack. It is heard, so it stays; the page folds it into the note.
+
 Pure arithmetic on note dicts ({onset, duration, pitch, confidence}), so all
-of it runs in CI. The transcriber (`stages/transcribe.py`) applies all three
-rules; the GUI re-orders a listener's EDITED set with `order` alone, because a
+of it runs in CI. The transcriber (`stages/transcribe.py`) applies them all;
+the GUI re-orders a listener's EDITED set with `order` alone, because a
 candidate the listener switched on must never be pruned again.
 """
 
@@ -61,6 +86,33 @@ GHOST_RATIO = 0.6
 # Why a heard note is not in either voice, as the candidates report it.
 GHOST = "ghost"
 THIRD = "third"
+
+# Two notes struck this close together are one chord: both horns attacking
+# (rule 2). Basic Pitch's frame is 11.6 ms; two horns attacking a written
+# chord land within a few frames of each other.
+CHORD_ONSET_S = 0.06
+
+# Two notes of one voice whose join is within this are touching: a held
+# note split, or a lead-in into the next note (rules 5 and 6). Two of Basic
+# Pitch's frames, because a note it ends is cut back to its last frame over
+# the threshold.
+TOUCH_S = 0.03
+
+# Rule 5: CREPE's trace must hold the note's pitch for this long either
+# side of the join, and have no corroborated onset within `REJOIN_ONSET_S`
+# of it.
+REJOIN_HOLD_S = 0.05
+REJOIN_ONSET_S = 0.04
+
+# Rule 6: a lead-in is at most this long (the CREPE line's own
+# glide_max_ms and reattack_max_ms), and the note it leads into at least
+# this many times as long: a scoop leads into a note that is held. Without
+# the second test a run of sixteenths rising by semitones, or repeated, at
+# 250 bpm (60 ms each) would be read as a chain of lead-ins. The CREPE line
+# tells a scoop by its frames never settling on their semitone; Basic Pitch
+# gives no frames, so the held note is the evidence here.
+LEAD_IN_MAX_S = 0.1
+LEAD_IN_TARGET_RATIO = 3.0
 
 
 def _end(note: dict[str, Any]) -> float:
@@ -135,6 +187,32 @@ def _common(notes: list[dict[str, Any]], indices: tuple[int, ...]) -> float:
     return max(0.0, end - start)
 
 
+def _triples(
+    notes: list[dict[str, Any]],
+    alive: set[int],
+    overlap_s: float = OVERLAP_S,
+    share: float = OVERLAP_SHARE,
+    pairs: list[tuple[int, int, float]] | None = None,
+) -> list[set[int]]:
+    """Every three of `alive` that sound at once: all three share a
+    meaningful stretch (the pairwise rule, applied to the time all three
+    hold)."""
+    pairs = overlapping_pairs(notes) if pairs is None else pairs
+    neighbours: dict[int, set[int]] = {i: set() for i in alive}
+    for i, j, _shared in pairs:
+        if i in alive and j in alive and meaningful(notes[i], notes[j], overlap_s, share):
+            neighbours[i].add(j)
+            neighbours[j].add(i)
+    triples = []
+    for i in sorted(alive):
+        for j in sorted(n for n in neighbours[i] if n > i):
+            for k in sorted(n for n in neighbours[i] & neighbours[j] if n > j):
+                shortest = min(float(notes[x]["duration"]) for x in (i, j, k))
+                if meaningful_length(_common(notes, (i, j, k)), shortest, overlap_s, share):
+                    triples.append({i, j, k})
+    return triples
+
+
 def thirds(
     notes: list[dict[str, Any]],
     alive: set[int],
@@ -149,19 +227,7 @@ def thirds(
     loses its least confident note; the least confident note in ANY triple
     goes first, which is exactly that note of its own triple, and a note it
     resolves for another triple saves that triple's own least confident."""
-    pairs = overlapping_pairs(notes) if pairs is None else pairs
-    neighbours: dict[int, set[int]] = {i: set() for i in alive}
-    for i, j, _shared in pairs:
-        if i in alive and j in alive and meaningful(notes[i], notes[j], overlap_s, share):
-            neighbours[i].add(j)
-            neighbours[j].add(i)
-    triples = []
-    for i in sorted(alive):
-        for j in sorted(n for n in neighbours[i] if n > i):
-            for k in sorted(n for n in neighbours[i] & neighbours[j] if n > j):
-                shortest = min(float(notes[x]["duration"]) for x in (i, j, k))
-                if meaningful_length(_common(notes, (i, j, k)), shortest, overlap_s, share):
-                    triples.append({i, j, k})
+    triples = _triples(notes, alive, overlap_s, share, pairs)
 
     def weakness(i: int) -> tuple[float, float, float]:
         # Least confident first; then the shorter; then the later.
@@ -247,31 +313,180 @@ def order(
     return voices
 
 
+def trim_tails(
+    notes: list[dict[str, Any]],
+    alive: set[int],
+    chord_onset: float = CHORD_ONSET_S,
+    overlap_s: float = OVERLAP_S,
+    share: float = OVERLAP_SHARE,
+) -> int:
+    """Rule 2, in place on `notes`, in two passes. Every note of `alive`
+    still sounding when a NEW CHORD -- two notes of `alive` at different
+    pitches struck within `chord_onset` of each other, after it began --
+    starts is cut where the chord starts. Then, where three still sound at
+    once, a note ENDING -- it ends before both others and began more than
+    `chord_onset` before the latest -- is cut where the latest starts: a
+    note starting beats a note ending (bar 28: one horn moving from A-flat
+    to G under the other's held C, the A-flat's tail ringing on). Returns
+    how many were cut."""
+    order_ = sorted(alive, key=lambda i: float(notes[i]["onset"]))
+    starts = []
+    for k, i in enumerate(order_):
+        for j in order_[k + 1 :]:
+            if float(notes[j]["onset"]) - float(notes[i]["onset"]) > chord_onset:
+                break
+            if int(notes[i]["pitch"]) != int(notes[j]["pitch"]):
+                starts.append(float(notes[i]["onset"]))
+                break
+    cut = 0
+    for start in sorted(set(starts)):
+        for i in alive:
+            onset = float(notes[i]["onset"])
+            if onset < start - chord_onset and onset + float(notes[i]["duration"]) > start:
+                notes[i]["duration"] = start - onset
+                cut += 1
+    triples = _triples(notes, alive, overlap_s, share)
+    for triple in sorted(triples, key=lambda t: max(float(notes[i]["onset"]) for i in t)):
+        ending = min(triple, key=lambda i: _end(notes[i]))
+        latest = max(triple, key=lambda i: float(notes[i]["onset"]))
+        others = triple - {ending}
+        if ending == latest or any(_end(notes[i]) <= _end(notes[ending]) for i in others):
+            continue
+        start = float(notes[latest]["onset"])
+        onset = float(notes[ending]["onset"])
+        if onset < start - chord_onset and _end(notes[ending]) > start:
+            notes[ending]["duration"] = start - onset
+            cut += 1
+    return cut
+
+
+def _voice_runs(notes: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
+    """Each voice's notes in onset order."""
+    runs: dict[int, list[dict[str, Any]]] = {}
+    for note in sorted(notes, key=lambda n: float(n["onset"])):
+        runs.setdefault(int(note.get("voice", 1)), []).append(note)
+    return runs
+
+
+def _touching(a: dict[str, Any], b: dict[str, Any], touch: float = TOUCH_S) -> bool:
+    return abs(_end(a) - float(b["onset"])) <= touch
+
+
+def rejoin_splits(
+    notes: list[dict[str, Any]],
+    track: tuple[float, float, list[float | None]] | None,
+    attacks: list[float] = (),
+    hold: float = REJOIN_HOLD_S,
+    attack_window: float = REJOIN_ONSET_S,
+) -> list[dict[str, Any]]:
+    """Rule 5: a voice's two touching notes of one pitch are ONE note where
+    CREPE's trace -- `track` as (time of frame 0, hop, pitch per frame, None
+    where unvoiced) -- holds that pitch, voiced and within half a semitone,
+    across `hold` either side of the join, and none of CREPE's corroborated
+    onsets (`attacks`) is within `attack_window` of it. Notes in, notes out,
+    the first of a joined pair lasting both; no track joins nothing."""
+    if track is None:
+        return notes
+    start, hop, pitches = track
+
+    def held(pitch: int, at: float) -> bool:
+        first = int(round((at - hold - start) / hop))
+        last = int(round((at + hold - start) / hop))
+        if first < 0 or last >= len(pitches) or last < first:
+            return False
+        return all(p is not None and abs(p - pitch) < 0.5 for p in pitches[first : last + 1])
+
+    out: list[dict[str, Any]] = []
+    for run in _voice_runs(notes).values():
+        merged: list[dict[str, Any]] = []
+        for note in run:
+            previous = merged[-1] if merged else None
+            at = float(note["onset"])
+            if (
+                previous is not None
+                and int(previous["pitch"]) == int(note["pitch"])
+                and _touching(previous, note)
+                and held(int(note["pitch"]), at)
+                and not any(abs(a - at) <= attack_window for a in attacks)
+            ):
+                previous["duration"] = _end(note) - float(previous["onset"])
+                previous["confidence"] = max(
+                    float(previous["confidence"]), float(note["confidence"])
+                )
+                continue
+            merged.append(dict(note))
+        out.extend(merged)
+    return out
+
+
+def mark_lead_ins(
+    notes: list[dict[str, Any]], max_s: float = LEAD_IN_MAX_S
+) -> list[dict[str, Any]]:
+    """Rule 6: in each voice, a note of at most `max_s` touching the next
+    note of its voice, a semitone under it (a scoop) or at its pitch (a
+    re-attack's head), when that note is `LEAD_IN_TARGET_RATIO` times as
+    long, gets `lead_in`, and is made to touch it exactly --
+    the fold (`quantize.absorb_lead_ins`) checks the two touch to 15 ms,
+    and Basic Pitch's ends sit up to two frames short."""
+    out: list[dict[str, Any]] = []
+    for run in _voice_runs(notes).values():
+        marked = [dict(n) for n in run]
+        for note, after in zip(marked, marked[1:], strict=False):
+            if (
+                float(note["duration"]) <= max_s
+                and int(after["pitch"]) - int(note["pitch"]) in (0, 1)
+                and _touching(note, after)
+                and float(after["duration"]) >= LEAD_IN_TARGET_RATIO * float(note["duration"])
+            ):
+                note["lead_in"] = True
+                note["duration"] = float(after["onset"]) - float(note["onset"])
+        out.extend(marked)
+    return out
+
+
 def assign(
     notes: list[dict[str, Any]],
     overlap_s: float = OVERLAP_S,
     share: float = OVERLAP_SHARE,
     ghost_ratio: float = GHOST_RATIO,
+    track: tuple[float, float, list[float | None]] | None = None,
+    attacks: list[float] = (),
+    stats: dict[str, int] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """All three rules: (the notes the two voices hold, each with a `voice`;
-    the notes neither holds, each with `dropped` saying why).
+    """Every rule: (the notes the two voices hold, each with a `voice`; the
+    notes neither holds, each with `dropped` saying why).
+
+    `track` and `attacks` are CREPE's frame trace and corroborated onsets
+    for rule 5 (`rejoin_splits`); without them nothing is joined. `stats`,
+    when given, is filled with what each rule did.
 
     Both lists are copies, in onset order (the higher pitch first at one
     onset). The dropped notes are what a listener may switch back on."""
     pairs = overlapping_pairs(notes)
     ghosted = ghosts(notes, ghost_ratio, pairs)
     alive = set(range(len(notes))) - ghosted
-    crowded = thirds(notes, alive, overlap_s, share, pairs)
+    work = [dict(n) for n in notes]
+    tails = trim_tails(work, alive, overlap_s=overlap_s, share=share)
+    crowded = thirds(work, alive, overlap_s, share)
     alive -= crowded
-    kept_indices = sorted(alive)
-    kept = [dict(notes[i]) for i in kept_indices]
+    kept = [work[i] for i in sorted(alive)]
     for note, voice in zip(kept, order(kept, overlap_s, share), strict=True):
         note["voice"] = voice
+    joined = rejoin_splits(kept, track, list(attacks))
+    marked = mark_lead_ins(joined)
     dropped = [
         {**notes[i], "dropped": GHOST if i in ghosted else THIRD} for i in sorted(ghosted | crowded)
     ]
+    if stats is not None:
+        stats.update(
+            ghosts=len(ghosted),
+            tails=tails,
+            thirds=len(crowded),
+            rejoined=len(kept) - len(joined),
+            lead_ins=sum(1 for n in marked if n.get("lead_in")),
+        )
 
     def by_time(note: dict[str, Any]) -> tuple[float, int]:
         return (float(note["onset"]), -int(note["pitch"]))
 
-    return sorted(kept, key=by_time), sorted(dropped, key=by_time)
+    return sorted(marked, key=by_time), sorted(dropped, key=by_time)

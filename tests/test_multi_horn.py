@@ -22,6 +22,7 @@ from swingscribe.notation import (
     notation_for_span,
     phrase_interval,
     reading_of,
+    sub_phrases,
     timing_for,
 )
 from swingscribe.stages.export import to_musicxml
@@ -51,6 +52,10 @@ def test_no_existing_transcribe_key_moved():
 def test_no_existing_quantize_key_moved():
     assert dump_hash(QuantizeConfig()) == "762afca5be68d378"
     assert dump_hash(QuantizeConfig(timing="literal-16")) == "80e64cc1d39a542e"
+    chosen = QuantizeConfig(
+        timing="literal-16", literal_eighths_beat_s=0.375, literal_lead_ins=True
+    ).model_dump(mode="json")
+    assert chosen["literal_eighths_beat_s"] == 0.375 and chosen["literal_lead_ins"] is True
 
 
 def test_a_horn_led_dump_carries_no_multi_horn_field():
@@ -63,6 +68,9 @@ def test_a_multi_horn_dump_carries_its_own_fields_and_none_of_crepes():
     assert dumped["multi_horn_onset_threshold"] == 0.5
     assert dumped["multi_horn_frame_threshold"] == 0.3
     assert dumped["multi_horn_min_note_ms"] == 23.0
+    # The rules' own version: a change to voices.py moves the GUI's review
+    # key, which hashes this dump and never transcribe.CACHE_VERSION.
+    assert dumped["multi_horn_version"] == 2
     # The horn fill, the tuning, the lead-ins and the piano line are CREPE's
     # or the piano model's; a multi-horn head reads none of them.
     for gone in ("horn_fill_gaps", "tuning_correction", "glide_max_ms", "piano_line"):
@@ -94,9 +102,16 @@ def test_the_literal_readings_are_off_unless_the_sidecar_turns_them_on():
         "timing": "literal-16",
         "literal_lag": False,
         "literal_thirds": False,
+        "literal_eighths_beat_s": 0.0,
+        # A multi-horn head folds its scoops into their notes by default.
+        "literal_lead_ins": True,
     }
-    on = reading_of({"literal_lag": True, "literal_thirds": True}, config)
+    on = reading_of({"literal_lag": True, "literal_thirds": True, "literal_tempo": True}, config)
     assert on["literal_lag"] and on["literal_thirds"]
+    assert on["literal_eighths_beat_s"] == 0.375
+    assert not on["literal_lead_ins"]  # not a multi-horn head
+    off = reading_of({"ensemble": "multi-horn", "literal_lead_ins": False}, config)
+    assert not off["literal_lead_ins"]
 
 
 # ── the writing conventions (notation.horn_lines) ────────────────────────────
@@ -168,6 +183,37 @@ def test_two_parts_keep_every_note_where_it_was_heard():
     lower = [horn(i * 0.5, 0.5, 58, voice=2) for i in range(4)]
     lines = horn_lines(upper + lower, move_octaves=False, merge_unisons=False)
     assert [n.pitch for n in lines.lower] == [58] * 4
+
+
+def test_an_excursion_inside_a_long_phrase_is_judged_on_its_own():
+    """Bars 15-16 of the head: two bars an octave and a minor third under,
+    inside one unbroken phrase whose median is a fourth. The excursion moves;
+    what is around it does not."""
+    upper = [horn(i * 0.25, 0.25, 72) for i in range(24)]
+    pitches = [67] * 8 + [57] * 8 + [67] * 8
+    lower = [horn(i * 0.25, 0.25, p, voice=2) for i, p in enumerate(pitches)]
+    assert len(lower_phrases(lower)) == 1
+    assert [len(part) for part in sub_phrases(lower, upper)] == [8, 8, 8]
+    lines = horn_lines(upper + lower)
+    assert [p["moved"] for p in lines.phrases] == [0, OCTAVE, 0]
+    assert [n.pitch for n in lines.lower] == [67] * 8 + [69] * 8 + [67] * 8
+
+
+def test_a_short_excursion_stays_with_its_phrase():
+    # Two notes, half a second: not a bar of its own, so nothing note by note.
+    upper = [horn(i * 0.25, 0.25, 72) for i in range(18)]
+    pitches = [67] * 8 + [57] * 2 + [67] * 8
+    lower = [horn(i * 0.25, 0.25, p, voice=2) for i, p in enumerate(pitches)]
+    assert len(sub_phrases(lower, upper)) == 1
+    assert [n.pitch for n in horn_lines(upper + lower).lower] == pitches
+
+
+def test_a_lone_note_goes_with_the_stretch_it_is_in():
+    upper = [horn(i * 0.25, 0.25, 72) for i in range(1, 9)]
+    lower = [horn(i * 0.25, 0.25, 57, voice=2) for i in range(9)]  # the first has no partner
+    (only,) = sub_phrases(lower, upper)
+    assert len(only) == 9
+    assert {n.pitch for n in horn_lines(upper + lower).lower} == {69}
 
 
 def test_the_phrase_interval_is_weighted_by_time_together():
@@ -402,6 +448,104 @@ def test_literal_lags_read_the_median_late_downbeat():
     onsets = [(4 + i) * BEAT + 0.2 * BEAT for i in range(12)]
     lags = literal_lags(onsets, beats, 4, 0.2, 0.08)
     assert lags and all(abs(lag - 0.2) < 1e-6 for lag in lags.values())
+
+
+FAST = 0.24  # 250 bpm, the Open Sesame head
+
+
+def fast_literal(onsets, **kwargs):
+    beats = [float(i) * FAST for i in range(40)]
+    notes, _ = quantize_notes(
+        onsets, [0.05] * len(onsets), [60] * len(onsets), beats, [], [], **kwargs
+    )
+    return [round(n.beat, 6) for n in notes]
+
+
+def test_a_fast_literal_beat_is_written_on_eighths_when_the_listener_asks():
+    """At 250 bpm a 16th is 60 ms; an attack 0.2 of a beat behind (48 ms)
+    is the "e" on 16ths and the beat on eighths."""
+    onsets = [(4 + i) * FAST + 0.2 * FAST for i in range(4)]
+    assert fast_literal(onsets, timing="literal-16") == [4.25, 5.25, 6.25, 7.25]
+    assert fast_literal(onsets, timing="literal-16", literal_eighths_beat_s=0.375) == [
+        4.0,
+        5.0,
+        6.0,
+        7.0,
+    ]
+
+
+def test_eighths_by_tempo_refine_where_they_cannot_keep_onsets_apart():
+    sixteenths = [4 * FAST + f * FAST for f in (0.0, 0.25, 0.5)]
+    assert fast_literal(sixteenths, timing="literal-16", literal_eighths_beat_s=0.375) == [
+        4.0,
+        4.25,
+        4.5,
+    ]
+
+
+def test_eighths_by_tempo_leave_a_slower_beat_on_sixteenths():
+    onsets = [(4 + i) * BEAT + 0.2 * BEAT for i in range(4)]
+    assert [
+        round(n.beat, 6) for n in literal(onsets, timing="literal-16", literal_eighths_beat_s=0.375)
+    ] == [4.25, 5.25, 6.25, 7.25]
+
+
+def test_a_literal_grid_is_unchanged_without_the_tempo_reading():
+    # literal-32 never refines; literal-16 refines once, to 32nds.
+    crowded = [4 * BEAT + f * BEAT for f in (0.0, 0.1, 0.2)]
+    assert [round(n.beat, 6) for n in literal(crowded, timing="literal-16")] == [
+        4.0,
+        4.125,
+        4.25,
+    ]
+    assert [round(n.beat, 6) for n in literal(crowded, timing="literal-32")] == [
+        4.0,
+        4.125,
+        4.25,
+    ]
+
+
+def scoop(onset, duration, pitch, voice):
+    return NoteEvent(
+        onset=onset,
+        duration=duration,
+        pitch=pitch,
+        confidence=0.7,
+        source="other",
+        voice=voice,
+        lead_in=True,
+    )
+
+
+def test_a_multi_horn_page_folds_both_horns_scoops_into_the_chord():
+    """Bar 23: both horns scoop a semitone into a held chord. On the head's
+    page the chord is written on the beat, each scoop as its grace note; a
+    page that does not fold writes the scoops as notes."""
+    beats = grid()
+    t = beats[8]
+    notes = [
+        scoop(t, 0.06, 71, 1),
+        scoop(t, 0.06, 66, 2),
+        horn(t + 0.06, 3 * BEAT, 72),
+        horn(t + 0.06, 3 * BEAT, 67, voice=2),
+    ]
+    region = (beats[4], beats[20])
+
+    def sounding(config):
+        page, _ = notation_for_horns(
+            "t.wav", notes, beats, region, stem="other", config=config, anchor=beats[4]
+        )
+        return [
+            (n.voice, round(n.beat, 6), n.pitch, list(n.grace))
+            for b in page.bars
+            for n in b.notes
+            if not n.is_rest and not n.tie_stop
+        ]
+
+    folded = sounding(literal_config(literal_lead_ins=True))
+    assert sorted(folded) == [(1, 0.0, 72, [71]), (2, 0.0, 67, [66])]
+    as_heard = sounding(literal_config())
+    assert sorted(p for _, _, p, _ in as_heard) == [66, 67, 71, 72]
 
 
 def test_a_literal_page_in_thirds_is_written_as_a_triplet():
