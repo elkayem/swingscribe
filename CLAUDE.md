@@ -322,8 +322,14 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   function, `library.discover(root) -> [(key, sidecar, audio)]`: an own
   sidecar keys as its audio's path, the key every pin has. The cache is the
   RECORDING's (digest): the panel lists the takes sharing it.
-  `scripts/dedupe_audio.py` is prepared and NOT to be run until the
-  listener has reviewed linked sidecars.
+  `scripts/dedupe_audio.py` turns byte-identical copies into linked takes
+  of one file; the listener approved running it (2026-10-09), and it runs
+  ONLY reversibly: each copy to the Recycle Bin (or `--trash`), a manifest
+  of every change with each sidecar's previous content, `--undo`. So every
+  script finds a take's audio through `library.audio_for_key`, `discover`
+  or `audio_files`, never `BENCH / key` or a glob: `BENCH / key` names a
+  file that is gone once its copy is a linked take, and the track drops
+  out without a word. `tests/test_script_audio.py` holds scripts/ to it.
 - **The cache panel (`gui/storage.py`, `swingscribe cache ls|rm`) deletes
   stems directories and ingest wavs, and nothing else.** Those are 78 of the
   cache's 78 GB; the bins, reviews and peaks are not worth a control. A
@@ -735,13 +741,14 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   its median interval is an octave or more (never note by note), a unison
   written once, each voice quantized on one grid and merged
   (`merge_horn_voices`: stems up/down where both sound, voice-2 rests
-  `print-object="no"`, no voice-2 rests in a bar of voice 1 alone). Literal
-  EIGHTHS by default (`literal-8`, the listener's decision 2026-10-09:
-  eighths at 160 bpm and over, 16ths under, any beat refined where it
-  cannot keep its onsets apart; `config.ENSEMBLE_TIMINGS`,
-  `notation.timing_for`; "Literal 16ths" stays a menu choice);
-  `literal_lag` (read once over both horns) and `literal_thirds` are off
-  until measured on the real head. Sidecar `staves: 2` is TWO PARTS
+  `print-object="no"`, no voice-2 rests in a bar of voice 1 alone). SWING
+  by default (the listener's decision 2026-10-09, `config.ENSEMBLE_TIMINGS`,
+  `notation.timing_for`), its lag read ONCE over both horns
+  (`notation._unlag_together`, swing's per-voice lag switched off) so a
+  chord stays a chord; "Literal 8ths" (`literal-8`: eighths at 160 bpm and
+  over, 16ths under) and "Literal 16ths" stay menu choices for a
+  straight-eighth head, a literal page taking the lag out too.
+  `literal_thirds` is off. Sidecar `staves: 2` is TWO PARTS
   (`merge_horn_parts`, `Notation.parts`): no octave move, no unison merge,
   `lower_transposition`, clef by written register. The review is its own
   VIEW (`erasures.split_by_view`, records tagged `view: "horns"`), re-ordered
@@ -754,11 +761,16 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   the next note 3x longer, so a 16th run is never a chain) and the page
   folds it as a grace (`literal_lead_ins`, on for this ensemble only). The
   GUI's review key hashes the transcribe dump and never CACHE_VERSION:
-  bump `multi_horn_version` with ANY rule change. The lag is taken out by
-  default for a head (`literal_lag` via `notation.reading_of`, the
-  listener's yes of 2026-10-09), read once over both horns. Swing as a
-  head's default is the listener's open question; before it ships, swing's
-  lag must be read over both horns too (it is per voice today).
+  bump `multi_horn_version` with ANY rule change (3 since the legato
+  successor). The listener's own corrections (A4; an internet page of the
+  head is NOT a reference): a head closes a rest of up to an eighth before
+  a voice's next note (`NotateConfig.close_rests` via `notation.
+  writing_of`); a note a step from the only note sounding, which ends
+  within 0.25 s, is that horn's legato successor and keeps its voice
+  (`voices.legato_successors`, `continue_voices`); faint scraps (under 80
+  ms AND confidence under 0.4 AND not a lead-in) leave the page only with
+  `drop_faint`, OFF until measured. `scripts/multi_horn_joins.py` measures
+  same-pitch joins for a re-attack rule; none exists yet.
 - **The Score button and the F1 on the ground-truth bar are DIFFERENT
   QUESTIONS**, and this is the project's most expensive confusion appearing in
   the UI. The bar's F1 is time-free and pitch-only (`gui/ground_truth.py`):

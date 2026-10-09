@@ -11,8 +11,8 @@ merged: the listener reviews the branch first. Design and state:
 
 | Piece | State |
 | --- | --- |
-| A. Multi-horn core + `scripts/multi_horn_page.py` | measured three times (Local tasks A, A2, A3); eighths and lag-out are the head's defaults; waiting on Local task A4 and the listener's swing-or-literal choice |
-| B. Linked sidecars | accepted (Local task B: card byte-identical, 4768 pins); dedupe decided by sidecar, waiting on the dry run |
+| A. Multi-horn core + `scripts/multi_horn_page.py` | measured four times (Local tasks A-A4); swing is the head's default, lag read once over both horns; the listener's bar 24/26/29 corrections in; waiting on Local task A5 |
+| B. Linked sidecars | accepted (Local task B); every script finds a take's audio through library; dedupe reversible (Recycle Bin or --trash, manifest, --undo); the listener said go: waiting on Local task B2 |
 | C. Two parts, GUI, guide | checked (Local task C); fixes pushed |
 
 What the reports changed (2026-10-09; details in
@@ -35,6 +35,12 @@ What the reports changed (2026-10-09; details in
   tenor part can sit above the trumpet's on the page.
 
 ## Setting up (once)
+
+Since 2026-10-09 the listener's MAIN checkout runs this branch (their
+request, to try it): update it with `git pull` and run every command below
+from its root, `.venv\Scripts\python.exe scripts\...`. Every push reaches
+their app on the next pull, so the branch is kept runnable. The worktree
+route that follows is for a checkout that stays on master.
 
 Peer sessions commit to `master` in the main checkout, so do not switch it to
 this branch. Use a worktree beside it, and run from the MAIN checkout's root
@@ -218,6 +224,101 @@ Report:
    it becomes the default: swing reads the lag per voice today, and must
    read it once over both horns first (multi-horn.md, "The third
    measurement").
+
+## Local task A5: the head on swing, with the listener's corrections
+
+What landed after A4 (multi-horn.md, "The fourth measurement"):
+
+- SWING is the head's default rhythm (the listener's "make swing default");
+  "Literal 8ths" and "Literal 16ths" stay in the menu for a straight-eighth
+  head. The line's lag is read ONCE over both horns on a swing page too.
+- Bar 24: a rest of up to an eighth before a voice's next note is written
+  into the note before it (`--no-close-rests` keeps them).
+- Bar 26: a note a step from the only note sounding, which ends within
+  0.25 s, is that horn's legato successor and keeps its voice. The review
+  key moved (`multi_horn_version` 3): the first run re-transcribes.
+- Bar 29: faint scraps (under 80 ms AND confidence under 0.4 AND not a
+  lead-in) can be left off with `--drop-faint`; OFF, and the dump lists
+  them either way.
+- Bar 25: `scripts/multi_horn_joins.py` measures every same-pitch join.
+
+```
+set PAGE=.venv\Scripts\python.exe scripts\multi_horn_page.py AUDIO --sidecar TAKE --start 0 --end 67.308
+%PAGE% --out OUT\os5.musicxml --dump-voices OUT\os5.txt
+%PAGE% --timing literal-8 --out OUT\os5.literal8.musicxml --dump-voices OUT\os5.literal8.txt
+%PAGE% --no-close-rests --out OUT\os5.open.musicxml --dump-voices OUT\os5.open.txt
+%PAGE% --drop-faint --out OUT\os5.faint.musicxml --dump-voices OUT\os5.faint.txt
+.venv\Scripts\python.exe scripts\multi_horn_joins.py AUDIO --sidecar TAKE --json OUT\joins.json
+```
+
+Report:
+
+1. The transcribe line's counts (tails, legato successors, rejoined,
+   lead-ins) and each run's summary (rests drawn + hidden, faint scraps).
+2. `os5` (swing) against A4's `os4` and A3's `os3.swing`, the listener's
+   bars 23-38 (page 41-56) above all: 24 (the lower A a whole note), 26
+   (the tenor's E-flat into D in voice 2; the trumpet's F4 tied over, a
+   rest, F4 on 4), 25, 29; and any chord whose two horns now land apart
+   (the joint lag should have closed those, not opened new ones).
+3. Closing rests: `os5` against `os5.open` -- how many rests went, and any
+   the listener hears as a REAL rest.
+4. The faint list from `os5.txt`: which are scraps, which are notes; and
+   whether `os5.faint` loses anything it should keep.
+5. The joins table, with the listener's marks: bar 25's lower C at 41.651
+   (one note, they say), the A section's F5 F5 F5 (roll bars 6 and 22,
+   re-attacks), and any other repeat they can call. Which column, if any,
+   separates the two?
+6. MuseScore opens each file (`.\pdf2musicxml render OUT`).
+
+## Local task B2: the clean-up, reversibly, with every check
+
+The listener said "go ahead with the clean-up". `dedupe_audio.py --apply`
+never deletes: on Windows each copy goes to the Recycle Bin, and a
+manifest of every DELETE, LINK and REPOINT, with each rewritten sidecar's
+previous content, is written to `benchmark\.dedupe\manifest-<time>.json`
+before the first change; `--undo MANIFEST` restores the audio and the
+sidecars. Every script now finds a take's audio through
+`library.audio_for_key` / `library.discover` (a test holds scripts/ to
+it), so no track drops out once its copy is gone.
+
+1. Rehearse the Recycle Bin and the undo on a scratch folder first (the
+   Recycle Bin path is Windows-only and untested in the cloud):
+   ```
+   mkdir C:\dedupe-rehearsal\a C:\dedupe-rehearsal\b
+   copy SOMEAUDIO.m4a C:\dedupe-rehearsal\a\x.m4a
+   copy SOMEAUDIO.m4a C:\dedupe-rehearsal\b\x-copy.m4a
+   echo {"region": [0, 1]} > C:\dedupe-rehearsal\b\x-copy.m4a.swingscribe.json
+   .venv\Scripts\python.exe scripts\dedupe_audio.py C:\dedupe-rehearsal --apply
+   .venv\Scripts\python.exe scripts\dedupe_audio.py --undo C:\dedupe-rehearsal\.dedupe\manifest-<time>.json
+   ```
+   After --apply: one copy in the Recycle Bin, its sidecar naming the kept
+   file. After --undo: the copy back where it was, the sidecar as it was.
+   If the undo cannot bring the audio back from the Recycle Bin, say so --
+   `--trash D:\somewhere` is the fallback, a plain move.
+2. Back up every sidecar:
+   `robocopy benchmark C:\dedupe-backup *.swingscribe.json /S`
+3. Before:
+   ```
+   .venv\Scripts\python.exe scripts\run_eval.py --db wjazz\wjazzd.db --json OUT\card-before.json > OUT\card-before.txt
+   .venv\Scripts\python.exe scripts\error_taxonomy.py --db wjazz\wjazzd.db --count > OUT\taxonomy-before.txt
+   .venv\Scripts\python.exe scripts\wjazz_reviews.py --count > OUT\reviews-before.txt
+   .venv\Scripts\python.exe scripts\wjazz_reviews.py --folder Omnibook --count > OUT\reviews-omnibook-before.txt
+   .venv\Scripts\python.exe scripts\dedupe_audio.py benchmark > OUT\dedupe-dry.txt
+   ```
+4. Apply: `.venv\Scripts\python.exe scripts\dedupe_audio.py benchmark --apply > OUT\dedupe-apply.txt`
+5. After: the four commands of step 3 again, to `*-after` files. Then:
+   - `fc /b OUT\card-before.json OUT\card-after.json` must say no
+     differences, and the card must end "Baselines: all 4768 numbers
+     unchanged" (or `run_eval.py ... --against OUT\card-before.json`);
+   - the taxonomy counts and the solo NAMES in the reviews lists must
+     match; the reviews' `<- audio` paths change for the linked takes
+     (they name the kept file now), and that is expected;
+   - nothing re-transcribed in either run_eval.
+6. If anything moved: `dedupe_audio.py --undo benchmark\.dedupe\manifest-<time>.json`,
+   then report with the before/after files.
+
+Report: the dry run's counts, the apply's output and manifest path, each
+comparison, and anything the undo rehearsal did not restore.
 
 ## Local task B: linked sidecars ("takes")
 

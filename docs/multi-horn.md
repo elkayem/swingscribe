@@ -132,9 +132,11 @@ button, the page view, the Score button, `run_eval` and
     beats of mean snap error -- the bridge's eighth-note triplet chords.
     Notate reads a literal page's beat as ternary only when an onset sits
     EXACTLY on a third (`notate.exact_thirds`), which nothing else writes.
-- The default rhythm is `literal-8` (config.TIMINGS, the Rhythm menu's
-  "Literal 8ths (16ths under 160 bpm)"), the listener's decision after the
-  second measurement (2026-10-09): a beat of 160 bpm or faster
+- The default rhythm is SWING since the fourth measurement (the
+  listener's decision, below), its lag read once over both horns. Before
+  it, it was `literal-8` (config.TIMINGS, the Rhythm menu's "Literal 8ths
+  (16ths under 160 bpm)"), still the choice for a straight-eighth head:
+  a beat of 160 bpm or faster
   (`quantize.LITERAL_EIGHTHS_BEAT_S`, 0.375 s) is written on EIGHTHS,
   refined to 16ths and 32nds only where a coarser grid cannot keep its
   onsets apart or pushes one onto the next beat's own note -- the running
@@ -347,6 +349,46 @@ and 0.4 confidence: the two G-flats of page bar 46 here) waits for the
 listener's erasures on the head to measure it against: CLAUDE.md's
 "never filter notes by duration" was measured on CREPE's line, not on
 this, and two notes are not a measurement.
+
+## The fourth measurement and the listener's corrections (Local task A4, 2026-10-09)
+
+The internet page the earlier rounds compared against is "something I
+found on the internet", wrong in places, and no reference: the listener's
+own edit of our MusicXML will be. Their decisions and corrections, and
+what each became:
+
+- "Make swing default": `config.ENSEMBLE_TIMINGS` is swing for a head. The
+  head had measured level with literal eighths plus the lag (14 of 70 bars
+  differ, all small), and swing already adapts the grid to each beat,
+  writes triplets and the "Swing" marking. Swing took the line's lag out
+  per voice inside quantize, so a lower horn entering for two chords was
+  written off the beat under an upper horn moved onto it; a swing head now
+  reads the lag once over both horns before the swing reading
+  (`notation._unlag_together`) and quantizes with the per-voice lag off.
+- Bar 24, the lower A "held the ENTIRE bar": a head closes a rest of up to
+  an eighth before a voice's next note (`NotateConfig.close_rests`, an
+  eighth via `notation.writing_of`; `legato_cap` asks about the onset-to-
+  onset gap, which would have filled four beats).
+- Bar 26, "the tenor moves from Eb on 1 to D on 3": a note a step or two
+  from the only note sounding, which ends within 0.25 s, is that horn's
+  legato successor (`voices.legato_successors`: the old note's tail is
+  cut); after ordering, a note with no partner keeps the voice of the note
+  it continues (`continue_voices`). The tenor's E-flat into D is voice 2,
+  the trumpet's F4 tied over, a rest, F4 on 4. Whether the tenor plays D
+  with a D-flat grace or D-flat (CREPE bends D-flat, D, D-flat over 0.2 s)
+  is the listener's to hear: no rule from one note.
+- Bar 29, the 58 ms G-flat at confidence 0.33: "too short to write down".
+  `notation.is_faint` (under 80 ms AND under 0.4 AND not a lead-in) with
+  `drop_faint`, OFF until the script's list of every scrap on the head is
+  read; never duration alone (CLAUDE.md, measured on solos).
+- Bar 25's lower C, "ONE WHOLE NOTE": Basic Pitch split it with no gap,
+  and its decoder ends every note where a same-pitch onset begins, so the
+  gap tells nothing; CREPE is on the trumpet there. `scripts/
+  multi_horn_joins.py` measures every same-pitch join (the onset
+  posteriorgram's peak, the frame posteriorgram's dip, the stem's energy
+  dip) for the listener to mark against the A section's real repeats.
+- Bars 36 and 38: the internet page's triplets "look wrong"; writing none
+  is right, and the triplet gates stay as they are.
 
 ## Open questions for the measurement
 
