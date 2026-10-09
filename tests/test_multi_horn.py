@@ -96,20 +96,24 @@ def test_a_multi_horn_page_is_literal_unless_the_sidecar_says_otherwise():
     assert timing_for({"ensemble": "multi-horn", "timing": "rubato"}, config) == "literal-8"
 
 
-def test_the_literal_readings_are_off_unless_the_sidecar_turns_them_on():
+def test_a_head_takes_the_lag_out_and_folds_its_scoops_by_default():
     config = Config()
     assert reading_of({"ensemble": "multi-horn"}, config) == {
         "timing": "literal-8",
-        "literal_lag": False,
+        # A head takes the lag out (the listener's decision, 2026-10-09) ...
+        "literal_lag": True,
         "literal_thirds": False,
-        # A multi-horn head folds its scoops into their notes by default.
+        # ... and folds its scoops into their notes by default.
         "literal_lead_ins": True,
     }
     on = reading_of({"literal_lag": True, "literal_thirds": True}, config)
     assert on["literal_lag"] and on["literal_thirds"]
     assert not on["literal_lead_ins"]  # not a multi-horn head
-    off = reading_of({"ensemble": "multi-horn", "literal_lead_ins": False}, config)
-    assert not off["literal_lead_ins"]
+    assert not reading_of({}, config)["literal_lag"]  # nor is a solo
+    off = reading_of(
+        {"ensemble": "multi-horn", "literal_lead_ins": False, "literal_lag": False}, config
+    )
+    assert not off["literal_lead_ins"] and not off["literal_lag"]
 
 
 # ── the writing conventions (notation.horn_lines) ────────────────────────────

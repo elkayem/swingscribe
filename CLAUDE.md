@@ -754,9 +754,11 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   the next note 3x longer, so a 16th run is never a chain) and the page
   folds it as a grace (`literal_lead_ins`, on for this ensemble only). The
   GUI's review key hashes the transcribe dump and never CACHE_VERSION:
-  bump `multi_horn_version` with ANY rule change. `literal_lag` on top of
-  the eighths mends three bars of the head and adds one 16th: still OFF,
-  the listener's call.
+  bump `multi_horn_version` with ANY rule change. The lag is taken out by
+  default for a head (`literal_lag` via `notation.reading_of`, the
+  listener's yes of 2026-10-09), read once over both horns. Swing as a
+  head's default is the listener's open question; before it ships, swing's
+  lag must be read over both horns too (it is per voice today).
 - **The Score button and the F1 on the ground-truth bar are DIFFERENT
   QUESTIONS**, and this is the project's most expensive confusion appearing in
   the UI. The bar's F1 is time-free and pitch-only (`gui/ground_truth.py`):

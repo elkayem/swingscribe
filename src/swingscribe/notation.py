@@ -247,15 +247,18 @@ def timing_for(settings: dict, config: Config) -> str:
 def reading_of(settings: dict, config: Config) -> dict:
     """The quantize settings a page's sidecar chooses: its rhythm
     (`timing_for`), and for a literal page the readings a written head may
-    take -- `literal_lag` and `literal_thirds`, both off unless the sidecar
-    turns them on -- and whether lead-ins fold into their notes
-    (`literal_lead_ins`: on for a multi-horn head unless its sidecar says
-    otherwise, off for anything else)."""
+    take -- `literal_lag` (the line's lag behind the beat taken out) and
+    `literal_thirds` -- and whether lead-ins fold into their notes
+    (`literal_lead_ins`). For a multi-horn head the lag and the lead-ins
+    are ON unless its sidecar says otherwise (the lag is the listener's
+    decision of 2026-10-09: three bars of the head's bridge onto the
+    downbeat, one 16th more); thirds, and all three for anything else,
+    are off unless the sidecar turns them on."""
     qc = config.quantize
     horns = (settings.get("ensemble") or config.transcribe.ensemble) == "multi-horn"
     return {
         "timing": timing_for(settings, config),
-        "literal_lag": bool(settings.get("literal_lag", qc.literal_lag)),
+        "literal_lag": bool(settings.get("literal_lag", horns or qc.literal_lag)),
         "literal_thirds": bool(settings.get("literal_thirds", qc.literal_thirds)),
         "literal_lead_ins": bool(settings.get("literal_lead_ins", horns or qc.literal_lead_ins)),
     }

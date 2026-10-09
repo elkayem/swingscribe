@@ -306,8 +306,25 @@ The listener decided:
 (bar 24's A4, bar 27's A-flat whole note, the B-flat halves of page bars
 51-52), puts a 16th into one (page 70, "D5:0.5 Eb5:0.5" -> "D5:0.25
 Eb5:0.75") and shortens a rest; readability 1.000 either way, ties 0.161
--> 0.156. The local session recommends lag ON with eighths for a head; it
-stays off until the listener says so.
+-> 0.156. The listener said YES to taking the lag out: `literal_lag` is ON
+for a head by default (`notation.reading_of`; sidecar `literal_lag: false`
+or the script's `--no-lag` keeps it), read once over both horns. The
+default export's name carries `literal8.lag`.
+
+The listener then asked whether SWING would do the job. Measured on the
+same take (c34959c, `--timing swing`): 379 notes, readability 1.000, ties
+0.158, BUR 1.91 with 112 of 291 beats warped, and the only triplet of any
+run (page 69, 3:2), against literal + lag + eighths' 378 notes, 1.000 and
+0.156. The pages differ in 14 of 70 bars, all small: swing is better at
+the listener's bar 31 (the lower G-flat on the downbeat), worse at 29 (a
+16th pickup from the 58 ms scrap), level elsewhere, and neither writes
+bars 36 and 38's triplets. Swing adapts the grid to each beat (16ths only
+where a beat demonstrates them) and takes the lag out itself (R29). The
+choice is the listener's; until they make it the head stays on literal
+eighths with the lag out. Before swing becomes a head's default its lag
+must be read once over both horns, as the literal path does
+(`notation._unlag_together`): swing reads it per voice inside quantize
+(`quantize.line_lag`), so a chord's two horns could land a 16th apart.
 
 Fixed by A2's round and confirmed: roll bars 15-16 move, 17's A-flat stays
 under the C; E natural is E. Still wrong in A3, fixed now: B natural was

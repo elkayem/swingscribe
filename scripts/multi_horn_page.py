@@ -24,9 +24,9 @@ meter, model and stem; the ensemble is forced to "multi-horn" in memory.
 Flags choose the rhythm without touching it: `--timing` (literal-8 is the
 multi-horn default: eighths at 160 bpm and over, finer only where eighths
 cannot keep a beat's notes apart; `--timing literal-16` writes 16ths),
-`--lag` (take the held chords' lag behind the beat out, read once over both
-horns) and `--thirds` (write a beat that fits thirds as a triplet). Both
-are off by default; the listener decides them. A head folds each scoop
+`--no-lag` (keep the held chords' lag behind the beat, which a head takes
+out by default, read once over both horns) and `--thirds` (write a beat
+that fits thirds as a triplet; off by default). A head folds each scoop
 into the note it leads into, written as a grace note (`--no-fold` writes
 them as notes).
 
@@ -65,7 +65,11 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="the rhythm (default: the sidecar's, else literal-8 for a multi-horn head; "
         "literal-16 for 16ths)",
     )
-    parser.add_argument("--lag", action="store_true", help="take the line's lag out")
+    lag = parser.add_mutually_exclusive_group()
+    lag.add_argument("--lag", action="store_true", help="take the line's lag out (the default)")
+    lag.add_argument(
+        "--no-lag", action="store_true", help="keep the line's lag (sidecar literal_lag false)"
+    )
     parser.add_argument("--thirds", action="store_true", help="read triplets in literal time")
     parser.add_argument(
         "--no-fold",
@@ -108,6 +112,8 @@ def load_settings(args: argparse.Namespace) -> dict:
     settings.update({key: value for key, value in overrides.items() if value is not None})
     if args.lag:
         settings["literal_lag"] = True
+    if args.no_lag:
+        settings["literal_lag"] = False
     if args.thirds:
         settings["literal_thirds"] = True
     if args.no_fold:
@@ -318,7 +324,7 @@ def main(argv=None) -> int:
     print(
         f"written: {described['bars']} bars, {described['notes']} notes, key "
         f"{described['key']} ({described['timing']}"
-        f"{', lag out' if settings.get('literal_lag') else ''}"
+        f"{', lag out' if reading['literal_lag'] else ''}"
         f"{', thirds' if settings.get('literal_thirds') else ''}"
         f"{', lead-ins folded' if reading['literal_lead_ins'] else ''}); "
         f"{len(moved)} of {len(lines.phrases)} lower phrases moved up, "

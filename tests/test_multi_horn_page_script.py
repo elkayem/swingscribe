@@ -98,7 +98,7 @@ def test_the_script_writes_a_two_horn_page_from_the_sidecar(monkeypatch, tmp_pat
     assert "bar   1 v2:" in text or "bar   2 v2:" in text
     printed = capsys.readouterr().out
     assert "1 candidates" in printed
-    assert "literal-8" in printed
+    assert "literal-8" in printed and "lag out" in printed
 
 
 def test_the_flags_are_laid_over_the_sidecar_in_memory(tmp_path):
@@ -125,6 +125,10 @@ def test_the_rhythm_and_fold_flags_are_sidecar_keys(tmp_path):
     settings = multi_horn_page.load_settings(args)
     assert settings["timing"] == "literal-16"
     assert settings["literal_lead_ins"] is False
+    args = multi_horn_page.parse_args(
+        ["x.m4a", "--sidecar", str(tmp_path / "none.json"), "--no-lag"]
+    )
+    assert multi_horn_page.load_settings(args)["literal_lag"] is False
 
 
 def test_a_console_that_cannot_print_a_flat_does_not_kill_the_summary(monkeypatch):

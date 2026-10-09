@@ -11,7 +11,7 @@ merged: the listener reviews the branch first. Design and state:
 
 | Piece | State |
 | --- | --- |
-| A. Multi-horn core + `scripts/multi_horn_page.py` | measured three times (Local tasks A, A2, A3); the listener's decisions in, waiting on Local task A4 and the listener's call on lag |
+| A. Multi-horn core + `scripts/multi_horn_page.py` | measured three times (Local tasks A, A2, A3); eighths and lag-out are the head's defaults; waiting on Local task A4 and the listener's swing-or-literal choice |
 | B. Linked sidecars | accepted (Local task B: card byte-identical, 4768 pins); dedupe decided by sidecar, waiting on the dry run |
 | C. Two parts, GUI, guide | checked (Local task C); fixes pushed |
 
@@ -192,27 +192,32 @@ Report:
 `--by-tempo` and the sidecar's `literal_tempo` are gone: eighths are the
 head's DEFAULT rhythm now (`literal-8`, "Literal 8ths (16ths under 160
 bpm)" in the Rhythm menu), and `--timing literal-16` (the menu's "Literal
-16ths") is the choice for a melody in sixteenths. The cached review is
-reused (nothing in its key moved).
+16ths") is the choice for a melody in sixteenths. The lag is taken out by
+DEFAULT too (the listener's yes); `--no-lag` keeps it. The cached review
+is reused (nothing in its key moved).
 
 ```
 %PAGE% --out OUT\os4.musicxml --dump-voices OUT\os4.txt
-%PAGE% --lag --out OUT\os4.lag.musicxml --dump-voices OUT\os4.lag.txt
+%PAGE% --no-lag --out OUT\os4.nolag.musicxml
 %PAGE% --timing literal-16 --out OUT\os4.16ths.musicxml
 ```
 
 Report:
 
-1. `os4` against A3's `os3.bytempo`: it should be the same page note for
-   note except spelling (the `literal-8` default IS by-tempo).
+1. `os4` against A3's `os3.lag-bytempo`, and `os4.nolag` against
+   `os3.bytempo`: each should be the same page note for note except
+   spelling (`literal-8` IS by-tempo, and the default now takes the lag
+   out).
 2. Spelling: page bar 10's G4/B4 chord over G7 reads B natural, page bar
    54's lower C-flat 4 now reads B3 (B natural), and no B or E natural
    reads wrong now (an A-flat-major page should hold no C-flat or F-flat).
 3. In the GUI: the Rhythm menu shows "Literal 8ths (16ths under 160 bpm)"
    for the head and offers "Literal 16ths"; Export names the file
    `.literal8` / `.literal16`.
-4. For the listener: `--lag` on with the eighths, as A3 recommended
-   (`os4.lag`)? If yes, it becomes the head's default the same way.
+4. The listener's swing-or-literal choice. If it is swing, say so before
+   it becomes the default: swing reads the lag per voice today, and must
+   read it once over both horns first (multi-horn.md, "The third
+   measurement").
 
 ## Local task B: linked sidecars ("takes")
 

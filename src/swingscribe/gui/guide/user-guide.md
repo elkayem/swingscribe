@@ -616,6 +616,9 @@ The page writes both horns on one treble staff, in concert pitch:
 - The rhythm is **literal 8ths** unless you pick another one in the
   **Rhythm** menu: horns playing a written head play the written rhythm.
   Pick **Literal 16ths** for a melody that moves in sixteenths.
+- Horns that sit a little behind the beat are written on it: how far
+  behind they play is read over both horns together and taken out before
+  the notes are placed, so a chord they attack together stays together.
 
 Set **Staves** to **Two parts (upper + lower)** to write the horns as two
 separate parts instead. Each part plays its own notes, so nothing is moved
