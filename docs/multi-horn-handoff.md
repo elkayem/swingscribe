@@ -5,6 +5,53 @@ the LOCAL session develops on master itself (the listener's decision), and
 the "Local task" sections below are the record of how each rule was
 measured. Design and state: [multi-horn.md](multi-horn.md).
 
+## 2026-10-11: the listener's ground truth, and the overfitting check
+
+`benchmark/Multi-Horn/Open_Sesame_Ground_Truth.mscz` is the listener's page
+of the head (62 bars, two voices, concert, staccato and triplets marked).
+It scores BOTH takes of the same melody: `Open_Sesame_Melody` (the head in)
+and `Open_Sesame_Melody_End` (the head out, 362-422 s). The out-head is the
+held-out check: the rules were tuned on the head in.
+
+    .venv\Scripts\python.exe scripts\score_horns.py benchmark\Multi-Horn\Open_Sesame_Ground_Truth.mscz PAGE.musicxml ...
+
+(`swingscribe.horn_score`: per voice, WRITTEN = same spot and pitch, HEARD =
+right pitch within an eighth, mir_eval's matcher on the position axis.)
+
+Pooled written F1 / heard F1: head in 0.818 / 0.910, head out 0.712 / 0.827
+(0.695 / 0.806 before the crossing guard below). Rule by rule, each removed
+in turn (scratch ablation), NO rule tuned on the head in hurts the head
+out: rejoin_splits, lead-in marks, one_attack, rule 5b, the triplet reading
+and the slide rule help both; trim_tails and legato_successors are level
+on the out-head (trim_tails +0.012 on the in only -- the one hint of a
+fit). The gap is mostly HEARING, not the writing rules:
+
+- out bars 59-60: the trumpet is heard an OCTAVE UP (C6 B5 A5, conf
+  0.65-0.82) where the page writes C5 B4 A4. Ask the listener whether the
+  trumpet takes the last A up the octave in the out-head; if so the
+  reference does not describe that take and these bars are not our error.
+- out bar 1's lower A-flat and bar 6's tenor riff are not heard at all;
+  bar 2's riff notes are heard faint (58-128 ms, conf 0.28-0.54) and the
+  slide rule takes one of them (12 slides left off on the out-head, 6 on
+  the in).
+- out bars 15-16: the triplet reading fired on 2 of the 4 half bars (the
+  in-head: 4 of 4; no false fires on either). Conservative, not overfit;
+  loosen only with more heads.
+- shared by BOTH heads (so not a fit): bars 46/48's eighth-triplet turn
+  on beat 1 (the listener writes Bb-C-Bb in triplet eighths), bars
+  11-12/27-28.
+
+Fixed today: an octave move may not put the lower voice over the upper
+(`notation.crossing_share`, `CROSSING_SHARE` 0.1): the out-head's last
+phrase was moved up because one 2.5 s final note dominated its
+length-weighted median, writing G5/F5 over C5.
+
+Open: both Multi-Horn sidecars now name the `.mscz` as their `score`, so
+run_eval will no longer skip them as "a multi-horn head with no score" --
+it would score them with the SINGLE-LINE scorer. Decide (keep them out of
+run_eval, or teach it horn_score) before the next harness run, and settle
+their split (they post-date split.json).
+
 ## Paused 2026-10-09: where to pick up
 
 Development is paused until the listener's usage limit resets. They are

@@ -414,6 +414,32 @@ def sub_phrases(
     return [run[1] for run in merged]
 
 
+# An octave move may not write the lower voice ABOVE the upper. The closing
+# Open Sesame head's last phrase (2026-10-11, scored against the listener's
+# page): seven notes a fourth to a sixth under the trumpet and one final
+# held E4 2.5 s long under a G5, so the length-weighted median read an
+# octave and a third, the phrase went up, and G4/F4 under C5 came out
+# G5/F5 over it. A real excursion (the opening head's bars 15-16) moves
+# with no pair crossing; this allows a stray pair, not a habit.
+CROSSING_SHARE = 0.1
+
+
+def crossing_share(phrase: list[NoteEvent], upper: list[NoteEvent], shift: int) -> float:
+    """The share of the time a phrase sounds under the upper voice that it
+    would sound ABOVE it, moved up `shift` semitones."""
+    above = total = 0.0
+    for low in phrase:
+        for high in upper:
+            shared = min(low.onset + low.duration, high.onset + high.duration) - max(
+                low.onset, high.onset
+            )
+            if shared > 0:
+                total += shared
+                if low.pitch + shift > high.pitch:
+                    above += shared
+    return above / total if total else 0.0
+
+
 def phrase_interval(phrase: list[NoteEvent], upper: list[NoteEvent]) -> float | None:
     """How far a phrase of the lower voice sits under the upper voice: the
     median interval to the upper notes sounding over it, weighted by how
@@ -775,6 +801,8 @@ def horn_lines(
         shift = 0
         if move_octaves and interval is not None and interval >= OCTAVE:
             shift = OCTAVE * int(interval // OCTAVE)
+            while shift and crossing_share(phrase, upper, shift) > CROSSING_SHARE:
+                shift -= OCTAVE
         phrases.append(
             {
                 "start": phrase[0].onset,

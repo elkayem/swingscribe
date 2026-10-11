@@ -144,6 +144,20 @@ def test_a_phrase_more_than_an_octave_under_is_moved_up_an_octave():
     assert lines.phrases[0]["moved"] == OCTAVE
 
 
+def test_a_move_never_writes_the_lower_voice_over_the_upper():
+    """The closing head's last phrase (2026-10-11): seven notes a fourth to
+    a sixth under C5 and one long final E4 under a G5. The length-weighted
+    median reads an octave and more, but moving the phrase would put G4/F4
+    OVER the C5 above them, so it stays."""
+    upper = [horn(i * 0.25, 0.25, 72) for i in range(7)] + [horn(1.75, 2.5, 79)]
+    lower = [horn(i * 0.25, 0.25, p, voice=2) for i, p in enumerate([67, 65, 65, 64, 67, 68, 64])]
+    lower.append(horn(1.75, 2.5, 64, voice=2))
+    lines = horn_lines(upper + lower)
+    assert lines.phrases[0]["interval"] >= OCTAVE
+    assert lines.phrases[0]["moved"] == 0
+    assert [n.pitch for n in lines.lower] == [n.pitch for n in lower]
+
+
 def test_a_phrase_in_close_harmony_is_never_moved():
     upper = [horn(i * 0.5, 0.5, 72) for i in range(8)]
     lower = [horn(i * 0.5, 0.5, 67, voice=2) for i in range(8)]
