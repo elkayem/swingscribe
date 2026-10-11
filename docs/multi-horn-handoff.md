@@ -62,7 +62,8 @@ never tune to it). When they hand it over, score our page against it first.
 
 State of the Open Sesame head (`benchmark/Multi-Horn/Open_Sesame_Melody.
 swingscribe.json`, a linked take of the Transcriptions_Other recording,
-span 0-67.308 s; latest page `benchmark/Multi-Horn/v8/os8.musicxml`):
+span 0-67.308 s; latest pages `benchmark/Multi-Horn/gt/`, the v1-v8 round
+folders recycled 2026-10-11):
 swing rhythm, lag out, staccato quarters for the riff, page bars 23-24 as
 quarter-note triplets in both voices, the listener's held notes joined
 (rule 5b at 250 ms), the G-flat slides gone. 2158 tests pass on Windows.
