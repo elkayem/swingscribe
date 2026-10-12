@@ -46,11 +46,66 @@ Fixed today: an octave move may not put the lower voice over the upper
 phrase was moved up because one 2.5 s final note dominated its
 length-weighted median, writing G5/F5 over C5.
 
-Open: both Multi-Horn sidecars now name the `.mscz` as their `score`, so
-run_eval will no longer skip them as "a multi-horn head with no score" --
-it would score them with the SINGLE-LINE scorer. Decide (keep them out of
-run_eval, or teach it horn_score) before the next harness run, and settle
-their split (they post-date split.json).
+The listener on out bars 59-60: Hubbard does take the last phrase up the
+octave, for effect; the page is a LEAD SHEET, not a transcription of either
+take, so those bars stay as written and are not ours to chase.
+
+**Bar numbers.** The ground truth starts at the head (the piano's eight
+bars are gone from it and from the sidecar's span), and so do our pages:
+they line up with no shift. The items below, and every number in this
+file from here on, are the GROUND TRUTH's bars. The "page bar N" of the
+Local task sections and of the 2026-10-09 list was the old 0 s page:
+GT bar = page bar - 8.
+
+## 2026-10-11, later: the harness set, item 3, the GUI checks
+
+**run_eval scores the heads** (module docstring, "A fifth set"): section
+`horns`, means `summary/horns_*`, pinned (38 new numbers, nothing else
+moved). A multi-horn take with a two-voice score is left out of the
+single-line hand-score set (`score_benchmark.discover_tunes`) and scored by
+`horn_score` from Export's own MusicXML. Its split is its own,
+`tests/regression/horn-split.json`: both Open Sesame takes are dev (the
+head in tuned on, the head out read beside it as the fitting check); ANY
+head added since is a test head, scored only by `run_eval --test`. The
+tune-title hash would have split the two takes (head in test, head out
+dev) and put the tune "Open Sesame" in test, where the Hubbard solo page
+stays. The head's span is ROUNDED as the GUI rounds it (`review.span_config`):
+unrounded, Basic Pitch's frame lattice moved and four held-note joins
+flipped. With that the harness page IS the Export page (head in note for
+note; head out one note in bar 46, a GPU/CPU millisecond): written / heard
+F1 0.818 / 0.910 in, 0.712 / 0.827 out.
+
+Item 3, each measured on BOTH heads (scratch A/Bs off the harness caches):
+
+- **Bar 2, both horns on the "and of 2"**: the two onsets are 58 ms apart
+  and `attack_window` is a quarter of the local beat, 57.5 ms there.
+  `ONE_ATTACK_BEATS` 0.28 (cap 75 ms) mends bar 2 in and bar 5 out and
+  moves nothing else; 0.30 already breaks 61 in and 46 out. A margin of
+  0.02 beat is a fit to one tune: NOT shipped; re-measure on the next head.
+- **Held notes the listener holds to the next note** (bars 17, 35, 39, 40,
+  47, 51) against phrase ends the listener leaves a beat of rest after
+  (7, 23, 55): closing rests up to 1-3 beats after a held note
+  (`HEAD_CLOSE_RESTS`) moves no written note and value only in the third
+  decimal, one head down; not shipped.
+- **Bars 46/48, the turn**: HEARING. Basic Pitch's onset map has the
+  trumpet's C at 0.65 but its frame map 0.22 (under 0.3), and the tenor's
+  middle note is heard a semitone flat (G4) and dropped. Lower thresholds
+  (frame 0.25, 0.2; onset 0.4) lose on the head in every time (written F1
+  0.818 -> 0.808 / 0.805 / 0.756); frame 0.2 hears out bars 1, 2 and 6 but
+  loses more elsewhere. The shipped thresholds stand.
+- **Bars 11-12 / 27-28**: the band plays B on (just after) beat 2 and B-flat
+  on its "and" (0.11 and 0.56 of the beat); the lead sheet writes C tied
+  into a triplet B-Bb. The written figure, not the played timing: no timing
+  rule should produce it.
+- **Bar 36's lower D** (old page 44): heard D-flat in, D out. Hearing.
+
+The A8 GUI checks, done in the built-in browser and reverted (sidecar
+identical to its backup): the Short notes menu shows for the head,
+"Eighth + rest" redraws the page (53 staccato marks -> 0, 11 rests -> 34)
+and Export's name gains `.eighths`; Not triplet on bar 15 takes its
+triplets off the page, Undo puts them back, Triplet on bar 46 (three notes
+a voice) writes it as one, As heard clears it. A mark on a half bar with
+fewer than three notes a voice is stored and changes nothing.
 
 ## Paused 2026-10-09: where to pick up
 
@@ -68,31 +123,28 @@ swing rhythm, lag out, staccato quarters for the riff, page bars 23-24 as
 quarter-note triplets in both voices, the listener's held notes joined
 (rule 5b at 250 ms), the G-flat slides gone. 2158 tests pass on Windows.
 
-Open items, each confirmed by the listener's ear unless marked:
+Open items as of 2026-10-09, renumbered to the GROUND TRUTH's bars
+(old page bar - 8) and settled against it on 2026-10-11:
 
-1. **Page bar 10: both horns enter on the "and of 2".** The trumpet's
-   D-flat (9.866 s) is 58 ms after the tenor's B-flat (9.808); even with
-   one_attack's 60 ms window the page still writes the trumpet on 3
-   (`~C5:2 Db5 ...` against the tenor's `~Ab4:1.5 Bb4 ...`). Find out why
-   the window did not pair them.
-2. **Page bar 44 (their bar 26): the trumpet's F is a TIED HALF NOTE, a
-   quarter rest, then F on 4.** We write a tied quarter and two quarter
-   rests: the joined F4's heard end (42.198 s, beat ~1.45) is early, as a
-   fading held note's is. Idea, unmeasured: round a held note's end UP to
-   the next beat when the rest left after it is a beat or more.
-3. **Page bar 44's lower voice**: the tenor goes E-flat on 1 to D on 3
-   ("there might be a D-flat grace on 3"); we write Db4 Db4. The frames bend
-   Db-D-Db (Local task A6's trace); ambiguous, one note.
-4. **Riff spelling of rhythm**: the listener writes the riff (pages 10, 14,
-   22-24, 26, 30) as STACCATO QUARTERS -- now the head's default (Short
-   notes menu). Check their ground truth for which notes they mark.
-5. **Page 34's D5 between E-flats (33.067 s, 58 ms, a semitone slide by
-   the rule)**: written as nothing now; a turn or nothing? Not asked yet.
-6. **Page 21's lower G4 join (20.323 s)** rode along with the A-section
-   E-flat's (same 0.31 s first note): not asked by itself.
-7. Local task A8's GUI checks were not run (the Short notes menu, the
-   Triplet mark on the roll, Export's `.eighths` tag). Do them on the
-   listener's first report.
+1. **GT bar 2 (page 10): both horns on the "and of 2".** Why the window
+   did not pair them: 58 ms against a 57.5 ms window (a quarter of the
+   local beat). A 0.28-beat window mends it and is held back as a fit
+   (above). OPEN, for the next head.
+2. **GT bars 35-36 (page 43-44): the trumpet's F.** The ground truth holds
+   it 7 beats (bar 35 and three beats of 36, no rest) then F on 4; we write
+   5 beats in, 6 out. Rest-closing measured and refused (above). OPEN, value
+   only (written F1 does not see it).
+3. **GT bar 36's lower voice (page 44)**: the ground truth writes E-flat
+   half, D quarter. Heard D-flat in, D out: hearing. OPEN.
+4. **Riff rhythm**: staccato quarters, as the ground truth marks them: 42
+   of its 50 marks on notes we wrote right, head in. DONE.
+5. **GT bar 26's D5 (page 34; 33.076 s, 46 ms, confidence 0.42)**: the
+   ground truth has none; we write a sixteenth between the E-flats (just
+   over the 0.4 faint line, so no slide). The tenor's G4 at 32.774 s is a
+   scoop the lead-in rule misses (its A-flat is 1.9x, not 3x, longer).
+   OPEN, one bar: look again on the next head.
+6. **GT bar 13's lower G4 (page 21)**: matches the ground truth. DONE.
+7. The A8 GUI checks: DONE (above).
 
 The dedupe clean-up is DONE (Local task B2): 37 copies in the Recycle Bin,
 undo with `scripts\dedupe_audio.py --undo C:\dedupe-backup\manifest-

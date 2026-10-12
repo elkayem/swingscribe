@@ -128,6 +128,11 @@ def discover_tunes(bench: Path = BENCH) -> dict[str, tuple[str, str, str, str]]:
         score_path = sidecar.get("score")
         if not score_path:
             continue
+        if sidecar.get("ensemble") == "multi-horn":
+            # A two-horn head's score is two voices; this scorer reads one
+            # line (its top note per chord). run_eval's `horns` set scores it
+            # through swingscribe.horn_score instead.
+            continue
         mscz_name = score_file(sidecar_path, score_path, bench)
         if mscz_name is None or not audio.is_file():
             continue

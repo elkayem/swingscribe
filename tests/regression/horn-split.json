@@ -1,0 +1,8 @@
+{
+  "frozen": "2026-10-11",
+  "note": "Two-horn heads a rule may be tuned on (scripts/run_eval.py, 'A fifth set'), by take key. Any multi-horn take not listed is a TEST head, scored only by run_eval --test. Never add a head here after reading its test numbers.",
+  "dev": [
+    "Multi-Horn/Open_Sesame_Melody",
+    "Multi-Horn/Open_Sesame_Melody_End"
+  ]
+}

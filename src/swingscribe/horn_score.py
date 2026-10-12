@@ -152,10 +152,19 @@ _STEP = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 
 def read_musicxml(path: str | Path) -> TwoVoices:
     """Our Export's single-part page: voice 1 the upper horn, voice 2 the lower."""
-    root = ElementTree.parse(path).getroot()
+    return _two_voices(ElementTree.parse(path).getroot(), str(path))
+
+
+def read_musicxml_text(text: str) -> TwoVoices:
+    """The same, from the MusicXML string Export would write (`to_musicxml`):
+    the harness scores a page it built without writing it anywhere."""
+    return _two_voices(ElementTree.fromstring(text), "page")
+
+
+def _two_voices(root, name: str) -> TwoVoices:
     part = root.find("part")
     if part is None:
-        raise ValueError(f"{path}: no part")
+        raise ValueError(f"{name}: no part")
     divisions = 1.0
     beats_per_bar = 4.0
     lines: dict[int, list[tuple[VoiceNote, bool]]] = {0: [], 1: []}

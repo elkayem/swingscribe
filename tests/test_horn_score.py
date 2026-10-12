@@ -80,3 +80,9 @@ def test_our_musicxml_is_read_by_voice_with_ties_joined(tmp_path):
         (2.0, 69, True),
     ]
     assert page.graces == 1 and page.bars == 2
+
+
+def test_a_page_string_reads_as_its_file_does(tmp_path):
+    path = tmp_path / "page.musicxml"
+    path.write_text(PAGE, encoding="utf-8")
+    assert horn_score.read_musicxml_text(PAGE) == horn_score.read_page(path)

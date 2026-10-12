@@ -83,6 +83,17 @@ def test_a_sidecar_without_a_score_is_not_a_benchmark_tune(tmp_path):
     assert score_benchmark.discover_tunes(tmp_path) == {}
 
 
+def test_a_two_horn_head_is_not_a_single_line_tune(tmp_path):
+    """Its score is two voices: run_eval's horns set scores it, never the
+    top-note-per-chord scorer."""
+    (tmp_path / "Head.mscz").write_bytes(b"pretend")
+    write_sidecar(tmp_path, "Head.m4a", score=str(tmp_path / "Head.mscz"), ensemble="multi-horn")
+    write_sidecar(tmp_path, "Solo.m4a", score=str(tmp_path / "Head.mscz"), ensemble="horn-led")
+    assert [audio for audio, *_ in score_benchmark.discover_tunes(tmp_path).values()] == [
+        "Solo.m4a"
+    ]
+
+
 # -- the Omnibook set: MusicXML beside the audio, in a subfolder -------------
 
 
@@ -648,6 +659,59 @@ def test_an_ordinary_run_holds_the_test_split_out_and_says_so(tmp_path, monkeypa
     assert {"Old_Tune.m4a", "Old_Tune.m4a [line=crepe]"} <= set(dev)
     assert any("held out: 1" in line for line in said)
     assert set(run_eval.split_runs(runs, None, test=True, log=said.append)) == {held}
+
+
+def test_two_horn_heads_take_their_own_split(tmp_path, monkeypatch):
+    """A head listed in horn-split.json is dev whatever its title hashes to
+    (both takes of one melody together); any other head is held out."""
+    from swingscribe.evaluation import load_split
+
+    monkeypatch.setattr(run_eval, "BENCH", tmp_path)
+    split_path = _split_file(tmp_path, [])
+    monkeypatch.setattr(run_eval, "SPLIT_FILE", split_path)
+    split = load_split(split_path)
+    titles = [f"Head {i}" for i in range(40)]
+    test_title = next(t for t in titles if split.is_test(t))
+    dev_title = next(t for t in titles if not split.is_test(t))
+    listed, other = test_title.replace(" ", "_"), dev_title.replace(" ", "_")
+    horn_split = tmp_path / "horn-split.json"
+    horn_split.write_text(json.dumps({"dev": [f"Horns/{listed}"]}), encoding="utf-8")
+    monkeypatch.setattr(run_eval, "HORN_SPLIT_FILE", horn_split)
+    runs = {f"Horns/{name}": {"notes": [], "ensemble": "multi-horn"} for name in (listed, other)}
+    dev = run_eval.split_runs(runs, None, test=False, log=lambda _m: None)
+    assert set(dev) == {f"Horns/{listed}"}
+    test = run_eval.split_runs(runs, None, test=True, log=lambda _m: None)
+    assert set(test) == {f"Horns/{other}"}
+
+
+def test_a_heads_span_is_rounded_as_the_gui_rounds_it():
+    """A head is scored as the page Export writes; the older sets keep the
+    unrounded spans their pins were made on."""
+    head = {"region": [8.386530288944911, 67.308], "ensemble": "multi-horn"}
+    solo = {"region": [8.386530288944911, 67.308], "ensemble": "horn-led"}
+    assert run_eval.transcribe_settings(head, 0.2, 0.0).region == (8.387, 67.308)
+    assert run_eval.transcribe_settings(solo, 0.2, 0.0).region == (8.386530288944911, 67.308)
+
+
+def test_a_heads_entry_and_means_come_from_horn_score():
+    pytest.importorskip("numpy")
+    pytest.importorskip("mir_eval")
+    from swingscribe import horn_score
+    from swingscribe.horn_score import TwoVoices, VoiceNote
+
+    reference = TwoVoices(
+        upper=[VoiceNote(0, 2, 74, 1, staccato=True), VoiceNote(2, 2, 72, 1)],
+        lower=[VoiceNote(0, 4, 70, 1)],
+    )
+    ours = TwoVoices(upper=reference.upper, lower=[VoiceNote(0.5, 3.5, 70, 1)])
+    entry = run_eval.horn_entry(horn_score.compare(reference, ours, shift=0.0), 1)
+    assert entry["upper_written_f1"] == 1.0 and entry["lower_written_f1"] == 0.0
+    assert entry["lower_heard_f1"] == 1.0
+    assert entry["staccato_both"] == 1.0 and entry["staccato_missed"] == 0.0
+    summary = run_eval.horn_summary({"a": entry, "b": dict(entry, written_f1=0.0)})
+    assert summary["horns_n"] == 2.0
+    assert summary["horns_written_f1"] == round(entry["written_f1"] / 2, 4)
+    assert run_eval.horn_summary({}) == {}
 
 
 def test_a_missing_split_file_holds_nothing_out(tmp_path, monkeypatch):

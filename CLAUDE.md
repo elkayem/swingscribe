@@ -785,7 +785,20 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   confidence under 0.4 AND not a lead-in AND no other such note within
   0.15 s: bar 36's quick soft figure is real, `notation.faint_scraps`)
   leave the page only with `drop_faint`, OFF until measured. `scripts/multi_horn_joins.py` measures
-  same-pitch joins for a re-attack rule; none exists yet.
+  same-pitch joins for a re-attack rule; none exists yet. **The listener's
+  two-voice page is the ground truth** (2026-10-11,
+  `benchmark/Multi-Horn/Open_Sesame_Ground_Truth.mscz`, a LEAD SHEET, bar 1
+  the head's first): `swingscribe.horn_score` scores a page voice by voice
+  (written = same spot and pitch, heard = within an eighth, mir_eval's
+  matcher on the position axis), `scripts/score_horns.py` by hand, and
+  run_eval's `horns` set on every run, pinned -- never the single-line
+  scorer. Its split is `tests/regression/horn-split.json`: the head in AND
+  the head out of Open Sesame are dev, read side by side as the fitting
+  check (a rule must help both); any head added since is TEST. run_eval
+  rounds a head's span as `review.span_config` does, so its page is
+  Export's (unrounded, four held-note joins flipped). A writing rule is
+  judged on both heads, and a threshold whose margin is one tune's (the
+  0.28-beat attack window) waits for the next head.
 - **The Score button and the F1 on the ground-truth bar are DIFFERENT
   QUESTIONS**, and this is the project's most expensive confusion appearing in
   the UI. The bar's F1 is time-free and pitch-only (`gui/ground_truth.py`):

@@ -49,6 +49,21 @@ can be trusted: silver or bronze (`swingscribe.evaluation.page_tier`,
 docs/roadmap.md E3). A page is never folded into the listener's twelve or the
 book.
 
+## A fifth set: two-horn heads
+
+A `multi-horn` take (docs/multi-horn.md) whose sidecar names a two-voice
+`.mscz` is scored by `swingscribe.horn_score`, not the single-line scorers:
+our page, built by the Export button's own assembly and read back from
+Export's MusicXML, against the listener's page voice by voice -- WRITTEN
+(same spot, same pitch) and HEARD (right pitch within an eighth), mir_eval's
+matcher on the position axis. Its section and means are its own (`horns`).
+Its split is its own too (`tests/regression/horn-split.json`, frozen
+2026-10-11): the heads every rule was tuned on are listed as dev -- both
+takes of Open Sesame, the head in and the head out, read side by side as the
+fitting check -- and any head added since is held out for `--test`. The
+tune-title hash would have split those two takes of one melody across dev
+and test.
+
 ## The locked test set
 
 Every track in `benchmark/` on 2026-09-29 is dev; a track added since is dev
@@ -117,6 +132,8 @@ BASELINES = Path("tests/regression/real-audio-baselines.json")
 # The test split's own pins, written only by `--test --pin` (module docstring).
 TEST_BASELINES = Path("tests/regression/test-baselines.json")
 SPLIT_FILE = Path("tests/regression/split.json")
+# The two-horn heads' own frozen split (module docstring, "A fifth set").
+HORN_SPLIT_FILE = Path("tests/regression/horn-split.json")
 # Which stage cache the stems and ingests are read from. The default is the
 # repo-root cache the GUI shares when launched from here; `--cache-dir
 # benchmark/.swingscribe-cache` reads the batch's, where a span-scoped
@@ -325,6 +342,15 @@ def transcribe_settings(sidecar: dict, step_cost: float, dip_db: float, line: st
 
     base = Config()
     low, high = sidecar["region"]
+    if sidecar.get("ensemble") == "multi-horn":
+        # A head's page is scored as the page Export writes, so its span is
+        # rounded as the GUI rounds it (`review.span_config`): unrounded,
+        # Basic Pitch's frame lattice moves and held-note joins flip (Open
+        # Sesame: 11 notes a frame apart, four joins). The older sets keep
+        # the unrounded spans their pins were made on.
+        from swingscribe.gui.review import SPAN_PRECISION
+
+        low, high = round(low, SPAN_PRECISION), round(high, SPAN_PRECISION)
     # A null `stem` means the listener never chose one, not that there is no
     # stem: it falls back to the default exactly as `ensemble` does. Without
     # this it reached the filesystem as "None.wav" and the track was skipped -
@@ -398,8 +424,8 @@ def transcribe_all(cache: Path, step_cost: float, dip_db: float, log=print) -> d
                 log(f"  {key}: {why} differs from cache -- re-transcribing")
                 runs.pop(key)
             base = eval_config()
-            low, high = sidecar["region"]
             settings = transcribe_settings(sidecar, step_cost, dip_db, line)
+            low, high = settings.region  # a head's, rounded as the GUI rounds it
             # The region rides in the config too, so a span-scoped stem set
             # that covers this solo resolves (library.span_for) — a whole-file
             # set still answers first.
@@ -967,6 +993,94 @@ def notation_scores(runs: dict, grids: dict, jobs: int = 1) -> dict:
         tasks.append((name, run, grids[track], str(BENCH / by_audio[track]), str(CACHE_DIR)))
     results = parallel_map(_notation_one, tasks, jobs)
     return {name: entry for name, entry in zip(names, results, strict=True) if entry}
+
+
+def _horn_one(task: tuple) -> dict | None:
+    name, run, grid, score_path, cache_dir = task
+    _worker_setup(cache_dir)
+    from swingscribe import horn_score
+    from swingscribe.stages.export import to_musicxml
+
+    page = notate_run(name, run, grid)
+    if page is None or not page.bars:
+        return None
+    # Read back from the MusicXML Export writes, so ties, tuplets, staccato
+    # and grace notes are judged as the listener's MuseScore sees them.
+    ours = horn_score.read_musicxml_text(to_musicxml(page))
+    return horn_entry(horn_score.compare(horn_score.read_page(score_path), ours), ours.bars)
+
+
+def horn_entry(result: dict, bars: int) -> dict:
+    """The pinned numbers of one head's `horn_score.compare`."""
+    entry = {"shift_beats": float(result["shift_beats"]), "bars": float(bars)}
+    for voice, prefix in (("both", ""), ("upper", "upper_"), ("lower", "lower_")):
+        scored = result[voice]
+        for kind in ("written", "heard"):
+            entry[f"{prefix}{kind}_f1"] = round(scored[kind]["f1"], 4)
+    both = result["both"]
+    entry["written_precision"] = round(both["written"]["precision"], 4)
+    entry["written_recall"] = round(both["written"]["recall"], 4)
+    entry["value"] = round(both["value"], 4)
+    for mark in ("staccato", "tuplet"):
+        entry[f"{mark}_both"] = float(both[mark]["both"])
+        entry[f"{mark}_missed"] = float(both[mark]["reference_only"])
+        entry[f"{mark}_extra"] = float(both[mark]["ours_only"])
+    return entry
+
+
+def horn_scores(runs: dict, grids: dict, jobs: int = 1) -> dict:
+    """Every two-horn head with a two-voice score, written and heard per
+    voice (`swingscribe.horn_score`)."""
+    names, tasks = [], []
+    for name, run in sorted(runs.items()):
+        track = track_of(name)
+        if run.get("ensemble") != "multi-horn" or track not in grids:
+            continue
+        sidecar_path = BENCH / f"{track}.swingscribe.json"
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        score = page_score(sidecar)
+        if score is None:
+            continue
+        names.append(name)
+        tasks.append((name, run, grids[track], str(score), str(CACHE_DIR)))
+    results = parallel_map(_horn_one, tasks, jobs)
+    return {name: entry for name, entry in zip(names, results, strict=True) if entry}
+
+
+def horn_summary(rows: dict) -> dict:
+    """The heads' means, pinned as `summary/horns_*` with their n."""
+    if not rows:
+        return {}
+    out = {
+        f"horns_{field}": round(statistics.fmean(e[field] for e in rows.values()), 4)
+        for field in ("written_f1", "heard_f1", "value")
+    }
+    out["horns_n"] = float(len(rows))
+    return out
+
+
+def render_horns(rows: dict, summary: dict) -> None:
+    print("\n== Two-horn heads: our page against the listener's, voice by voice ==")
+    print("  (written: same spot and pitch; heard: right pitch within an eighth)")
+    header = (
+        f"  {'head':<26s} {'written':>8s} {'heard':>7s} {'upper w':>8s} {'lower w':>8s} "
+        f"{'value':>6s} {'trip':>6s} {'stacc':>6s} {'shift':>6s}"
+    )
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    for name, e in sorted(rows.items()):
+        tuplets = f"{int(e['tuplet_both'])}/{int(e['tuplet_both'] + e['tuplet_missed'])}"
+        staccato = f"{int(e['staccato_both'])}/{int(e['staccato_both'] + e['staccato_missed'])}"
+        print(
+            f"  {Path(track_of(name)).name[:26]:<26s} {e['written_f1']:8.3f} "
+            f"{e['heard_f1']:7.3f} {e['upper_written_f1']:8.3f} {e['lower_written_f1']:8.3f} "
+            f"{e['value']:6.3f} {tuplets:>6s} {staccato:>6s} {e['shift_beats']:+6.0f}"
+        )
+    print(
+        f"\n  mean written F1 {summary['horns_written_f1']:.3f}, heard F1 "
+        f"{summary['horns_heard_f1']:.3f} over {int(summary['horns_n'])} head(s); "
+        "trip/stacc: the listener's marks we also wrote, on notes written right"
+    )
 
 
 # A notation row's edit cost (benchmark.edit_cost), per 100 reference notes:
@@ -1674,6 +1788,9 @@ def render(card: dict) -> None:
                 f"on {len(traced_pages)} pages"
             )
 
+    if card.get("horns"):
+        render_horns(card["horns"], card["summary"])
+
     if card.get("erasures"):
         render_erasures(card["erasures"], card.get("erasure_means", {}))
 
@@ -1905,6 +2022,7 @@ def flatten(card: dict) -> dict[str, float]:
         ("omnibook_notation", "omnibook-notation"),
         ("pages", "pages"),
         ("pages_notation", "pages-notation"),
+        ("horns", "horns"),
     ):
         for name, entry in card.get(section, {}).items():
             for field, value in entry.items():
@@ -1926,6 +2044,8 @@ HEADLINE_FIELDS = (
     "readability",
     "on_the_bar",
     "edit_cost",
+    "written_f1",
+    "heard_f1",
 )
 # Headline measures where LOWER is better. The paired table's up/down columns
 # count the number's direction, so on these "down" is the improvement.
@@ -2128,6 +2248,8 @@ def main() -> None:
         "omnibook_notation": {k: v for k, v in notated.items() if is_omnibook(k)},
         "pages": {k: v for k, v in scored.items() if is_page(k)},
         "pages_notation": {k: v for k, v in notated.items() if is_page(k)},
+        # Two-horn heads, voice by voice (module docstring, "A fifth set").
+        "horns": horn_scores(runs, grids, args.jobs) if grids else {},
         # WJazzD carries a human's NOTATION as well as their onsets, so the
         # same solos answer both questions.
         "wjazz_notation": (
@@ -2180,6 +2302,7 @@ def main() -> None:
                 f"pages_{tier}",
             )
         )
+    card["summary"].update(horn_summary(card["horns"]))
     card["summary"].update(placement_summary(card["notation"], "mscz"))
     card["summary"].update(placement_summary(card["wjazz_notation"], "wjazz"))
     card["summary"].update(grid_summary(card["notation"], "mscz"))
@@ -2242,8 +2365,15 @@ def split_runs(runs: dict, db_path: Path | None, test: bool, log=print) -> dict:
         db = sqlite3.connect(db_path)
     held: set[str] = set()
     sidecars: dict[str, dict] = {}
+    horn_dev = horn_dev_takes()
     for key in runs:
         track = track_of(key)
+        if runs[key].get("ensemble") == "multi-horn":
+            # A two-horn head is dev only by name in its own split; a head
+            # added since is a test head.
+            if track not in horn_dev:
+                held.add(key)
+            continue
         if track not in sidecars:
             path = BENCH / f"{track}.swingscribe.json"
             sidecars[track] = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
@@ -2255,6 +2385,14 @@ def split_runs(runs: dict, db_path: Path | None, test: bool, log=print) -> dict:
     if held:
         log(f"  held out: {len(held)} test-split run(s), scored only by --test at a release")
     return {k: v for k, v in runs.items() if k not in held}
+
+
+def horn_dev_takes(path: Path | None = None) -> set[str]:
+    """The two-horn heads a rule may be tuned on, by take key."""
+    path = path or HORN_SPLIT_FILE
+    if not path.is_file():
+        return set()
+    return set(json.loads(path.read_text(encoding="utf-8"))["dev"])
 
 
 def page_tiers(runs: dict) -> dict[str, str]:
