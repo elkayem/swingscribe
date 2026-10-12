@@ -334,6 +334,11 @@ rather than a lower constant: CLAUDE.md records that lowering
 `min_note_ms`, `pitch_persist_ms` and `median_filter_ms` as constants over
 six cached spans bought about two false notes per true one, and this
 taxonomy says exactly which classes those false notes go into.
+**Measured 2026-10-11 and refuted** (`docs/rhythm-splits.md`): a split
+conditioned on the local rhythm, from our own onsets or from the beat grid,
+reads level to down on all fifteen rules over the 68 horns; the real notes
+are a fifth of the short pieces the segmenter loses and sit in the same
+slots as the fragments.
 
 **At risk.** `fragment_neighbour` (585) and `split_sustain` (453): a
 segmenter that splits on shorter excursions splits more held notes at

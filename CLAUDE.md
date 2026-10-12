@@ -898,7 +898,12 @@ things not to re-derive:
   short-note floor were all swept over six cached spans: every one costs about
   two false notes per true one, and NOTHING beats the shipped settings on F1.
   The GUI's cached reviews carry raw f0 + periodicity + energy, so this sweep
-  costs no CREPE — re-run it before touching a threshold.
+  costs no CREPE — re-run it before touching a threshold. Nor does a split
+  conditioned on the local RHYTHM (2026-10-11, docs/rhythm-splits.md): fifteen
+  rules on our onsets and the beat grid, level to down over 68 horns. Only a
+  fifth of the short pieces the segmenter loses are missed notes, a note must
+  be right 43% of the time to raise F1, and the rest (pitch passing into the
+  next note, duplicates, fragments) sit in the same slots.
 - **Two voices of one performance share ONE swing reading.** `notation.py`
   notates the overlay separately (quantize writes one note per grid position,
   so two simultaneous notes in one list are a grid too coarse and one gets
