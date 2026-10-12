@@ -107,6 +107,21 @@ triplets off the page, Undo puts them back, Triplet on bar 46 (three notes
 a voice) writes it as one, As heard clears it. A mark on a half bar with
 fewer than three notes a voice is stored and changes nothing.
 
+**Bends, shipped the same evening.** The listener on GT bar 26: Hubbard's
+E-flat, D, E-flat is ONE bent E-flat ("Freddie does not change fingering"),
+in a lead sheet or a solo transcription alike; Tina's scoop into the A-flat
+is real (a grace in a transcription), and grace notes stay -- no lead-sheet
+mode. `notation.bends` finds the shape (<= 80 ms, a semitone from the same
+pitch either side, touching both) whatever its confidence, and
+`join_bends` writes the two held notes as one. Six on the two heads (five
+of Hubbard's, one tenor G-flat, G, G-flat); three had been dropped as faint
+slides, leaving two attacks. Written / heard / value: in 0.818 / 0.910 /
+0.813 -> 0.825 / 0.918 / 0.826, out 0.712 / 0.827 / 0.799 -> 0.716 / 0.832 /
+0.804; no reference note lost on either. Pins moved (horns only). The
+harness and GUI pages now differ by one figure on each head (in bar 58's
+lower G-A-flat, out bar 46's C), both a beat on the edge under the two
+paths' millisecond onset differences.
+
 ## Paused 2026-10-09: where to pick up
 
 Development is paused until the listener's usage limit resets. They are
@@ -138,7 +153,7 @@ Open items as of 2026-10-09, renumbered to the GROUND TRUTH's bars
    half, D quarter. Heard D-flat in, D out: hearing. OPEN.
 4. **Riff rhythm**: staccato quarters, as the ground truth marks them: 42
    of its 50 marks on notes we wrote right, head in. DONE.
-5. **GT bar 26's D5 (page 34; 33.076 s, 46 ms, confidence 0.42)**: the
+5. **GT bar 26's D5 (page 34; 33.076 s, 46 ms, confidence 0.42)**: DONE, a bend (above). Was: the
    ground truth has none; we write a sixteenth between the E-flats (just
    over the 0.4 faint line, so no slide). The tenor's G4 at 32.774 s is a
    scoop the lead-in rule misses (its A-flat is 1.9x, not 3x, longer).

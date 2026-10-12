@@ -325,6 +325,16 @@ def dump(notation, lines, edits, key: int, roll_bar: int | None, moves=()) -> st
         )
     out.append("")
     out.append(
+        "# bends (a short note a semitone from the same pitch either side: one held "
+        "note, joined unless --keep-slides)"
+    )
+    for n in lines.bends:
+        out.append(
+            f"{n.onset:8.3f}  {n.duration:6.3f}  v{n.voice}  "
+            f"{pitch_name(n.pitch, key):>4}  conf {n.confidence:.2f}"
+        )
+    out.append("")
+    out.append(
         f"# sounding share of the gap to the voice's next note (gaps up to {RATIO_GAP_S} s), "
         "in tenths: 0.0-0.1 ... 0.9-1.0, 1.0+"
     )

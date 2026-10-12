@@ -331,6 +331,8 @@ class HornLines:
     faint: list[NoteEvent] = field(default_factory=list)
     # The faint slides (`slide_scraps`), whether or not they were left off.
     slides: list[NoteEvent] = field(default_factory=list)
+    # The bends (`bends`), whether or not they were joined.
+    bends: list[NoteEvent] = field(default_factory=list)
     # Notes moved onto the other horn's attack (`one_attack`).
     together: int = 0
 
@@ -526,6 +528,65 @@ def slide_scraps(notes: list[NoteEvent], touch: float = SLIDE_TOUCH_S) -> list[N
             if into or off:
                 slides.append(note)
     return sorted(slides, key=lambda n: n.onset)
+
+
+# A BEND: a short note a semitone from the notes either side of it in its
+# voice, which share one pitch and touch it -- E-flat, D, E-flat. The player
+# bends the held note and does not change fingering, so it is ONE note
+# (the listener, 2026-10-11, on Hubbard's bar 26 of the Open Sesame head:
+# "a bent note is not a different note"). Unlike a slide it is judged by its
+# shape, never its loudness: bar 26's D sounds at confidence 0.42, over the
+# faint line, and was written as a sixteenth between the E-flats.
+BEND_MAX_S = 0.08
+
+
+def bends(
+    notes: list[NoteEvent], longest: float | None = None, touch: float = SLIDE_TOUCH_S
+) -> list[tuple[NoteEvent, NoteEvent, NoteEvent]]:
+    """Every (held note, bend, held note again) in either voice: the bend at
+    most `longest` long (`BEND_MAX_S`), a semitone from both neighbours,
+    touching each within `touch`."""
+    longest = BEND_MAX_S if longest is None else longest
+    found = []
+    for voice in (1, 2):
+        line = sorted(
+            (n for n in notes if (2 if n.voice == 2 else 1) == voice), key=lambda n: n.onset
+        )
+        for before, bend, after in zip(line, line[1:], line[2:], strict=False):
+            if (
+                before.pitch == after.pitch
+                and abs(bend.pitch - before.pitch) == 1
+                and bend.duration <= longest
+                and abs(bend.onset - (before.onset + before.duration)) <= touch
+                and abs(after.onset - (bend.onset + bend.duration)) <= touch
+            ):
+                found.append((before, bend, after))
+    return found
+
+
+def join_bends(
+    notes: list[NoteEvent], found: list[tuple[NoteEvent, NoteEvent, NoteEvent]]
+) -> list[NoteEvent]:
+    """The notes with each bend gone and the held note on either side of it
+    written as ONE note, from the first's onset to the second's end. A run
+    of bends on one held note joins into one."""
+    joined: dict[int, NoteEvent] = {}  # id of a note -> the note it became
+    gone: set[int] = set()
+    for before, bend, after in found:
+        head = joined.get(id(before), before)
+        end = max(head.onset + head.duration, after.onset + after.duration)
+        whole = head.model_copy(update={"duration": end - head.onset})
+        for key, note in joined.items():
+            if note is head:
+                joined[key] = whole
+        joined[id(before)] = joined[id(after)] = whole
+        gone.update((id(bend), id(after)))
+    out = []
+    for note in notes:
+        if id(note) in gone:
+            continue
+        out.append(joined.get(id(note), note))
+    return out
 
 
 # A two-horn HEAD's quarter-note triplet (head_triplet_units). D28 settled
@@ -783,8 +844,12 @@ def horn_lines(
     `move_octaves` and `merge_unisons` are off for two PARTS, where each
     horn plays its own notes at its own octave. `drop_faint` leaves the
     faint scraps (`faint_scraps`) off the page, `drop_slides` the faint
-    slides (`slide_scraps`); both are listed either way.
+    slides (`slide_scraps`) AND the bends (`bends`), each bend's held note
+    written once; all three are listed either way.
     """
+    found = bends(notes)
+    if drop_slides and found:
+        notes = join_bends(notes, found)
     faint = faint_scraps(notes)
     slides = slide_scraps(notes)
     gone = {id(n) for n in (*(faint if drop_faint else ()), *(slides if drop_slides else ()))}
@@ -826,7 +891,13 @@ def horn_lines(
             kept.append(note)
         moved = kept
     return HornLines(
-        upper=upper, lower=moved, phrases=phrases, unisons=unisons, faint=faint, slides=slides
+        upper=upper,
+        lower=moved,
+        phrases=phrases,
+        unisons=unisons,
+        faint=faint,
+        slides=slides,
+        bends=[bend for _before, bend, _after in found],
     )
 
 

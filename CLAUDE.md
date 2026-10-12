@@ -798,7 +798,13 @@ UI, so pipeline logic never goes here. Two rules that are easy to break:
   rounds a head's span as `review.span_config` does, so its page is
   Export's (unrounded, four held-note joins flipped). A writing rule is
   judged on both heads, and a threshold whose margin is one tune's (the
-  0.28-beat attack window) waits for the next head.
+  0.28-beat attack window) waits for the next head. **A bend is one held
+  note** (2026-10-11, `notation.bends`/`join_bends`, under `drop_slides`):
+  a note of 80 ms or less a semitone from the SAME pitch on both sides,
+  touching each, by its shape and never its loudness -- the player bends
+  without changing fingering ("a bent note is not a different note").
+  Scoops stay grace notes: there is no lead-sheet mode, the listener
+  deletes a grace more easily than they would restore one.
 - **The Score button and the F1 on the ground-truth bar are DIFFERENT
   QUESTIONS**, and this is the project's most expensive confusion appearing in
   the UI. The bar's F1 is time-free and pitch-only (`gui/ground_truth.py`):

@@ -15,6 +15,7 @@ from swingscribe.gui import edits, erasures
 from swingscribe.model import NotatedBar, NotatedNote, Notation, NoteEvent
 from swingscribe.notation import (
     OCTAVE,
+    bends,
     faint_scraps,
     horn_lines,
     lower_phrases,
@@ -1160,6 +1161,41 @@ def test_the_head_s_two_g_flat_slides_are_written_as_nothing():
     assert slide_scraps([sure, g]) == []
     # Apart by more than 50 ms it does not touch: not a slide.
     assert slide_scraps([scrap(43.700, 66, voice=2), g]) == []
+
+
+def test_a_bent_note_is_one_held_note():
+    """The listener on Hubbard's bar 26 (2026-10-11): "A bent note is not a
+    different note" -- E-flat, a 46 ms D the model is fairly sure of (0.42,
+    over the faint line), E-flat again is ONE E-flat, whatever its loudness."""
+    first = horn(32.786, 0.29, 75)
+    bend = scrap(33.076, 74, duration=0.046, confidence=0.42)
+    again = horn(33.123, 0.081, 75)
+    under = horn(32.879, 0.197, 68, voice=2)
+    notes = [first, bend, again, under]
+    assert bends(notes) == [(first, bend, again)]
+    lines = horn_lines(notes, drop_slides=True)
+    assert lines.bends == [bend]
+    assert [(n.onset, n.pitch) for n in lines.upper] == [(32.786, 75)]
+    assert lines.upper[0].duration == pytest.approx(33.123 + 0.081 - 32.786)
+    # Kept as heard when the sidecar keeps its slides.
+    assert len(horn_lines(notes, drop_slides=False).upper) == 3
+    # Not a bend: a whole step, a different pitch after, too long, or apart.
+    assert bends([first, scrap(33.076, 73, duration=0.046), again]) == []
+    assert bends([first, bend, horn(33.123, 0.081, 74)]) == []
+    assert bends([first, scrap(33.076, 74, duration=0.12), horn(33.2, 0.1, 75)]) == []
+    assert bends([first, scrap(33.2, 74, duration=0.046), horn(33.25, 0.1, 75)]) == []
+
+
+def test_two_bends_on_one_held_note_join_into_one():
+    notes = [
+        horn(0.0, 0.3, 75),
+        scrap(0.3, 74, duration=0.05),
+        horn(0.35, 0.3, 75),
+        scrap(0.65, 74, duration=0.05),
+        horn(0.7, 0.3, 75),
+    ]
+    lines = horn_lines(notes, drop_slides=True)
+    assert [(n.onset, n.duration, n.pitch) for n in lines.upper] == [(0.0, pytest.approx(1.0), 75)]
 
 
 def test_slides_are_left_off_a_head_unless_its_sidecar_keeps_them():
