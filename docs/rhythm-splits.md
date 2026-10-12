@@ -262,6 +262,10 @@ a harness A/B) was conditional on a variant passing, and none did.
   raw grid at speed 1.0 for all 68 solos (none has Fast tune).
 - Tempo bands are WJazzD's `tempoclass`.
 - The instrument (`common.py`, `rhythm.py`, `variants.py`, `report.py`,
-  `features.py`, `features2.py`, `grid_features.py`, `ceiling.py`) is kept
-  outside the repo with the per-solo results, because its tables are derived
-  from commercial recordings; only these aggregates are here.
+  `features.py`, `features2.py`, `grid_features.py`, `ceiling.py`,
+  `accounting.py`) is kept OUTSIDE the repo, in
+  `C:\Users\lkmcg\swingscribe-research\rhythm-splits`, with the per-solo
+  results and the cached Basic Pitch notes, because its tables are derived
+  from commercial recordings and WJazzD; only these aggregates are here.
+  `variants.py OUT.pkl --jobs 3` re-runs every rule in about two minutes
+  once `solos.pkl` and `bp/` exist; `report.py OUT.pkl` prints section 3.
