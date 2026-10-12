@@ -648,3 +648,11 @@ note, still unmeasured) and item 5 (the pianists, where line selection
 rather than hearing is the problem: Soul Station rejoined the hand-scored
 set today at pitch F1 0.599 with a third of its matched positions at the
 wrong pitch).
+
+**Item 3, measured 2026-10-11 (docs/neighbour-salience.md): not the
+decoder.** CREPE re-run with its activations kept over the 10 horn solos
+with the most `neighbour` rows (318 pairs): the reference pitch is a
+secondary peak under 0 of 318, a lower step cost resolves at most 4, and a
+synthetic test shows CREPE drops a second tone 3 dB down a semitone or a
+tone away. The recording itself, stem and mix alike, puts 157 of the
+notes BETWEEN the two semitones and 101 at OUR pitch.

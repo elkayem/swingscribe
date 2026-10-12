@@ -369,6 +369,12 @@ while a median-filter sweep does not. A first experiment: re-segment the
 cached f0 with `median_filter_ms` 30 and count what moves out of
 `neighbour` and into `fragment_neighbour`.
 
+*Measured since:* the 30 ms median filter changes nothing
+(error-taxonomy-review.md 3b.1), and the mechanism is NOT the decode
+(docs/neighbour-salience.md, 2026-10-11). The reference pitch is never a
+second peak in CREPE's activation; the recording itself sits between the
+two semitones (157 of 318) or at our pitch (101).
+
 **At risk.** `fragment_neighbour` (585, same short excursions cut loose),
 `too_short` (112), and `absorbed` itself if a decode that moves faster also
 tracks the comping between notes.

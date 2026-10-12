@@ -1870,6 +1870,18 @@ list of what is actually wrong; run everything with one command:
   was D31: three Parker solos under `benchmark/wjazzd/` are byte-identical
   to their Omnibook copies and share a stems digest; the Omnibook's later
   whole-file separation changed what their spans read.)
+- **`neighbour` (a short horn note a semitone or a tone off) is NOT the
+  decoder** (2026-10-11, docs/neighbour-salience.md,
+  `scripts/neighbour_salience.py`; the activations are kept outside the
+  repo). Over 318 pairs in the 10 worst solos, the reference pitch is a
+  secondary CREPE peak under 0, and a lower step cost (down to the
+  per-frame argmax) resolves 4. CREPE is close to winner-take-all: a second
+  tone 3 dB down vanishes at a semitone or a tone, and two equal tones a
+  semitone apart give one peak halfway between. The recording itself, stem
+  AND mix, puts 157 of the notes between the two semitones and 101 at OUR
+  pitch, so a third of the class disputes the annotation. Never build a
+  decoder or salience fix for it. A note between semitones is a coin flip
+  by signal alone; only musical context could decide it.
 - **The NARROWEST stem set covering a span answers first, the whole-file
   set last** (2026-09-17, R25; `separate.covering_dirs`,
   `library.available_stems`). Stability, not quality: the sets differ by a
