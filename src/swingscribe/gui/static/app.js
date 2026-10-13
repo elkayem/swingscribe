@@ -4734,16 +4734,23 @@ document.addEventListener('keydown', (event) => {
       event.preventDefault();
       restartFromStart();
       break;
+    // event.key is the character the keys TYPE, so with Shift held these
+    // arrive as { } < > on a US layout and never as [ ] , . -- each fine
+    // step has to be matched under both names.
     case '[':
+    case '{':
       nudge(state.focusEdge, shift ? -0.01 : -0.1);
       break;
     case ']':
+    case '}':
       nudge(state.focusEdge, shift ? 0.01 : 0.1);
       break;
     case ',':
+    case '<':
       stepRate(shift ? -1 : -5);
       break;
     case '.':
+    case '>':
       stepRate(shift ? 1 : 5);
       break;
     case 'arrowleft':

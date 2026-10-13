@@ -12,7 +12,8 @@ and are never redistributed by it.
 Gabriel Meseguer-Brocal and Sebastian Ewert, "A Lightweight
 Instrument-Agnostic Model for Polyphonic Note Transcription and Multipitch
 Estimation", ICASSP 2022), licensed under the Apache License, Version 2.0.
-It fills the holes in a horn's line (docs/frontend-bakeoff.md). SwingScribe
+It fills the holes in a horn's line (docs/frontend-bakeoff.md) and hears
+both horns of a two-horn head (docs/multi-horn.md). SwingScribe
 ships its ICASSP 2022 model graph unmodified as
 `swingscribe\basic-pitch-nmp.onnx` (basic-pitch 0.4.0's
 `saved_models/icassp_2022/nmp.onnx`, 230 KB), and `swingscribe\basic_pitch.py`

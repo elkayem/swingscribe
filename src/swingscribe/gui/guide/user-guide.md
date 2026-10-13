@@ -117,13 +117,10 @@ may even sit in another folder.
   affects all of them, and never touches any take's settings.
 - Two identical copies of a recording in different folders each keep their
   own settings, even with both open in two browser tabs.
-- The project's clean-up script (`scripts/dedupe_audio.py`) turns
-  identical copies into takes of one file, keeping the copy made first.
-  A folder can then hold settings files and pages with no audio of its
-  own: on the benchmark, `Omnibook/` holds its takes and MusicXML, and the
-  recordings they name are in `wjazzd/`. The browser lists each take there
-  with an arrow to its recording. The clean-up sends the copies to the
-  Recycle Bin and writes a manifest, and `--undo` puts everything back.
+- From source, `scripts/dedupe_audio.py` turns identical copies of a
+  recording into takes of one file, keeping the copy made first. It sends
+  the other copies to the Recycle Bin and writes a manifest of every
+  change, and `--undo` puts everything back.
 
 ### Freeing disk space
 
@@ -473,14 +470,34 @@ span. Once a transcription exists, the button reads **Re-transcribe**. A
 transcription that is already cached loads by itself when you open the
 track.
 
+How the notes are heard depends on who is playing (see the next section):
+
+- **A horn** is followed by CREPE, a neural network pitch tracker that hears
+  one note at a time. Basic Pitch, a small model that hears several notes at
+  once, then fills the holes CREPE leaves, such as a quick ornament.
+- **A pianist** is heard by a polyphonic piano model, which hears every note
+  played (see "Pianists: Line, Piano notes and Staves").
+- **Two horns** playing a head in harmony are both heard by Basic Pitch (see
+  "Two horns in harmony").
+
+Old recordings often run a little sharp or flat, because the disc was
+recorded or transferred at a slightly wrong speed. When CREPE finds the
+whole recording 15 cents or more away from concert pitch (A = 440 Hz), each
+note is rounded against the recording's own tuning instead. Otherwise a
+solo sitting near the edge between two semitones would come out with notes
+a semitone off in places. Recordings closer than that to concert pitch are
+left as they are.
+
 ### Who is playing
 
 **Ensemble** tells SwingScribe who is playing: **Horn-led**, **Trio
-(piano)**, **Solo piano** or **Two horns (a head)**. A pianist is transcribed with the help of a
-polyphonic piano model, which hears every note played. A horn never is,
-because a piano model asked about a saxophone vouches for nothing. The note
-beside the menu says whether the piano model will be consulted. Changing
-the ensemble clears the review, so transcribe again afterwards.
+(piano)**, **Solo piano** or **Two horns (a head)**. A pianist is
+transcribed with the help of a polyphonic piano model, which hears every
+note played. A horn never is, because a piano model asked about a saxophone
+vouches for nothing. The note beside the menu says whether the piano model
+will be consulted. **Two horns (a head)** is for a tune's melody played by
+two horns in harmony, and has a section of its own below. Changing the
+ensemble clears the review, so transcribe again afterwards.
 
 Until a track has an ensemble of its own, SwingScribe suggests one. Once
 the span is separated, a line under the menus says who the stems say is
@@ -519,7 +536,14 @@ right every time and never called a horn solo Trio.
   stem, so if one of them lands there it would be suggested Trio. Check by
   ear before you apply it.
 
-**Line** (pianists only) chooses where the melody comes from:
+### Pianists: Line, Piano notes and Staves
+
+**Line** and **Piano notes** appear only when the ensemble is **Trio
+(piano)** or **Solo piano**, and **Staves** once Piano notes is set to All
+notes. A two-horn head has a Staves menu of its own (see "Two horns in
+harmony").
+
+**Line** chooses where the melody comes from:
 
 - **Piano model, melody picked** is the default. The melody is chosen, as a
   line, from everything the piano model heard.
@@ -533,8 +557,8 @@ transcriptions, the picked melody gets more of the right notes for six
 pianists out of seven. The CREPE take is there for the passage where it
 hears better, and its export gets `.crepe` in the file name.
 
-**Piano notes** (pianists only) chooses which of the piano's notes are on the
-roll and the page:
+**Piano notes** chooses which of the piano's notes are on the roll and the
+page:
 
 - **Melody line** is the default: the line chosen above, usually the top
   note but not always, plus any of the piano model's notes you switch on.
@@ -603,7 +627,8 @@ upper voice, so it is written once. The piano model is never consulted.
   quarter-note triplets, and **Not triplet** never does. The page finds
   them by itself where both horns play three notes on a half bar's
   thirds; the buttons are for where it misses or should not have fired.
-  **As heard** forgets these marks too.
+  **As heard** forgets these marks too. Literal pages have no triplets, so
+  the marks take effect only on a Swing page.
 - Silencing a note of a pair leaves its partner alone, and the partner is
   then written once, in the upper voice.
 - The ear test plays both voices.
@@ -620,29 +645,38 @@ The page writes both horns on one treble staff, in concert pitch:
 - Where a phrase of the lower horn sits an octave or more under the upper
   horn, the whole phrase is written an octave up, so the two lines sit
   close on the staff. This is decided phrase by phrase, never note by
-  note. A phrase doubled at the octave is written once.
+  note, and never where it would put the lower horn above the upper one.
+  A phrase doubled at the octave is written once.
 - A unison is written once, in the upper voice.
+
+A head is written the way a player reads one, not with every detail of the
+playing:
+
 - A scoop into a held note (a short note a semitone under it) is written
   as a grace note on the note it leads into, and a note re-attacked with a
   short "head" is written as one note.
 - A chord both horns strike together starts at one place on the page,
   even where one horn leads in with a scoop or a short head.
-- A held note the model heard as two -- one horn holding while the other
-  holds its note straight across, with no new attack -- is written as one
-  note. Where both horns re-attack together, or the note is short, the
-  note is repeated and written twice.
+- A held note the model heard as two is written as one note, where the
+  other horn holds its note straight across the break with no new attack.
+  Where both horns re-attack together, or the note is short, the note is
+  repeated and written twice.
+- A bent note is written as one held note. A very short dip a semitone
+  away and straight back, such as E♭, D, E♭, is the player bending the
+  note, not playing a new one.
+- A faint, very short note a semitone from the note it slides into or
+  falls off is left off the page.
 - A short note with a rest after it (an eighth and an eighth rest, as
   played) is written as a quarter with a staccato dot. The **Short notes**
   menu beside Rhythm writes them as an eighth and a rest instead.
-- A faint, very short note a semitone from the note it slides into or
-  falls off is left off the page.
-- A half bar where both horns play three even notes is written as a
-  quarter-note triplet in both voices.
 - A held note (a half note or longer) followed by a breath of an eighth
   or less before the horn's next note is written to that note: a whole
   note, not three and a half beats and an eighth rest. A short note keeps
   its rest, so a staccato riff of eighths and eighth rests is written as
   played.
+
+The rhythm:
+
 - The rhythm is **Swing** unless you pick another one in the **Rhythm**
   menu: eighths where a beat shows no more, sixteenths where one does,
   triplets, and "Swing" over the staff. For a head played in straight
@@ -651,6 +685,10 @@ The page writes both horns on one treble staff, in concert pitch:
 - Horns that sit a little behind the beat are written on it: how far
   behind they play is read over both horns together and taken out before
   the notes are placed, so a chord they attack together stays together.
+  This holds on the literal pages too, and they still write a scoop as a
+  grace note.
+- On a Swing page, a half bar where both horns play three even notes is
+  written as a quarter-note triplet in both voices.
 
 Set **Staves** to **Two parts (upper + lower)** to write the horns as two
 separate parts instead. Each part plays its own notes, so nothing is moved
@@ -820,10 +858,20 @@ transposes it for a horn.
   for sixteenths is written in thirty-seconds.
 - **Literal 32nds** writes every note on the nearest thirty-second.
 
-Literal pages have no triplets, and a literal export gets `.literal8`,
-`.literal16` or `.literal32` in its file name, so it never overwrites the
-swing page. An
-All-notes export gets `.all`, and a two-staff one `.2staves`.
+Literal pages have no triplets.
+
+Each choice away from the default adds a tag to the file name, so no
+choice overwrites another page:
+
+- `.crepe` for a pianist's CREPE line.
+- `.all` for All notes, and `.2staves` for two staves.
+- `.literal8`, `.literal16` or `.literal32` for a literal rhythm. On a
+  two-horn head, whose literal pages also take the horns' lag out, `.lag`
+  follows it.
+- `.2parts` for a two-horn head written as two parts, and `.eighths` for
+  its short notes written as an eighth and a rest.
+
+For example, `solo.42-118s.literal16.musicxml`.
 
 Bars are numbered from 1 within your span, the way a solo transcription is
 usually numbered, not from the start of the track. Notes before the first
@@ -903,8 +951,9 @@ transcription and a beat grid, and says so while either is missing.
   on white, the way the page will print.
 - The **Page** chip in the export bar, or <kbd>P</kbd>, hides the page and
   shows it again. This browser remembers the choice.
-- When most of the page is 32nd notes, a line above it says so. The beat
-  the page was written against is then probably slower than the music's,
+- When 40% or more of the page's notes are 32nds, a line above it says so.
+  The beat the page was written against is then probably slower than the
+  music's,
   and the line offers whichever fix is still off: **Fast tune**, for a fast
   tune the tracker heard once a bar, or **2× time**, for double-time runs
   over a slow tune. You can tell which by listening. The page cannot.
@@ -1000,8 +1049,13 @@ separates only the span you selected.
 ## The AI models and their licences
 
 SwingScribe is MIT licensed. The models it runs belong to their authors,
-and each one downloads on first use under its own terms.
+each under its own terms. Basic Pitch ships inside SwingScribe; every other
+model downloads on first use.
 
+- **Basic Pitch** ([paper](https://arxiv.org/abs/2203.09893)), by
+  Spotify, hears both horns of a two-horn head and fills the holes in a
+  horn's line. It is Apache-2.0 licensed, and its model file, 230 KB,
+  ships inside SwingScribe.
 - **BS-RoFormer** ([paper](https://arxiv.org/abs/2309.02612)) is the
   default separator. The weights SwingScribe uses, BS-Roformer-SW, have
   **no licence and no known author**. The person who re-hosted them says
@@ -1112,6 +1166,13 @@ The installation guide has the same steps with more detail.
 - **Pin:** a beat you placed by hand. The bar grid passes through every
   pin, and the beats around it are worked out again.
 - **Chorus:** one time through the tune's form, often 12 or 32 bars.
+- **Head:** the tune's written melody, played at the start and end of a
+  performance, with the solos in between.
+- **Take:** one settings file for a recording. A recording can have
+  several, one for each thing you transcribe from it.
+- **Voice:** one of the two lines on a two-horn head. Where both horns
+  sound, the higher note is in the upper voice and the lower note in the
+  lower voice.
 - **f0:** the fundamental frequency, which is the pitch you hear.
 - **Periodicity:** how regular, and so how clearly pitched, the sound is at
   a moment. Noise and drums score low, and a held note scores high.
